@@ -109,8 +109,10 @@
       <div>
         <label for="activity">Movement</label>
         <select id="activity">
+          <option value="auto">Detect automatically</option>
           <option value="pullup">Pull-up</option>
           <option value="squat">Squat</option>
+          <option value="neck">Neck (close-up)</option>
         </select>
       </div>
       <div>
@@ -139,6 +141,7 @@
       <label for="avatar">Skeleton overlay</label>
       <select id="avatar">
         <option value="">None — landmarks only</option>
+        <option value="gpk_bones">Skeleton (OpenSim bone geometry)</option>
         <option value="gpk_generic">Generic body (GPK v3) — head/arms fixed to torso</option>
         <option value="bas_v3">Bas (v3) — full arms + head</option>
         <option value="gwen_v3">Gwen (v3) — full arms + head</option>
@@ -193,8 +196,9 @@ setTimeout(function () {
 </script>
 <script type="module">
 import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
-         buildSquatFeatures, computePxPerM, jointPositionsM } from "./pullupkit.js";
+         buildSquatFeatures, computePxPerM, jointPositionsM } from "./kinematics.js";
 import { inverseDynamics } from "./dynamics.js";
+import { classify, MIN_CONFIDENCE } from "./detect.js";
 import { Overlay } from "./overlay.js";
 import { makeZip, svgToPng, blobBytes } from "./zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
@@ -482,11 +486,33 @@ async function finish() {
   const fps = span > 0 ? (frames.length - 1) / span : 30;
   const poses = {};
   frames.forEach((f, i) => { poses[i] = f.lm; });
-  const activity = $("activity").value;
+  let activity = $("activity").value;
   const heightM = parseFloat($("height").value) || 1.75;
+  let detection = null;
+  if (activity === "auto") {
+    detection = classify(poses);
+    if (!detection.activity) {
+      // Refusing is the useful answer: analysing a squat as a pull-up gives
+      // numbers that look fine and mean nothing.
+      say("Movement not recognised. " + detection.reason, true);
+      $("results").classList.remove("hidden");
+      $("results").innerHTML =
+        `<h1 style="font-size:18px">Movement not recognised</h1>
+         <p class="note">${detection.reason}</p>
+         <table style="margin-top:8px"><thead><tr><th>Movement</th><th>Score</th></tr></thead><tbody>
+         ${Object.entries(detection.scores).sort((a,b)=>b[1]-a[1])
+            .map(([k,v])=>`<tr><td>${k}</td><td>${v.toFixed(2)}</td></tr>`).join("")}
+         </tbody></table>
+         <p class="note">Pick the movement by hand, or re-shoot with the whole
+         body in frame and side on.</p>`;
+      return;
+    }
+    activity = detection.activity;
+  }
   try {
     lastResult = analyse(poses, fps, { heightM, activity,
                                        osimModel: OSIM_MODEL });
+    lastResult.detection = detection;
     await enrich(lastResult, poses, fps, heightM, activity);
     render(lastResult, fps);
     say(`Analysed ${frames.length} frames at ${fps.toFixed(1)} fps.`);
@@ -899,6 +925,62 @@ function render(res, fps) {
     return;
   }
 
+  const isNeck = res.activity === "neck";
+  if (isNeck) {
+    const nrows = res.reps.map((r) =>
+      `<tr><td>${r.rep}</td><td>${r.out_s.toFixed(2)}</td><td>${r.back_s.toFixed(2)}</td>
+       <td>${r.flexion_extension_range_deg}°</td><td>${r.lateral_bend_range_deg}°</td>
+       <td>${r.rotation_range_deg}°</td></tr>`).join("");
+    el.innerHTML = `
+      <h1 style="font-size:19px;margin-bottom:2px">${n} neck movement${n===1?"":"s"}</h1>
+      <p class="sub" style="margin-bottom:12px">${fps.toFixed(0)} fps ·
+        ${(res.coverage*100).toFixed(0)}% tracked · .mot signed for ${res.osimModel}</p>
+      ${res.detection ? `<p class="note" style="border-left:3px solid var(--good);
+        padding-left:11px;color:var(--good)">Detected automatically —
+        ${res.detection.reason}.</p>` : ""}
+      <table><thead><tr><th>Rep</th><th>Out</th><th>Back</th><th>Flex/Ext</th>
+        <th>Side bend</th><th>Rotation</th></tr></thead><tbody>${nrows}</tbody></table>
+      <div class="tabs" id="repTabs" style="margin-top:14px"></div>
+      <div id="chartBox"></div>
+      <button class="ghost" id="dlBtn" style="margin-top:12px">Download angles (.mot)</button>
+      <button class="ghost" id="zipBtn" style="margin-top:8px">Download everything (.zip)</button>
+      <div class="status" id="zipStatus"></div>
+      <p class="note">Cervical angles estimated from ear, nose and shoulder
+        positions in a single view. Yaw and pitch trade off against each other at
+        large angles, and upper and lower cervical motion are not separated —
+        the export splits each angle between the two joints in proportion to
+        their ranges. A screening measure, not goniometry.</p>`;
+    const tabsN = $("repTabs");
+    res.reps.forEach((r, i) => {
+      const b = document.createElement("button");
+      b.textContent = "Rep " + r.rep;
+      b.onclick = () => selN(i);
+      tabsN.appendChild(b);
+    });
+    selectRep = selN;
+    function selN(i) {
+      [...tabsN.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
+      const r = res.reps[i], t = r.times;
+      const sum = (a, b2) => r.coords[a].map((v, k) => v + r.coords[b2][k]);
+      $("chartBox").innerHTML = lineChart(t, [
+        ["flexion / extension", sum("pitch1", "pitch2")],
+        ["lateral bend", sum("roll1", "roll2")],
+        ["rotation", sum("yaw1", "yaw2")]], "deg");
+    }
+    selN(0);
+    $("zipBtn").onclick = () => exportZip(res, fps);
+    $("dlBtn").onclick = () => {
+      const txt = writeMot("joint_angles", ACTIVITIES.neck.columns,
+                           res.reps[0].times, res.reps[0].coords);
+      const u = URL.createObjectURL(new Blob([txt], { type: "text/plain" }));
+      const a = document.createElement("a");
+      a.href = u; a.download = `neck_rep1_joint_angles.mot`;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(u); a.remove(); }, 4000);
+    };
+    return;
+  }
+
   const rows = res.reps.map((r) => isSquat
     ? `<tr><td>${r.rep}</td><td>${r.eccentric_s.toFixed(2)}</td><td>${r.concentric_s.toFixed(2)}</td>
          <td>${r.knee_flex_max_deg.toFixed(0)}°</td><td>${r.hip_flex_max_deg.toFixed(0)}°</td>
@@ -921,6 +1003,10 @@ function render(res, fps) {
     <button class="ghost" id="dlBtn" style="margin-top:12px">Download angles (.mot) + moments (.sto)</button>
     <button class="ghost" id="zipBtn" style="margin-top:8px">Download everything (.zip)</button>
     <div class="status" id="zipStatus"></div>
+    ${res.detection ? `<p class="note" style="border-left:3px solid var(--good);
+        padding-left:11px;color:var(--good)">Detected <b>${ACTIVITIES[res.activity].label}</b>
+        (${res.detection.confidence.toFixed(2)} confidence, margin
+        ${res.detection.margin.toFixed(2)}) — ${res.detection.reason}.</p>` : ""}
     ${viewNote(res)}
     <div id="dynBox"></div>
     <div id="forceBox"></div>

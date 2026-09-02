@@ -1,5 +1,5 @@
 /**
- * dynamics.js -- sagittal inverse dynamics, ported from pullupkit/dynamics.py.
+ * dynamics.js -- sagittal inverse dynamics, ported from kinematics/dynamics.py.
  *
  * Joint moments from kinematics and body mass alone, no force plate. The
  * ground reaction is DERIVED, not guessed: Newton's second law on the whole

@@ -110,7 +110,7 @@ def main():
     if FAILURES:
         print("%d MISMATCH(ES) -- reference.json no longer matches the Python "
               "pipeline.\nEither the change was unintended, or the fixture and "
-              "pullupkit.js both need updating:" % len(FAILURES))
+              "kinematics.js both need updating:" % len(FAILURES))
         for f in FAILURES:
             print("  " + f)
         return 1

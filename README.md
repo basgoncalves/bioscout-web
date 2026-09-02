@@ -141,7 +141,7 @@ camera is invisible to it.
 
 ## Verification
 
-`pullupkit.js` is a deliberate line-by-line port of `bioscout.movement_detector.markerless`,
+`kinematics.js` is a deliberate line-by-line port of `bioscout.movement_detector.markerless`,
 including numpy's exact semantics for percentile interpolation, `convolve`
 `'same'` offset and NaN handling. It is checked, not assumed.
 
@@ -179,7 +179,7 @@ model families), across 121 checks.
 
 ```
 index.html                 the whole app (UI, camera, analysis, export)
-pullupkit.js               ported analysis core - shared with the node test
+kinematics.js               ported analysis core - shared with the node test
 sw.js                      service worker, for offline use
 vendor/                    MediaPipe tasks-vision, vendored (not a CDN)
 pose_landmarker_full.task  the pose model

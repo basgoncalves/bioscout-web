@@ -66,6 +66,61 @@ def read_stl(path):
     return v[: len(v) // 3 * 3].reshape(-1, 3, 3)
 
 
+def read_vtp(path):
+    """OpenSim bone geometry (.vtp, VTK XML PolyData) -> (n, 3, 3) triangles.
+
+    Only the ASCII form is handled, which is what the OpenSim Geometry folder
+    ships. Polygons are fanned into triangles; every face in these files is
+    already a triangle or a small convex polygon, so a fan is exact.
+    """
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.parse(path).getroot()
+    except Exception:
+        return np.zeros((0, 3, 3), np.float32)
+    piece = root.find(".//Piece")
+    if piece is None:
+        return np.zeros((0, 3, 3), np.float32)
+
+    def arr(parent_tag, name=None):
+        parent = piece.find(parent_tag)
+        if parent is None:
+            return None
+        for da in parent.findall("DataArray"):
+            if name is None or da.get("Name") == name:
+                if (da.get("format") or "ascii").lower() != "ascii":
+                    return None
+                txt = (da.text or "").split()
+                return np.array(txt, dtype=np.float64) if txt else None
+        return None
+
+    pts = arr("Points")
+    conn = arr("Polys", "connectivity")
+    offs = arr("Polys", "offsets")
+    if pts is None or conn is None or offs is None:
+        return np.zeros((0, 3, 3), np.float32)
+
+    pts = pts.reshape(-1, 3)
+    conn = conn.astype(np.int64)
+    offs = offs.astype(np.int64)
+    tris, start = [], 0
+    for end in offs:
+        face = conn[start:end]
+        start = end
+        for k in range(1, len(face) - 1):        # fan
+            tris.append((face[0], face[k], face[k + 1]))
+    if not tris:
+        return np.zeros((0, 3, 3), np.float32)
+    idx = np.array(tris, np.int64)
+    if idx.max() >= len(pts):
+        return np.zeros((0, 3, 3), np.float32)
+    return pts[idx].astype(np.float32)
+
+
+def read_mesh(path):
+    return read_vtp(path) if path.lower().endswith(".vtp") else read_stl(path)
+
+
 def decimate(tris, cell, want_index=False):
     """Vertex clustering to a grid of the given cell size.
 
@@ -105,7 +160,7 @@ def mesh_bodies(osim_path):
             if not fm:
                 continue
             fn = os.path.basename(fm.group(1).strip())
-            if not fn.lower().endswith(".stl"):
+            if not fn.lower().endswith((".stl", ".vtp")):
                 continue
             # Decorative VFX geometry (energy aura, bolts) is not body geometry:
             # it is huge, detached from the skeleton, and stretches into spikes
@@ -152,6 +207,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--osim", required=True)
     ap.add_argument("--stl", required=True, help="root the mesh_file paths resolve under")
+    ap.add_argument("--geometry", default=None,
+                    help="extra folder searched for .vtp bone geometry")
     ap.add_argument("--name", required=True)
     ap.add_argument("--target-triangles", type=int, default=60000)
     ap.add_argument("--out", default="meshes")
@@ -169,15 +226,18 @@ def main():
         parts, cols = [], []
         for fn, col in files:
             tris = None
-            for cand in (os.path.join(args.stl, fn),
-                         os.path.join(args.stl, "stl_" + args.name, fn)):
+            cands = [os.path.join(args.stl, fn),
+                     os.path.join(args.stl, "stl_" + args.name, fn)]
+            if args.geometry:
+                cands.append(os.path.join(args.geometry, fn))
+            for cand in cands:
                 if os.path.exists(cand):
-                    tris = read_stl(cand)
+                    tris = read_mesh(cand)
                     break
             if tris is None:
                 hits = [os.path.join(dp, fn) for dp, _, fs in os.walk(args.stl) if fn in fs]
                 if hits:
-                    tris = read_stl(hits[0])
+                    tris = read_mesh(hits[0])
             if tris is not None and len(tris):
                 parts.append(tris)
                 cols.append(np.tile(np.array(col, np.float32), (len(tris), 1)))
@@ -194,6 +254,23 @@ def main():
 
     blobs, index, offset = [], {}, 0
     for body, tris in raw.items():
+        if ratio >= 1.0:
+            # Already inside the budget -- bone geometry is low-poly to begin
+            # with, and decimating it throws away detail for no benefit.
+            dec, keep = tris, np.arange(len(tris))
+            tri_col = raw_col[body][keep]
+            vcol = np.repeat(tri_col, 3, axis=0)
+            buf = dec.reshape(-1).astype("<f4").tobytes()
+            cbuf = vcol.reshape(-1).astype("<f4").tobytes()
+            blobs.append(buf); blobs.append(cbuf)
+            index[body] = {"byteOffset": offset, "triangles": int(len(dec)),
+                           "colorOffset": offset + len(buf),
+                           "anchors": anchors.get(body, {})}
+            offset += len(buf) + len(cbuf)
+            print("   %-11s %7d -> %6d tri  (kept in full)" % (len(tris), len(dec), 0)
+                  .replace("%-11s", body) if False else
+                  "   %-11s %7d -> %6d tri  (kept in full)" % (body, len(tris), len(dec)))
+            continue
         span = float(np.linalg.norm(np.ptp(tris.reshape(-1, 3), axis=0)))
         # Cell size chosen so each body keeps roughly its share of the budget.
         cell = span / max(4.0, (len(tris) * ratio) ** (1 / 2.2))

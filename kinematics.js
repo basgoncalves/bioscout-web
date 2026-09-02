@@ -1,6 +1,10 @@
 /**
- * pullupkit.js -- rep detection and joint angles, ported from the Python
- * pullupkit package.
+ * kinematics.js -- the movement-agnostic core: pose features, rep detection,
+ * joint angles, pixel-to-metre scaling, .mot export and the activity table.
+ *
+ * Named for what it does. It began life as pullupkit.js when pull-ups were the
+ * only movement; it now serves pull-ups, squats and the neck test, and adding a
+ * movement means adding an entry to ACTIVITIES rather than touching analyse().
  *
  * This is a deliberate line-by-line port, not a reimplementation: the numeric
  * helpers below reproduce numpy's exact semantics (percentile interpolation,

@@ -9,7 +9,7 @@
  * The browser and the desktop must not disagree about how many reps you did.
  */
 import fs from "node:fs";
-import { analyse, buildSquatFeatures, computePxPerM, jointPositionsM } from "./pullupkit.js";
+import { analyse, buildSquatFeatures, computePxPerM, jointPositionsM } from "./kinematics.js";
 import { inverseDynamics } from "./dynamics.js";
 
 const TOL = 1e-9;

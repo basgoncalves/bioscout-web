@@ -5,7 +5,7 @@
  * trap: it pins every visitor to whatever version they first loaded, and no
  * amount of pushing fixes reaches them.
  *
- *   app shell (index.html, pullupkit.js, the manifest)
+ *   app shell (index.html, kinematics.js, the manifest)
  *       network-first. Small files that change whenever the code changes, so
  *       correctness beats latency. Falls back to cache when offline.
  *
@@ -15,10 +15,10 @@
  *
  * Bump CACHE when the vendored engine or model changes, to evict the old copy.
  */
-const CACHE = "bioscout-web-v7";
+const CACHE = "bioscout-web-v8";
 
-const SHELL = ["./", "./index.html", "./pullupkit.js", "./dynamics.js",
-               "./forces.js", "./overlay.js", "./zip.js", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest",
+const SHELL = ["./", "./index.html", "./kinematics.js", "./dynamics.js",
+               "./forces.js", "./overlay.js", "./zip.js", "./detect.js", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest",
                "./logo.png", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png",
                "./apple-touch-icon.png", "./favicon.ico"];
 const HEAVY = [
@@ -30,6 +30,7 @@ const HEAVY = [
   "./meshes/gohan_ss_v4.json", "./meshes/gohan_ss_v4.bin",
   "./meshes/gpk_generic.json", "./meshes/gpk_generic.bin",
   "./meshes/bas_v3.json", "./meshes/bas_v3.bin",
+  "./meshes/gpk_bones.json", "./meshes/gpk_bones.bin",
   "./vendor/wasm/vision_wasm_internal.js",
   "./vendor/wasm/vision_wasm_internal.wasm",
   "./vendor/wasm/vision_wasm_nosimd_internal.js",
