@@ -46,7 +46,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install numpy
-          pip install --no-deps "bioscout @ git+https://github.com/basgoncalves/bioscout.git@main"
+          # TEMPORARY: pinned to the markerless branch until it lands on
+          # bioscout main. Switch back to @main when it merges -- leaving it
+          # on a branch means this check silently stops watching the code
+          # that actually ships.
+          pip install --no-deps "bioscout @ git+https://github.com/basgoncalves/bioscout.git@markerless"
 
       - name: Python agrees with reference.json
         run: python tools/check_reference.py
