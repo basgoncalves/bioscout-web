@@ -83,7 +83,11 @@ def mesh_bodies(osim_path):
         body, blk = bm.group(1), bm.group(2)
         files = [os.path.basename(f.strip())
                  for f in re.findall(r"<mesh_file>([^<]+)</mesh_file>", blk)]
-        stls = [f for f in files if f.lower().endswith(".stl")]
+        # Decorative VFX geometry (energy aura, bolts) is not body geometry:
+        # it is huge, detached from the skeleton, and stretches into spikes
+        # when a body is scaled. Keep it out of the rig.
+        stls = [f for f in files if f.lower().endswith(".stl")
+                and not any(k in f.lower() for k in ("aura", "bolt"))]
         if stls:
             out[body] = stls
     return out

@@ -15,13 +15,17 @@
  *
  * Bump CACHE when the vendored engine or model changes, to evict the old copy.
  */
-const CACHE = "movement-lab-v5";
+const CACHE = "movement-lab-v6";
 
 const SHELL = ["./", "./index.html", "./pullupkit.js", "./dynamics.js",
-               "./forces.js", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest"];
+               "./forces.js", "./overlay.js", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest"];
 const HEAVY = [
   "./pose_landmarker_full.task",
   "./vendor/vision_bundle.mjs",
+  "./vendor/three.module.min.js",
+  "./vendor/three.core.min.js",
+  "./meshes/gwen_v3.json", "./meshes/gwen_v3.bin",
+  "./meshes/gohan_ss_v4.json", "./meshes/gohan_ss_v4.bin",
   "./vendor/wasm/vision_wasm_internal.js",
   "./vendor/wasm/vision_wasm_internal.wasm",
   "./vendor/wasm/vision_wasm_nosimd_internal.js",

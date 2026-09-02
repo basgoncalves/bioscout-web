@@ -126,6 +126,14 @@
     <p class="note" style="margin:-4px 0 10px">Barbell, vest or belt in
       <b>Added</b>; band or machine offload in <b>Assistance</b>. Both apply at
       once — a loaded bar with a band assist is added minus assist.</p>
+    <div style="margin-bottom:11px">
+      <label for="avatar">Skeleton overlay</label>
+      <select id="avatar">
+        <option value="">None — landmarks only</option>
+        <option value="gwen_v3">Gwen (v3)</option>
+        <option value="gohan_ss_v4">Gohan (SS v4)</option>
+      </select>
+    </div>
     <button id="startBtn" disabled>Start camera</button>
     <button class="ghost" id="fileBtn">Analyse a video file</button>
     <input id="fileInput" type="file" accept="video/*" class="hidden">
@@ -135,6 +143,7 @@
   <div id="stage">
     <video id="video" playsinline muted></video>
     <canvas class="overlay" id="overlay"></canvas>
+    <canvas class="overlay" id="avatarCanvas"></canvas>
     <div class="hud">
       <span class="pill" id="hudLeft">standing by</span>
       <span class="pill" id="hudRight"></span>
@@ -170,6 +179,7 @@ setTimeout(function () {
 import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          buildSquatFeatures, computePxPerM, jointPositionsM } from "./pullupkit.js";
 import { inverseDynamics } from "./dynamics.js";
+import { Overlay } from "./overlay.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
          MAX_PLAUSIBLE_FORCE_N } from "./forces.js";
 
@@ -206,6 +216,25 @@ const say = (t, warn) => { statusEl.textContent = t; statusEl.classList.toggle("
 
 let landmarker = null, stream = null, running = false, recording = false;
 let muscleJoints = null;   // { muscleJoints: {name:[joints]}, byJoint: {joint:[names]} }
+let avatar = null, avatarBusy = false;
+
+async function setAvatar(name) {
+  const cv = $("avatarCanvas");
+  if (!name) { if (avatar) { avatar.dispose(); avatar.setName = null; avatar.clear(); }
+               cv.style.display = "none"; return; }
+  if (avatarBusy) return;
+  avatarBusy = true;
+  try {
+    if (!avatar) avatar = new Overlay(cv);
+    say(`Loading ${name}…`);
+    await avatar.load(name);
+    cv.style.display = "";
+    say(running ? "Tracking with overlay." : "Overlay ready.");
+  } catch (err) {
+    say("Overlay failed to load: " + err.message, true);
+    cv.style.display = "none";
+  } finally { avatarBusy = false; }
+}
 let facing = "user";
 let frames = [];          // { t_ms, lm } per detected frame
 let lastResult = null;
@@ -295,6 +324,10 @@ function loop() {
       lastTs = ts;
       const res = landmarker.detectForVideo(video, ts);
       draw(res);
+      if (avatar && avatar.setName) {
+        avatar.update(res.landmarks?.[0], res.worldLandmarks?.[0],
+                      video.videoWidth, video.videoHeight, facing === "user");
+      }
       if (recording && res.landmarks && res.landmarks.length) {
         frames.push({ t: ts, lm: toNamed(res.landmarks[0], video.videoWidth, video.videoHeight) });
         $("hudRight").textContent = frames.length + " frames";
@@ -345,6 +378,7 @@ function draw(res) {
 // above, which has already enabled it. The initial disabled state is in the
 // markup instead.
 $("startBtn").onclick = startCamera;
+$("avatar").onchange = (e) => setAvatar(e.target.value);
 $("stopBtn").onclick = stopCamera;
 $("switchBtn").onclick = async () => {
   facing = facing === "user" ? "environment" : "user";
