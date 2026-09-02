@@ -65,6 +65,10 @@
   th { font-size:11px; text-transform:uppercase; letter-spacing:.05em;
        color:var(--muted); font-weight:600; }
   .note { font-size:12.5px; color:var(--muted); margin-top:10px; }
+  tr.meanrow td { border-top:1.5px solid var(--line); font-weight:600; }
+  tr.meanrow td .sub { font-weight:400; font-size:11.5px; }
+  th select, .thsel { font-size:11px; padding:3px 4px; margin:0; width:auto;
+                      max-width:130px; text-transform:none; letter-spacing:0; }
   .warn { color:var(--warn); }
   .tabs { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
   .tabs button { width:auto; flex:0 0 auto; padding:7px 13px; font-size:13.5px;
@@ -161,7 +165,7 @@
         <option value="gpk_generic">Generic body (GPK v3) — head/arms fixed to torso</option>
         <option value="bas_v3">Bas (v3) — full arms + head</option>
         <option value="gwen_v3">Gwen (v3) — full arms + head</option>
-        <option value="gohan_ss_v4">Gohan (SS v4) — arms fixed to torso</option>
+        <option value="gohan_ss_v6">Gohan (SS v6, Meshy sculpt) — arms fixed to torso</option>
       </select>
     </div>
     <label style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
@@ -203,8 +207,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v11";
-try { document.getElementById("build").textContent = "build v11"; } catch (e) {}
+window.BUILD = "v12";
+try { document.getElementById("build").textContent = "build v12"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -225,6 +229,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          newSession, getSession, clearSession, addSet, summariseSession }
        from "./profiles.js";
 import { Overlay } from "./overlay.js";
+import { ensembleRep } from "./ensemble.js";
 import { makeZip, svgToPng, blobBytes } from "./zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
          peakJRF, selfTest as forceSelfTest,
@@ -266,6 +271,16 @@ let muscleJoints = null;   // { muscleJoints: {name:[joints]}, byJoint: {joint:[
 let avatar = null, avatarBusy = false;
 let recorder = null, videoChunks = [], videoBlob = null;
 let selectRep = null;   // set by render(), so the export can page through reps
+let shownItems = [];    // reps currently on screen, plus the mean if there is one
+
+/* Every recording analysed since the page loaded, so the results card can page
+ * back through the session. Full waveforms only ever live here, in memory: the
+ * localStorage session keeps per-rep SUMMARIES, because one set of coordinates,
+ * moments and 80 muscle forces is a few hundred kilobytes and a training
+ * session would blow the quota by set four. A reload therefore keeps the set
+ * list and loses the curves, and the dropdown says so rather than pretending. */
+const pageSets = [];    // { index, res, fps }
+let viewingSet = null;  // index of the set currently rendered, or null
 
 async function setAvatar(name) {
   const cv = $("avatarCanvas");
@@ -369,22 +384,135 @@ $("delProfileBtn").onclick = () => {
   say(`Profile “${n}” deleted.`);
 };
 
+/* Which per-set measure the training table and its chart show. Keys are the
+ * fields profiles.js stores per rep, so anything summarised there can be
+ * plotted without touching this list twice. */
+const PEAK_VARS = {
+  depth_m:            { label: "Depth", unit: "m", dp: 2 },
+  knee_flex_max_deg:  { label: "Peak knee flexion", unit: "°", dp: 0 },
+  hip_flex_max_deg:   { label: "Peak hip flexion", unit: "°", dp: 0 },
+  travel_m:           { label: "Body travel", unit: "m", dp: 2 },
+  elbow_flex_max_deg: { label: "Peak elbow flexion", unit: "°", dp: 0 },
+  peak_hip_Nm:        { label: "Peak hip moment", unit: "N·m", dp: 0 },
+  peak_knee_Nm:       { label: "Peak knee moment", unit: "N·m", dp: 0 },
+  peak_ankle_Nm:      { label: "Peak ankle moment", unit: "N·m", dp: 0 },
+  peak_grf_bw:        { label: "Peak GRF", unit: "×BW", dp: 2 },
+  duration_s:         { label: "Rep duration", unit: "s", dp: 2 },
+  up_s:               { label: "Concentric time", unit: "s", dp: 2 },
+  down_s:             { label: "Eccentric time", unit: "s", dp: 2 },
+  flex_ext_deg:       { label: "Flex/ext range", unit: "°", dp: 0 },
+  bend_deg:           { label: "Side-bend range", unit: "°", dp: 0 },
+  rotation_deg:       { label: "Rotation range", unit: "°", dp: 0 },
+};
+let peakVar = null;      // survives re-renders of the training card
+// Its own colour, not COLORS[0]: the training card renders at module
+// init, before the chart palette further down has been evaluated, and
+// reaching for it there is a temporal-dead-zone error that leaves the
+// card blank.
+const SET_COLOR = "#2f6fe4";
+
+/** Keys that at least one set actually carries a number for. */
+function availablePeakVars(sess) {
+  const seen = new Set();
+  for (const st of sess.sets) {
+    for (const r of st.perRep || []) {
+      for (const [k, v] of Object.entries(r)) {
+        if (typeof v === "number" && Number.isFinite(v) && PEAK_VARS[k]) seen.add(k);
+      }
+    }
+  }
+  return [...seen].sort((a, b) =>
+    Object.keys(PEAK_VARS).indexOf(a) - Object.keys(PEAK_VARS).indexOf(b));
+}
+
+/** Per set: mean of the chosen measure across that set's reps, with the range.
+ *  The mean is the honest summary of a set; the range is what says whether the
+ *  reps inside it agreed. */
+function setSeries(sess, key) {
+  return sess.sets.map((st) => {
+    const v = (st.perRep || []).map((r) => r[key])
+      .filter((x) => typeof x === "number" && Number.isFinite(x));
+    if (!v.length) return { index: st.index, mean: null };
+    const mean = v.reduce((a, b) => a + b, 0) / v.length;
+    return { index: st.index, mean, min: Math.min(...v), max: Math.max(...v), n: v.length };
+  });
+}
+
+/** Mean per set with the within-set range as a whisker. Deliberately not a
+ *  line: sets are ordinal, and joining them implies you could read a value
+ *  between set 2 and set 3. */
+function setChart(points, key) {
+  const spec = PEAK_VARS[key] || { label: key, unit: "", dp: 2 };
+  const ok = points.filter((p) => p.mean != null);
+  if (ok.length < 1) return '<p class="note">No values for this measure yet.</p>';
+  const W = 320, H = 150, P = { l: 42, r: 10, t: 12, b: 24 };
+  const vals = ok.flatMap((p) => [p.min, p.max, p.mean]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * 0.15 || Math.abs(hi || 1) * 0.1 || 1;
+  lo -= pad; hi += pad;
+  const n = points.length;
+  const sx = (i) => P.l + ((i + 0.5) / n) * (W - P.l - P.r);
+  const sy = (v) => H - P.b - ((v - lo) / (hi - lo)) * (H - P.t - P.b);
+  let g = "";
+  for (let k = 0; k <= 3; k++) {
+    const yy = P.t + (H - P.t - P.b) * k / 3, val = hi - (hi - lo) * k / 3;
+    g += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="var(--line)" stroke-width=".8"/>`;
+    g += `<text x="${P.l - 5}" y="${yy + 3.5}" font-size="9" text-anchor="end" fill="var(--muted)">${val.toFixed(spec.dp)}</text>`;
+  }
+  points.forEach((pt, i) => {
+    const x = sx(i);
+    if (pt.mean == null) return;
+    if (pt.max > pt.min) {
+      g += `<line x1="${x}" y1="${sy(pt.min)}" x2="${x}" y2="${sy(pt.max)}" stroke="var(--muted)" stroke-width="1.2"/>`;
+      for (const v of [pt.min, pt.max]) {
+        g += `<line x1="${x - 4}" y1="${sy(v)}" x2="${x + 4}" y2="${sy(v)}" stroke="var(--muted)" stroke-width="1.2"/>`;
+      }
+    }
+    g += `<circle cx="${x}" cy="${sy(pt.mean)}" r="4.2" fill="${SET_COLOR}"/>`;
+    g += `<text x="${x}" y="${H - 7}" font-size="9" text-anchor="middle" fill="var(--muted)">${pt.index}</text>`;
+  });
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:150px">${g}</svg>
+    <div class="legend"><span><i class="swatch" style="background:${SET_COLOR}"></i>set mean</span>
+      <span>whisker: rep range within the set</span><span>${spec.unit}</span></div>
+    <p class="note" style="margin-top:2px">Set number on the horizontal axis —
+      points are not joined because sets are ordinal, not a continuous time.</p>`;
+}
+
 function renderTraining() {
   const card = $("trainingCard");
   const sess = getSession();
   if (!sess || !sess.sets.length) { card.classList.add("hidden"); return; }
   card.classList.remove("hidden");
-  const rows = sess.sets.map((s) => `<tr><td>Set ${s.index}</td><td>${s.activity}</td>
+  const vars = availablePeakVars(sess);
+  if (!vars.includes(peakVar)) peakVar = vars[0] || null;
+  const series = peakVar ? setSeries(sess, peakVar) : [];
+  const spec = peakVar ? PEAK_VARS[peakVar] : null;
+  const byIndex = Object.fromEntries(series.map((x) => [x.index, x]));
+
+  const rows = sess.sets.map((s) => {
+    const pv = byIndex[s.index];
+    const cell = pv && pv.mean != null
+      ? `${pv.mean.toFixed(spec.dp)}<span class="sub"> ${spec.unit}</span>` : "—";
+    return `<tr><td>Set ${s.index}</td><td>${s.activity}</td>
       <td>${s.reps}</td><td>${s.addedKg ? "+" + s.addedKg : ""}${s.assistKg ? " −" + s.assistKg : ""}</td>
-      <td>${new Date(s.at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</td></tr>`).join("");
+      <td>${cell}</td>
+      <td>${new Date(s.at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</td></tr>`;
+  }).join("");
+  const varOpts = vars.map((k) =>
+    `<option value="${k}"${k === peakVar ? " selected" : ""}>${PEAK_VARS[k].label}</option>`).join("");
   const total = sess.sets.reduce((a, b) => a + b.reps, 0);
   card.innerHTML = `
     <h1 style="font-size:17px;margin:0 0 2px">Training session</h1>
     <p class="sub" style="margin-bottom:10px">${sess.profile ? sess.profile + " · " : ""}
       ${sess.sets.length} set${sess.sets.length===1?"":"s"} · ${total} reps ·
       started ${new Date(sess.started).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</p>
-    <table><thead><tr><th>Set</th><th>Movement</th><th>Reps</th><th>Load</th><th>Time</th></tr></thead>
+    <table><thead><tr><th>Set</th><th>Movement</th><th>Reps</th><th>Load</th>
+      <th>${vars.length
+            ? `<select id="peakVar" class="thsel">${varOpts}</select>`
+            : "Peak"}</th><th>Time</th></tr></thead>
       <tbody>${rows}</tbody></table>
+    <div id="peakChartBox" style="margin-top:10px">${
+      peakVar ? setChart(series, peakVar) : ""}</div>
     <button class="ghost" id="summaryBtn" style="margin-top:10px">Finish and summarise</button>
     <button class="ghost" id="newSessionBtn" style="margin-top:8px">Start a new session</button>
     <div id="summaryBox"></div>`;
@@ -394,6 +522,22 @@ function renderTraining() {
     say("New training session started.");
   };
   $("summaryBtn").onclick = () => renderSummary();
+  const pv = $("peakVar");
+  if (pv) pv.onchange = () => {
+    peakVar = pv.value;
+    // Redraw the chart and the column in place: re-rendering the whole card
+    // would collapse an open summary underneath it.
+    const sess2 = getSession();
+    const ser = setSeries(sess2, peakVar);
+    $("peakChartBox").innerHTML = setChart(ser, peakVar);
+    const sp = PEAK_VARS[peakVar];
+    const byI = Object.fromEntries(ser.map((x) => [x.index, x]));
+    [...$("trainingCard").querySelectorAll("tbody tr")].forEach((tr, i) => {
+      const st = sess2.sets[i], hit = st && byI[st.index];
+      tr.cells[4].innerHTML = hit && hit.mean != null
+        ? `${hit.mean.toFixed(sp.dp)}<span class="sub"> ${sp.unit}</span>` : "—";
+    });
+  };
 }
 
 function renderSummary() {
@@ -417,7 +561,122 @@ function renderSummary() {
         handful of sets a slope would imply precision that is not there. A
         falling depth or range and a lengthening concentric are the usual
         signatures of fatigue.</p>`
-      : '<p class="note">Not enough sets yet to show a trend.</p>'}`;
+      : '<p class="note">Not enough sets yet to show a trend.</p>'}
+    <button class="ghost" id="saveExportBtn" style="margin-top:12px">Save &amp; export session (.zip)</button>
+    <button class="ghost" id="closeSummaryBtn" style="margin-top:8px">Close</button>
+    <div class="status" id="sessionZipStatus"></div>`;
+  $("saveExportBtn").onclick = () => exportSession();
+  $("closeSummaryBtn").onclick = () => { $("summaryBox").innerHTML = ""; };
+}
+
+/** The whole training session as one archive: every set's summary, the trends,
+ *  a per-rep table, the chart on screen, and full waveforms for the sets whose
+ *  curves are still in memory. Finishing a session and losing the numbers to a
+ *  closed tab is the failure this exists to prevent. */
+async function exportSession() {
+  const st = $("sessionZipStatus");
+  const note = (t) => { if (st) st.textContent = t; };
+  try {
+    const sess = getSession();
+    if (!sess || !sess.sets.length) { note("No sets to export."); return; }
+    note("Collecting…");
+    const sum = summariseSession(sess);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const files = [
+      { name: "training/sets.json", data: JSON.stringify(sess, null, 2) },
+      { name: "training/summary.json", data: JSON.stringify(sum, null, 2) },
+    ];
+
+    const hdr = ["set", "activity", "reps", "mass_kg", "added_kg", "assist_kg",
+                 "view", "fps", "at"];
+    files.push({ name: "training/sets.csv", data: hdr.join(",") + "\n" +
+      sess.sets.map((x) => [x.index, x.activity, x.reps, x.massKg ?? "",
+        x.addedKg ?? 0, x.assistKg ?? 0, x.view ?? "", x.fps ?? "", x.at].join(",")).join("\n") + "\n" });
+
+    // Per-rep table: the union of every key any rep carries, so a session that
+    // mixes movements still exports cleanly instead of dropping columns.
+    const keys = [];
+    for (const x of sess.sets) for (const r of x.perRep || []) {
+      for (const k of Object.keys(r)) if (!keys.includes(k)) keys.push(k);
+    }
+    const repHdr = ["set", ...keys];
+    const repRows = sess.sets.flatMap((x) =>
+      (x.perRep || []).map((r) => [x.index, ...keys.map((k) => r[k] ?? "")].join(",")));
+    files.push({ name: "training/reps.csv",
+                 data: repHdr.join(",") + "\n" + repRows.join("\n") + "\n" });
+
+    if (sum.trends && sum.trends.length) {
+      files.push({ name: "training/trends.csv",
+        data: "measure,unit,first_set,last_set,change,percent\n" +
+          sum.trends.map((t) => [t.label, t.unit, t.first, t.last, t.change, t.pct].join(",")).join("\n") + "\n" });
+    }
+
+    note("Rendering the chart…");
+    for (const svg of document.querySelectorAll("#peakChartBox svg.chart")) {
+      const png = await svgToPng(svg, 1100);
+      if (png) files.push({ name: `plots/session_${peakVar || "measure"}.png`,
+                            data: await blobBytes(png) });
+    }
+
+    // Full waveforms for whatever is still in memory this page session.
+    const kept = [];
+    for (const ps of pageSets) {
+      const cols = ACTIVITIES[ps.res.activity].columns;
+      for (const r of ps.res.reps) {
+        const d = `set${ps.index}/rep${r.rep}/`;
+        files.push({ name: d + "joint_angles.mot",
+                     data: writeMot("joint_angles", cols, r.times, r.coords) });
+        if (r.dyn) {
+          const dc = ["hip_moment", "knee_moment", "ankle_moment",
+                      "grf_vertical", "grf_horizontal"];
+          files.push({ name: d + "joint_moments.sto",
+                       data: writeMot("joint_moments", dc, r.times,
+                         Object.fromEntries(dc.map((k) => [k, r.dyn[k]]))) });
+        }
+      }
+      kept.push(ps.index);
+    }
+
+    files.push({ name: "README.txt", data:
+`BioScout Web — training session ${stamp}
+Athlete: ${sess.profile || "(no profile)"}   started ${sess.started}
+${sum.sets} sets, ${sum.total_reps} reps (${sum.reps_per_set.join(", ")})
+
+training/sets.json     every set as recorded, with its per-rep summary.
+training/summary.json  the same, plus first-set-to-last trends.
+training/sets.csv      one row per set.
+training/reps.csv      one row per rep, every measure.
+training/trends.csv    first set vs last set.
+plots/                 the measure plotted in the app.
+set<N>/rep<M>/         full waveforms — ONLY for sets ${kept.length ? kept.join(", ") : "(none)"},
+                       which are the ones still in memory. Waveforms are not
+                       written to browser storage (a session would exceed the
+                       quota), so sets recorded before the last page reload
+                       survive here as summaries only.
+
+Trends are the plain change from the first set to the last, not a fitted
+slope: with a handful of sets a regression implies a precision that is not
+there. A falling depth or range and a lengthening concentric are the usual
+signatures of fatigue.
+
+Angles, ranges, rep counts and depth are measured. Moments are inverse
+dynamics from body mass. Left and right are mirrored — one camera cannot
+separate the sides.
+` });
+
+    note("Packing…");
+    const blob = makeZip(files);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bioscout_session_${(sess.profile || "athlete").replace(/[^\w-]+/g, "_")}_${stamp}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
+    note(`Saved ${files.length} files, ${(blob.size / 1e6).toFixed(2)} MB.`);
+  } catch (err) {
+    note("Export failed: " + err.message);
+  }
 }
 
 refreshProfiles(lastUsedProfile()?.name || "");
@@ -656,6 +915,8 @@ async function finish() {
       try {
         const set = addSet(lastResult, fps, { profile: $("profile").value || null });
         lastResult.setIndex = set.index;
+        pageSets.push({ index: set.index, res: lastResult, fps });
+        viewingSet = set.index;
         renderTraining();
       } catch (e) {
         console.warn("could not log the set", e);
@@ -707,6 +968,7 @@ async function enrich(res, poses, fps, heightM, activity) {
   // weights, that shows up here rather than as a silently wrong number.
   try {
     const fm = await loadForceModel();
+    await loadMomentArms();
     const st = forceSelfTest(fm);
     if (!st.plausible) throw new Error(
       `force model self-test failed: ${st.peakMuscleBW.toFixed(1)} BW at the training mean`);
@@ -717,11 +979,22 @@ async function enrich(res, poses, fps, heightM, activity) {
     for (const r of res.reps) {
       // The surrogate was trained on RAJAGOPAL signs (its knee_angle_r training
       // mean is +56.9 deg). A GPK-signed knee would silently invert that input.
-      const mc = (activity === "squat" && KNEE_SIGN[res.osimModel] < 0)
-        ? { ...r.coords,
-            knee_angle_r: r.coords.knee_angle_r.map((v) => -v),
-            knee_angle_l: r.coords.knee_angle_l.map((v) => -v) }
-        : r.coords;
+      const mc = { ...r.coords };
+      if (activity === "squat" && KNEE_SIGN[res.osimModel] < 0) {
+        mc.knee_angle_r = r.coords.knee_angle_r.map((v) => -v);
+        mc.knee_angle_l = r.coords.knee_angle_l.map((v) => -v);
+      }
+      // Axis convention. `pullupkit` writes the measured horizontal hip
+      // displacement into pelvis_tz, because that is the image's horizontal
+      // axis. In the Rajagopal frame the model was trained on, pelvis_tx is
+      // ANTERIOR and pelvis_tz is LATERAL -- and a side-on shot measures
+      // fore-aft motion, not lateral. The model reads the second derivative of
+      // these as whole-body acceleration, so feeding fore-aft motion in as
+      // lateral would put real dynamics on an axis the training data barely
+      // moves along. Swap it here rather than in the .mot export, which has
+      // its own established convention.
+      mc.pelvis_tx = r.coords.pelvis_tz;
+      mc.pelvis_tz = r.coords.pelvis_tx;
       const out = predictForces(fm, mc, r.times.length,
         { massKg, heightM, times: r.times });
       r.forces = out.forces;
@@ -755,15 +1028,23 @@ function viewNote(res) {
 }
 
 function chart(rep, activity) {
-  const series = activity === "squat"
-    ? [["knee flexion", rep.coords.knee_angle_r],
-       ["hip flexion", rep.coords.hip_flexion_r],
-       ["ankle dorsiflexion", rep.coords.ankle_angle_r]]
-    : [["elbow flexion", rep.coords.elbow_flex_r],
-       ["shoulder flexion", rep.coords.arm_flex_r],
-       ["hip flexion", rep.coords.hip_flexion_r]];
+  const keys = activity === "squat"
+    ? [["knee flexion", "knee_angle_r"], ["hip flexion", "hip_flexion_r"],
+       ["ankle dorsiflexion", "ankle_angle_r"]]
+    : [["elbow flexion", "elbow_flex_r"], ["shoulder flexion", "arm_flex_r"],
+       ["hip flexion", "hip_flexion_r"]];
+  const series = keys.map(([n, k]) => [n, rep.coords[k]]);
+  // On the mean rep, the between-rep SD is drawn as a band. It is the point of
+  // an ensemble average: a mean with a wide band is three different squats.
+  const sdc = rep.sd && rep.sd.coords;
+  const bands = sdc ? keys.map(([, k]) => sdc[k] || null) : null;
+
+  const pct = rep.timeUnit === "%";
   const t = rep.times, W = 320, H = 190, P = { l: 34, r: 8, t: 10, b: 22 };
-  const all = series.flatMap(([, v]) => v);
+  const all = series.flatMap(([, v], i) => {
+    const b = bands && bands[i];
+    return b ? v.flatMap((x, j) => [x + b[j], x - b[j]]) : v;
+  });
   const y0 = Math.min(...all), y1 = Math.max(...all);
   const pad = (y1 - y0) * 0.08 || 1;
   const lo = y0 - pad, hi = y1 + pad;
@@ -776,25 +1057,43 @@ function chart(rep, activity) {
     g += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="var(--line)" stroke-width=".8"/>`;
     g += `<text x="${P.l - 5}" y="${yy + 3.5}" font-size="9" text-anchor="end" fill="var(--muted)">${val.toFixed(0)}</text>`;
   }
-  const topT = t[rep.bounds[1] - rep.bounds[0]];
-  if (topT !== undefined) {
+  const topT = pct ? rep.topPct : t[rep.bounds[1] - rep.bounds[0]];
+  if (topT !== undefined && topT !== null) {
     g += `<line x1="${sx(topT)}" y1="${P.t}" x2="${sx(topT)}" y2="${H - P.b}" stroke="var(--muted)" stroke-width=".8" stroke-dasharray="3 3"/>`;
+  }
+  if (bands) {
+    series.forEach(([, vals], i) => {
+      const b = bands[i];
+      if (!b) return;
+      g += bandPath(t, vals, b, sx, sy, COLORS[i]);
+    });
   }
   series.forEach(([, vals], i) => {
     g += `<polyline fill="none" stroke="${COLORS[i]}" stroke-width="1.9" stroke-linejoin="round" points="${
       vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
   });
-  g += `<text x="${P.l}" y="${H - 6}" font-size="9" fill="var(--muted)">${t[0].toFixed(1)}s</text>`;
-  g += `<text x="${W - P.r}" y="${H - 6}" font-size="9" text-anchor="end" fill="var(--muted)">${t[t.length - 1].toFixed(1)}s</text>`;
+  const lab = (v) => (pct ? `${v.toFixed(0)}%` : `${v.toFixed(1)}s`);
+  g += `<text x="${P.l}" y="${H - 6}" font-size="9" fill="var(--muted)">${lab(t[0])}</text>`;
+  g += `<text x="${W - P.r}" y="${H - 6}" font-size="9" text-anchor="end" fill="var(--muted)">${lab(t[t.length - 1])}</text>`;
   const legend = series.map(([n], i) =>
     `<span><i class="swatch" style="background:${COLORS[i]}"></i>${n}</span>`).join("");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>
-          <div class="legend">${legend}</div>`;
+          <div class="legend">${legend}${bands ? '<span>shaded: ±1 SD between reps</span>' : ""}</div>`;
 }
 
-function lineChart(t, series, unit, palette) {
+/** Mean ± SD ribbon: forward along the upper edge, back along the lower. */
+function bandPath(t, mean, sd, sx, sy, color) {
+  const up = mean.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v + sd[j]).toFixed(1)}`);
+  const dn = mean.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v - sd[j]).toFixed(1)}`).reverse();
+  return `<polygon points="${up.concat(dn).join(" ")}" fill="${color}" fill-opacity=".15" stroke="none"/>`;
+}
+
+function lineChart(t, series, unit, palette, bands) {
   const W = 320, H = 170, P = { l: 40, r: 8, t: 10, b: 22 };
-  const all = series.flatMap(([, v]) => v);
+  const all = series.flatMap(([, v], i) => {
+    const b = bands && bands[i];
+    return b ? v.flatMap((x, j) => [x + b[j], x - b[j]]) : v;
+  });
   const y0 = Math.min(...all), y1 = Math.max(...all);
   const pad = (y1 - y0) * 0.08 || 1, lo = y0 - pad, hi = y1 + pad;
   const sx = (v) => P.l + ((v - t[0]) / (t[t.length - 1] - t[0] || 1)) * (W - P.l - P.r);
@@ -809,6 +1108,11 @@ function lineChart(t, series, unit, palette) {
     g += `<line x1="${P.l}" y1="${sy(0)}" x2="${W - P.r}" y2="${sy(0)}" stroke="var(--muted)" stroke-width="1"/>`;
   }
   const pal = palette || COLORS;
+  if (bands) {
+    series.forEach(([, vals], i) => {
+      if (bands[i]) g += bandPath(t, vals, bands[i], sx, sy, pal[i % pal.length]);
+    });
+  }
   series.forEach(([, vals], i) => {
     g += `<polyline fill="none" stroke="${pal[i % pal.length]}" stroke-width="1.7" stroke-linejoin="round" points="${
       vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
@@ -816,13 +1120,59 @@ function lineChart(t, series, unit, palette) {
   const legend = series.map(([n], i) =>
     `<span><i class="swatch" style="background:${pal[i % pal.length]}"></i>${n}</span>`).join("");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:170px">${g}</svg>
-          <div class="legend">${legend}<span>${unit}</span></div>`;
+          <div class="legend">${legend}<span>${unit}</span>${
+            bands ? '<span>shaded: \u00b11 SD between reps</span>' : ""}</div>`;
+}
+
+/* Moment arms, if they have been generated.
+ *
+ * The force surrogate predicts muscle FORCES and nothing else, so a muscle's
+ * share of a joint moment (force x moment arm) cannot be computed from it
+ * alone. Moment arms are a property of the musculoskeletal model, not of the
+ * movement, so they are generated once from the .osim file by
+ * tools/moment_arms.py and shipped as a lookup of arm-versus-joint-angle.
+ *
+ * The file is optional on purpose: without it the moment plots show the net
+ * moment only, rather than a contribution invented from a guessed constant
+ * arm. */
+let momentArms = null, momentArmsTried = false;
+async function loadMomentArms() {
+  if (momentArmsTried) return momentArms;
+  momentArmsTried = true;
+  try {
+    const r = await fetch("moment_arms.json");
+    if (r.ok) momentArms = await r.json();
+  } catch { momentArms = null; }
+  return momentArms;
+}
+
+/* Sign. These plots are EXTENSION POSITIVE (see dynamics.js) and the Rajagopal
+ * coordinates the arms are tabulated against are flexion/dorsiflexion
+ * positive, so a contribution flips on the way in. A flexor then plots
+ * negative against a positive extensor moment, which is what you want to see. */
+const ARM_SIGN = { hip: -1, knee: -1, ankle: -1 };
+
+/** Linear lookup of one muscle's moment arm at each frame's joint angle. */
+function armSeries(joint, muscle, angles) {
+  const tab = momentArms && momentArms.joints && momentArms.joints[joint];
+  const arm = tab && tab.muscles && tab.muscles[muscle];
+  if (!arm || !tab.grid || arm.length !== tab.grid.length) return null;
+  const g = tab.grid;
+  return angles.map((a) => {
+    if (!Number.isFinite(a)) return 0;
+    if (a <= g[0]) return arm[0];
+    if (a >= g[g.length - 1]) return arm[arm.length - 1];
+    let i = 0;
+    while (i < g.length - 2 && g[i + 1] < a) i++;
+    const f = (a - g[i]) / (g[i + 1] - g[i] || 1);
+    return arm[i] + (arm[i + 1] - arm[i]) * f;
+  });
 }
 
 const JOINTS = [
-  { key: "hip", label: "Hip", series: "hip_moment" },
-  { key: "knee", label: "Knee", series: "knee_moment" },
-  { key: "ankle", label: "Ankle", series: "ankle_moment" },
+  { key: "hip", label: "Hip", series: "hip_moment", coord: "hip_flexion_r" },
+  { key: "knee", label: "Knee", series: "knee_moment", coord: "knee_angle_r" },
+  { key: "ankle", label: "Ankle", series: "ankle_moment", coord: "ankle_angle_r" },
 ];
 
 /** Top muscles CROSSING a joint, ranked by predicted peak force.
@@ -846,23 +1196,32 @@ function jointSubplot(rep, res, j) {
   const top = topMusclesForJoint(rep, j.key);
   const pk = Math.max(...moment.map(Math.abs));
   const sel = selectedMuscle[j.key];
+  const sdd = rep.sd && rep.sd.dyn;
 
-  const momentChart = lineChart(rep.times, [[`${j.label} moment`, moment]], "N·m");
-
-  // Muscle force WAVEFORMS, in newtons, on their own axis. Predicted per frame
-  // for all 80 muscles -- the table only ever showed each one's peak.
-  let forceChart = "";
-  if (top.length) {
-    const shown = sel ? top.filter(([, , i]) => i === sel.idx) : top;
-    const series = shown.map(([nm, , i]) => [nm, rep.forces.map((r) => Math.abs(r[i]))]);
-    const cols = sel
-      ? [MCOLORS[Math.max(0, top.findIndex(([, , i]) => i === sel.idx))]]
-      : MCOLORS;
-    forceChart = lineChart(rep.times, series, "N", cols) +
-      `<p class="note" style="margin-top:2px">${sel
-        ? `Isolated: ${sel.name}. Tap it again to show all five.`
-        : "All five on one axis — the largest dominates, so tap one to isolate it."}</p>`;
+  // Muscle contributions to THIS moment, where the model's moment arms are
+  // available: force x arm, in the same newton-metres and the same
+  // extension-positive convention as the net moment they sit on.
+  const shown = sel ? top.filter(([, , i]) => i === sel.idx) : top;
+  const contrib = [];
+  const angles = rep.coords && rep.coords[j.coord];
+  if (momentArms && angles && rep.forces) {
+    // The surrogate is trained on Rajagopal signs, and enrich() already flipped
+    // a GPK-signed knee for it. The arm table is in the same frame, so flip
+    // here too rather than reading the arm at a mirrored angle.
+    const a = (res.activity === "squat" && KNEE_SIGN[res.osimModel] < 0 &&
+               j.coord.startsWith("knee")) ? angles.map((v) => -v) : angles;
+    for (const [nm, , i] of shown) {
+      const arm = armSeries(j.key, nm, a);
+      if (!arm) continue;
+      contrib.push([nm, rep.forces.map((r, k) => ARM_SIGN[j.key] * r[i] * arm[k])]);
+    }
   }
+
+  const series = [[`${j.label} moment (net)`, moment], ...contrib];
+  const pal = ["#8892a6", ...MCOLORS];
+  const bands = sdd && sdd[j.series]
+    ? [sdd[j.series], ...contrib.map(() => null)] : null;
+  const momentChart = lineChart(rep.times, series, "N·m", pal, bands);
 
   const rows = top.map(([nm, p, i], k) => {
     const on = sel && sel.idx === i;
@@ -877,8 +1236,11 @@ function jointSubplot(rep, res, j) {
       <h2>${j.label} <span class="pk">peak ${pk.toFixed(0)} N·m
         (${(pk / res.massKg).toFixed(2)} N·m/kg)</span></h2>
       ${momentChart}
+      <p class="note" style="margin-top:2px">${contrib.length
+        ? (sel ? `Isolated: ${sel.name}. Tap it again to show all ${top.length}.`
+               : "Coloured curves are each muscle's contribution — force × moment arm. Tap one to isolate it.")
+        : "Muscle contributions need moment arms from the .osim model: run tools/moment_arms.py to add moment_arms.json and they appear on this plot."}</p>
       <div class="muscles">${rows || '<span class="note">no muscle data</span>'}</div>
-      ${forceChart}
     </div>`;
 }
 
@@ -908,11 +1270,17 @@ function momentPanel(rep, res) {
       pressure is taken as the midfoot and the two legs are assumed symmetric —
       a visible lean breaks that. A small flexor knee moment in a shallow squat
       is physical, not an error.</p>
-    <p class="note banner">The muscles listed under each joint are those that
-      <b>cross</b> that joint, ranked by predicted peak force — not by their
-      contribution to the moment. Attributing moment shares needs muscle moment
-      arms, which this surrogate does not provide. The force values themselves
-      are the unreliable ones described below.</p>`;
+    <p class="note banner">${momentArms
+      ? `Contributions are predicted muscle force times the moment arm read from
+         the <b>${momentArms.model || "OpenSim"}</b> model at that joint angle.
+         The arms are the model's; the forces are the surrogate's and carry its
+         errors, so read the contributions as a ranking of who is doing the
+         work, not as newton-metres you could publish. They will not sum to the
+         net moment: only the muscles crossing the joint are drawn,
+         co-contraction is not resolved, and the two legs are lumped.`
+      : `The muscles listed under each joint are those that <b>cross</b> it,
+         ranked by predicted peak force — not by their contribution to the
+         moment, which needs moment arms this surrogate does not provide.`}</p>`;
 }
 
 function forcePanel(rep) {
@@ -927,24 +1295,58 @@ function forcePanel(rep) {
     .map(([n, v]) => `<tr><td>${n.replace("_mag", "").replace("_", " ")}</td>
       <td>${v.toFixed(2)}</td></tr>`).join("");
 
-  const r2 = fm?.report?.["muscle forces"]?.r2_median;
-  const r2j = fm?.report?.["JRF magnitude"]?.r2_median;
+  // Muscle force as a percentage of each muscle's OWN peak in this rep.
+  // Normalising sidesteps the surrogate's magnitude problem: the shapes are
+  // the part that survived validation, and on a shared newton axis the largest
+  // muscle flattens every other curve onto the floor.
+  let pctChart = "";
+  if (top.length) {
+    const series = top.map(([nm]) => {
+      const i = rep.forceNames.indexOf(nm);
+      const col = rep.forces.map((r) => Math.abs(r[i]));
+      const mx = Math.max(...col) || 1;
+      return [nm, col.map((v) => (100 * v) / mx)];
+    });
+    pctChart = `<h1 style="font-size:14px;margin:14px 0 2px">Muscle force,
+        % of each muscle's own peak</h1>` +
+      lineChart(rep.times, series, "% of peak", MCOLORS) +
+      `<p class="note" style="margin-top:2px">Each curve is scaled to its own
+        maximum, so this compares timing and shape rather than magnitude —
+        which is the part of this model worth reading.</p>`;
+  }
+
+  // Joint contact forces, already in bodyweights.
+  let jrfChart = "";
+  if (rep.jrf && rep.jrf.length && rep.jrfNames) {
+    const series = rep.jrfNames.map((n, i) =>
+      [n.replace("_mag", "").replace(/_/g, " "), rep.jrf.map((r) => r[i])]);
+    jrfChart = lineChart(rep.times, series, "× bodyweight", COLORS);
+  }
+
+  // The WITHIN-TRIAL figure, not the pooled one. Pooled R2 is computed across
+  // every held-out frame at once, so it is rewarded for telling a sprint from a
+  // squat -- which is not the question anyone reading this panel is asking.
+  // Within-trial R2 says how well the predicted curve follows the real one
+  // inside one movement, and it is the lower and honest number.
+  const r2 = fm?.report?.["muscle forces"]?.r2_within_trial_median;
+  const r2j = fm?.report?.["JRF magnitude"]?.r2_within_trial_median;
 
   return `
     <h1 style="font-size:16px;margin:16px 0 2px">Muscle and joint forces</h1>
     <p class="note banner">Estimates from a surrogate trained on OpenSim static
       optimisation of running and single-leg squats — not a measurement.
-      On subjects it never saw, it explains
-      ${r2 == null ? "—" : (r2 * 100).toFixed(0)}% of the variance in muscle
-      force and ${r2j == null ? "—" : (r2j * 100).toFixed(0)}% in joint contact
-      force. Two limits are structural: it takes kinematics only, so it
+      On subjects it never saw, the predicted curve tracks the real one with a
+      median R² of ${r2 == null ? "—" : r2.toFixed(2)} for muscle force and
+      ${r2j == null ? "—" : r2j.toFixed(2)} for joint contact force. Two limits are structural: it takes kinematics only, so it
       <b>cannot know external load</b> — an empty bar and a loaded bar at the
       same depth read the same; and every output is a lower-limb muscle, so a
       <b>pull-up is out of its domain entirely</b>. Squats are a short
       extrapolation from single-leg squats; treat the ranking as more reliable
       than the absolute newtons.</p>
     <table><thead><tr><th>Muscle</th><th>Peak N</th></tr></thead><tbody>${rows}</tbody></table>
+    ${pctChart}
     <h1 style="font-size:14px;margin:14px 0 2px">Joint contact force</h1>
+    ${jrfChart}
     <table><thead><tr><th>Joint</th><th>Peak × bodyweight</th></tr></thead>
       <tbody>${jrows}</tbody></table>
     <p class="note">${rep.forceMissing?.length || 0} of the model's
@@ -996,7 +1398,8 @@ async function exportZip(res, fps) {
 
     // Plots: page through the reps so each one's charts are in the DOM.
     note("Rendering plots…");
-    for (let i = 0; i < res.reps.length; i++) {
+    const pages = shownItems.length || res.reps.length;
+    for (let i = 0; i < pages; i++) {
       if (selectRep) selectRep(i);
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const svgs = document.querySelectorAll("#results svg.chart");
@@ -1013,7 +1416,8 @@ async function exportZip(res, fps) {
           : [];
         const slug = (labels.slice(0, 3).join("_") || `chart${++k}`)
           .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
-        files.push({ name: `plots/rep${res.reps[i].rep}_${String(++k).padStart(2, "0")}_${slug}.png`,
+        const who = shownItems[i] && shownItems[i].isMean ? "mean" : `rep${res.reps[i].rep}`;
+        files.push({ name: `plots/${who}_${String(++k).padStart(2, "0")}_${slug}.png`,
                      data: await blobBytes(png) });
       }
     }
@@ -1101,6 +1505,38 @@ WHAT NOT TO TRUST
   }
 }
 
+/** Dropdown over the sets recorded since the page loaded. Sets from an earlier
+ *  page are listed but disabled: their summaries survived in storage, their
+ *  waveforms did not, and offering them would give an empty chart. */
+function setSwitcher(res) {
+  const sess = getSession();
+  if (!sess || sess.sets.length < 2) return "";
+  const have = new Set(pageSets.map((x) => x.index));
+  const cur = res.setIndex ?? viewingSet;
+  const opts = sess.sets.map((x) => {
+    const ok = have.has(x.index);
+    return `<option value="${x.index}"${ok ? "" : " disabled"}${
+      x.index === cur ? " selected" : ""}>Set ${x.index} — ${x.reps} ${x.activity}${
+      ok ? "" : " (curves not kept past a reload)"}</option>`;
+  }).join("");
+  return `<div style="margin-bottom:10px">
+      <label for="setSel">Showing</label>
+      <select id="setSel">${opts}</select>
+    </div>`;
+}
+
+function wireSetSwitcher() {
+  const sel = $("setSel");
+  if (!sel) return;
+  sel.onchange = () => {
+    const hit = pageSets.find((x) => x.index === +sel.value);
+    if (!hit) return;
+    viewingSet = hit.index;
+    render(hit.res, hit.fps);
+    $("results").scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+}
+
 function render(res, fps) {
   const el = $("results");
   el.classList.remove("hidden");
@@ -1125,6 +1561,7 @@ function render(res, fps) {
       <h1 style="font-size:19px;margin-bottom:2px">${n} neck movement${n===1?"":"s"}</h1>
       <p class="sub" style="margin-bottom:12px">${fps.toFixed(0)} fps ·
         ${(res.coverage*100).toFixed(0)}% tracked · .mot signed for ${res.osimModel}</p>
+      ${setSwitcher(res)}
       ${res.detection ? `<p class="note" style="border-left:3px solid var(--good);
         padding-left:11px;color:var(--good)">Detected automatically —
         ${res.detection.reason}.</p>` : ""}
@@ -1140,24 +1577,32 @@ function render(res, fps) {
         large angles, and upper and lower cervical motion are not separated —
         the export splits each angle between the two joints in proportion to
         their ranges. A screening measure, not goniometry.</p>`;
+    const meanN = ensembleRep(res.reps);
+    const itemsN = meanN ? [...res.reps, meanN] : res.reps;
+    shownItems = itemsN;
     const tabsN = $("repTabs");
-    res.reps.forEach((r, i) => {
+    itemsN.forEach((r, i) => {
       const b = document.createElement("button");
-      b.textContent = "Rep " + r.rep;
+      b.textContent = r.isMean ? `Mean (${r.nReps})` : "Rep " + r.rep;
       b.onclick = () => selN(i);
       tabsN.appendChild(b);
     });
     selectRep = selN;
     function selN(i) {
       [...tabsN.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
-      const r = res.reps[i], t = r.times;
+      const r = itemsN[i], t = r.times;
       const sum = (a, b2) => r.coords[a].map((v, k) => v + r.coords[b2][k]);
+      const sd = r.sd && r.sd.coords;
+      const sumSd = (a, b2) => (sd && sd[a] && sd[b2]
+        ? sd[a].map((v, k) => Math.hypot(v, sd[b2][k])) : null);
       $("chartBox").innerHTML = lineChart(t, [
         ["flexion / extension", sum("pitch1", "pitch2")],
         ["lateral bend", sum("roll1", "roll2")],
-        ["rotation", sum("yaw1", "yaw2")]], "deg");
+        ["rotation", sum("yaw1", "yaw2")]], "deg", null,
+        sd ? [sumSd("pitch1", "pitch2"), sumSd("roll1", "roll2"), sumSd("yaw1", "yaw2")] : null);
     }
     selN(0);
+    wireSetSwitcher();
     $("zipBtn").onclick = () => exportZip(res, fps);
     $("dlBtn").onclick = () => {
       const txt = writeMot("joint_angles", ACTIVITIES.neck.columns,
@@ -1182,12 +1627,29 @@ function render(res, fps) {
     ? "<tr><th>Rep</th><th>Down</th><th>Up</th><th>Knee</th><th>Hip</th><th>Depth m</th></tr>"
     : "<tr><th>Rep</th><th>Up</th><th>Down</th><th>Elbow</th><th>Shldr</th><th>Rise m</th></tr>";
 
+  const meanRep = ensembleRep(res.reps);
+  const items = meanRep ? [...res.reps, meanRep] : res.reps;
+  shownItems = items;
+  // Mean +- SD across the reps, on the same row shape as the reps above it.
+  const ms = (k, d = 2) => {
+    const st = meanRep && meanRep.stats[k];
+    return st ? `${st.mean.toFixed(d)}<span class="sub"> ±${st.sd.toFixed(d)}</span>` : "—";
+  };
+  const meanRow = !meanRep ? "" : (isSquat
+    ? `<tr class="meanrow"><td>Mean</td><td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
+         <td>${ms("knee_flex_max_deg", 0)}°</td><td>${ms("hip_flex_max_deg", 0)}°</td>
+         <td>${ms("depth_m")}</td></tr>`
+    : `<tr class="meanrow"><td>Mean</td><td>${ms("concentric_s")}</td><td>${ms("eccentric_s")}</td>
+         <td>${ms("elbow_flex_max_deg", 0)}°</td><td>${ms("arm_flex_range_deg", 0)}°</td>
+         <td>${ms("pelvis_travel_m")}</td></tr>`);
+
   el.innerHTML = `
     <h1 style="font-size:19px;margin-bottom:2px">${n} ${ACTIVITIES[res.activity].label}${n === 1 ? "" : "s"}</h1>
     <p class="sub" style="margin-bottom:12px">${fps.toFixed(0)} fps ·
       ${(res.coverage * 100).toFixed(0)}% tracked · ${res.pxPerM.toFixed(0)} px/m ·
       ${res.view?.view ?? "?"} view · .mot signed for ${res.osimModel}</p>
-    <table><thead>${head}</thead><tbody>${rows}</tbody></table>
+    ${setSwitcher(res)}
+    <table><thead>${head}</thead><tbody>${rows}${meanRow}</tbody></table>
     <div class="tabs" id="repTabs" style="margin-top:14px"></div>
     <div id="chartBox"></div>
     <button class="ghost" id="dlBtn" style="margin-top:12px">Download angles (.mot) + moments (.sto)</button>
@@ -1206,17 +1668,23 @@ function render(res, fps) {
       cannot separate the sides.</p>`;
 
   const tabs = $("repTabs");
-  res.reps.forEach((r, i) => {
+  items.forEach((r, i) => {
     const b = document.createElement("button");
-    b.textContent = "Rep " + r.rep;
+    b.textContent = r.isMean ? `Mean (${r.nReps})` : "Rep " + r.rep;
     b.onclick = () => select(i);
     tabs.appendChild(b);
   });
   selectRep = select;
+  wireSetSwitcher();
   function select(i) {
     [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
-    $("chartBox").innerHTML = chart(res.reps[i], res.activity);
-    $("dynBox").innerHTML = momentPanel(res.reps[i], res);
+    $("chartBox").innerHTML = chart(items[i], res.activity)
+      + (items[i].isMean ? `<p class="note">Every rep stretched to 0–100% of
+         itself and averaged across ${items[i].nReps} reps, so the bottom of a
+         slow rep lines up with the bottom of a fast one. The shaded band is
+         ±1 SD between reps: a wide band means the reps did not repeat, which
+         is usually more informative than the mean.</p>` : "");
+    $("dynBox").innerHTML = momentPanel(items[i], res);
     $("dynBox").querySelectorAll("button.muscle").forEach((b) => {
       b.onclick = () => {
         const j = b.dataset.joint, idx = +b.dataset.idx;
@@ -1226,7 +1694,7 @@ function render(res, fps) {
         select(i);
       };
     });
-    $("forceBox").innerHTML = forcePanel(res.reps[i]);
+    $("forceBox").innerHTML = forcePanel(items[i]);
   }
   select(0);
 

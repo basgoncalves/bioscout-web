@@ -15,10 +15,10 @@
  *
  * Bump CACHE when the vendored engine or model changes, to evict the old copy.
  */
-const CACHE = "bioscout-web-v11";
+const CACHE = "bioscout-web-v14";
 
 const SHELL = ["./", "./index.html", "./kinematics.js", "./dynamics.js",
-               "./forces.js", "./overlay.js", "./zip.js", "./detect.js", "./profiles.js", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest",
+               "./forces.js", "./overlay.js", "./zip.js", "./detect.js", "./profiles.js", "./ensemble.js", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest",
                "./logo.png", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png",
                "./apple-touch-icon.png", "./favicon.ico"];
 const HEAVY = [
@@ -27,7 +27,7 @@ const HEAVY = [
   "./vendor/three.module.min.js",
   "./vendor/three.core.min.js",
   "./meshes/gwen_v3.json", "./meshes/gwen_v3.bin",
-  "./meshes/gohan_ss_v4.json", "./meshes/gohan_ss_v4.bin",
+  "./meshes/gohan_ss_v6.json", "./meshes/gohan_ss_v6.bin",
   "./meshes/gpk_generic.json", "./meshes/gpk_generic.bin",
   "./meshes/bas_v3.json", "./meshes/bas_v3.bin",
   "./meshes/gpk_bones.json", "./meshes/gpk_bones.bin",
