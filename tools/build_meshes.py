@@ -31,6 +31,14 @@ import numpy as np
 # Bodies the overlay can actually place from pose landmarks. Cervical vertebrae
 # and the jaw are skipped: they are interior bones with no landmark to drive
 # them, and they cost triangles for nothing at overlay size.
+#: Tempting but WRONG: reassigning a welded mesh to another body. GPK_v3_human
+#: welds head and arms onto the torso, and those STLs are authored in the
+#: TORSO's coordinate frame. Moving them to a skull/humerus body places them by
+#: a frame they were never expressed in, and the arms shoot off across the
+#: scene. A welded mesh has to stay on the body it was authored against; the
+#: fix for articulating arms is a model that actually has arm bodies
+#: (bas_v3, gwen_v3), not a reassignment here.
+
 RIGGED_BODIES = [
     "pelvis", "torso", "skull",
     "femur_r", "femur_l", "tibia_r", "tibia_l",

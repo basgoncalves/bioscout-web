@@ -89,10 +89,12 @@ export class Overlay {
     this.scene.add(this.group);
     this.meshes = {};
     this.anchors = {};
+    this._lastScale = {};
     this.setName = null;
   }
 
   dispose() {
+    this._lastScale = {};
     for (const m of Object.values(this.meshes)) {
       m.geometry.dispose(); m.material.dispose(); this.group.remove(m);
     }
@@ -170,12 +172,34 @@ export class Overlay {
     }
     const pxPerM = n ? scale / n : 500;
 
+    // MediaPipe estimates every landmark whether or not it is in frame. Close
+    // to the face the hips and knees are pure guesses, and a body driven by
+    // them flails. Gate on the reported visibility instead of trusting them.
+    const VIS = 0.5;
+    const seen = (i) => (landmarks[i].visibility ?? 1) >= VIS;
+
     const P = (i) => {
       const p = p2(i);
       p.z = (mirror ? -world[i].z : world[i].z) * pxPerM;
       return p;
     };
     const mid = (a, b) => P(a).add(P(b)).multiplyScalar(0.5);
+
+    const OK = {
+      nose: seen(L.nose), lEar: seen(L.lEar), rEar: seen(L.rEar),
+      rHip: seen(L.rHip), lHip: seen(L.lHip),
+      rKnee: seen(L.rKnee), lKnee: seen(L.lKnee),
+      rAnkle: seen(L.rAnkle), lAnkle: seen(L.lAnkle),
+      rToe: seen(L.rToe), lToe: seen(L.lToe),
+      rShoulder: seen(L.rShoulder), lShoulder: seen(L.lShoulder),
+      rElbow: seen(L.rElbow), lElbow: seen(L.lElbow),
+      rWrist: seen(L.rWrist), lWrist: seen(L.lWrist),
+      rIndex: seen(L.rIndex), lIndex: seen(L.lIndex),
+    };
+    OK.hipMid = OK.lHip && OK.rHip;
+    OK.shoulderMid = OK.lShoulder && OK.rShoulder;
+    OK.backJoint = OK.hipMid && OK.shoulderMid;
+    OK.headCentre = OK.lEar && OK.rEar;
 
     const pts = {
       nose: P(L.nose), rHip: P(L.rHip), lHip: P(L.lHip),
@@ -215,7 +239,9 @@ export class Overlay {
       const mesh = this.meshes[r.body];
       if (!mesh) continue;
       const w0 = pts[r.from], w1 = pts[r.to];
-      if (!w0 || !w1) { mesh.visible = false; continue; }
+      if (!w0 || !w1 || OK[r.from] === false || OK[r.to] === false) {
+        mesh.visible = false; continue;
+      }
 
       const anch = this.anchors[r.body] || {};
       const a0 = r.localFrom === "hipMid"
@@ -258,6 +284,7 @@ export class Overlay {
       // matrix stale. Without this the meshes are positioned and invisible.
       mesh.matrixWorldNeedsUpdate = true;
       mesh.visible = true;
+      this._lastScale[r.body] = s;
     }
 
     // The skull is placed last, and differently. It has no child joint in the
@@ -267,13 +294,17 @@ export class Overlay {
     // the two actually meet, size it from the measured ear span, and orient it
     // from the head. Ears drive size and roll; the torso decides where it sits.
     const skull = this.meshes.skull, torsoMesh = this.meshes.torso;
+    const torsoScale = this._lastScale.torso || this._lastScale.femur_r
+                    || this._lastScale.humerus_r || 0;
     if (skull && skull.userData.bbox) {
       const bb = skull.userData.bbox;
       const size = new THREE.Vector3(); bb.getSize(size);
       const centre = new THREE.Vector3(); bb.getCenter(centre);
-      const earW = pts.lEar.distanceTo(pts.rEar);
-      const modelW = Math.max(size.z, 1e-4);
-      const sk = earW > 2 ? (earW * 1.45) / modelW : fallbackScale * 0.2;
+      // Scale the head with the rest of the character, NOT from the ear span.
+      // The model is internally consistent; sizing the skull independently
+      // makes the head too large the moment the camera is close, because the
+      // ear span then fills the frame.
+      const sk = torsoScale || fallbackScale;
 
       const up = pts.headCentre.clone().sub(pts.shoulderMid);
       if (up.lengthSq() > 1e-6) {

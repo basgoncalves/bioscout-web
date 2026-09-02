@@ -28,6 +28,8 @@ const HEAVY = [
   "./vendor/three.core.min.js",
   "./meshes/gwen_v3.json", "./meshes/gwen_v3.bin",
   "./meshes/gohan_ss_v4.json", "./meshes/gohan_ss_v4.bin",
+  "./meshes/gpk_generic.json", "./meshes/gpk_generic.bin",
+  "./meshes/bas_v3.json", "./meshes/bas_v3.bin",
   "./vendor/wasm/vision_wasm_internal.js",
   "./vendor/wasm/vision_wasm_internal.wasm",
   "./vendor/wasm/vision_wasm_nosimd_internal.js",
