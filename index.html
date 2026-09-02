@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111318">
+<title>Movement Lab</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --ink:#14161a; --muted:#5d626e;
+    --line:#e2e5ea; --accent:#2f6fe4; --warn:#b4540f; --good:#1d7a45;
+    --shadow:0 1px 3px rgba(0,0,0,.07), 0 6px 20px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111318; --card:#191c22; --ink:#eceef2; --muted:#9aa1ae;
+            --line:#2a2e37; --accent:#5b93f5; --warn:#e08a4a; --good:#4fbd7d;
+            --shadow:0 1px 3px rgba(0,0,0,.4); }
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+         padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+  .wrap { max-width:640px; margin:0 auto; padding:16px 14px 40px; }
+  h1 { font-size:21px; margin:4px 0 2px; letter-spacing:-.01em; }
+  .sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+          padding:14px; margin-bottom:12px; box-shadow:var(--shadow); }
+  label { display:block; font-size:13px; color:var(--muted); margin-bottom:5px; }
+  .row { display:flex; gap:10px; }
+  .row > * { flex:1; min-width:0; }
+  input, select { width:100%; padding:11px 12px; font-size:16px; color:var(--ink);
+                  background:var(--bg); border:1px solid var(--line);
+                  border-radius:10px; font-family:inherit; }
+  button { width:100%; padding:14px; font-size:16px; font-weight:600;
+           border:0; border-radius:11px; background:var(--accent); color:#fff;
+           font-family:inherit; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line);
+                 font-weight:500; }
+  button:disabled { opacity:.45; cursor:default; }
+  button + button { margin-top:8px; }
+  #stage { position:relative; border-radius:12px; overflow:hidden;
+           background:#000; aspect-ratio:3/4; display:none; }
+  #stage.on { display:block; }
+  video, canvas.overlay { position:absolute; inset:0; width:100%; height:100%;
+                          object-fit:cover; }
+  video { transform:scaleX(-1); }
+  video.rear { transform:none; }
+  .hud { position:absolute; left:10px; top:10px; right:10px; display:flex;
+         justify-content:space-between; font-size:12px; font-weight:600;
+         color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.8); pointer-events:none; }
+  .pill { background:rgba(0,0,0,.5); padding:4px 9px; border-radius:999px;
+          backdrop-filter:blur(6px); }
+  .rec { color:#ff5a5a; }
+  .status { font-size:13px; color:var(--muted); margin-top:10px; min-height:19px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th,td { text-align:right; padding:7px 4px; border-bottom:1px solid var(--line); }
+  th:first-child, td:first-child { text-align:left; }
+  th { font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+       color:var(--muted); font-weight:600; }
+  .note { font-size:12.5px; color:var(--muted); margin-top:10px; }
+  .warn { color:var(--warn); }
+  .tabs { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+  .tabs button { width:auto; flex:0 0 auto; padding:7px 13px; font-size:13.5px;
+                 background:transparent; border:1px solid var(--line);
+                 color:var(--muted); font-weight:500; margin:0; }
+  .tabs button[aria-selected="true"] { background:var(--accent); color:#fff;
+                                       border-color:var(--accent); font-weight:600; }
+  svg.chart { width:100%; height:190px; display:block; }
+  .legend { display:flex; gap:12px; font-size:12px; color:var(--muted);
+            margin-top:4px; flex-wrap:wrap; }
+  .swatch { display:inline-block; width:11px; height:3px; border-radius:2px;
+            vertical-align:middle; margin-right:5px; }
+  .hidden { display:none !important; }
+  .banner { border-left:3px solid var(--warn); padding-left:11px; font-size:13px;
+            color:var(--warn); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Movement Lab</h1>
+  <p class="sub">Pull-ups and squats, tracked in the browser. Video never leaves your phone.</p>
+
+  <div class="card" id="setup">
+    <div class="row" style="margin-bottom:11px">
+      <div>
+        <label for="activity">Movement</label>
+        <select id="activity">
+          <option value="pullup">Pull-up</option>
+          <option value="squat">Squat</option>
+        </select>
+      </div>
+      <div>
+        <label for="height">Height (m)</label>
+        <input id="height" type="number" step="0.01" value="1.75" inputmode="decimal">
+      </div>
+    </div>
+    <button id="startBtn">Start camera</button>
+    <button class="ghost" id="fileBtn">Analyse a video file</button>
+    <input id="fileInput" type="file" accept="video/*" class="hidden">
+    <div class="status" id="status">Loading pose model…</div>
+  </div>
+
+  <div id="stage">
+    <video id="video" playsinline muted></video>
+    <canvas class="overlay" id="overlay"></canvas>
+    <div class="hud">
+      <span class="pill" id="hudLeft">standing by</span>
+      <span class="pill" id="hudRight"></span>
+    </div>
+  </div>
+
+  <div class="card hidden" id="controls">
+    <button id="recBtn">Start recording</button>
+    <button class="ghost" id="switchBtn">Switch camera</button>
+    <button class="ghost" id="stopBtn">Close camera</button>
+  </div>
+
+  <div class="card hidden" id="results"></div>
+</div>
+
+<script type="module">
+import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES } from "./pullupkit.js";
+
+// MediaPipe is vendored into vendor/ rather than pulled from a CDN: the app
+// then works offline, loads faster on a second visit, and cannot be broken by
+// a CDN outage or a restrictive network. It is imported DYNAMICALLY and inside
+// a try/catch, because a failed static import aborts the whole module -- which
+// would leave a blank page with no error, the worst possible failure.
+let FilesetResolver = null, PoseLandmarker = null;
+async function loadMediaPipe() {
+  if (PoseLandmarker) return true;
+  try {
+    const mp = await import("./vendor/vision_bundle.mjs");
+    FilesetResolver = mp.FilesetResolver; PoseLandmarker = mp.PoseLandmarker;
+    return true;
+  } catch (err) {
+    say("Could not load the pose engine: " + err.message, true);
+    return false;
+  }
+}
+async function makeLandmarker() {
+  const fileset = await FilesetResolver.forVisionTasks("./vendor/wasm");
+  return PoseLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: "pose_landmarker_full.task", delegate: "GPU" },
+    runningMode: "VIDEO", numPoses: 1,
+    minPoseDetectionConfidence: 0.3, minPosePresenceConfidence: 0.3,
+    minTrackingConfidence: 0.3,
+  });
+}
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+const say = (t, warn) => { statusEl.textContent = t; statusEl.classList.toggle("warn", !!warn); };
+
+let landmarker = null, stream = null, running = false, recording = false;
+let facing = "user";
+let frames = [];          // { t_ms, lm } per detected frame
+let lastResult = null;
+
+// ?demo=1 renders a stored result with no camera and no model download, so you
+// can confirm the page works on a phone before granting anything. The flag is
+// read here but acted on at the very bottom of the module: render() reaches
+// consts declared further down, and calling it early hits the temporal dead
+// zone.
+const DEMO = new URLSearchParams(location.search).get("demo");
+
+// --- model -----------------------------------------------------------------
+if (!DEMO) say("Loading pose engine (about 45 MB the first time)…");
+if (await loadMediaPipe()) {
+  try {
+    landmarker = await makeLandmarker();
+    if (!DEMO) say("Ready. Prop the phone up so your whole body is in frame.");
+    $("startBtn").disabled = false;
+  } catch (err) {
+    if (!DEMO) say("Could not start the pose model: " + err.message, true);
+  }
+}
+
+// --- camera ----------------------------------------------------------------
+const video = $("video"), overlay = $("overlay"), ctx = overlay.getContext("2d");
+
+async function startCamera() {
+  if (!window.isSecureContext) {
+    say("The camera needs HTTPS. Open the hosted URL, not a local file.", true);
+    return;
+  }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    });
+  } catch (err) {
+    say("Camera unavailable: " + err.message, true);
+    return;
+  }
+  video.srcObject = stream;
+  video.classList.toggle("rear", facing !== "user");
+  await video.play();
+  $("stage").classList.add("on");
+  $("controls").classList.remove("hidden");
+  $("startBtn").classList.add("hidden");
+  $("fileBtn").classList.add("hidden");
+  say("Tracking. Press record when you're set.");
+  running = true;
+  requestAnimationFrame(loop);
+}
+
+function stopCamera() {
+  running = false; recording = false;
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = null;
+  $("stage").classList.remove("on");
+  $("controls").classList.add("hidden");
+  $("startBtn").classList.remove("hidden");
+  $("fileBtn").classList.remove("hidden");
+  $("recBtn").textContent = "Start recording";
+  say("Camera closed.");
+}
+
+let lastTs = -1;
+function loop() {
+  if (!running) return;
+  if (video.readyState >= 2) {
+    const ts = performance.now();
+    if (ts !== lastTs) {
+      lastTs = ts;
+      const res = landmarker.detectForVideo(video, ts);
+      draw(res);
+      if (recording && res.landmarks && res.landmarks.length) {
+        frames.push({ t: ts, lm: toNamed(res.landmarks[0], video.videoWidth, video.videoHeight) });
+        $("hudRight").textContent = frames.length + " frames";
+      }
+    }
+  }
+  requestAnimationFrame(loop);
+}
+
+function toNamed(lms, w, h) {
+  const out = {};
+  lms.forEach((l, i) => {
+    if ((l.visibility ?? 1) >= 0.3) out[LANDMARK_NAMES[i]] = [l.x * w, l.y * h];
+  });
+  return out;
+}
+
+const BONES = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],
+               [23,25],[25,27],[24,26],[26,28],[27,31],[28,32]];
+
+function draw(res) {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w) return;
+  if (overlay.width !== w) { overlay.width = w; overlay.height = h; }
+  ctx.clearRect(0, 0, w, h);
+  if (!res.landmarks || !res.landmarks.length) {
+    $("hudLeft").textContent = "no body detected";
+    return;
+  }
+  $("hudLeft").innerHTML = recording ? '<span class="rec">● recording</span>' : "tracking";
+  const lm = res.landmarks[0];
+  const mirror = facing === "user";
+  const X = (p) => (mirror ? (1 - p.x) : p.x) * w, Y = (p) => p.y * h;
+  ctx.lineWidth = Math.max(2, w / 260);
+  ctx.strokeStyle = "rgba(91,147,245,.95)";
+  for (const [a, b] of BONES) {
+    if (!lm[a] || !lm[b]) continue;
+    ctx.beginPath(); ctx.moveTo(X(lm[a]), Y(lm[a])); ctx.lineTo(X(lm[b]), Y(lm[b])); ctx.stroke();
+  }
+  ctx.fillStyle = "#fff";
+  for (const p of lm) {
+    ctx.beginPath(); ctx.arc(X(p), Y(p), Math.max(2.5, w / 330), 0, 7); ctx.fill();
+  }
+}
+
+// --- recording -------------------------------------------------------------
+$("startBtn").disabled = true;
+$("startBtn").onclick = startCamera;
+$("stopBtn").onclick = stopCamera;
+$("switchBtn").onclick = async () => {
+  facing = facing === "user" ? "environment" : "user";
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); await startCameraQuiet(); }
+};
+async function startCameraQuiet() {
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+  video.srcObject = stream;
+  video.classList.toggle("rear", facing !== "user");
+  await video.play();
+}
+
+$("recBtn").onclick = () => {
+  if (!recording) {
+    frames = []; recording = true;
+    $("recBtn").textContent = "Stop and analyse";
+    $("results").classList.add("hidden");
+    say("Recording. Do your set, then stop.");
+  } else {
+    recording = false;
+    $("recBtn").textContent = "Start recording";
+    $("hudRight").textContent = "";
+    finish();
+  }
+};
+
+// --- video file ------------------------------------------------------------
+$("fileBtn").onclick = () => $("fileInput").click();
+$("fileInput").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  say("Reading video…");
+  const v = document.createElement("video");
+  v.src = URL.createObjectURL(file); v.muted = true; v.playsInline = true;
+  await new Promise((r) => { v.onloadedmetadata = r; });
+  frames = [];
+  if (!(await loadMediaPipe())) return;
+  const off = await makeLandmarker();
+  await v.play();
+  const step = () => new Promise((r) => v.requestVideoFrameCallback((_, m) => r(m)));
+  while (!v.ended) {
+    const meta = await step();
+    const res = off.detectForVideo(v, meta.mediaTime * 1000);
+    if (res.landmarks && res.landmarks.length) {
+      frames.push({ t: meta.mediaTime * 1000, lm: toNamed(res.landmarks[0], v.videoWidth, v.videoHeight) });
+    }
+    say(`Tracking ${v.currentTime.toFixed(1)}s / ${v.duration.toFixed(1)}s — ${frames.length} frames`);
+  }
+  off.close();
+  finish();
+};
+
+// --- analysis --------------------------------------------------------------
+function finish() {
+  if (frames.length < 20) {
+    say(`Only ${frames.length} frames captured — too few to find a rep.`, true);
+    return;
+  }
+  const span = (frames[frames.length - 1].t - frames[0].t) / 1000;
+  const fps = span > 0 ? (frames.length - 1) / span : 30;
+  const poses = {};
+  frames.forEach((f, i) => { poses[i] = f.lm; });
+  const activity = $("activity").value;
+  const heightM = parseFloat($("height").value) || 1.75;
+  try {
+    lastResult = analyse(poses, fps, { heightM, activity });
+    render(lastResult, fps);
+    say(`Analysed ${frames.length} frames at ${fps.toFixed(1)} fps.`);
+  } catch (err) {
+    say("Analysis failed: " + err.message, true);
+  }
+}
+
+const COLORS = ["#2f6fe4", "#e8871a", "#1d7a45"];
+
+function chart(rep, activity) {
+  const series = activity === "squat"
+    ? [["knee flexion", rep.coords.knee_angle_r],
+       ["hip flexion", rep.coords.hip_flexion_r],
+       ["ankle dorsiflexion", rep.coords.ankle_angle_r]]
+    : [["elbow flexion", rep.coords.elbow_flex_r],
+       ["shoulder flexion", rep.coords.arm_flex_r],
+       ["hip flexion", rep.coords.hip_flexion_r]];
+  const t = rep.times, W = 320, H = 190, P = { l: 34, r: 8, t: 10, b: 22 };
+  const all = series.flatMap(([, v]) => v);
+  const y0 = Math.min(...all), y1 = Math.max(...all);
+  const pad = (y1 - y0) * 0.08 || 1;
+  const lo = y0 - pad, hi = y1 + pad;
+  const sx = (v) => P.l + ((v - t[0]) / (t[t.length - 1] - t[0] || 1)) * (W - P.l - P.r);
+  const sy = (v) => H - P.b - ((v - lo) / (hi - lo)) * (H - P.t - P.b);
+  let g = "";
+  for (let k = 0; k <= 3; k++) {
+    const yy = P.t + (H - P.t - P.b) * k / 3;
+    const val = hi - (hi - lo) * k / 3;
+    g += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="var(--line)" stroke-width=".8"/>`;
+    g += `<text x="${P.l - 5}" y="${yy + 3.5}" font-size="9" text-anchor="end" fill="var(--muted)">${val.toFixed(0)}</text>`;
+  }
+  const topT = t[rep.bounds[1] - rep.bounds[0]];
+  if (topT !== undefined) {
+    g += `<line x1="${sx(topT)}" y1="${P.t}" x2="${sx(topT)}" y2="${H - P.b}" stroke="var(--muted)" stroke-width=".8" stroke-dasharray="3 3"/>`;
+  }
+  series.forEach(([, vals], i) => {
+    g += `<polyline fill="none" stroke="${COLORS[i]}" stroke-width="1.9" stroke-linejoin="round" points="${
+      vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
+  });
+  g += `<text x="${P.l}" y="${H - 6}" font-size="9" fill="var(--muted)">${t[0].toFixed(1)}s</text>`;
+  g += `<text x="${W - P.r}" y="${H - 6}" font-size="9" text-anchor="end" fill="var(--muted)">${t[t.length - 1].toFixed(1)}s</text>`;
+  const legend = series.map(([n], i) =>
+    `<span><i class="swatch" style="background:${COLORS[i]}"></i>${n}</span>`).join("");
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>
+          <div class="legend">${legend}</div>`;
+}
+
+function render(res, fps) {
+  const el = $("results");
+  el.classList.remove("hidden");
+  const n = res.reps.length;
+  const isSquat = res.activity === "squat";
+
+  if (!n) {
+    el.innerHTML = `<h1 style="font-size:17px">No ${ACTIVITIES[res.activity].label} reps found</h1>
+      <p class="note">Pose coverage ${(res.coverage * 100).toFixed(0)}%. Check your whole
+      body stayed in frame and the phone did not move. Partial reps may fall under the
+      detection threshold.</p>`;
+    return;
+  }
+
+  const rows = res.reps.map((r) => isSquat
+    ? `<tr><td>${r.rep}</td><td>${r.eccentric_s.toFixed(2)}</td><td>${r.concentric_s.toFixed(2)}</td>
+         <td>${r.knee_flex_max_deg.toFixed(0)}°</td><td>${r.hip_flex_max_deg.toFixed(0)}°</td>
+         <td>${r.depth_m.toFixed(2)}</td></tr>`
+    : `<tr><td>${r.rep}</td><td>${r.concentric_s.toFixed(2)}</td><td>${r.eccentric_s.toFixed(2)}</td>
+         <td>${r.elbow_flex_max_deg.toFixed(0)}°</td><td>${r.arm_flex_range_deg.toFixed(0)}°</td>
+         <td>${r.pelvis_travel_m.toFixed(2)}</td></tr>`).join("");
+  const head = isSquat
+    ? "<tr><th>Rep</th><th>Down</th><th>Up</th><th>Knee</th><th>Hip</th><th>Depth m</th></tr>"
+    : "<tr><th>Rep</th><th>Up</th><th>Down</th><th>Elbow</th><th>Shldr</th><th>Rise m</th></tr>";
+
+  el.innerHTML = `
+    <h1 style="font-size:19px;margin-bottom:2px">${n} ${ACTIVITIES[res.activity].label}${n === 1 ? "" : "s"}</h1>
+    <p class="sub" style="margin-bottom:12px">${fps.toFixed(0)} fps ·
+      ${(res.coverage * 100).toFixed(0)}% tracked · ${res.pxPerM.toFixed(0)} px/m</p>
+    <table><thead>${head}</thead><tbody>${rows}</tbody></table>
+    <div class="tabs" id="repTabs" style="margin-top:14px"></div>
+    <div id="chartBox"></div>
+    <button class="ghost" id="dlBtn" style="margin-top:12px">Download joint angles (.mot)</button>
+    <p class="note">Angles and depth are measured. Durations depend on the frame rate the
+      browser actually delivered (${fps.toFixed(1)} fps), which varies with lighting and
+      phone load — treat tempo as approximate. Left and right are mirrored: one camera
+      cannot separate the sides.</p>
+    <p class="note banner">No muscle-force estimate is shown. The available model failed
+      its audit — it returns non-physiological forces even on the gait data it was trained
+      on. Joint kinematics are unaffected.</p>`;
+
+  const tabs = $("repTabs");
+  res.reps.forEach((r, i) => {
+    const b = document.createElement("button");
+    b.textContent = "Rep " + r.rep;
+    b.onclick = () => select(i);
+    tabs.appendChild(b);
+  });
+  function select(i) {
+    [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
+    $("chartBox").innerHTML = chart(res.reps[i], res.activity);
+  }
+  select(0);
+
+  $("dlBtn").onclick = () => {
+    const cols = ACTIVITIES[res.activity].columns;
+    res.reps.forEach((r, i) => {
+      const txt = writeMot("joint_angles", cols, r.times, r.coords);
+      const url = URL.createObjectURL(new Blob([txt], { type: "text/plain" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${res.activity}_rep${r.rep}_joint_angles.mot`;
+      // The anchor must be in the document, the clicks must be staggered (a
+      // burst of downloads gets suppressed), and the URL must outlive the
+      // click -- revoking straight away cancels the download.
+      document.body.appendChild(a);
+      setTimeout(() => {
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 4000);
+      }, i * 350);
+    });
+  };
+}
+
+// --- demo mode (last: everything above must be initialised first) ----------
+if (DEMO) {
+  try {
+    const ref = await (await fetch("reference.json")).json();
+    const c = ref.cases[DEMO === "squat" ? "squat_synthetic" : "pullup_P01"];
+    $("activity").value = c.activity;
+    render(analyse(c.poses, c.fps, { heightM: c.height_m, activity: c.activity }), c.fps);
+    say("Demo data — no camera used. Reload without ?demo to record.");
+  } catch (err) {
+    say("Demo failed: " + err.message, true);
+  }
+}
+
+// Offline: after one visit the whole app (engine, model, code) is cached.
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>
