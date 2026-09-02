@@ -35,6 +35,16 @@ export const DRIVEN_COORDS = [
   "flex_extension",
 ];
 
+//: Ankle joint centre height above the floor (m), to turn a measured
+// hip-above-ankle distance into an absolute pelvis height.
+export const ANKLE_JOINT_HEIGHT_M = 0.07;
+
+// Knee sign per model family. OpenSim accepts out-of-range values silently and
+// renders a collapsed figure, so this has to be right, not nearly right.
+//   rajagopal     knee_angle 0..+145 deg, flexion POSITIVE
+//   gpk/gait2392  knee_angle -145..+10 deg, flexion NEGATIVE
+export const KNEE_SIGN = { rajagopal: 1, gpk: -1, gait2392: -1 };
+
 export const SQUAT_DRIVEN_COORDS = [
   "pelvis_tilt", "pelvis_tx", "pelvis_ty", "pelvis_tz",
   "hip_flexion_r", "hip_flexion_l", "knee_angle_r", "knee_angle_l",
@@ -273,7 +283,8 @@ export function buildSquatFeatures(poses) {
   if (!frames.length) throw new Error("no pose frames");
   const lo = frames[0], hi = frames[frames.length - 1];
   const n = hi - lo + 1;
-  const keys = ["hip_cy", "hip_cx", "shoulder_cy", "ankle_cy",
+  const keys = ["hip_cy", "hip_cx", "shoulder_cy", "shoulder_cx",
+                "ankle_cy", "ankle_cx", "knee_cy", "knee_cx", "toe_cy", "toe_cx",
                 "knee_flex", "hip_flex", "ankle_dorsi", "trunk_lean", "shank_len"];
   const F = {};
   for (const k of keys) F[k] = new Array(n).fill(NaN);
@@ -286,9 +297,12 @@ export function buildSquatFeatures(poses) {
     const la = lm.left_ankle, ra = lm.right_ankle;
     const lf = lm.left_foot_index, rf = lm.right_foot_index;
     const sh = mid(ls, rs), hp = mid(lh, rh), an = mid(la, ra);
-    if (sh) F.shoulder_cy[i] = sh[1];
+    const kn = mid(lk, rk), ft = mid(lf, rf);
+    if (sh) { F.shoulder_cy[i] = sh[1]; F.shoulder_cx[i] = sh[0]; }
     if (hp) { F.hip_cy[i] = hp[1]; F.hip_cx[i] = hp[0]; }
-    if (an) F.ankle_cy[i] = an[1];
+    if (an) { F.ankle_cy[i] = an[1]; F.ankle_cx[i] = an[0]; }
+    if (kn) { F.knee_cy[i] = kn[1]; F.knee_cx[i] = kn[0]; }
+    if (ft) { F.toe_cy[i] = ft[1]; F.toe_cx[i] = ft[0]; }
     F.knee_flex[i] = 180 - nanmean([angle3(lh, lk, la), angle3(rh, rk, ra)]);
     F.hip_flex[i] = 180 - nanmean([angle3(ls, lh, lk), angle3(rs, rh, rk)]);
     F.ankle_dorsi[i] = 90 - nanmean([angle3(lk, la, lf), angle3(rk, ra, rf)]);
@@ -304,6 +318,9 @@ export function buildSquatFeatures(poses) {
   F.depth = F.hip_cy.map((y) => (y - standY) / scale);
 
   F._lo = lo; F._n = n; F._scale = scale; F._standY = standY;
+  // Floor level in image pixels: the lowest foot position observed.
+  const feet = [...F.toe_cy, ...F.ankle_cy].filter(isNum);
+  F._floorY = feet.length ? Math.max(...feet) : 0;
   F._coverage = frames.length / n;
   return F;
 }
@@ -329,22 +346,29 @@ export function findSquatReps(F, cfg = DEFAULT_SQUAT_CFG) {
   return { reps, depth };
 }
 
-export function squatRepCoordinates(F, rep, fps, pxPerM, standHipY, midX) {
+export function squatRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
+                                    { model = "gpk", ankleValid = true } = {}) {
   const [t0, , t1] = rep, lo = F._lo;
   const sl = (a) => interpNan(a).slice(t0, t1 + 1);
   const knee = sl(F.knee_flex), hip = sl(F.hip_flex);
   const ankle = sl(F.ankle_dorsi), lean = sl(F.trunk_lean);
-  const hipY = sl(F.hip_cy), hipX = sl(F.hip_cx);
+  const hipY = sl(F.hip_cy), hipX = sl(F.hip_cx), ankleY = sl(F.ankle_cy);
   const times = [], z = [];
   for (let i = t0; i <= t1; i++) { times.push((lo + i) / fps); z.push(0); }
+  const sign = KNEE_SIGN[model] ?? -1;
   const hipFlex = clipArr(hip, -20, 130);
-  const kneeAng = clipArr(knee, 0, 145);      // Rajagopal: flexion POSITIVE
-  const ankleAng = clipArr(ankle, -40, 40);
+  const kneeAng = clipArr(knee, 0, 145).map((v) => sign * v);
+  // A frontal view pins knee-ankle-toe at the clip bound; a saturated constant
+  // would masquerade as data, so emit zero and report it separately instead.
+  const ankleAng = ankleValid ? clipArr(ankle, -40, 40) : ankle.map(() => 0);
   return {
     times,
     coords: {
       pelvis_tx: z,
-      pelvis_ty: hipY.map((y) => (standHipY - y) / pxPerM),
+      // ABSOLUTE height above the floor, not a displacement: OpenSim's
+      // pelvis_ty is the pelvis origin height (GPK defaults to 0.93 m), so a
+      // displacement starting near zero drops the model through the floor.
+      pelvis_ty: ankleY.map((ay, i) => (ay - hipY[i]) / pxPerM + ANKLE_JOINT_HEIGHT_M),
       pelvis_tz: hipX.map((x) => (x - midX) / pxPerM),
       hip_flexion_r: hipFlex, hip_flexion_l: hipFlex,
       knee_angle_r: kneeAng, knee_angle_l: kneeAng,
@@ -391,6 +415,35 @@ export function computePxPerM(poses, heightM, fractions = null) {
   return { pxPerM: nanmedian(ests), detail };
 }
 
+export function viewQuality(poses) {
+  /* How side-on the camera is, and whether the feet are usable.
+     Every angle here is SAGITTAL and only meaningful from the side. Filmed
+     face-on, knee and hip still produce plausible-looking numbers while
+     measuring something else, and the ankle degenerates completely. */
+  const seps = [], torsos = [], ankles = [];
+  for (const lm of Object.values(poses)) {
+    const ls = lm.left_shoulder, rs = lm.right_shoulder;
+    const sh = mid(ls, rs), hp = mid(lm.left_hip, lm.right_hip);
+    if (ls && rs) seps.push(Math.abs(ls[0] - rs[0]));
+    if (sh && hp) torsos.push(Math.hypot(sh[0] - hp[0], sh[1] - hp[1]));
+    for (const side of ["left", "right"]) {
+      const a = angle3(lm[`${side}_knee`], lm[`${side}_ankle`], lm[`${side}_foot_index`]);
+      if (isNum(a)) ankles.push(a);
+    }
+  }
+  const torso = torsos.length ? nanmedian(torsos) : 1;
+  const frontality = seps.length && torso > 1e-6 ? nanmedian(seps) / torso : NaN;
+  const medAnkle = ankles.length ? nanmedian(ankles) : NaN;
+  const view = !isNum(frontality) ? "unknown"
+    : frontality < 0.30 ? "sagittal" : frontality < 0.45 ? "oblique" : "frontal";
+  return {
+    frontality: isNum(frontality) ? +frontality.toFixed(3) : null,
+    view,
+    ankle_usable: isNum(medAnkle) && medAnkle < 155,
+    median_ankle_interior_deg: isNum(medAnkle) ? +medAnkle.toFixed(1) : null,
+  };
+}
+
 export function writeMot(name, columns, times, coords) {
   const cols = ["time", ...columns];
   const lines = [name, "version=1", `nRows=${times.length}`,
@@ -401,6 +454,23 @@ export function writeMot(name, columns, times, coords) {
     lines.push(row.map((v) => v.toFixed(8).padStart(16)).join("\t"));
   }
   return lines.join("\n") + "\n";
+}
+
+export function jointPositionsM(F, rep, pxPerM, floorY) {
+  /* Landmark positions for one rep in METRES, world frame, y UP.
+     Image y grows downward and the floor is the lowest observed foot position,
+     so this flips and offsets into a physical frame the dynamics can use. */
+  const [t0, , t1] = rep;
+  const grab = (xk, yk) => {
+    const x = interpNan(F[xk]).slice(t0, t1 + 1);
+    const y = interpNan(F[yk]).slice(t0, t1 + 1);
+    return x.map((v, i) => [v / pxPerM, (floorY - y[i]) / pxPerM]);
+  };
+  return {
+    ankle: grab("ankle_cx", "ankle_cy"), knee: grab("knee_cx", "knee_cy"),
+    hip: grab("hip_cx", "hip_cy"), shoulder: grab("shoulder_cx", "shoulder_cy"),
+    toe: grab("toe_cx", "toe_cy"),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +491,7 @@ export const ACTIVITIES = {
 };
 
 export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
-                                      cfg = null } = {}) {
+                                      cfg = null, osimModel = "gpk" } = {}) {
   const spec = ACTIVITIES[activity];
   if (!spec) throw new Error(`unknown activity ${activity}`);
   const conf = cfg || spec.defaultCfg;
@@ -429,9 +499,13 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   const { pxPerM, detail } = computePxPerM(poses, heightM);
   const [refA, refB] = spec.reference(F);
   const { reps: bounds } = spec.findReps(F, conf);
+  const view = viewQuality(poses);
 
   const reps = bounds.map((b, i) => {
-    const { times, coords } = spec.coords(F, b, fps, pxPerM, refA, refB);
+    const { times, coords } = activity === "squat"
+      ? spec.coords(F, b, fps, pxPerM, refA, refB,
+                    { model: osimModel, ankleValid: view.ankle_usable })
+      : spec.coords(F, b, fps, pxPerM, refA, refB);
     const [b0, top, b1] = b;
     const s = {
       rep: i + 1, times, coords, bounds: b,
@@ -440,10 +514,13 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
     s[spec.phases[0]] = (top - b0) / fps;
     s[spec.phases[1]] = (b1 - top) / fps;
     if (activity === "squat") {
-      s.knee_flex_max_deg = Math.max(...coords.knee_angle_r);
+      // knee_angle is SIGNED per model family, so report peak flexion as a
+      // magnitude; otherwise a GPK export summarises as "-2 deg".
+      s.knee_flex_max_deg = Math.max(...coords.knee_angle_r.map(Math.abs));
       s.hip_flex_max_deg = Math.max(...coords.hip_flexion_r);
-      s.ankle_dorsi_max_deg = Math.max(...coords.ankle_angle_r);
-      s.depth_m = -Math.min(...coords.pelvis_ty);
+      s.ankle_dorsi_max_deg = Math.max(...coords.ankle_angle_r.map(Math.abs));
+      // pelvis_ty is an ABSOLUTE height, so depth is the drop, not -min.
+      s.depth_m = Math.max(...coords.pelvis_ty) - Math.min(...coords.pelvis_ty);
     } else {
       s.elbow_flex_min_deg = Math.min(...coords.elbow_flex_r);
       s.elbow_flex_max_deg = Math.max(...coords.elbow_flex_r);
@@ -453,6 +530,6 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
     return s;
   });
 
-  return { activity, fps, pxPerM, scaleDetail: detail,
+  return { activity, fps, pxPerM, scaleDetail: detail, view, osimModel,
            coverage: F._coverage, reps, columns: spec.columns };
 }

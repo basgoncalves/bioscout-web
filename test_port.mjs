@@ -9,7 +9,8 @@
  * The browser and the desktop must not disagree about how many reps you did.
  */
 import fs from "node:fs";
-import { analyse } from "./pullupkit.js";
+import { analyse, buildSquatFeatures, computePxPerM, jointPositionsM } from "./pullupkit.js";
+import { inverseDynamics } from "./dynamics.js";
 
 const TOL = 1e-9;
 const failures = [];
@@ -32,12 +33,27 @@ const ref = JSON.parse(fs.readFileSync("reference.json", "utf8"));
 for (const caseName of Object.keys(ref.cases)) {
   const c = ref.cases[caseName];
   console.log(`\n${caseName}  (${c.activity}, ${Object.keys(c.poses).length} frames)`);
-  const got = analyse(c.poses, c.fps, { heightM: c.height_m, activity: c.activity });
+  const got = analyse(c.poses, c.fps, { heightM: c.height_m, activity: c.activity,
+                                        osimModel: c.osim_model || "gpk" });
+  const vOk = JSON.stringify(got.view) === JSON.stringify(c.view);
+  if (!vOk) failures.push(`${caseName}: view ${JSON.stringify(got.view)} vs ${JSON.stringify(c.view)}`);
+  console.log(`  [${vOk ? "OK  " : "FAIL"}] camera view                   ${JSON.stringify(got.view)}`);
 
   const okCount = got.reps.length === c.reps.length;
   if (!okCount) failures.push(`${caseName}: rep count ${got.reps.length} vs ${c.reps.length}`);
   console.log(`  [${okCount ? "OK  " : "FAIL"}] rep count                     ${got.reps.length} (python ${c.reps.length})`);
   check(`${caseName} px_per_m`, [got.pxPerM], [c.px_per_m], 1e-6);
+
+  if (c.dynamics) {
+    const F = buildSquatFeatures(c.poses);
+    const { pxPerM } = computePxPerM(c.poses, c.height_m);
+    const b = got.reps[0].bounds;
+    const d = inverseDynamics(jointPositionsM(F, b, pxPerM, F._floorY), 75.0, c.fps);
+    for (const k of ["ankle_moment", "knee_moment", "hip_moment",
+                     "grf_vertical", "grf_horizontal", "com_y"]) {
+      check(`dyn ${k}`, d[k], c.dynamics[k], 1e-7);
+    }
+  }
 
   for (let i = 0; i < Math.min(got.reps.length, c.reps.length); i++) {
     const g = got.reps[i], p = c.reps[i];

@@ -94,6 +94,17 @@
         <label for="height">Height (m)</label>
         <input id="height" type="number" step="0.01" value="1.75" inputmode="decimal">
       </div>
+      <div>
+        <label for="mass">Mass (kg)</label>
+        <input id="mass" type="number" step="0.5" value="75" inputmode="decimal">
+      </div>
+    </div>
+    <div style="margin-bottom:11px">
+      <label for="osim">OpenSim model family (knee sign convention)</label>
+      <select id="osim">
+        <option value="gpk">GPK / gait2392 — knee flexion negative</option>
+        <option value="rajagopal">Rajagopal — knee flexion positive</option>
+      </select>
     </div>
     <button id="startBtn" disabled>Start camera</button>
     <button class="ghost" id="fileBtn">Analyse a video file</button>
@@ -120,7 +131,11 @@
 </div>
 
 <script type="module">
-import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES } from "./pullupkit.js";
+import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
+         buildSquatFeatures, computePxPerM, jointPositionsM } from "./pullupkit.js";
+import { inverseDynamics } from "./dynamics.js";
+import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
+         MAX_PLAUSIBLE_FORCE_N } from "./forces.js";
 
 // MediaPipe is vendored into vendor/ rather than pulled from a CDN: the app
 // then works offline, loads faster on a second visit, and cannot be broken by
@@ -164,6 +179,16 @@ let lastResult = null;
 // consts declared further down, and calling it early hits the temporal dead
 // zone.
 const DEMO = new URLSearchParams(location.search).get("demo");
+
+// ?fresh=1 tears out every service worker and cache for this origin, then
+// reloads. A cache-first worker can strand a browser on an old build with no
+// way back from inside the page, so this escape hatch is not optional.
+if (new URLSearchParams(location.search).has("fresh")) {
+  const regs = await navigator.serviceWorker.getRegistrations();
+  await Promise.all(regs.map((r) => r.unregister()));
+  await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
+  location.replace(location.pathname);
+}
 
 // --- model -----------------------------------------------------------------
 if (!DEMO) say("Loading pose engine (about 45 MB the first time)…");
@@ -331,7 +356,7 @@ $("fileInput").onchange = async (e) => {
 };
 
 // --- analysis --------------------------------------------------------------
-function finish() {
+async function finish() {
   if (frames.length < 20) {
     say(`Only ${frames.length} frames captured — too few to find a rep.`, true);
     return;
@@ -343,7 +368,9 @@ function finish() {
   const activity = $("activity").value;
   const heightM = parseFloat($("height").value) || 1.75;
   try {
-    lastResult = analyse(poses, fps, { heightM, activity });
+    lastResult = analyse(poses, fps, { heightM, activity,
+                                       osimModel: $("osim").value });
+    await enrich(lastResult, poses, fps, heightM, activity);
     render(lastResult, fps);
     say(`Analysed ${frames.length} frames at ${fps.toFixed(1)} fps.`);
   } catch (err) {
@@ -352,6 +379,66 @@ function finish() {
 }
 
 const COLORS = ["#2f6fe4", "#e8871a", "#1d7a45"];
+
+/** Attach joint moments and muscle forces to each rep.
+ *  Shared by the live path and ?demo, which is the only way to be sure the
+ *  demo exercises the same code the camera does. */
+async function enrich(res, poses, fps, heightM, activity) {
+  const massKg = parseFloat($("mass").value) || 75;
+  res.massKg = massKg;
+
+  // Inverse dynamics: squats only. A pull-up has no ground reaction, so the
+  // whole-body-COM derivation of the external load does not apply.
+  if (activity === "squat" && res.reps.length) {
+    try {
+      const F = buildSquatFeatures(poses);
+      const { pxPerM } = computePxPerM(poses, heightM);
+      for (const r of res.reps) {
+        r.dyn = inverseDynamics(
+          jointPositionsM(F, r.bounds, pxPerM, F._floorY), massKg, fps);
+      }
+    } catch (err) { console.warn("dynamics failed", err); }
+  }
+
+  // Muscle forces from the surrogate. See forces.js: this model fails its own
+  // audit and is present at the user's explicit request.
+  try {
+    const fm = await loadForceModel();
+    for (const r of res.reps) {
+      // The surrogate was trained on RAJAGOPAL signs (its knee_angle_r training
+      // mean is +56.9 deg). A GPK-signed knee would silently invert that input.
+      const mc = (activity === "squat" && KNEE_SIGN[res.osimModel] < 0)
+        ? { ...r.coords,
+            knee_angle_r: r.coords.knee_angle_r.map((v) => -v),
+            knee_angle_l: r.coords.knee_angle_l.map((v) => -v) }
+        : r.coords;
+      const { forces, missing } = predictForces(fm, mc, r.times.length);
+      r.forces = forces;
+      r.forceNames = fm.targ;
+      r.forceMissing = missing;
+      r.forceImplausible = implausibleFraction(forces);
+    }
+  } catch (err) { console.warn("force model failed", err); }
+}
+
+// A squat filmed face-on still yields plausible-looking knee and hip numbers
+// that are measuring the wrong plane, so say so rather than let them pass.
+function viewNote(res) {
+  const v = res.view || {};
+  const bits = [];
+  if (res.activity === "squat" && (v.view === "frontal" || v.view === "oblique")) {
+    bits.push(`This looks like a <b>${v.view}</b> view (frontality ${v.frontality}).
+      Knee, hip and ankle angles are sagittal measurements and are only valid
+      filmed from the side. Re-shoot side on.`);
+  }
+  if (res.activity === "squat" && v.ankle_usable === false) {
+    bits.push(`Ankle angle could not be measured — the foot is pointing at or
+      away from the camera, which flattens the knee-ankle-toe angle. It is
+      written as 0 in the .mot rather than a fabricated value.`);
+  }
+  return bits.length
+    ? `<p class="note banner">${bits.join(" ")}</p>` : "";
+}
 
 function chart(rep, activity) {
   const series = activity === "squat"
@@ -391,6 +478,72 @@ function chart(rep, activity) {
           <div class="legend">${legend}</div>`;
 }
 
+function lineChart(t, series, unit) {
+  const W = 320, H = 170, P = { l: 40, r: 8, t: 10, b: 22 };
+  const all = series.flatMap(([, v]) => v);
+  const y0 = Math.min(...all), y1 = Math.max(...all);
+  const pad = (y1 - y0) * 0.08 || 1, lo = y0 - pad, hi = y1 + pad;
+  const sx = (v) => P.l + ((v - t[0]) / (t[t.length - 1] - t[0] || 1)) * (W - P.l - P.r);
+  const sy = (v) => H - P.b - ((v - lo) / (hi - lo)) * (H - P.t - P.b);
+  let g = "";
+  for (let k = 0; k <= 3; k++) {
+    const yy = P.t + (H - P.t - P.b) * k / 3, val = hi - (hi - lo) * k / 3;
+    g += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="var(--line)" stroke-width=".8"/>`;
+    g += `<text x="${P.l - 5}" y="${yy + 3.5}" font-size="9" text-anchor="end" fill="var(--muted)">${val.toFixed(0)}</text>`;
+  }
+  if (lo < 0 && hi > 0) {
+    g += `<line x1="${P.l}" y1="${sy(0)}" x2="${W - P.r}" y2="${sy(0)}" stroke="var(--muted)" stroke-width="1"/>`;
+  }
+  series.forEach(([, vals], i) => {
+    g += `<polyline fill="none" stroke="${COLORS[i]}" stroke-width="1.9" stroke-linejoin="round" points="${
+      vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
+  });
+  const legend = series.map(([n], i) =>
+    `<span><i class="swatch" style="background:${COLORS[i]}"></i>${n}</span>`).join("");
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:170px">${g}</svg>
+          <div class="legend">${legend}<span>${unit}</span></div>`;
+}
+
+function momentPanel(rep, res) {
+  if (!rep.dyn) return "";
+  const d = rep.dyn, m = res.massKg;
+  const pk = (a) => Math.max(...a.map(Math.abs));
+  return `
+    <h1 style="font-size:16px;margin:16px 0 2px">Joint moments</h1>
+    <p class="sub" style="margin-bottom:8px">Extension positive · per leg ·
+      peak GRF ${(Math.max(...d.grf_vertical) / d.body_weight_n).toFixed(2)} body weights</p>
+    ${lineChart(rep.times, [["hip", d.hip_moment], ["knee", d.knee_moment],
+                            ["ankle", d.ankle_moment]], "N·m")}
+    <table style="margin-top:8px"><thead><tr><th>Joint</th><th>Peak N·m</th><th>Peak N·m/kg</th></tr></thead><tbody>
+      ${[["Hip", d.hip_moment], ["Knee", d.knee_moment], ["Ankle", d.ankle_moment]]
+        .map(([n, a]) => `<tr><td>${n}</td><td>${pk(a).toFixed(0)}</td><td>${(pk(a) / m).toFixed(2)}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="note">Inverse dynamics from your body mass. The ground reaction is
+      derived from whole-body centre-of-mass acceleration, not assumed. Centre of
+      pressure is taken as the midfoot and the two legs are assumed symmetric —
+      a visible lean breaks that. A small flexor knee moment in a shallow squat
+      is physical, not an error.</p>`;
+}
+
+function forcePanel(rep) {
+  if (!rep.forces || !rep.forces.length) return "";
+  const bad = rep.forceImplausible || 0;
+  const top = peakByMuscle(rep.forces, rep.forceNames, 6);
+  const rows = top.map(([n, v]) =>
+    `<tr><td>${n}</td><td${v > MAX_PLAUSIBLE_FORCE_N ? ' style="color:var(--warn)"' : ""}>${v.toFixed(0)}</td></tr>`).join("");
+  return `
+    <h1 style="font-size:16px;margin:16px 0 2px">Muscle forces</h1>
+    <p class="note banner"><b>These numbers are not reliable.</b> The model
+      fails its own audit: on a real trial from its own gait training set it
+      predicts 113,250 N, where the largest human muscle produces a few
+      thousand. ${(bad * 100).toFixed(0)}% of the values below exceed
+      ${MAX_PLAUSIBLE_FORCE_N} N. Shown pending a corrected model export —
+      treat as a placeholder, not an estimate.</p>
+    <table><thead><tr><th>Muscle</th><th>Peak N</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="note">${rep.forceMissing?.length || 0} of the model's 34 inputs
+      cannot be measured from one camera and take the training mean.</p>`;
+}
+
 function render(res, fps) {
   const el = $("results");
   el.classList.remove("hidden");
@@ -419,18 +572,19 @@ function render(res, fps) {
   el.innerHTML = `
     <h1 style="font-size:19px;margin-bottom:2px">${n} ${ACTIVITIES[res.activity].label}${n === 1 ? "" : "s"}</h1>
     <p class="sub" style="margin-bottom:12px">${fps.toFixed(0)} fps ·
-      ${(res.coverage * 100).toFixed(0)}% tracked · ${res.pxPerM.toFixed(0)} px/m</p>
+      ${(res.coverage * 100).toFixed(0)}% tracked · ${res.pxPerM.toFixed(0)} px/m ·
+      ${res.view?.view ?? "?"} view · .mot signed for ${res.osimModel}</p>
     <table><thead>${head}</thead><tbody>${rows}</tbody></table>
     <div class="tabs" id="repTabs" style="margin-top:14px"></div>
     <div id="chartBox"></div>
-    <button class="ghost" id="dlBtn" style="margin-top:12px">Download joint angles (.mot)</button>
+    <button class="ghost" id="dlBtn" style="margin-top:12px">Download angles (.mot) + moments (.sto)</button>
+    ${viewNote(res)}
+    <div id="dynBox"></div>
+    <div id="forceBox"></div>
     <p class="note">Angles and depth are measured. Durations depend on the frame rate the
       browser actually delivered (${fps.toFixed(1)} fps), which varies with lighting and
       phone load — treat tempo as approximate. Left and right are mirrored: one camera
-      cannot separate the sides.</p>
-    <p class="note banner">No muscle-force estimate is shown. The available model failed
-      its audit — it returns non-physiological forces even on the gait data it was trained
-      on. Joint kinematics are unaffected.</p>`;
+      cannot separate the sides.</p>`;
 
   const tabs = $("repTabs");
   res.reps.forEach((r, i) => {
@@ -442,6 +596,8 @@ function render(res, fps) {
   function select(i) {
     [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
     $("chartBox").innerHTML = chart(res.reps[i], res.activity);
+    $("dynBox").innerHTML = momentPanel(res.reps[i], res);
+    $("forceBox").innerHTML = forcePanel(res.reps[i]);
   }
   select(0);
 
@@ -449,10 +605,21 @@ function render(res, fps) {
     const cols = ACTIVITIES[res.activity].columns;
     res.reps.forEach((r, i) => {
       const txt = writeMot("joint_angles", cols, r.times, r.coords);
+      if (r.dyn) {
+        const dcols = ["hip_moment", "knee_moment", "ankle_moment",
+                       "grf_vertical", "grf_horizontal"];
+        const sto = writeMot("joint_moments", dcols, r.times,
+          Object.fromEntries(dcols.map((k) => [k, r.dyn[k]])));
+        const du = URL.createObjectURL(new Blob([sto], { type: "text/plain" }));
+        const da = document.createElement("a");
+        da.href = du; da.download = `${res.activity}_rep${r.rep}_joint_moments.sto`;
+        document.body.appendChild(da);
+        setTimeout(() => { da.click(); setTimeout(() => { URL.revokeObjectURL(du); da.remove(); }, 4000); }, i * 350 + 150);
+      }
       const url = URL.createObjectURL(new Blob([txt], { type: "text/plain" }));
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${res.activity}_rep${r.rep}_joint_angles.mot`;
+      a.download = `${res.activity}_rep${r.rep}_${res.osimModel}_joint_angles.mot`;
       // The anchor must be in the document, the clicks must be staggered (a
       // burst of downloads gets suppressed), and the URL must outlive the
       // click -- revoking straight away cancels the download.
@@ -471,7 +638,10 @@ if (DEMO) {
     const ref = await (await fetch("reference.json")).json();
     const c = ref.cases[DEMO === "squat" ? "squat_synthetic" : "pullup_P01"];
     $("activity").value = c.activity;
-    render(analyse(c.poses, c.fps, { heightM: c.height_m, activity: c.activity }), c.fps);
+    const demoRes = analyse(c.poses, c.fps,
+      { heightM: c.height_m, activity: c.activity, osimModel: $("osim").value });
+    await enrich(demoRes, c.poses, c.fps, c.height_m, c.activity);
+    render(demoRes, c.fps);
     say("Demo data — no camera used. Reload without ?demo to record.");
   } catch (err) {
     say("Demo failed: " + err.message, true);

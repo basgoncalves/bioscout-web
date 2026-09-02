@@ -71,6 +71,47 @@ work offline.
 - Squats: stand still for a moment at the start, so there is a standing
   reference to measure depth against.
 
+## Outputs
+
+Per rep, downloadable:
+
+| File | Contents |
+|---|---|
+| `<activity>_rep<N>_<model>_joint_angles.mot` | OpenSim coordinates, signed for the chosen model family |
+| `<activity>_rep<N>_joint_moments.sto` | hip / knee / ankle moments (N·m, extension positive) and ground reaction (N) |
+
+## Joint moments
+
+Sagittal inverse dynamics from kinematics and body mass, no force plate. The
+ground reaction is **derived, not assumed**: Newton's second law on the whole
+body gives `GRF = m(a_com + g)`, and every segment centre of mass is measured.
+Segment inertias follow Winter Table 4.1.
+
+Assumptions, and where the error lives: centre of pressure at the midfoot;
+left-right symmetry (a visible lean breaks it); planar motion. Squats only — a
+pull-up has no ground contact, so the derivation does not apply.
+
+Signs are declared, not derived, and pinned by
+`android_app/tests/test_dynamics.py` against a hand-computed static pose. Note
+one genuine result that looks like a bug: in a shallow squat the ground reaction
+can pass in front of the knee, giving a small **flexor** moment that grows into
+a large extensor moment with depth.
+
+## The model-family selector matters
+
+`knee_angle` sign is opposite between model families — Rajagopal has flexion
+positive (0..+145), GPK/gait2392 negative (−145..+10). Pick the family you will
+load the file into; the choice is stamped into the filename. OpenSim accepts
+out-of-range values silently and renders a collapsed figure, so getting this
+wrong looks like a mystery rather than an error.
+
+`pelvis_ty` is written as an **absolute height above the floor**, measured as
+hip-above-ankle plus the ankle joint height. A standing subject should come out
+near 0.93 m; if not, the pixel scale (and so your height entry) is wrong.
+
+The force model is always fed Rajagopal signs internally, whatever the export
+convention, since that is what it was trained on.
+
 ## What it measures, and what it does not
 
 **Measured, and trustworthy:** rep count, joint angles through the rep, range of
@@ -80,10 +121,13 @@ motion, squat depth and pull-up travel in metres.
 lighting, thermal state and load, so durations are only as good as the achieved
 frame rate — which the results panel reports.
 
-**Not shown: muscle forces.** The one available model fails its own audit,
-returning non-physiological forces (>100 kN) even on the gait data it was trained
-on. See `../android_app/models/MODEL_CARD.md`. Joint kinematics are unaffected by
-this; they never went through that model.
+**Muscle forces: shown, but not reliable.** The available surrogate fails its
+own audit, returning >100 kN even on the gait data it was trained on. It is
+displayed at the user's explicit request pending a corrected export, behind a
+warning, with any value beyond physiological range flagged. See
+`../android_app/models/MODEL_CARD.md` and run `tools/audit_model.py` to
+reproduce the failure. Joint kinematics and joint moments never pass through
+this model and are unaffected.
 
 **Structural limits.** One camera cannot separate left from right, so `*_r` and
 `*_l` carry identical values. Nor can it recover out-of-plane motion — this is a
