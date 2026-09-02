@@ -93,7 +93,8 @@ export function addSet(result, fps, extra = {}) {
 }
 
 function summariseRep(r, activity) {
-  const o = { rep: r.rep, duration_s: +r.duration_s.toFixed(2) };
+  const num = (v) => (Number.isFinite(v) ? +v.toFixed(2) : null);
+  const o = { rep: r.rep, duration_s: num(r.duration_s) };
   if (r.dyn) {
     const pk = (a) => +Math.max(...a.map(Math.abs)).toFixed(1);
     o.peak_hip_Nm = pk(r.dyn.hip_moment);

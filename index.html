@@ -102,7 +102,8 @@
     <img src="logo.png" alt="" width="34" height="34">
     <h1>BioScout Web</h1>
   </div>
-  <p class="sub">Pull-ups and squats, tracked in the browser. Video never leaves your phone.</p>
+  <p class="sub">Pull-ups and squats, tracked in the browser. Video never leaves your phone.
+    <span class="note" id="build" style="opacity:.6"></span></p>
 
   <div class="card" id="setup">
     <div class="row" style="margin-bottom:11px">
@@ -199,6 +200,11 @@
 // static imports 404s, the module never executes and every status message in
 // it is unreachable. Without this the page sits on its placeholder text
 // looking like it is still loading, which is indistinguishable from working.
+// Stamped here, in the non-module script, so the version is on screen
+// before the 45 MB engine load -- it is what tells "the fix is not
+// deployed" apart from "this tab predates the deploy".
+window.BUILD = "v11";
+try { document.getElementById("build").textContent = "build v11"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -645,9 +651,15 @@ async function finish() {
     lastResult.detection = detection;
     await enrich(lastResult, poses, fps, heightM, activity);
     if (lastResult.reps.length && !DEMO) {
-      const set = addSet(lastResult, fps, { profile: $("profile").value || null });
-      lastResult.setIndex = set.index;
-      renderTraining();
+      // Never let the training log take the analysis down with it: the results
+      // are the point of the recording, the set row is a bonus on top.
+      try {
+        const set = addSet(lastResult, fps, { profile: $("profile").value || null });
+        lastResult.setIndex = set.index;
+        renderTraining();
+      } catch (e) {
+        console.warn("could not log the set", e);
+      }
     }
     render(lastResult, fps);
     say(`Analysed ${frames.length} frames at ${fps.toFixed(1)} fps.`);
