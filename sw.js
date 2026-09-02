@@ -15,10 +15,12 @@
  *
  * Bump CACHE when the vendored engine or model changes, to evict the old copy.
  */
-const CACHE = "movement-lab-v6";
+const CACHE = "bioscout-web-v7";
 
 const SHELL = ["./", "./index.html", "./pullupkit.js", "./dynamics.js",
-               "./forces.js", "./overlay.js", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest"];
+               "./forces.js", "./overlay.js", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest",
+               "./logo.png", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png",
+               "./apple-touch-icon.png", "./favicon.ico"];
 const HEAVY = [
   "./pose_landmarker_full.task",
   "./vendor/vision_bundle.mjs",

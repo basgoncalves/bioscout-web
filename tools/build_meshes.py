@@ -58,10 +58,13 @@ def read_stl(path):
     return v[: len(v) // 3 * 3].reshape(-1, 3, 3)
 
 
-def decimate(tris, cell):
-    """Vertex clustering to a grid of the given cell size."""
+def decimate(tris, cell, want_index=False):
+    """Vertex clustering to a grid of the given cell size.
+
+    With want_index, also returns the surviving source-triangle indices so
+    per-triangle attributes (colour) can be carried through."""
     if len(tris) == 0 or cell <= 0:
-        return tris
+        return (tris, np.arange(len(tris))) if want_index else tris
     v = tris.reshape(-1, 3)
     keys = np.floor(v / cell).astype(np.int64)
     uniq, inv = np.unique(keys, axis=0, return_inverse=True)
@@ -73,23 +76,39 @@ def decimate(tris, cell):
     reps /= counts[:, None]
     idx = inv.reshape(-1, 3)
     keep = (idx[:, 0] != idx[:, 1]) & (idx[:, 1] != idx[:, 2]) & (idx[:, 0] != idx[:, 2])
-    return reps[idx[keep]].astype(np.float32)
+    out = reps[idx[keep]].astype(np.float32)
+    return (out, np.nonzero(keep)[0]) if want_index else out
 
 
 def mesh_bodies(osim_path):
+    """{body: [(filename, (r, g, b)), ...]}.
+
+    Colour comes from each Mesh's own <Appearance><color>, so a character keeps
+    its skin, hair and clothing instead of rendering as uniform grey.
+    """
     s = open(osim_path).read()
     out = {}
     for bm in re.finditer(r'<Body name="([^"]+)">(.*?)</Body>', s, re.S):
         body, blk = bm.group(1), bm.group(2)
-        files = [os.path.basename(f.strip())
-                 for f in re.findall(r"<mesh_file>([^<]+)</mesh_file>", blk)]
-        # Decorative VFX geometry (energy aura, bolts) is not body geometry:
-        # it is huge, detached from the skeleton, and stretches into spikes
-        # when a body is scaled. Keep it out of the rig.
-        stls = [f for f in files if f.lower().endswith(".stl")
-                and not any(k in f.lower() for k in ("aura", "bolt"))]
-        if stls:
-            out[body] = stls
+        meshes = []
+        for mm in re.finditer(r'<Mesh name="[^"]*">(.*?)</Mesh>', blk, re.S):
+            mblk = mm.group(1)
+            fm = re.search(r"<mesh_file>([^<]+)</mesh_file>", mblk)
+            if not fm:
+                continue
+            fn = os.path.basename(fm.group(1).strip())
+            if not fn.lower().endswith(".stl"):
+                continue
+            # Decorative VFX geometry (energy aura, bolts) is not body geometry:
+            # it is huge, detached from the skeleton, and stretches into spikes
+            # when a body is scaled. Keep it out of the rig.
+            if any(k in fn.lower() for k in ("aura", "bolt")):
+                continue
+            cm = re.search(r"<color>([^<]+)</color>", mblk)
+            col = tuple(float(v) for v in cm.group(1).split()) if cm else (0.8, 0.8, 0.85)
+            meshes.append((fn, col[:3]))
+        if meshes:
+            out[body] = meshes
     return out
 
 
@@ -134,24 +153,29 @@ def main():
     anchors = joint_anchors(args.osim)
     os.makedirs(args.out, exist_ok=True)
 
-    raw = {}
+    raw, raw_col = {}, {}
     for body in RIGGED_BODIES:
         files = mb.get(body)
         if not files:
             continue
-        parts = []
-        for fn in files:
+        parts, cols = [], []
+        for fn, col in files:
+            tris = None
             for cand in (os.path.join(args.stl, fn),
                          os.path.join(args.stl, "stl_" + args.name, fn)):
                 if os.path.exists(cand):
-                    parts.append(read_stl(cand))
+                    tris = read_stl(cand)
                     break
-            else:
+            if tris is None:
                 hits = [os.path.join(dp, fn) for dp, _, fs in os.walk(args.stl) if fn in fs]
                 if hits:
-                    parts.append(read_stl(hits[0]))
+                    tris = read_stl(hits[0])
+            if tris is not None and len(tris):
+                parts.append(tris)
+                cols.append(np.tile(np.array(col, np.float32), (len(tris), 1)))
         if parts:
             raw[body] = np.concatenate(parts, axis=0)
+            raw_col[body] = np.concatenate(cols, axis=0)
 
     total = sum(len(t) for t in raw.values())
     if not total:
@@ -165,18 +189,23 @@ def main():
         span = float(np.linalg.norm(np.ptp(tris.reshape(-1, 3), axis=0)))
         # Cell size chosen so each body keeps roughly its share of the budget.
         cell = span / max(4.0, (len(tris) * ratio) ** (1 / 2.2))
-        dec = decimate(tris, cell)
+        dec, keep = decimate(tris, cell, want_index=True)
         for _ in range(6):                        # converge on the budget
             got = len(dec) / max(1, len(tris))
             if got <= ratio * 1.35 or len(dec) < 200:
                 break
             cell *= 1.25
-            dec = decimate(tris, cell)
+            dec, keep = decimate(tris, cell, want_index=True)
+        # One colour per surviving triangle, expanded to its three vertices.
+        tri_col = raw_col[body][keep]
+        vcol = np.repeat(tri_col, 3, axis=0)
         buf = dec.reshape(-1).astype("<f4").tobytes()
-        blobs.append(buf)
+        cbuf = vcol.reshape(-1).astype("<f4").tobytes()
+        blobs.append(buf); blobs.append(cbuf)
         index[body] = {"byteOffset": offset, "triangles": int(len(dec)),
+                       "colorOffset": offset + len(buf),
                        "anchors": anchors.get(body, {})}
-        offset += len(buf)
+        offset += len(buf) + len(cbuf)
         print("   %-11s %7d -> %6d tri  (%.1f%%)"
               % (body, len(tris), len(dec), 100 * len(dec) / max(1, len(tris))))
 

@@ -37,23 +37,28 @@ const L = {
 /** body -> [local anchor pair], [world landmark pair].
  *  localTo names the child joint whose translation the build step stored. */
 const RIG = [
-  { body: "pelvis",    localFrom: "hipMid",  localTo: "torso",   from: "hipMid",    to: "shoulderMid" },
-  { body: "torso",     localFrom: "origin",  localTo: "cerv7",   from: "backJoint", to: "shoulderMid" },
-  { body: "skull",     localFrom: "origin",  localTo: null,      from: "shoulderMid", to: "nose", fallbackLen: 0.16 },
-  { trueSpan: true, body: "femur_r",   localFrom: "origin",  localTo: "femoral_cond_r", from: "rHip", to: "rKnee" },
-  { trueSpan: true, body: "femur_l",   localFrom: "origin",  localTo: "femoral_cond_l", from: "lHip", to: "lKnee" },
-  { trueSpan: true, body: "tibia_r",   localFrom: "origin",  localTo: "talus_r", from: "rKnee",  to: "rAnkle" },
-  { trueSpan: true, body: "tibia_l",   localFrom: "origin",  localTo: "talus_l", from: "lKnee",  to: "lAnkle" },
-  { body: "calcn_r",   localFrom: "origin",  localTo: "toes_r",  from: "rAnkle", to: "rToe" },
-  { body: "calcn_l",   localFrom: "origin",  localTo: "toes_l",  from: "lAnkle", to: "lToe" },
-  { body: "toes_r",    localFrom: "origin",  localTo: null,      from: "rToe",   to: "rToe", fallbackLen: 0.05 },
-  { body: "toes_l",    localFrom: "origin",  localTo: null,      from: "lToe",   to: "lToe", fallbackLen: 0.05 },
-  { trueSpan: true, body: "humerus_r", localFrom: "origin",  localTo: "ulna_r",  from: "rShoulder", to: "rElbow" },
-  { trueSpan: true, body: "humerus_l", localFrom: "origin",  localTo: "ulna_l",  from: "lShoulder", to: "lElbow" },
-  { trueSpan: true, body: "ulna_r",    localFrom: "origin",  localTo: "hand_r",  from: "rElbow", to: "rWrist" },
-  { trueSpan: true, body: "ulna_l",    localFrom: "origin",  localTo: "hand_l",  from: "lElbow", to: "lWrist" },
-  { body: "hand_r",    localFrom: "origin",  localTo: null,      from: "rWrist", to: "rIndex", fallbackLen: 0.09 },
-  { body: "hand_l",    localFrom: "origin",  localTo: null,      from: "lWrist", to: "lIndex", fallbackLen: 0.09 },
+  // modelLen: the model's own distance corresponding to the from->to landmark
+  // pair, in metres, read off the .osim joint table. Each body is scaled by its
+  // OWN measured segment rather than one shared factor -- that is what makes
+  // the figure match the subject's height and keeps limb joints closed, since
+  // every segment then spans exactly its two landmarks.
+  { body: "pelvis",    localTo: "torso",          from: "hipMid",    to: "shoulderMid", modelLen: 0.493, localFrom: "hipMid" },
+  { body: "torso",     localTo: "cerv7",          from: "backJoint", to: "shoulderMid", modelLen: 0.412 },
+  { body: "skull",     localTo: null,             from: "shoulderMid", to: "nose",      modelLen: 0.24, fallbackLen: 0.16 },
+  { body: "femur_r",   localTo: "femoral_cond_r", from: "rHip",   to: "rKnee" },
+  { body: "femur_l",   localTo: "femoral_cond_l", from: "lHip",   to: "lKnee" },
+  { body: "tibia_r",   localTo: "talus_r",        from: "rKnee",  to: "rAnkle" },
+  { body: "tibia_l",   localTo: "talus_l",        from: "lKnee",  to: "lAnkle" },
+  { body: "calcn_r",   localTo: "toes_r",         from: "rAnkle", to: "rToe" },
+  { body: "calcn_l",   localTo: "toes_l",         from: "lAnkle", to: "lToe" },
+  { body: "toes_r",    localTo: null,             from: "rToe",   to: "rToe", modelLen: 0.05, fallbackLen: 0.05 },
+  { body: "toes_l",    localTo: null,             from: "lToe",   to: "lToe", modelLen: 0.05, fallbackLen: 0.05 },
+  { body: "humerus_r", localTo: "ulna_r",         from: "rShoulder", to: "rElbow" },
+  { body: "humerus_l", localTo: "ulna_l",         from: "lShoulder", to: "lElbow" },
+  { body: "ulna_r",    localTo: "hand_r",         from: "rElbow", to: "rWrist" },
+  { body: "ulna_l",    localTo: "hand_l",         from: "lElbow", to: "lWrist" },
+  { body: "hand_r",    localTo: null,             from: "rWrist", to: "rIndex", modelLen: 0.09, fallbackLen: 0.09 },
+  { body: "hand_l",    localTo: null,             from: "lWrist", to: "lIndex", modelLen: 0.09, fallbackLen: 0.09 },
 ];
 
 const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
@@ -61,7 +66,18 @@ const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
 export class Overlay {
   constructor(canvas) {
     this.canvas = canvas;
-    this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    // Some mobile browsers refuse a second WebGL context, or fail under memory
+    // pressure. Surface that instead of rendering nothing.
+    try {
+      this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true,
+                                                powerPreference: "high-performance" });
+    } catch (err) {
+      throw new Error("WebGL unavailable on this device: " + err.message);
+    }
+    canvas.addEventListener("webglcontextlost", (e) => {
+      e.preventDefault();
+      this.contextLost = true;
+    });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.scene = new THREE.Scene();
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1e5, 1e5);
@@ -90,7 +106,8 @@ export class Overlay {
     const idx = await (await fetch(`meshes/${name}.json`)).json();
     const buf = await (await fetch(`meshes/${name}.bin`)).arrayBuffer();
     const mat = new THREE.MeshLambertMaterial({
-      color: 0xdcdce4, transparent: true, opacity: 0.92, side: THREE.DoubleSide,
+      vertexColors: true, transparent: true, opacity: 0.92,
+      side: THREE.DoubleSide,
     });
     let done = 0;
     for (const [body, info] of Object.entries(idx.bodies)) {
@@ -98,6 +115,11 @@ export class Overlay {
       const pos = new Float32Array(buf, info.byteOffset, floats);
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      if (info.colorOffset !== undefined) {
+        // Per-vertex colour, carried from each source mesh's <Appearance>.
+        const col = new Float32Array(buf, info.colorOffset, floats);
+        geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      }
       geo.computeVertexNormals();
       const mesh = new THREE.Mesh(geo, mat.clone());
       mesh.matrixAutoUpdate = false;
@@ -127,6 +149,7 @@ export class Overlay {
 
   /** landmarks: 2-D normalised; world: metric. Both from one detect call. */
   update(landmarks, world, w, h, mirror) {
+    if (this.contextLost) return;
     this.resize(w, h);
     if (!landmarks || !world || !Object.keys(this.meshes).length) {
       this.renderer.clear();
@@ -168,22 +191,20 @@ export class Overlay {
     // The subject's right, in scene space. OpenSim's local +z is the same.
     const worldRight = pts.rHip.clone().sub(pts.lHip).normalize();
 
-    // ONE global scale, from the bodies whose local and world anchor pairs are
-    // the same physical span (limb segments, joint centre to joint centre).
-    // The pelvis, torso and skull have no such correspondence -- their stored
-    // anchors span a different distance than any landmark pair -- so deriving a
-    // per-body scale there inflates them enormously. Orientation is still taken
-    // per body; only the size is shared.
-    const scales = [];
+    // Fallback scale for a body whose own segment is not measurable this
+    // frame (a landmark dropped out): the median of everything that is.
+    const measured = [];
     for (const r of RIG) {
-      if (!r.trueSpan) continue;
-      const anch = this.anchors[r.body] || {};
-      const la = r.localTo && anch[r.localTo] ? v3(anch[r.localTo]).length() : 0;
       const w0 = pts[r.from], w1 = pts[r.to];
-      if (la > 1e-4 && w0 && w1) scales.push(w0.distanceTo(w1) / la);
+      const anch = this.anchors[r.body] || {};
+      const ml = r.modelLen || (r.localTo && anch[r.localTo] ? v3(anch[r.localTo]).length() : 0);
+      if (w0 && w1 && ml > 1e-4) {
+        const d = w0.distanceTo(w1);
+        if (d > 1e-3) measured.push(d / ml);
+      }
     }
-    scales.sort((a, b) => a - b);
-    const gScale = scales.length ? scales[scales.length >> 1] : pxPerM;
+    measured.sort((a, b) => a - b);
+    const fallbackScale = measured.length ? measured[measured.length >> 1] : pxPerM;
 
     for (const r of RIG) {
       const mesh = this.meshes[r.body];
@@ -205,7 +226,9 @@ export class Overlay {
       const lLen = la.length(), wLen = wa.length();
       if (lLen < 1e-6 || wLen < 1e-3) { mesh.visible = false; continue; }
 
-      const s = gScale;                          // pixels per model metre
+      // Scale this body by its own segment: world span / model span.
+      const modelLen = r.modelLen || lLen;
+      const s = wLen > 1e-3 && modelLen > 1e-4 ? wLen / modelLen : fallbackScale;
       const b1 = wa.clone().normalize();
       const a1n = la.clone().normalize();
       const lRef = new THREE.Vector3(0, 0, 1);

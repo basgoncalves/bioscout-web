@@ -1,8 +1,15 @@
-# Movement Lab
+# BioScout Web
 
 Pull-up and squat kinematics from a phone camera, computed entirely in the
 browser. No app store, no APK, no server. Open a URL, press record, get reps,
 joint angles and an OpenSim `.mot` file.
+
+The browser front end of [BioScout](https://github.com/basgoncalves/bioscout).
+It is a **separate repository on purpose**: this deploys as a static site on
+every push, while `bioscout` is a Python package released to PyPI, and the 45 MB
+of vendored pose engine here has no business in a `pip install`. What the two
+share is the analysis core, and that link is enforced rather than assumed — see
+*Verification*.
 
 ## Why this exists and not an APK
 
@@ -30,20 +37,17 @@ anything to. After the first visit the app runs with the network off.
 
 ## Putting it on your phone
 
-1. Create a repository and push this folder:
+1. Push this folder:
 
    ```bash
    cd C:/Users/Basilio/Desktop/pullups/web
-   git init && git add -A
-   git commit -m "Movement Lab: in-browser pull-up and squat kinematics"
-   git branch -M main
-   git remote add origin git@github.com:<you>/movement-lab.git
-   git push -u origin main
+   git push
    ```
 
 2. On GitHub: **Settings → Pages → Source: Deploy from a branch → main / (root)**.
 
-3. Wait a minute, then open `https://<you>.github.io/movement-lab/` on your Pixel.
+3. Wait a minute, then open `https://basgoncalves.github.io/bioscout-web/` on
+   your Pixel.
 
 4. Check it works before granting the camera: open `?demo=1`. That renders a
    stored result with no camera and no model download. `?demo=squat` shows the
@@ -159,6 +163,8 @@ vendor/                    MediaPipe tasks-vision, vendored (not a CDN)
 pose_landmarker_full.task  the pose model
 reference.json             Python output, for the port test and ?demo
 test_port.mjs              asserts the JS matches the Python
+logo.png, icon-*.png       BioScout mark: page header, PWA and home screen
+tools/make_icons.py        regenerates those from bioscout/utils/logo.png
 ```
 
 `reference.json` is 1.1 MB and only used by the test and demo mode. Delete it
