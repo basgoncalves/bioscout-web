@@ -240,8 +240,12 @@ async function setAvatar(name) {
     cv.style.display = "";
     say(running ? "Tracking with overlay." : "Overlay ready.");
   } catch (err) {
-    say("Overlay failed to load: " + err.message, true);
+    // Report it: on a phone this is usually WebGL being refused (a second GL
+    // context alongside MediaPipe's, or memory pressure), and a blank canvas
+    // gives no clue which.
+    say("Overlay failed: " + (err && err.message ? err.message : err), true);
     cv.style.display = "none";
+    $("avatar").value = "";
   } finally { avatarBusy = false; }
 }
 let facing = "user";
