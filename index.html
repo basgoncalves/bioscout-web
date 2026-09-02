@@ -85,6 +85,8 @@
   button.muscle:hover { border-color:var(--accent); }
   button.muscle.on { background:var(--accent); border-color:var(--accent); color:#fff; }
   button.muscle .mval { color:var(--muted); font-variant-numeric:tabular-nums; }
+  button.muscle .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+                       margin-right:6px; vertical-align:middle; }
   button.muscle.on .mval { color:rgba(255,255,255,.8); }
 </style>
 </head>
@@ -420,7 +422,8 @@ async function finish() {
 }
 
 const COLORS = ["#2f6fe4", "#e8871a", "#1d7a45"];
-const selectedMuscle = {};   // { joint: {idx, name} }
+const selectedMuscle = {};   // { joint: {idx, name} } -- isolates one muscle
+const MCOLORS = ["#2f6fe4", "#e8871a", "#1d7a45", "#c0392b", "#7d5bbe"];
 
 /** Attach joint moments and muscle forces to each rep.
  *  Shared by the live path and ?demo, which is the only way to be sure the
@@ -533,7 +536,7 @@ function chart(rep, activity) {
           <div class="legend">${legend}</div>`;
 }
 
-function lineChart(t, series, unit) {
+function lineChart(t, series, unit, palette) {
   const W = 320, H = 170, P = { l: 40, r: 8, t: 10, b: 22 };
   const all = series.flatMap(([, v]) => v);
   const y0 = Math.min(...all), y1 = Math.max(...all);
@@ -549,12 +552,13 @@ function lineChart(t, series, unit) {
   if (lo < 0 && hi > 0) {
     g += `<line x1="${P.l}" y1="${sy(0)}" x2="${W - P.r}" y2="${sy(0)}" stroke="var(--muted)" stroke-width="1"/>`;
   }
+  const pal = palette || COLORS;
   series.forEach(([, vals], i) => {
-    g += `<polyline fill="none" stroke="${COLORS[i]}" stroke-width="1.9" stroke-linejoin="round" points="${
+    g += `<polyline fill="none" stroke="${pal[i % pal.length]}" stroke-width="1.7" stroke-linejoin="round" points="${
       vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
   });
   const legend = series.map(([n], i) =>
-    `<span><i class="swatch" style="background:${COLORS[i]}"></i>${n}</span>`).join("");
+    `<span><i class="swatch" style="background:${pal[i % pal.length]}"></i>${n}</span>`).join("");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:170px">${g}</svg>
           <div class="legend">${legend}<span>${unit}</span></div>`;
 }
@@ -587,29 +591,38 @@ function jointSubplot(rep, res, j) {
   const pk = Math.max(...moment.map(Math.abs));
   const sel = selectedMuscle[j.key];
 
-  // Overlay the selected muscle's force on its own normalised scale, so a
-  // 40 kN nonsense value cannot flatten a 90 N.m moment trace.
-  let extra = [];
-  if (sel !== undefined) {
-    const col = rep.forces.map((r) => Math.abs(r[sel.idx]));
-    const fmax = Math.max(...col) || 1;
-    extra = [[`${sel.name} (force, scaled)`, col.map((v) => v / fmax * pk)]];
-  }
-  const chart = lineChart(rep.times, [[`${j.label} moment`, moment], ...extra], "N·m");
+  const momentChart = lineChart(rep.times, [[`${j.label} moment`, moment]], "N·m");
 
-  const rows = top.map(([nm, p, i]) => {
+  // Muscle force WAVEFORMS, in newtons, on their own axis. Predicted per frame
+  // for all 80 muscles -- the table only ever showed each one's peak.
+  let forceChart = "";
+  if (top.length) {
+    const shown = sel ? top.filter(([, , i]) => i === sel.idx) : top;
+    const series = shown.map(([nm, , i]) => [nm, rep.forces.map((r) => Math.abs(r[i]))]);
+    const cols = sel
+      ? [MCOLORS[Math.max(0, top.findIndex(([, , i]) => i === sel.idx))]]
+      : MCOLORS;
+    forceChart = lineChart(rep.times, series, "N", cols) +
+      `<p class="note" style="margin-top:2px">${sel
+        ? `Isolated: ${sel.name}. Tap it again to show all five.`
+        : "All five on one axis — the largest dominates, so tap one to isolate it."}</p>`;
+  }
+
+  const rows = top.map(([nm, p, i], k) => {
     const on = sel && sel.idx === i;
     return `<button class="muscle${on ? " on" : ""}" data-joint="${j.key}"
-              data-idx="${i}" data-name="${nm}" title="Peak ${p.toFixed(0)} N — click to plot">
-              ${nm} <span class="mval">${p > 1000 ? (p / 1000).toFixed(1) + "k" : p.toFixed(0)} N</span>
+              data-idx="${i}" data-name="${nm}" title="Peak ${p.toFixed(0)} N">
+              <i class="dot" style="background:${MCOLORS[k]}"></i>${nm}
+              <span class="mval">${p > 1000 ? (p / 1000).toFixed(1) + "k" : p.toFixed(0)} N</span>
             </button>`;
   }).join("");
 
   return `<div class="subplot">
       <h2>${j.label} <span class="pk">peak ${pk.toFixed(0)} N·m
         (${(pk / res.massKg).toFixed(2)} N·m/kg)</span></h2>
-      ${chart}
+      ${momentChart}
       <div class="muscles">${rows || '<span class="note">no muscle data</span>'}</div>
+      ${forceChart}
     </div>`;
 }
 
