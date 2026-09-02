@@ -480,7 +480,15 @@ if (DEMO) {
 
 // Offline: after one visit the whole app (engine, model, code) is cached.
 if ("serviceWorker" in navigator && location.protocol === "https:") {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+  navigator.serviceWorker.register("sw.js").then((reg) => {
+    reg.update();
+    // A waiting worker means a newer version is already downloaded. Reload once
+    // so the user gets it now rather than several visits later.
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!reloaded) { reloaded = true; location.reload(); }
+    });
+  }).catch(() => {});
 }
 </script>
 </body>
