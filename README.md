@@ -24,8 +24,9 @@ of the same Pose Landmarker task, which runs on-device in mobile Chrome. That
 removes the packaging problem entirely, so this is the version that actually
 reaches a phone.
 
-The Python package stays the source of truth for desktop and batch work. This is
-a second front end over the same algorithm, not a fork of it — see *Verification*.
+`bioscout.movement_detector.markerless` stays the source of truth for desktop
+and batch work. This is a second front end over the same algorithm, not a fork
+of it — see *Verification*.
 
 ## Privacy
 
@@ -96,7 +97,7 @@ left-right symmetry (a visible lean breaks it); planar motion. Squats only — a
 pull-up has no ground contact, so the derivation does not apply.
 
 Signs are declared, not derived, and pinned by
-`android_app/tests/test_dynamics.py` against a hand-computed static pose. Note
+`bioscout.tests.markerless.test_dynamics` against a hand-computed static pose. Note
 one genuine result that looks like a bug: in a shallow squat the ground reaction
 can pass in front of the knee, giving a small **flexor** moment that grows into
 a large extensor moment with depth.
@@ -129,9 +130,9 @@ frame rate — which the results panel reports.
 own audit, returning >100 kN even on the gait data it was trained on. It is
 displayed at the user's explicit request pending a corrected export, behind a
 warning, with any value beyond physiological range flagged. See
-`../android_app/models/MODEL_CARD.md` and run `tools/audit_model.py` to
-reproduce the failure. Joint kinematics and joint moments never pass through
-this model and are unaffected.
+`bioscout/movement_detector/markerless/models/MODEL_CARD.md`, and
+`bioscout.tests.markerless.test_squat` demonstrates the failure. Joint
+kinematics and joint moments never pass through this model and are unaffected.
 
 **Structural limits.** One camera cannot separate left from right, so `*_r` and
 `*_l` carry identical values. Nor can it recover out-of-plane motion — this is a
@@ -140,18 +141,39 @@ camera is invisible to it.
 
 ## Verification
 
-`pullupkit.js` is a deliberate line-by-line port of the Python `pullupkit`,
+`pullupkit.js` is a deliberate line-by-line port of `bioscout.movement_detector.markerless`,
 including numpy's exact semantics for percentile interpolation, `convolve`
-`'same'` offset and NaN handling. It is checked, not assumed:
+`'same'` offset and NaN handling. It is checked, not assumed.
+
+`reference.json` is the fixture both sides are held to:
 
 ```bash
-python ../android_app/tests/dump_reference.py   # Python output -> reference.json
-node test_port.mjs                              # JS must reproduce it
+node test_port.mjs             # JS     == reference.json
+python tools/check_reference.py  # Python == reference.json
 ```
 
-Current status: every rep boundary, timestamp and exported coordinate agrees to
-within 5e-12 on a real pull-up clip (2 reps) and a synthetic squat (3 reps).
-Re-run both whenever either implementation changes.
+The second half is the one that is easy to leave out, and leaving it out is
+what lets the two drift. Checking only the JavaScript proves it reproduces a
+*recording* of the Python; if bioscout changes and nobody regenerates the
+fixture, that test keeps passing against a stale answer forever. With both
+sides pinned to the same file, `JS == reference == Python` — and any change to
+either implementation has to update the fixture deliberately.
+
+Neither step needs a video or a clip: every case in `reference.json` stores its
+own input landmarks. That is what makes this runnable in CI
+(`.github/workflows/port.yml`, on every push and weekly, since bioscout can
+change without anything happening in this repo).
+
+To regenerate the fixture after an intended change:
+
+```bash
+python tools/dump_reference.py                      # squats; carries the pull-up case over
+python tools/dump_reference.py --pullup-poses ../sessions/session1/poses.json
+```
+
+Current status: every rep boundary, timestamp and exported coordinate agrees
+exactly on a real pull-up clip (2 reps) and a synthetic squat (3 reps, both
+model families), across 121 checks.
 
 ## Files
 
@@ -161,8 +183,10 @@ pullupkit.js               ported analysis core - shared with the node test
 sw.js                      service worker, for offline use
 vendor/                    MediaPipe tasks-vision, vendored (not a CDN)
 pose_landmarker_full.task  the pose model
-reference.json             Python output, for the port test and ?demo
-test_port.mjs              asserts the JS matches the Python
+reference.json             the fixture both implementations are pinned to
+test_port.mjs              asserts the JS matches the fixture
+tools/check_reference.py   asserts the Python matches the fixture
+tools/dump_reference.py    regenerates the fixture after an intended change
 logo.png, icon-*.png       BioScout mark: page header, PWA and home screen
 tools/make_icons.py        regenerates those from bioscout/utils/logo.png
 ```
