@@ -106,6 +106,21 @@
 
   <div class="card" id="setup">
     <div class="row" style="margin-bottom:11px">
+      <div style="flex:1.4">
+        <label for="profile">Athlete</label>
+        <select id="profile"><option value="">— no profile —</option></select>
+      </div>
+      <div style="flex:1">
+        <label for="profileName">Name</label>
+        <input id="profileName" type="text" placeholder="e.g. Bas" autocomplete="off">
+      </div>
+    </div>
+    <div class="row" style="margin-bottom:11px">
+      <button class="ghost" id="saveProfileBtn" style="margin:0;padding:9px">Save profile</button>
+      <button class="ghost" id="delProfileBtn" style="margin:0;padding:9px">Delete</button>
+    </div>
+
+    <div class="row" style="margin-bottom:11px">
       <div>
         <label for="activity">Movement</label>
         <select id="activity">
@@ -175,6 +190,7 @@
     <button class="ghost" id="stopBtn">Close camera</button>
   </div>
 
+  <div class="card hidden" id="trainingCard"></div>
   <div class="card hidden" id="results"></div>
 </div>
 
@@ -199,9 +215,13 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          buildSquatFeatures, computePxPerM, jointPositionsM } from "./kinematics.js";
 import { inverseDynamics } from "./dynamics.js";
 import { classify, MIN_CONFIDENCE } from "./detect.js";
+import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
+         newSession, getSession, clearSession, addSet, summariseSession }
+       from "./profiles.js";
 import { Overlay } from "./overlay.js";
 import { makeZip, svgToPng, blobBytes } from "./zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
+         peakJRF, selfTest as forceSelfTest,
          MAX_PLAUSIBLE_FORCE_N } from "./forces.js";
 
 // MediaPipe is vendored into vendor/ rather than pulled from a CDN: the app
@@ -290,6 +310,116 @@ if (new URLSearchParams(location.search).has("fresh")) {
 }
 
 // --- model -----------------------------------------------------------------
+// --- profiles and the training session -------------------------------------
+function currentSettings() {
+  return {
+    name: ($("profileName").value || "").trim(),
+    heightM: parseFloat($("height").value) || 1.75,
+    massKg: parseFloat($("mass").value) || 75,
+    activity: $("activity").value,
+    avatar: $("avatar").value,
+    addedKg: parseFloat($("added").value) || 0,
+    assistKg: parseFloat($("assist").value) || 0,
+  };
+}
+
+function applyProfile(p) {
+  if (!p) return;
+  $("profileName").value = p.name || "";
+  if (p.heightM) $("height").value = p.heightM;
+  if (p.massKg) $("mass").value = p.massKg;
+  if (p.activity) $("activity").value = p.activity;
+  if (p.addedKg != null) $("added").value = p.addedKg;
+  if (p.assistKg != null) $("assist").value = p.assistKg;
+  if (p.avatar) { $("avatar").value = p.avatar; setAvatar(p.avatar); }
+}
+
+function refreshProfiles(select) {
+  const { profiles } = listProfiles();
+  const sel = $("profile");
+  sel.innerHTML = '<option value="">— no profile —</option>' +
+    profiles.map((p) => `<option value="${p.name}">${p.name}</option>`).join("");
+  if (select) sel.value = select;
+}
+
+$("profile").onchange = (e) => {
+  const p = getProfile(e.target.value);
+  if (p) applyProfile(p);
+  renderTraining();
+};
+$("saveProfileBtn").onclick = () => {
+  const s = currentSettings();
+  if (!s.name) { say("Give the profile a name first.", true); return; }
+  const ok = saveProfile(s);      // call once: it writes
+  say(ok ? `Profile “${s.name}” saved.`
+         : "Could not save — browser storage is unavailable here.", !ok);
+  refreshProfiles(s.name);
+};
+$("delProfileBtn").onclick = () => {
+  const n = $("profile").value;
+  if (!n) return;
+  deleteProfile(n);
+  refreshProfiles("");
+  say(`Profile “${n}” deleted.`);
+};
+
+function renderTraining() {
+  const card = $("trainingCard");
+  const sess = getSession();
+  if (!sess || !sess.sets.length) { card.classList.add("hidden"); return; }
+  card.classList.remove("hidden");
+  const rows = sess.sets.map((s) => `<tr><td>Set ${s.index}</td><td>${s.activity}</td>
+      <td>${s.reps}</td><td>${s.addedKg ? "+" + s.addedKg : ""}${s.assistKg ? " −" + s.assistKg : ""}</td>
+      <td>${new Date(s.at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</td></tr>`).join("");
+  const total = sess.sets.reduce((a, b) => a + b.reps, 0);
+  card.innerHTML = `
+    <h1 style="font-size:17px;margin:0 0 2px">Training session</h1>
+    <p class="sub" style="margin-bottom:10px">${sess.profile ? sess.profile + " · " : ""}
+      ${sess.sets.length} set${sess.sets.length===1?"":"s"} · ${total} reps ·
+      started ${new Date(sess.started).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</p>
+    <table><thead><tr><th>Set</th><th>Movement</th><th>Reps</th><th>Load</th><th>Time</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+    <button class="ghost" id="summaryBtn" style="margin-top:10px">Finish and summarise</button>
+    <button class="ghost" id="newSessionBtn" style="margin-top:8px">Start a new session</button>
+    <div id="summaryBox"></div>`;
+  $("newSessionBtn").onclick = () => {
+    clearSession(); newSession($("profile").value || null);
+    $("trainingCard").classList.add("hidden");
+    say("New training session started.");
+  };
+  $("summaryBtn").onclick = () => renderSummary();
+}
+
+function renderSummary() {
+  const sum = summariseSession(getSession());
+  if (!sum) return;
+  const t = sum.trends.map((x) => {
+    // A drop in depth or range is fatigue; a longer concentric is fatigue too.
+    const bad = x.lowerIsWorse ? x.change < -0.02 * Math.abs(x.first || 1)
+                               : x.change > 0.05 * Math.abs(x.first || 1);
+    const arrow = x.change > 0 ? "▲" : x.change < 0 ? "▼" : "–";
+    return `<tr><td>${x.label}</td><td>${x.first}${x.unit}</td><td>${x.last}${x.unit}</td>
+      <td style="color:${bad ? "var(--warn)" : "var(--muted)"}">${arrow} ${x.pct > 0 ? "+" : ""}${x.pct}%</td></tr>`;
+  }).join("");
+  $("summaryBox").innerHTML = `
+    <h2 style="font-size:15px;margin:14px 0 4px">Summary</h2>
+    <p class="sub" style="margin-bottom:8px">${sum.sets} sets · ${sum.total_reps} reps
+      (${sum.reps_per_set.join(", ")}) · mean rep ${sum.mean_rep_duration_s}s</p>
+    ${t ? `<table><thead><tr><th>Measure</th><th>First set</th><th>Last set</th><th>Change</th></tr></thead>
+      <tbody>${t}</tbody></table>
+      <p class="note">Change is first set to last, not a fitted trend — with a
+        handful of sets a slope would imply precision that is not there. A
+        falling depth or range and a lengthening concentric are the usual
+        signatures of fatigue.</p>`
+      : '<p class="note">Not enough sets yet to show a trend.</p>'}`;
+}
+
+refreshProfiles(lastUsedProfile()?.name || "");
+if (lastUsedProfile()) applyProfile(lastUsedProfile());
+renderTraining();
+
+
+
 if (!DEMO) say("Loading pose engine (about 45 MB the first time)…");
 if (await loadMediaPipe()) {
   try {
@@ -514,6 +644,11 @@ async function finish() {
                                        osimModel: OSIM_MODEL });
     lastResult.detection = detection;
     await enrich(lastResult, poses, fps, heightM, activity);
+    if (lastResult.reps.length && !DEMO) {
+      const set = addSet(lastResult, fps, { profile: $("profile").value || null });
+      lastResult.setIndex = set.index;
+      renderTraining();
+    }
     render(lastResult, fps);
     say(`Analysed ${frames.length} frames at ${fps.toFixed(1)} fps.`);
   } catch (err) {
@@ -554,10 +689,15 @@ async function enrich(res, poses, fps, heightM, activity) {
     } catch (err) { console.warn("dynamics failed", err); }
   }
 
-  // Muscle forces from the surrogate. See forces.js: this model fails its own
-  // audit and is present at the user's explicit request.
+  // Muscle forces and joint reaction forces from the static-optimisation
+  // surrogate. See forces.js. The self-test replays the network at its own
+  // training mean: if the browser forward pass has drifted from the trained
+  // weights, that shows up here rather than as a silently wrong number.
   try {
     const fm = await loadForceModel();
+    const st = forceSelfTest(fm);
+    if (!st.plausible) throw new Error(
+      `force model self-test failed: ${st.peakMuscleBW.toFixed(1)} BW at the training mean`);
     if (!muscleJoints) {
       try { muscleJoints = await (await fetch("muscle_joints.json")).json(); }
       catch { muscleJoints = null; }
@@ -570,11 +710,15 @@ async function enrich(res, poses, fps, heightM, activity) {
             knee_angle_r: r.coords.knee_angle_r.map((v) => -v),
             knee_angle_l: r.coords.knee_angle_l.map((v) => -v) }
         : r.coords;
-      const { forces, missing } = predictForces(fm, mc, r.times.length);
-      r.forces = forces;
-      r.forceNames = fm.targ;
-      r.forceMissing = missing;
-      r.forceImplausible = implausibleFraction(forces);
+      const out = predictForces(fm, mc, r.times.length,
+        { massKg, heightM, times: r.times });
+      r.forces = out.forces;
+      r.forceNames = out.muscleNames;
+      r.jrf = out.jrf;
+      r.jrfNames = out.jrfNames;
+      r.forceMissing = out.missing;
+      r.forceModel = fm;
+      r.forceImplausible = implausibleFraction(out.forces);
     }
   } catch (err) { console.warn("force model failed", err); }
 }
@@ -761,21 +905,42 @@ function momentPanel(rep, res) {
 
 function forcePanel(rep) {
   if (!rep.forces || !rep.forces.length) return "";
+  const fm = rep.forceModel;
   const bad = rep.forceImplausible || 0;
   const top = peakByMuscle(rep.forces, rep.forceNames, 6);
   const rows = top.map(([n, v]) =>
     `<tr><td>${n}</td><td${v > MAX_PLAUSIBLE_FORCE_N ? ' style="color:var(--warn)"' : ""}>${v.toFixed(0)}</td></tr>`).join("");
+
+  const jrows = (rep.jrf ? peakJRF(rep.jrf, rep.jrfNames) : [])
+    .map(([n, v]) => `<tr><td>${n.replace("_mag", "").replace("_", " ")}</td>
+      <td>${v.toFixed(2)}</td></tr>`).join("");
+
+  const r2 = fm?.report?.["muscle forces"]?.r2_median;
+  const r2j = fm?.report?.["JRF magnitude"]?.r2_median;
+
   return `
-    <h1 style="font-size:16px;margin:16px 0 2px">Muscle forces</h1>
-    <p class="note banner"><b>These numbers are not reliable.</b> The model
-      fails its own audit: on a real trial from its own gait training set it
-      predicts 113,250 N, where the largest human muscle produces a few
-      thousand. ${(bad * 100).toFixed(0)}% of the values below exceed
-      ${MAX_PLAUSIBLE_FORCE_N} N. Shown pending a corrected model export —
-      treat as a placeholder, not an estimate.</p>
+    <h1 style="font-size:16px;margin:16px 0 2px">Muscle and joint forces</h1>
+    <p class="note banner">Estimates from a surrogate trained on OpenSim static
+      optimisation of running and single-leg squats — not a measurement.
+      On subjects it never saw, it explains
+      ${r2 == null ? "—" : (r2 * 100).toFixed(0)}% of the variance in muscle
+      force and ${r2j == null ? "—" : (r2j * 100).toFixed(0)}% in joint contact
+      force. Two limits are structural: it takes kinematics only, so it
+      <b>cannot know external load</b> — an empty bar and a loaded bar at the
+      same depth read the same; and every output is a lower-limb muscle, so a
+      <b>pull-up is out of its domain entirely</b>. Squats are a short
+      extrapolation from single-leg squats; treat the ranking as more reliable
+      than the absolute newtons.</p>
     <table><thead><tr><th>Muscle</th><th>Peak N</th></tr></thead><tbody>${rows}</tbody></table>
-    <p class="note">${rep.forceMissing?.length || 0} of the model's 34 inputs
-      cannot be measured from one camera and take the training mean.</p>`;
+    <h1 style="font-size:14px;margin:14px 0 2px">Joint contact force</h1>
+    <table><thead><tr><th>Joint</th><th>Peak × bodyweight</th></tr></thead>
+      <tbody>${jrows}</tbody></table>
+    <p class="note">${rep.forceMissing?.length || 0} of the model's
+      ${fm ? new Set(fm.feat.filter((f) => f.startsWith("q_"))).size : "?"}
+      joint coordinates cannot be seen by one camera and take the training
+      mean. Velocities and accelerations are differentiated from the measured
+      angles.${bad > 0 ? ` ${(bad * 100).toFixed(1)}% of predicted values exceed
+      ${MAX_PLAUSIBLE_FORCE_N} N and are flagged.` : ""}</p>`;
 }
 
 function csvFromColumns(header, cols, n) {
@@ -863,6 +1028,19 @@ async function exportZip(res, fps) {
       })),
     };
     files.push({ name: "session.json", data: JSON.stringify(summary, null, 2) });
+
+    // The whole training session, not just this set: every set recorded so
+    // far, plus the first-to-last trends.
+    const training = getSession();
+    if (training && training.sets.length) {
+      files.push({ name: "training/sets.json", data: JSON.stringify(training, null, 2) });
+      const ts = summariseSession(training);
+      files.push({ name: "training/summary.json", data: JSON.stringify(ts, null, 2) });
+      const hdr = ["set", "activity", "reps", "added_kg", "assist_kg", "at"];
+      const rows = training.sets.map((x) => [x.index, x.activity, x.reps,
+        x.addedKg ?? 0, x.assistKg ?? 0, x.at].join(","));
+      files.push({ name: "training/sets.csv", data: hdr.join(",") + "\n" + rows.join("\n") + "\n" });
+    }
     files.push({ name: "README.txt", data:
 `BioScout Web export — ${stamp}
 Activity: ${res.activity}   frame rate: ${fps.toFixed(1)} fps

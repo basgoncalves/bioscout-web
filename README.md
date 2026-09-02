@@ -126,13 +126,26 @@ motion, squat depth and pull-up travel in metres.
 lighting, thermal state and load, so durations are only as good as the achieved
 frame rate — which the results panel reports.
 
-**Muscle forces: shown, but not reliable.** The available surrogate fails its
-own audit, returning >100 kN even on the gait data it was trained on. It is
-displayed at the user's explicit request pending a corrected export, behind a
-warning, with any value beyond physiological range flagged. See
-`bioscout/movement_detector/markerless/models/MODEL_CARD.md`, and
-`bioscout.tests.markerless.test_squat` demonstrates the failure. Joint
-kinematics and joint moments never pass through this model and are unaffected.
+**Muscle and joint contact forces: estimates, not measurements.** A surrogate
+for OpenSim static optimisation, retrained 2026-09-02 on 570 solved trials from
+26 subjects (running, sprinting, single-leg squats). On subjects it has never
+seen it reaches a median R² of 0.46 for muscle force and 0.66 for joint contact
+force. The ranking of muscles and the shape of the curve are more trustworthy
+than the absolute newtons.
+
+Two limits are structural rather than fixable by more data. It takes kinematics
+only, so it **cannot know external load** — an empty bar and a loaded bar at the
+same depth and tempo predict the same forces, which makes it valid for
+bodyweight movement and wrong for loaded lifting. And every one of its 80
+outputs is a lower-limb muscle, so **it does not apply to pull-ups at all**: the
+lats, biceps and trapezius that do the work are not in the output vector. It is
+shown for squats, where the muscle list is right and the inputs are recoverable.
+
+The model it replaced predicted 113,250 N on a trial from its own training set;
+`node test_force_model.mjs` is the regression test that would have caught that,
+and it now runs against the browser's own forward pass. See
+`../android_app/models/MODEL_CARD.md`. Joint kinematics and joint moments never
+pass through this model and are unaffected.
 
 **Structural limits.** One camera cannot separate left from right, so `*_r` and
 `*_l` carry identical values. Nor can it recover out-of-plane motion — this is a
