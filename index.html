@@ -74,6 +74,18 @@
   .hidden { display:none !important; }
   .banner { border-left:3px solid var(--warn); padding-left:11px; font-size:13px;
             color:var(--warn); }
+  .subplot { border-top:1px solid var(--line); padding-top:10px; margin-top:10px; }
+  .subplot h2 { font-size:14px; margin:0 0 2px; font-weight:600; }
+  .subplot h2 .pk { font-weight:400; color:var(--muted); font-size:12px; }
+  .muscles { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  button.muscle { width:auto; flex:0 0 auto; margin:0; padding:6px 10px;
+                  font-size:12.5px; font-weight:500; border-radius:8px;
+                  background:transparent; border:1px solid var(--line);
+                  color:var(--ink); cursor:pointer; }
+  button.muscle:hover { border-color:var(--accent); }
+  button.muscle.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.muscle .mval { color:var(--muted); font-variant-numeric:tabular-nums; }
+  button.muscle.on .mval { color:rgba(255,255,255,.8); }
 </style>
 </head>
 <body>
@@ -169,6 +181,7 @@ const statusEl = $("status");
 const say = (t, warn) => { statusEl.textContent = t; statusEl.classList.toggle("warn", !!warn); };
 
 let landmarker = null, stream = null, running = false, recording = false;
+let muscleJoints = null;   // { muscleJoints: {name:[joints]}, byJoint: {joint:[names]} }
 let facing = "user";
 let frames = [];          // { t_ms, lm } per detected frame
 let lastResult = null;
@@ -379,6 +392,7 @@ async function finish() {
 }
 
 const COLORS = ["#2f6fe4", "#e8871a", "#1d7a45"];
+const selectedMuscle = {};   // { joint: {idx, name} }
 
 /** Attach joint moments and muscle forces to each rep.
  *  Shared by the live path and ?demo, which is the only way to be sure the
@@ -404,6 +418,10 @@ async function enrich(res, poses, fps, heightM, activity) {
   // audit and is present at the user's explicit request.
   try {
     const fm = await loadForceModel();
+    if (!muscleJoints) {
+      try { muscleJoints = await (await fetch("muscle_joints.json")).json(); }
+      catch { muscleJoints = null; }
+    }
     for (const r of res.reps) {
       // The surrogate was trained on RAJAGOPAL signs (its knee_angle_r training
       // mean is +56.9 deg). A GPK-signed knee would silently invert that input.
@@ -504,25 +522,78 @@ function lineChart(t, series, unit) {
           <div class="legend">${legend}<span>${unit}</span></div>`;
 }
 
+const JOINTS = [
+  { key: "hip", label: "Hip", series: "hip_moment" },
+  { key: "knee", label: "Knee", series: "knee_moment" },
+  { key: "ankle", label: "Ankle", series: "ankle_moment" },
+];
+
+/** Top muscles CROSSING a joint, ranked by predicted peak force.
+ *  Deliberately not called a moment contribution: that needs moment arms,
+ *  which the surrogate does not provide -- see the note rendered below. */
+function topMusclesForJoint(rep, joint, n = 5) {
+  if (!rep.forces || !muscleJoints) return [];
+  const names = new Set(muscleJoints.byJoint?.[joint] || []);
+  const peaks = rep.forceNames.map((nm, i) => {
+    if (!names.has(nm)) return null;
+    let p = 0;
+    for (const row of rep.forces) p = Math.max(p, Math.abs(row[i]));
+    return [nm, p, i];
+  }).filter(Boolean);
+  return peaks.sort((a, b) => b[1] - a[1]).slice(0, n);
+}
+
+function jointSubplot(rep, res, j) {
+  const d = rep.dyn;
+  const moment = d[j.series];
+  const top = topMusclesForJoint(rep, j.key);
+  const pk = Math.max(...moment.map(Math.abs));
+  const sel = selectedMuscle[j.key];
+
+  // Overlay the selected muscle's force on its own normalised scale, so a
+  // 40 kN nonsense value cannot flatten a 90 N.m moment trace.
+  let extra = [];
+  if (sel !== undefined) {
+    const col = rep.forces.map((r) => Math.abs(r[sel.idx]));
+    const fmax = Math.max(...col) || 1;
+    extra = [[`${sel.name} (force, scaled)`, col.map((v) => v / fmax * pk)]];
+  }
+  const chart = lineChart(rep.times, [[`${j.label} moment`, moment], ...extra], "N·m");
+
+  const rows = top.map(([nm, p, i]) => {
+    const on = sel && sel.idx === i;
+    return `<button class="muscle${on ? " on" : ""}" data-joint="${j.key}"
+              data-idx="${i}" data-name="${nm}" title="Peak ${p.toFixed(0)} N — click to plot">
+              ${nm} <span class="mval">${p > 1000 ? (p / 1000).toFixed(1) + "k" : p.toFixed(0)} N</span>
+            </button>`;
+  }).join("");
+
+  return `<div class="subplot">
+      <h2>${j.label} <span class="pk">peak ${pk.toFixed(0)} N·m
+        (${(pk / res.massKg).toFixed(2)} N·m/kg)</span></h2>
+      ${chart}
+      <div class="muscles">${rows || '<span class="note">no muscle data</span>'}</div>
+    </div>`;
+}
+
 function momentPanel(rep, res) {
   if (!rep.dyn) return "";
-  const d = rep.dyn, m = res.massKg;
-  const pk = (a) => Math.max(...a.map(Math.abs));
+  const d = rep.dyn;
   return `
     <h1 style="font-size:16px;margin:16px 0 2px">Joint moments</h1>
     <p class="sub" style="margin-bottom:8px">Extension positive · per leg ·
       peak GRF ${(Math.max(...d.grf_vertical) / d.body_weight_n).toFixed(2)} body weights</p>
-    ${lineChart(rep.times, [["hip", d.hip_moment], ["knee", d.knee_moment],
-                            ["ankle", d.ankle_moment]], "N·m")}
-    <table style="margin-top:8px"><thead><tr><th>Joint</th><th>Peak N·m</th><th>Peak N·m/kg</th></tr></thead><tbody>
-      ${[["Hip", d.hip_moment], ["Knee", d.knee_moment], ["Ankle", d.ankle_moment]]
-        .map(([n, a]) => `<tr><td>${n}</td><td>${pk(a).toFixed(0)}</td><td>${(pk(a) / m).toFixed(2)}</td></tr>`).join("")}
-    </tbody></table>
+    ${JOINTS.map((j) => jointSubplot(rep, res, j)).join("")}
     <p class="note">Inverse dynamics from your body mass. The ground reaction is
       derived from whole-body centre-of-mass acceleration, not assumed. Centre of
       pressure is taken as the midfoot and the two legs are assumed symmetric —
       a visible lean breaks that. A small flexor knee moment in a shallow squat
-      is physical, not an error.</p>`;
+      is physical, not an error.</p>
+    <p class="note banner">The muscles listed under each joint are those that
+      <b>cross</b> that joint, ranked by predicted peak force — not by their
+      contribution to the moment. Attributing moment shares needs muscle moment
+      arms, which this surrogate does not provide. The force values themselves
+      are the unreliable ones described below.</p>`;
 }
 
 function forcePanel(rep) {
@@ -597,6 +668,15 @@ function render(res, fps) {
     [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
     $("chartBox").innerHTML = chart(res.reps[i], res.activity);
     $("dynBox").innerHTML = momentPanel(res.reps[i], res);
+    $("dynBox").querySelectorAll("button.muscle").forEach((b) => {
+      b.onclick = () => {
+        const j = b.dataset.joint, idx = +b.dataset.idx;
+        // clicking the active muscle clears it
+        if (selectedMuscle[j] && selectedMuscle[j].idx === idx) delete selectedMuscle[j];
+        else selectedMuscle[j] = { idx, name: b.dataset.name };
+        select(i);
+      };
+    });
     $("forceBox").innerHTML = forcePanel(res.reps[i]);
   }
   select(0);
