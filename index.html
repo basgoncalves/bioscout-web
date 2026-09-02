@@ -111,17 +111,23 @@
         <input id="mass" type="number" step="0.5" value="75" inputmode="decimal">
       </div>
     </div>
-    <div style="margin-bottom:11px">
-      <label for="osim">OpenSim model family (knee sign convention)</label>
-      <select id="osim">
-        <option value="gpk">GPK / gait2392 — knee flexion negative</option>
-        <option value="rajagopal">Rajagopal — knee flexion positive</option>
-      </select>
+    <div class="row" style="margin-bottom:11px">
+      <div>
+        <label for="added">Added load (kg)</label>
+        <input id="added" type="number" step="0.5" value="0" min="0" inputmode="decimal">
+      </div>
+      <div>
+        <label for="assist">Assistance (kg)</label>
+        <input id="assist" type="number" step="0.5" value="0" min="0" inputmode="decimal">
+      </div>
     </div>
+    <p class="note" style="margin:-4px 0 10px">Barbell, vest or belt in
+      <b>Added</b>; band or machine offload in <b>Assistance</b>. Both apply at
+      once — a loaded bar with a band assist is added minus assist.</p>
     <button id="startBtn" disabled>Start camera</button>
     <button class="ghost" id="fileBtn">Analyse a video file</button>
     <input id="fileInput" type="file" accept="video/*" class="hidden">
-    <div class="status" id="status">Loading pose model…</div>
+    <div class="status" id="status">Starting…</div>
   </div>
 
   <div id="stage">
@@ -142,6 +148,22 @@
   <div class="card hidden" id="results"></div>
 </div>
 
+<script>
+// Not a module, deliberately: if the module below fails to parse or one of its
+// static imports 404s, the module never executes and every status message in
+// it is unreachable. Without this the page sits on its placeholder text
+// looking like it is still loading, which is indistinguishable from working.
+window.__mlBooted = false;
+setTimeout(function () {
+  if (window.__mlBooted) return;
+  var el = document.getElementById("status");
+  if (!el) return;
+  el.classList.add("warn");
+  el.innerHTML = "The app did not start \u2014 usually an old cached copy. " +
+    "<a href=\"?fresh=1\" style=\"color:inherit;font-weight:600\">Tap here to reset it</a>, " +
+    "or clear this site's data in your browser settings.";
+}, 8000);
+</script>
 <script type="module">
 import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          buildSquatFeatures, computePxPerM, jointPositionsM } from "./pullupkit.js";
@@ -191,6 +213,12 @@ let lastResult = null;
 // read here but acted on at the very bottom of the module: render() reaches
 // consts declared further down, and calling it early hits the temporal dead
 // zone.
+window.__mlBooted = true;   // the watchdog above can stand down
+
+// These models are GPK/gait2392 (knee flexion NEGATIVE). Fixed rather than
+// offered as a choice: picking the wrong one silently renders a collapsed
+// figure in OpenSim. The force model is still fed Rajagopal signs internally.
+const OSIM_MODEL = "gpk";
 const DEMO = new URLSearchParams(location.search).get("demo");
 
 // ?fresh=1 tears out every service worker and cache for this origin, then
@@ -382,7 +410,7 @@ async function finish() {
   const heightM = parseFloat($("height").value) || 1.75;
   try {
     lastResult = analyse(poses, fps, { heightM, activity,
-                                       osimModel: $("osim").value });
+                                       osimModel: OSIM_MODEL });
     await enrich(lastResult, poses, fps, heightM, activity);
     render(lastResult, fps);
     say(`Analysed ${frames.length} frames at ${fps.toFixed(1)} fps.`);
@@ -399,7 +427,15 @@ const selectedMuscle = {};   // { joint: {idx, name} }
  *  demo exercises the same code the camera does. */
 async function enrich(res, poses, fps, heightM, activity) {
   const massKg = parseFloat($("mass").value) || 75;
+  // Added and assistance are cumulative and signed: a loaded bar with a band
+  // assist is added minus assist, and a net-negative value (more assistance
+  // than load) is legitimate.
+  const addedKg = Math.max(0, parseFloat($("added").value) || 0);
+  const assistKg = Math.max(0, parseFloat($("assist").value) || 0);
   res.massKg = massKg;
+  res.addedKg = addedKg;
+  res.assistKg = assistKg;
+  res.externalKg = addedKg - assistKg;
 
   // Inverse dynamics: squats only. A pull-up has no ground reaction, so the
   // whole-body-COM derivation of the external load does not apply.
@@ -409,7 +445,8 @@ async function enrich(res, poses, fps, heightM, activity) {
       const { pxPerM } = computePxPerM(poses, heightM);
       for (const r of res.reps) {
         r.dyn = inverseDynamics(
-          jointPositionsM(F, r.bounds, pxPerM, F._floorY), massKg, fps);
+          jointPositionsM(F, r.bounds, pxPerM, F._floorY), massKg, fps,
+          { barMassKg: res.externalKg });
       }
     } catch (err) { console.warn("dynamics failed", err); }
   }
@@ -576,13 +613,26 @@ function jointSubplot(rep, res, j) {
     </div>`;
 }
 
+function loadNote(res) {
+  const bits = [];
+  if (res.addedKg) bits.push(`+${res.addedKg} kg load`);
+  if (res.assistKg) bits.push(`−${res.assistKg} kg assist`);
+  if (!bits.length) return "";
+  return `· ${bits.join(" ")} (net ${res.externalKg > 0 ? "+" : ""}${res.externalKg} kg,
+          system ${(res.massKg + res.externalKg).toFixed(1)} kg)`;
+}
+
 function momentPanel(rep, res) {
   if (!rep.dyn) return "";
   const d = rep.dyn;
   return `
     <h1 style="font-size:16px;margin:16px 0 2px">Joint moments</h1>
     <p class="sub" style="margin-bottom:8px">Extension positive · per leg ·
-      peak GRF ${(Math.max(...d.grf_vertical) / d.body_weight_n).toFixed(2)} body weights</p>
+      peak GRF ${(Math.max(...d.grf_vertical) / d.body_weight_n).toFixed(2)} × system weight
+      ${loadNote(res)}</p>
+    ${res.massKg + res.externalKg <= 0 ? `<p class="note banner">Assistance
+      (${res.assistKg} kg) exceeds body mass plus load, so the system weight is
+      zero or negative. The moments below are not meaningful.</p>` : ""}
     ${JOINTS.map((j) => jointSubplot(rep, res, j)).join("")}
     <p class="note">Inverse dynamics from your body mass. The ground reaction is
       derived from whole-body centre-of-mass acceleration, not assumed. Centre of
@@ -719,7 +769,7 @@ if (DEMO) {
     const c = ref.cases[DEMO === "squat" ? "squat_synthetic" : "pullup_P01"];
     $("activity").value = c.activity;
     const demoRes = analyse(c.poses, c.fps,
-      { heightM: c.height_m, activity: c.activity, osimModel: $("osim").value });
+      { heightM: c.height_m, activity: c.activity, osimModel: OSIM_MODEL });
     await enrich(demoRes, c.poses, c.fps, c.height_m, c.activity);
     render(demoRes, c.fps);
     say("Demo data — no camera used. Reload without ?demo to record.");

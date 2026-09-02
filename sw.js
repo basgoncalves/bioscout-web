@@ -15,7 +15,7 @@
  *
  * Bump CACHE when the vendored engine or model changes, to evict the old copy.
  */
-const CACHE = "movement-lab-v4";
+const CACHE = "movement-lab-v5";
 
 const SHELL = ["./", "./index.html", "./pullupkit.js", "./dynamics.js",
                "./forces.js", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest"];
