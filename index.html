@@ -95,7 +95,7 @@
         <input id="height" type="number" step="0.01" value="1.75" inputmode="decimal">
       </div>
     </div>
-    <button id="startBtn">Start camera</button>
+    <button id="startBtn" disabled>Start camera</button>
     <button class="ghost" id="fileBtn">Analyse a video file</button>
     <input id="fileInput" type="file" accept="video/*" class="hidden">
     <div class="status" id="status">Loading pose model…</div>
@@ -273,7 +273,9 @@ function draw(res) {
 }
 
 // --- recording -------------------------------------------------------------
-$("startBtn").disabled = true;
+// NB: do NOT disable startBtn here -- this runs after the awaited model load
+// above, which has already enabled it. The initial disabled state is in the
+// markup instead.
 $("startBtn").onclick = startCamera;
 $("stopBtn").onclick = stopCamera;
 $("switchBtn").onclick = async () => {
