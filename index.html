@@ -143,6 +143,11 @@
         <option value="gohan_ss_v4">Gohan (SS v4)</option>
       </select>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
+                  font-size:13.5px;color:var(--ink)">
+      <input type="checkbox" id="saveVideo" style="width:auto;margin:0">
+      Also keep the video in the export
+    </label>
     <button id="startBtn" disabled>Start camera</button>
     <button class="ghost" id="fileBtn">Analyse a video file</button>
     <input id="fileInput" type="file" accept="video/*" class="hidden">
@@ -189,6 +194,7 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          buildSquatFeatures, computePxPerM, jointPositionsM } from "./pullupkit.js";
 import { inverseDynamics } from "./dynamics.js";
 import { Overlay } from "./overlay.js";
+import { makeZip, svgToPng, blobBytes } from "./zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
          MAX_PLAUSIBLE_FORCE_N } from "./forces.js";
 
@@ -226,6 +232,8 @@ const say = (t, warn) => { statusEl.textContent = t; statusEl.classList.toggle("
 let landmarker = null, stream = null, running = false, recording = false;
 let muscleJoints = null;   // { muscleJoints: {name:[joints]}, byJoint: {joint:[names]} }
 let avatar = null, avatarBusy = false;
+let recorder = null, videoChunks = [], videoBlob = null;
+let selectRep = null;   // set by render(), so the export can page through reps
 
 async function setAvatar(name) {
   const cv = $("avatarCanvas");
@@ -408,6 +416,16 @@ async function startCameraQuiet() {
 $("recBtn").onclick = () => {
   if (!recording) {
     frames = []; recording = true;
+    videoBlob = null; videoChunks = [];
+    // Opt-in, off by default. The recording is held in memory and only ever
+    // written to the user's own download; nothing is uploaded.
+    if ($("saveVideo").checked && stream && window.MediaRecorder) {
+      try {
+        recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+        recorder.ondataavailable = (e) => { if (e.data.size) videoChunks.push(e.data); };
+        recorder.start();
+      } catch { recorder = null; }
+    }
     $("recBtn").textContent = "Stop and analyse";
     $("results").classList.add("hidden");
     say("Recording. Do your set, then stop.");
@@ -415,6 +433,13 @@ $("recBtn").onclick = () => {
     recording = false;
     $("recBtn").textContent = "Start recording";
     $("hudRight").textContent = "";
+    if (recorder && recorder.state !== "inactive") {
+      recorder.onstop = () => {
+        videoBlob = new Blob(videoChunks, { type: "video/webm" });
+        recorder = null;
+      };
+      recorder.stop();
+    }
     finish();
   }
 };
@@ -725,6 +750,139 @@ function forcePanel(rep) {
       cannot be measured from one camera and take the training mean.</p>`;
 }
 
+function csvFromColumns(header, cols, n) {
+  const lines = [header.join(",")];
+  for (let i = 0; i < n; i++) lines.push(header.map((h, k) => {
+    const v = cols[k][i];
+    return typeof v === "number" ? v.toFixed(6) : v;
+  }).join(","));
+  return lines.join("\n") + "\n";
+}
+
+/** Everything from this session in one archive: data, plots and (optionally)
+ *  the video. Built locally -- nothing is uploaded at any point. */
+async function exportZip(res, fps) {
+  const st = $("zipStatus");
+  const note = (t) => { st.textContent = t; };
+  try {
+    note("Collecting…");
+    const files = [];
+    const cols = ACTIVITIES[res.activity].columns;
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+
+    for (const r of res.reps) {
+      const d = `rep${r.rep}/`;
+      files.push({ name: d + "joint_angles.mot",
+                   data: writeMot("joint_angles", cols, r.times, r.coords) });
+      if (r.dyn) {
+        const dc = ["hip_moment", "knee_moment", "ankle_moment",
+                    "grf_vertical", "grf_horizontal"];
+        files.push({ name: d + "joint_moments.sto",
+                     data: writeMot("joint_moments", dc, r.times,
+                       Object.fromEntries(dc.map((k) => [k, r.dyn[k]]))) });
+      }
+      if (r.forces && r.forces.length) {
+        const header = ["time", ...r.forceNames];
+        const colArr = [r.times, ...r.forceNames.map((_, j) => r.forces.map((row) => row[j]))];
+        files.push({ name: d + "muscle_forces.csv",
+                     data: csvFromColumns(header, colArr, r.times.length) });
+      }
+    }
+
+    // Plots: page through the reps so each one's charts are in the DOM.
+    note("Rendering plots…");
+    for (let i = 0; i < res.reps.length; i++) {
+      if (selectRep) selectRep(i);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const svgs = document.querySelectorAll("#results svg.chart");
+      let k = 0;
+      for (const svg of svgs) {
+        const png = await svgToPng(svg, 1100);
+        if (!png) continue;
+        // Name each plot from its own legend, so the files are self-describing
+        // rather than rep1_02.png.
+        const leg = svg.nextElementSibling;
+        const labels = leg && leg.classList.contains("legend")
+          ? [...leg.querySelectorAll("span")].map((x) => x.textContent.trim())
+              .filter((t) => t && !/^N(·m)?$/.test(t))
+          : [];
+        const slug = (labels.slice(0, 3).join("_") || `chart${++k}`)
+          .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+        files.push({ name: `plots/rep${res.reps[i].rep}_${String(++k).padStart(2, "0")}_${slug}.png`,
+                     data: await blobBytes(png) });
+      }
+    }
+
+    if (videoBlob && videoBlob.size) {
+      note(`Adding video (${(videoBlob.size / 1e6).toFixed(1)} MB)…`);
+      files.push({ name: "video.webm", data: await blobBytes(videoBlob) });
+    }
+
+    const summary = {
+      generated: new Date().toISOString(),
+      activity: res.activity, osim_model: res.osimModel,
+      fps: +fps.toFixed(2), pose_coverage: +res.coverage.toFixed(3),
+      px_per_m: +res.pxPerM.toFixed(2), camera_view: res.view,
+      body_mass_kg: res.massKg, added_kg: res.addedKg, assistance_kg: res.assistKg,
+      net_external_kg: res.externalKg,
+      reps: res.reps.map((r) => ({
+        rep: r.rep, duration_s: +r.duration_s.toFixed(3),
+        peak_moments_Nm: r.dyn ? {
+          hip: +Math.max(...r.dyn.hip_moment.map(Math.abs)).toFixed(1),
+          knee: +Math.max(...r.dyn.knee_moment.map(Math.abs)).toFixed(1),
+          ankle: +Math.max(...r.dyn.ankle_moment.map(Math.abs)).toFixed(1),
+        } : null,
+      })),
+    };
+    files.push({ name: "session.json", data: JSON.stringify(summary, null, 2) });
+    files.push({ name: "README.txt", data:
+`BioScout Web export — ${stamp}
+Activity: ${res.activity}   frame rate: ${fps.toFixed(1)} fps
+Camera view: ${res.view?.view ?? "?"} (frontality ${res.view?.frontality ?? "?"})
+
+repN/joint_angles.mot    OpenSim coordinates, signed for ${res.osimModel}
+                         (knee flexion NEGATIVE). pelvis_ty is an ABSOLUTE
+                         height above the floor, not a displacement.
+repN/joint_moments.sto   hip/knee/ankle moments (N.m, extension positive, per
+                         leg) and ground reaction (N, both legs).
+repN/muscle_forces.csv   80 muscles, per frame, in newtons. SEE WARNING BELOW.
+plots/                   PNG of every chart shown in the app.
+session.json             summary and settings used.
+${videoBlob ? "video.webm              the recorded clip.\n" : ""}
+WHAT TO TRUST
+  Joint angles, range of motion, rep count and depth are measured.
+  Joint moments are inverse dynamics from body mass; the ground reaction is
+  derived from whole-body centre-of-mass acceleration, not assumed. Centre of
+  pressure is taken as the midfoot and the legs are assumed symmetric.
+  Durations depend on the frame rate the browser delivered — treat as
+  approximate.
+  Left and right are mirrored: one camera cannot separate the sides.
+
+WHAT NOT TO TRUST
+  muscle_forces.csv comes from a surrogate that FAILS ITS OWN AUDIT: on a real
+  trial from its own gait training set it predicts 113,250 N, where the largest
+  human muscle produces a few thousand. The waveform SHAPES look plausible; the
+  magnitudes are wrong by orders of magnitude. Do not publish these numbers.
+
+  Sagittal angles are only valid filmed from the side. This session was
+  ${res.view?.view ?? "?"}.
+` });
+
+    note("Packing…");
+    const blob = makeZip(files);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bioscout_${res.activity}_${stamp}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
+    note(`Saved ${files.length} files, ${(blob.size / 1e6).toFixed(1)} MB.`);
+  } catch (err) {
+    note("Export failed: " + err.message);
+  }
+}
+
 function render(res, fps) {
   const el = $("results");
   el.classList.remove("hidden");
@@ -759,6 +917,8 @@ function render(res, fps) {
     <div class="tabs" id="repTabs" style="margin-top:14px"></div>
     <div id="chartBox"></div>
     <button class="ghost" id="dlBtn" style="margin-top:12px">Download angles (.mot) + moments (.sto)</button>
+    <button class="ghost" id="zipBtn" style="margin-top:8px">Download everything (.zip)</button>
+    <div class="status" id="zipStatus"></div>
     ${viewNote(res)}
     <div id="dynBox"></div>
     <div id="forceBox"></div>
@@ -774,6 +934,7 @@ function render(res, fps) {
     b.onclick = () => select(i);
     tabs.appendChild(b);
   });
+  selectRep = select;
   function select(i) {
     [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
     $("chartBox").innerHTML = chart(res.reps[i], res.activity);
@@ -790,6 +951,8 @@ function render(res, fps) {
     $("forceBox").innerHTML = forcePanel(res.reps[i]);
   }
   select(0);
+
+  $("zipBtn").onclick = () => exportZip(res, fps);
 
   $("dlBtn").onclick = () => {
     const cols = ACTIVITIES[res.activity].columns;

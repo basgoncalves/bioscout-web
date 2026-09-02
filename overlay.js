@@ -28,7 +28,7 @@ import * as THREE from "./vendor/three.module.min.js";
 
 // MediaPipe pose landmark indices.
 const L = {
-  nose: 0, lShoulder: 11, rShoulder: 12, lElbow: 13, rElbow: 14,
+  nose: 0, lEar: 7, rEar: 8, lShoulder: 11, rShoulder: 12, lElbow: 13, rElbow: 14,
   lWrist: 15, rWrist: 16, lIndex: 19, rIndex: 20,
   lHip: 23, rHip: 24, lKnee: 25, rKnee: 26, lAnkle: 27, rAnkle: 28,
   lHeel: 29, rHeel: 30, lToe: 31, rToe: 32,
@@ -121,7 +121,9 @@ export class Overlay {
         geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
       }
       geo.computeVertexNormals();
+      geo.computeBoundingBox();
       const mesh = new THREE.Mesh(geo, mat.clone());
+      mesh.userData.bbox = geo.boundingBox.clone();
       mesh.matrixAutoUpdate = false;
       mesh.visible = false;
       this.group.add(mesh);
@@ -184,8 +186,10 @@ export class Overlay {
       rElbow: P(L.rElbow), lElbow: P(L.lElbow),
       rWrist: P(L.rWrist), lWrist: P(L.lWrist),
       rIndex: P(L.rIndex), lIndex: P(L.lIndex),
+      lEar: P(L.lEar), rEar: P(L.rEar),
       hipMid: mid(L.lHip, L.rHip), shoulderMid: mid(L.lShoulder, L.rShoulder),
     };
+    pts.headCentre = pts.lEar.clone().add(pts.rEar).multiplyScalar(0.5);
     pts.backJoint = pts.hipMid.clone().lerp(pts.shoulderMid, 0.12);
 
     // The subject's right, in scene space. OpenSim's local +z is the same.
@@ -207,6 +211,7 @@ export class Overlay {
     const fallbackScale = measured.length ? measured[measured.length >> 1] : pxPerM;
 
     for (const r of RIG) {
+      if (r.body === "skull") continue;          // handled above
       const mesh = this.meshes[r.body];
       if (!mesh) continue;
       const w0 = pts[r.from], w1 = pts[r.to];
@@ -254,6 +259,66 @@ export class Overlay {
       mesh.matrixWorldNeedsUpdate = true;
       mesh.visible = true;
     }
+
+    // The skull is placed last, and differently. It has no child joint in the
+    // model (the cervical chain is dropped from the rig), so the two-anchor
+    // scheme had nothing to span and stretched it along shoulder->nose -- the
+    // spike over the face. Instead: sit it on the torso's own neck anchor so
+    // the two actually meet, size it from the measured ear span, and orient it
+    // from the head. Ears drive size and roll; the torso decides where it sits.
+    const skull = this.meshes.skull, torsoMesh = this.meshes.torso;
+    if (skull && skull.userData.bbox) {
+      const bb = skull.userData.bbox;
+      const size = new THREE.Vector3(); bb.getSize(size);
+      const centre = new THREE.Vector3(); bb.getCenter(centre);
+      const earW = pts.lEar.distanceTo(pts.rEar);
+      const modelW = Math.max(size.z, 1e-4);
+      const sk = earW > 2 ? (earW * 1.45) / modelW : fallbackScale * 0.2;
+
+      const up = pts.headCentre.clone().sub(pts.shoulderMid);
+      if (up.lengthSq() > 1e-6) {
+        up.normalize();
+        const lat = pts.rEar.clone().sub(pts.lEar);
+        const b3 = lat.lengthSq() > 1e-6
+          ? lat.normalize().sub(up.clone().multiplyScalar(lat.dot(up))).normalize()
+          : worldRight.clone();
+        const b1 = up, b2 = b3.clone().cross(b1);
+        const a1 = new THREE.Vector3(0, 1, 0), a3 = new THREE.Vector3(0, 0, 1);
+        const a2 = a3.clone().cross(a1);
+        const A = new THREE.Matrix4().makeBasis(a1, a2, a3);
+        const B = new THREE.Matrix4().makeBasis(b1, b2, b3);
+        const R = B.multiply(A.transpose());
+        const M = new THREE.Matrix4().multiplyMatrices(
+          R, new THREE.Matrix4().makeScale(sk, sk, sk));
+
+        // Where the neck ends, in world: the torso's own cerv7 anchor.
+        const tAnch = this.anchors.torso || {};
+        let neck = null;
+        if (torsoMesh && torsoMesh.visible && tAnch.cerv7) {
+          neck = v3(tAnch.cerv7).applyMatrix4(torsoMesh.matrix);
+        }
+        // Put the BOTTOM of the skull there, then blend toward the measured
+        // head centre so a bad torso scale cannot drag the head off the face.
+        const bottomLocal = new THREE.Vector3(centre.x, bb.min.y, centre.z);
+        const bottomShift = bottomLocal.clone().applyMatrix4(M);
+        const target = neck
+          ? neck.clone().lerp(
+              pts.headCentre.clone().sub(
+                new THREE.Vector3().subVectors(
+                  centre.clone().applyMatrix4(M), bottomShift)), 0.5)
+          : pts.headCentre.clone().sub(
+              new THREE.Vector3().subVectors(centre.clone().applyMatrix4(M), bottomShift));
+        M.setPosition(target.x - bottomShift.x,
+                      target.y - bottomShift.y,
+                      target.z - bottomShift.z);
+        skull.matrix.copy(M);
+        skull.matrixWorldNeedsUpdate = true;
+        skull.visible = true;
+      } else {
+        skull.visible = false;
+      }
+    }
+
     this.renderer.render(this.scene, this.camera);
   }
 
