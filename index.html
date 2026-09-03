@@ -124,6 +124,17 @@
       <button class="ghost" id="saveProfileBtn" style="margin:0;padding:9px">Save profile</button>
       <button class="ghost" id="delProfileBtn" style="margin:0;padding:9px">Delete</button>
     </div>
+    <div class="row" style="margin-bottom:6px">
+      <button class="ghost" id="exportProfilesBtn" style="margin:0;padding:9px">Export my data</button>
+      <button class="ghost" id="importProfilesBtn" style="margin:0;padding:9px">Import</button>
+    </div>
+    <input id="importProfilesFile" type="file" accept="application/json,.json" class="hidden">
+    <p class="note" style="margin:0 0 11px">Profiles and training history live on
+      <b>this device only</b> — there is no account and nothing is uploaded, so
+      nobody else can see your sessions and neither can I. To carry them to
+      another phone or laptop, export the file here and import it there. That
+      is a manual step, not background sync: without a server there is no
+      honest way to make it automatic.</p>
 
     <div class="row" style="margin-bottom:11px">
       <div>
@@ -216,8 +227,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v14";
-try { document.getElementById("build").textContent = "build v14"; } catch (e) {}
+window.BUILD = "v15";
+try { document.getElementById("build").textContent = "build v15"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -235,7 +246,8 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
 import { inverseDynamics } from "./dynamics.js";
 import { classify, MIN_CONFIDENCE } from "./detect.js";
 import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
-         newSession, getSession, clearSession, addSet, summariseSession }
+         newSession, getSession, clearSession, addSet, summariseSession,
+         archiveSession, listArchive, exportAll, importAll }
        from "./profiles.js";
 import { Overlay } from "./overlay.js";
 import { ensembleRep } from "./ensemble.js";
@@ -393,6 +405,47 @@ $("saveProfileBtn").onclick = () => {
          : "Could not save — browser storage is unavailable here.", !ok);
   refreshProfiles(s.name);
 };
+$("exportProfilesBtn").onclick = () => {
+  try {
+    const data = exportAll();
+    const who = ($("profile").value || $("profileName").value || "")
+      .replace(/[^\w-]+/g, "_");
+    const stamp = new Date().toISOString().slice(0, 10);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `bioscout_${who ? who + "_" : ""}${stamp}.json`;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
+    const n = (data.archive || []).length;
+    say(`Exported ${data.profiles.profiles.length} profile(s), ${n} past session(s)` +
+        `${data.session ? " and the open session" : ""}.`);
+  } catch (err) {
+    say("Export failed: " + err.message, true);
+  }
+};
+$("importProfilesBtn").onclick = () => $("importProfilesFile").click();
+$("importProfilesFile").onchange = async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";                     // so the same file can be picked twice
+  if (!f) return;
+  try {
+    const rep = importAll(JSON.parse(await f.text()));
+    refreshProfiles($("profile").value || lastUsedProfile()?.name || "");
+    const p = getProfile($("profile").value);
+    if (p) applyProfile(p);
+    renderTraining();
+    const bits = [];
+    if (rep.profilesAdded) bits.push(`${rep.profilesAdded} new profile(s)`);
+    if (rep.profilesUpdated) bits.push(`${rep.profilesUpdated} updated`);
+    if (rep.sessionsAdded) bits.push(`${rep.sessionsAdded} session(s) into history`);
+    if (rep.sessionAdopted) bits.push("picked up the open session");
+    say(bits.length ? "Imported " + bits.join(", ") + "."
+                    : "Nothing new — this device already has everything in that file.");
+  } catch (err) {
+    say("Import failed: " + err.message, true);
+  }
+};
 $("delProfileBtn").onclick = () => {
   const n = $("profile").value;
   if (!n) return;
@@ -522,7 +575,9 @@ function renderTraining() {
     <h1 style="font-size:17px;margin:0 0 2px">Training session</h1>
     <p class="sub" style="margin-bottom:10px">${sess.profile ? sess.profile + " · " : ""}
       ${sess.sets.length} set${sess.sets.length===1?"":"s"} · ${total} reps ·
-      started ${new Date(sess.started).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</p>
+      started ${new Date(sess.started).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}${
+        (() => { const n = listArchive().length;
+                 return n ? ` · ${n} past session${n===1?"":"s"} on this device` : ""; })()}</p>
     <table><thead><tr><th>Set</th><th>Movement</th><th>Reps</th><th>Load</th>
       <th>${vars.length
             ? `<select id="peakVar" class="thsel">${varOpts}</select>`
@@ -534,9 +589,12 @@ function renderTraining() {
     <button class="ghost" id="newSessionBtn" style="margin-top:8px">Start a new session</button>
     <div id="summaryBox"></div>`;
   $("newSessionBtn").onclick = () => {
-    clearSession(); newSession($("profile").value || null);
+    // File the old one rather than dropping it: the export is only worth
+    // moving between devices if there is history in it.
+    const kept = archiveSession();
+    newSession($("profile").value || null);
     $("trainingCard").classList.add("hidden");
-    say("New training session started.");
+    say(`New training session started. ${kept} past session(s) kept on this device.`);
   };
   $("summaryBtn").onclick = () => renderSummary();
   const pv = $("peakVar");
@@ -1472,6 +1530,10 @@ async function exportZip(res, fps) {
     const training = getSession();
     if (training && training.sets.length) {
       files.push({ name: "training/sets.json", data: JSON.stringify(training, null, 2) });
+      const past = listArchive();
+      if (past.length) {
+        files.push({ name: "training/history.json", data: JSON.stringify(past, null, 2) });
+      }
       const ts = summariseSession(training);
       files.push({ name: "training/summary.json", data: JSON.stringify(ts, null, 2) });
       const hdr = ["set", "activity", "reps", "added_kg", "assist_kg", "at"];

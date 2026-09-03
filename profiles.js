@@ -14,6 +14,12 @@
  */
 const PKEY = "bioscout.profiles.v1";
 const SKEY = "bioscout.session.v1";
+const AKEY = "bioscout.archive.v1";
+
+// Finished sessions kept per device. Capped, because localStorage is a few
+// megabytes and silently starts throwing when it is full -- and the thing it
+// would break is the profile the athlete is standing there trying to use.
+const ARCHIVE_MAX = 50;
 
 function read(key, fallback) {
   try {
@@ -71,6 +77,100 @@ export function getSession() {
 
 export function clearSession() {
   try { localStorage.removeItem(SKEY); } catch { /* ignore */ }
+}
+
+// --- archive ---------------------------------------------------------------
+export function listArchive() {
+  const a = read(AKEY, []);
+  return Array.isArray(a) ? a : [];
+}
+
+/** File the open session and clear it. Returns the number kept.
+ *  A session with no sets is dropped rather than archived: an empty entry is
+ *  not history, it is a session someone started and walked away from. */
+export function archiveSession() {
+  const s = getSession();
+  clearSession();
+  if (!s || !s.sets || !s.sets.length) return listArchive().length;
+  const a = listArchive();
+  // `started` is the identity: importing the same file twice must not double
+  // the history, and two sessions cannot begin at the same millisecond.
+  if (!a.some((x) => x.started === s.started)) a.push(s);
+  a.sort((x, y) => String(x.started).localeCompare(String(y.started)));
+  const trimmed = a.slice(-ARCHIVE_MAX);
+  write(AKEY, trimmed);
+  return trimmed.length;
+}
+
+// --- export and import -----------------------------------------------------
+/* No server, so no automatic sync. What there is instead: one file carrying
+ * everything this device knows, which the athlete moves themselves. That is a
+ * real limitation and the app says so rather than implying otherwise. */
+export const EXPORT_VERSION = 1;
+
+export function exportAll() {
+  return {
+    format: "bioscout-profile-export",
+    version: EXPORT_VERSION,
+    exported: new Date().toISOString(),
+    profiles: listProfiles(),
+    session: getSession(),
+    archive: listArchive(),
+  };
+}
+
+/**
+ * Merge an exported file into this device. Merging, not replacing: importing
+ * on a phone that already has a session must not throw that session away, and
+ * a re-import of the same file must be a no-op.
+ *
+ * Returns a report so the app can say what actually happened instead of a
+ * blanket "imported".
+ */
+export function importAll(data) {
+  if (!data || data.format !== "bioscout-profile-export") {
+    throw new Error("not a BioScout export file");
+  }
+  if (!(data.version <= EXPORT_VERSION)) {
+    throw new Error(`file is from a newer version (${data.version}) than this app understands`);
+  }
+  const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0, sessionAdopted: false };
+
+  const store = listProfiles();
+  for (const p of (data.profiles && data.profiles.profiles) || []) {
+    if (!p || !p.name) continue;
+    const i = store.profiles.findIndex((x) => x.name === p.name);
+    if (i < 0) { store.profiles.push(p); report.profilesAdded++; continue; }
+    const merged = { ...store.profiles[i], ...p };
+    // Only count a change that IS one: re-importing the same file should
+    // report "nothing new", not invent an update.
+    if (JSON.stringify(merged) !== JSON.stringify(store.profiles[i])) {
+      store.profiles[i] = merged; report.profilesUpdated++;
+    }
+  }
+  if (data.profiles && data.profiles.lastUsed) store.lastUsed = data.profiles.lastUsed;
+  write(PKEY, store);
+
+  const a = listArchive();
+  const seen = new Set(a.map((x) => x.started));
+  for (const s of data.archive || []) {
+    if (!s || !s.started || seen.has(s.started)) continue;
+    a.push(s); seen.add(s.started); report.sessionsAdded++;
+  }
+  // The open session on the other device is history here unless this device
+  // has nothing open -- in which case adopt it, so a phone handed over
+  // mid-workout carries on rather than starting again.
+  const incoming = data.session;
+  const open = getSession();
+  const alreadyHere = incoming &&
+    (seen.has(incoming.started) || (open && open.started === incoming.started));
+  if (incoming && incoming.sets && incoming.sets.length && !alreadyHere) {
+    if (!open) { write(SKEY, incoming); report.sessionAdopted = true; }
+    else { a.push(incoming); report.sessionsAdded++; }
+  }
+  a.sort((x, y) => String(x.started).localeCompare(String(y.started)));
+  write(AKEY, a.slice(-ARCHIVE_MAX));
+  return report;
 }
 
 /** Append one recording as the next set. Returns the stored (summary) set. */
