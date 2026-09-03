@@ -64,3 +64,34 @@ console.log('same clip called a CMJ -> mismatch:', asCmj.reps.map(r => r.mismatc
 const sq = clip({ fps: 60, jumpH: 0.0001, cmv: 0.30 });
 const noJump = K.analyse(sq.poses, 60, { heightM: 1.81, activity: 'cmj', osimModel: 'gpk' });
 console.log('a squat analysed as a jump -> reps found:', noJump.reps.length, '(want 0)');
+
+// ---------------------------------------------------------------------------
+// The failure that produced a 1.99 s "flight" and a 484 cm jump: the foot
+// signal goes up and never comes back, which is what a lost or out-of-frame
+// foot looks like. It must be refused, not reported.
+// ---------------------------------------------------------------------------
+function lostFoot({ fps = 60, pxPerM = 293 }) {
+  const H = [], FOOT = [], stand = 0.95;
+  for (let i = 0; i < 60; i++) { H.push(stand); FOOT.push(0); }
+  for (let i = 0; i < 20; i++) { H.push(stand); FOOT.push(0.20 * (i + 1) / 20); }
+  for (let i = 0; i < 140; i++) { H.push(stand); FOOT.push(0.20 + 0.01 * Math.sin(i / 3)); }
+  const poses = {};
+  H.forEach((h, i) => {
+    const hipY = 1000 - h * pxPerM, footY = 1000 - FOOT[i] * pxPerM;
+    const kneeY = footY - 0.42 * pxPerM, shY = hipY - 0.45 * pxPerM;
+    poses[i] = {
+      left_shoulder: [240, shY], right_shoulder: [260, shY],
+      left_hip: [245, hipY], right_hip: [255, hipY],
+      left_knee: [245, kneeY], right_knee: [255, kneeY],
+      left_ankle: [245, footY], right_ankle: [255, footY],
+      left_foot_index: [265, footY + 4], right_foot_index: [275, footY + 4],
+      left_elbow: [235, shY + 110], right_elbow: [265, shY + 110],
+      left_wrist: [235, shY + 220], right_wrist: [265, shY + 220],
+    };
+  });
+  return poses;
+}
+const lost = K.analyse(lostFoot({}), 60, { heightM: 1.81, activity: 'sj', osimModel: 'gpk' });
+console.log('lost foot ->', lost.reps.length, 'jump(s)',
+  lost.reps.map(r => `${r.flight_s}s / ${(r.height_flight_m*100).toFixed(0)}cm`).join(', ') || '(none)',
+  '  [want none, or a flagged one -- never a bare 484 cm]');

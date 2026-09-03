@@ -323,8 +323,11 @@ export function buildSquatFeatures(poses) {
 
   F._lo = lo; F._n = n; F._scale = scale; F._standY = standY;
   // Floor level in image pixels: the lowest foot position observed.
+  // The floor is where the feet spend their time, not the single lowest pixel
+  // any foot ever reached. One dropped frame or one crouch put the floor below
+  // the feet for the whole clip, and everything after looked airborne.
   const feet = [...F.toe_cy, ...F.ankle_cy].filter(isNum);
-  F._floorY = feet.length ? Math.max(...feet) : 0;
+  F._floorY = feet.length ? nanpercentile(feet, 97) : 0;
   F._coverage = frames.length / n;
   return F;
 }
@@ -622,17 +625,29 @@ export function jointPositionsM(F, rep, pxPerM, floorY) {
  */
 export const DEFAULT_JUMP_CFG = {
   smoothWin: 3,
-  // Foot rise that counts as airborne, as a fraction of shank length (~0.4 m),
-  // so it scales with the athlete and the camera distance. 0.15 is about 6 cm:
-  // far above heel lift in a deep squat, far below any real flight.
-  liftFrac: 0.15,
+  // Foot rise that counts as airborne, as a fraction of F._scale, so it scales
+  // with the athlete and the camera distance.
+  //
+  // F._scale is the median HIP-TO-ANKLE distance -- standing hip height, about
+  // 0.95 m on a 1.81 m athlete -- not the shank. Reading it as a shank made
+  // every threshold here 2.3x what was intended: the take-off edge sat at 4.8
+  // cm instead of 2 cm, so the first airborne frames were missed and the flight
+  // came up 3 cm short at 60 fps. 0.07 is about 6.6 cm: above heel lift in a
+  // deep squat, below any real flight.
+  liftFrac: 0.07,
   // The threshold that FINDS a jump is the wrong one to TIME it with. Timing
   // from the moment the foot passes 6 cm cost 30% of the flight in testing
   // (0.35 s measured against 0.50 s true), because the foot spends real time
   // between the floor and 6 cm at both ends. So the edges are located at a
   // near-floor threshold instead, and the crossing is interpolated between
   // frames -- which also buys back most of the frame-rate resolution.
-  edgeFrac: 0.02,
+  // About 1.4 cm of hip height: above pose jitter, low enough that the first
+  // airborne frames are not skipped. What actually caused the 0.4 s flight to
+  // be read as 1.99 s -- a 48 cm jump as 484 cm -- was not this threshold but
+  // the walk out to it running unbounded to the ends of the window. The walk
+  // is capped now, so the edge can stay where the physics wants it.
+  edgeFrac: 0.015,
+  maxEdgeWalkS: 0.10,   // the foot clears 2 cm in a frame or two, not in half a second
   minFlightFrames: 2,     // 2 frames at 30 fps is a 6.7 cm jump -- the floor
   maxFlightFrames: 60,
   // A countermovement is a dip below the starting hip height, as a fraction of
@@ -731,17 +746,35 @@ export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
 
   // Walk out to the near-floor crossings, then interpolate between the two
   // frames that straddle each one for a sub-frame instant.
+  const walk = Math.max(1, Math.round(cfg.maxEdgeWalkS * fps));
+  const aMin = Math.max(t0, takeoff - walk), bMax = Math.min(t1, land + walk);
   let a = takeoff;
-  while (a > t0 && riseRaw[a - 1] > edge) a--;
+  while (a > aMin && riseRaw[a - 1] > edge) a--;
   let b2 = land;
-  while (b2 < t1 && riseRaw[b2 + 1] > edge) b2++;
-  const cross = (i, j) => {
+  while (b2 < bMax && riseRaw[b2 + 1] > edge) b2++;
+  /* Find the edge with a threshold that sits above pose jitter, then read the
+   * instant off the AIRBORNE side of it.
+   *
+   * Timing the crossing of a 2 cm threshold rather than the floor shortens the
+   * flight systematically -- 2 to 4 cm of height at 60 fps in testing. But the
+   * two frames either side of the threshold straddle the take-off itself: the
+   * earlier one has the foot still on the floor, so a line through them is not
+   * the foot's trajectory and extrapolating it lands early. The first two
+   * frames that are genuinely in the air are on the trajectory, and just after
+   * take-off the foot rises very nearly linearly, so the line through those,
+   * run back to zero, is the take-off instant. Same argument in reverse for
+   * touch-down. Clamped to one frame either side, since the crossing cannot be
+   * further away than that.
+   */
+  const zeroBefore = (i, j) => {          // i, j airborne; j is further in
     const yi = riseRaw[i], yj = riseRaw[j];
-    if (!Number.isFinite(yi) || !Number.isFinite(yj) || yj === yi) return i;
-    return i + (edge - yi) / (yj - yi);
+    if (!Number.isFinite(yi) || !Number.isFinite(yj) || yi === yj) return i;
+    const t = i + (0 - yi) * (j - i) / (yj - yi);
+    const lo = Math.min(i, i - (j - i)), hi = Math.max(i, i - (j - i));
+    return Math.max(lo, Math.min(hi, t));
   };
-  const offF = a > 0 ? cross(a - 1, a) : a;          // rising through the edge
-  const onF = b2 < rise.length - 1 ? cross(b2 + 1, b2) : b2;  // falling back
+  const offF = a + 1 <= b2 ? zeroBefore(a, a + 1) : a;
+  const onF = b2 - 1 >= a ? zeroBefore(b2, b2 - 1) : b2;
   const G = 9.80665;
   const flight_s = Math.max(0, (onF - offF)) / fps;
   const height_flight_m = (G * flight_s * flight_s) / 8;
@@ -768,7 +801,24 @@ export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
   const countermovement_m = pxPerM > 0 ? dip_px / pxPerM : NaN;
   const hasCountermovement = dip_px > cfg.dipFrac * (F._scale || 1);
 
+  /* Two guards, because a number in a table is read as a measurement.
+   *
+   * A flight longer than the detector will accept is not a flight -- it is the
+   * foot signal never coming back to the floor, which is what a lost or
+   * out-of-frame foot looks like.
+   *
+   * And the two heights are independent: flight time knows nothing about the
+   * pixel scale, hip rise knows nothing about gravity. When they disagree by
+   * more than a factor of two something is wrong with one of them, and which
+   * one is not knowable from here. */
+  const tooLong = flight_s > cfg.maxFlightFrames / fps;
+  const comH = Number.isFinite(height_com_m) ? height_com_m : null;
+  const disagree = comH != null && comH > 0.02
+    && (height_flight_m > 2.2 * comH || comH > 2.2 * height_flight_m);
+  if (tooLong) return null;
+
   return {
+    implausible: disagree,
     takeoff_frame: offIdx, land_frame: b2, apex_frame: apex,
     flight_s: +flight_s.toFixed(3),
     height_flight_m: +height_flight_m.toFixed(3),

@@ -242,8 +242,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v22";
-try { document.getElementById("build").textContent = "build v22"; } catch (e) {}
+window.BUILD = "v23";
+try { document.getElementById("build").textContent = "build v23"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -2122,11 +2122,13 @@ function render(res, fps) {
   const cm = (v, dp = 1) => (v == null ? "—" : (v * 100).toFixed(dp));
   const jumpRows = !isJump ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
       <td>${r.flight_s == null ? "—" : r.flight_s.toFixed(3)}</td>
-      <td>${r.height_flight_m == null ? "—" : cm(r.height_flight_m) +
-            `<span class="sub"> ±${cm(r.flight_uncertainty_m)}</span>`}</td>
+      <td${r.implausible ? ' style="color:var(--warn)"' : ""}>${
+        r.height_flight_m == null ? "—" : cm(r.height_flight_m) +
+        `<span class="sub"> ±${cm(r.flight_uncertainty_m)}</span>`}</td>
       <td>${cm(r.height_com_m)}</td><td>${cm(r.countermovement_m)}</td>
       <td>${r.push_s == null ? "—" : r.push_s.toFixed(2)}</td></tr>`).join("");
   const mismatched = isJump ? res.reps.filter((r) => r.mismatch) : [];
+  const suspect = isJump ? res.reps.filter((r) => r.implausible) : [];
 
   // Built only when it will be used: a jump has no eccentric_s or
   // concentric_s -- its phases are push and landing -- so computing these rows
@@ -2177,6 +2179,13 @@ function render(res, fps) {
       ${res.view?.view ?? "?"} view · .mot signed for ${res.osimModel}</p>
     ${setSwitcher(res)}
     <table><thead>${head}</thead><tbody>${isJump ? jumpRows : rows}${meanRow}</tbody></table>
+    ${suspect.length ? `<p class="note banner">The two heights disagree by more
+      than a factor of two on ${suspect.length} of ${n}. They are independent —
+      flight time knows nothing about the pixel scale, hip rise knows nothing
+      about gravity — so when they diverge one of them is wrong and which is not
+      knowable from here. Usual causes: a foot leaving the frame, or a view too
+      far from side-on for the hip to be tracked cleanly. Re-shoot with the
+      whole body in frame and side on before believing either number.</p>` : ""}
     ${mismatched.length ? `<p class="note banner">${mismatched.length} of ${n}
       ${res.activity === "sj"
         ? `had a countermovement: the hip dipped before the push. A squat jump
