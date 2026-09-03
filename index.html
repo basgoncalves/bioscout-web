@@ -242,8 +242,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v23";
-try { document.getElementById("build").textContent = "build v23"; } catch (e) {}
+window.BUILD = "v24";
+try { document.getElementById("build").textContent = "build v24"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -1211,6 +1211,13 @@ function viewNote(res) {
       Knee, hip and ankle angles are sagittal measurements and are only valid
       filmed from the side. Re-shoot side on.`);
   }
+  if (ACTIVITIES[res.activity]?.jump && (v.view === "frontal" || v.view === "oblique")
+      && res.reps.length) {
+    bits.push(`Filmed <b>${v.view}</b>. Flight time survives that, but the hip-rise
+      height does not: it measures vertical travel in the image, and off the
+      sagittal plane the hip moves toward or away from the camera as well. If
+      the two heights disagree, this is the first thing to fix.`);
+  }
   if (sagittal && v.ankle_usable === false) {
     bits.push(`Ankle angle could not be measured — the foot is pointing at or
       away from the camera, which flattens the knee-ankle-toe angle. It is
@@ -2046,10 +2053,16 @@ function render(res, fps) {
   const isSquat = res.activity === "squat";
 
   if (!n) {
-    el.innerHTML = `<h1 style="font-size:17px">No ${ACTIVITIES[res.activity].label} reps found</h1>
-      <p class="note">Pose coverage ${(res.coverage * 100).toFixed(0)}%. Check your whole
-      body stayed in frame and the phone did not move. Partial reps may fall under the
-      detection threshold.</p>`;
+    el.innerHTML = `<h1 style="font-size:17px">No ${ACTIVITIES[res.activity].label} found</h1>
+      ${res.refused === "feet" ? `<p class="note banner">The feet were only in
+        frame for ${((res.footCoverage ?? 0) * 100).toFixed(0)}% of the clip.
+        A jump is measured entirely from the feet — when they leave the picture
+        MediaPipe keeps reporting a position for them anyway, and that guess
+        drifts, which reads as flight. Step back until your feet and head are
+        both in frame, film side on, and try again.</p>`
+      : `<p class="note">Pose coverage ${(res.coverage * 100).toFixed(0)}%. Check your whole
+        body stayed in frame and the phone did not move. Partial reps may fall under the
+        detection threshold.</p>`}`;
     return;
   }
 

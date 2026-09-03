@@ -95,3 +95,59 @@ const lost = K.analyse(lostFoot({}), 60, { heightM: 1.81, activity: 'sj', osimMo
 console.log('lost foot ->', lost.reps.length, 'jump(s)',
   lost.reps.map(r => `${r.flight_s}s / ${(r.height_flight_m*100).toFixed(0)}cm`).join(', ') || '(none)',
   '  [want none, or a flagged one -- never a bare 484 cm]');
+
+// ---------------------------------------------------------------------------
+// Three jumps in one clip must be three jumps, not one.
+// ---------------------------------------------------------------------------
+function multi({ fps = 60, n = 3, jumpH = 0.30, cmv = 0.25, gapS = 1.0, pxPerM = 500 }) {
+  const H = [], FOOT = [], stand = 0.95, dip = stand - cmv;
+  const flight = 2 * Math.sqrt((2 * jumpH) / G), v = (G * flight) / 2;
+  const push = (arr, f) => { H.push(f.h); FOOT.push(f.foot); };
+  for (let i = 0; i < Math.round(0.4 * fps); i++) push(0, { h: stand, foot: 0 });
+  for (let k = 0; k < n; k++) {
+    const dipN = Math.round(0.4 * fps), pushN = Math.round(0.3 * fps);
+    for (let i = 0; i < dipN; i++) push(0, { h: stand - cmv * (i + 1) / dipN, foot: 0 });
+    for (let i = 0; i < pushN; i++) push(0, { h: dip + cmv * (i + 1) / pushN, foot: 0 });
+    for (let i = 0; i < Math.round(flight * fps); i++) {
+      const t = (i + 1) / fps, y = v * t - 0.5 * G * t * t;
+      push(0, { h: stand + y, foot: Math.max(0, y) });
+    }
+    for (let i = 0; i < Math.round(gapS * fps); i++) push(0, { h: stand, foot: 0 });
+  }
+  const poses = {};
+  H.forEach((h, i) => {
+    const hipY = 1000 - h * pxPerM, footY = 1000 - FOOT[i] * pxPerM;
+    const kneeY = footY - 0.42 * pxPerM, shY = hipY - 0.45 * pxPerM;
+    const drop = stand - h, kx = drop * 0.9 * pxPerM, tx = -drop * 0.5 * pxPerM;
+    poses[i] = {
+      left_shoulder: [240 + tx, shY], right_shoulder: [260 + tx, shY],
+      left_hip: [245, hipY], right_hip: [255, hipY],
+      left_knee: [245 + kx, kneeY], right_knee: [255 + kx, kneeY],
+      left_ankle: [245, footY], right_ankle: [255, footY],
+      left_foot_index: [265, footY + 4], right_foot_index: [275, footY + 4],
+      left_elbow: [235 + tx, shY + 110], right_elbow: [265 + tx, shY + 110],
+      left_wrist: [235 + tx, shY + 220], right_wrist: [265 + tx, shY + 220],
+    };
+  });
+  return poses;
+}
+for (const gapS of [1.0, 0.4]) {
+  const r = K.analyse(multi({ gapS }), 60, { heightM: 1.81, activity: 'cmj', osimModel: 'gpk' });
+  console.log(`3 jumps, ${gapS}s apart -> ${r.reps.length} found`,
+    r.reps.map(x => (x.height_flight_m * 100).toFixed(1) + 'cm').join(' '), '(want 3, ~30cm each)');
+}
+
+// ---------------------------------------------------------------------------
+// Feet out of frame: MediaPipe drops the landmark, so there is nothing to
+// measure and the analysis must refuse rather than invent.
+// ---------------------------------------------------------------------------
+const noFeet = multi({ n: 1 });
+for (const k of Object.keys(noFeet)) {
+  delete noFeet[k].left_ankle; delete noFeet[k].right_ankle;
+  delete noFeet[k].left_foot_index; delete noFeet[k].right_foot_index;
+}
+try {
+  const r = K.analyse(noFeet, 60, { heightM: 1.81, activity: 'cmj', osimModel: 'gpk' });
+  console.log('feet out of frame ->', r.reps.length, 'jumps, refused:', r.refused,
+    ' footCoverage', (r.footCoverage ?? 0).toFixed(2), '(want 0 jumps, refused "feet")');
+} catch (e) { console.log('feet out of frame -> threw:', e.message); }

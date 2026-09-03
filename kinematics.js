@@ -655,6 +655,22 @@ export const DEFAULT_JUMP_CFG = {
   dipFrac: 0.08,
   preRollFrames: 45,      // how far back to look for the start of the movement
   postRollFrames: 30,
+  /* Everything here is measured from the FEET, so the feet have to be in the
+   * picture. MediaPipe reports a position for every landmark whether or not it
+   * can see it, and an off-screen ankle comes back as a confident guess that
+   * drifts -- which reads as flight. Below this fraction of frames with a
+   * usable foot, a jump is not measurable from this clip and saying so is the
+   * only honest output. */
+  minFootCoverage: 0.9,
+  /* A hard physical ceiling. The best standing vertical jumps ever recorded
+   * are a little over a metre; anything past this is not a jump that was
+   * mismeasured, it is not a jump. */
+  maxHeightM: 1.10,
+  /* The two heights are independent -- flight time knows nothing about the
+   * pixel scale, hip rise knows nothing about gravity -- so on a clean clip
+   * they agree within a few centimetres. A factor of 1.5 is already far outside
+   * that. */
+  maxHeightRatio: 1.5,
 };
 
 export function buildJumpFeatures(poses) {
@@ -665,11 +681,13 @@ export function buildJumpFeatures(poses) {
   // time than in the air.
   const n = F._n;
   F.foot_rise = new Array(n).fill(NaN);
+  let seen = 0;
   for (let i = 0; i < n; i++) {
     const a = F.ankle_cy[i], t = F.toe_cy[i];
     const low = Math.max(isNum(a) ? a : -Infinity, isNum(t) ? t : -Infinity);
-    if (Number.isFinite(low)) F.foot_rise[i] = F._floorY - low;
+    if (Number.isFinite(low)) { F.foot_rise[i] = F._floorY - low; seen++; }
   }
+  F._footCoverage = n ? seen / n : 0;
   return F;
 }
 
@@ -695,16 +713,30 @@ function flightRuns(rise, thresh, cfg) {
 /** One "rep" per jump: [start of movement, take-off, end of landing]. */
 export function findJumpReps(F, cfg = DEFAULT_JUMP_CFG) {
   const n = F._n;
+  // No feet, no jump. Refusing is the answer here, not a number with a
+  // caveat: with the ankles off-screen every quantity below is measuring
+  // MediaPipe's imagination.
+  if ((F._footCoverage ?? 1) < cfg.minFootCoverage) {
+    return { reps: [], rise: [], refused: "feet" };
+  }
   const rise = smooth(interpNan(F.foot_rise), cfg.smoothWin);
   const hipY = smooth(interpNan(F.hip_cy), cfg.smoothWin);
   const thresh = cfg.liftFrac * (F._scale || 1);
   const reps = [];
   let prevEnd = -1;
-  for (const [a, b] of flightRuns(rise, thresh, cfg)) {
+  const runs = flightRuns(rise, thresh, cfg);
+  for (let ri = 0; ri < runs.length; ri++) {
+    const [a, b] = runs[ri];
+    // Never let one jump's trailing window swallow the next one's start. The
+    // half-second of post-roll is for watching the landing, not for claiming
+    // the frames the following jump needs.
+    const nextStart = ri + 1 < runs.length ? runs[ri + 1][0] : n;
     const takeoff = a;
     // Walk back to where the hip stopped being still: the top of the dip for a
     // countermovement jump, the start of the push for a squat jump.
     let t0 = Math.max(prevEnd + 1, takeoff - cfg.preRollFrames);
+    // A previous jump's window must not push the start past this take-off.
+    if (t0 > takeoff - 3) t0 = Math.max(0, takeoff - 3);
     let best = takeoff;
     for (let i = takeoff; i > t0; i--) {
       if (hipY[i] > hipY[best]) best = i;      // larger y = lower on screen
@@ -713,7 +745,7 @@ export function findJumpReps(F, cfg = DEFAULT_JUMP_CFG) {
     let s0 = best;
     while (s0 > t0 && hipY[s0 - 1] < hipY[s0]) s0--;
     t0 = Math.min(best, s0);
-    const t1 = Math.min(n - 1, b + cfg.postRollFrames);
+    const t1 = Math.min(n - 1, b + cfg.postRollFrames, nextStart - 1);
     if (t1 - t0 < 4) continue;
     reps.push([t0, takeoff, t1]);
     prevEnd = t1;
@@ -812,10 +844,13 @@ export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
    * more than a factor of two something is wrong with one of them, and which
    * one is not knowable from here. */
   const tooLong = flight_s > cfg.maxFlightFrames / fps;
+  const tooHigh = height_flight_m > cfg.maxHeightM
+    || (Number.isFinite(height_com_m) && height_com_m > cfg.maxHeightM);
   const comH = Number.isFinite(height_com_m) ? height_com_m : null;
+  const R = cfg.maxHeightRatio;
   const disagree = comH != null && comH > 0.02
-    && (height_flight_m > 2.2 * comH || comH > 2.2 * height_flight_m);
-  if (tooLong) return null;
+    && (height_flight_m > R * comH || comH > R * height_flight_m);
+  if (tooLong || tooHigh) return null;
 
   return {
     implausible: disagree,
@@ -885,7 +920,8 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   try { ({ pxPerM, detail } = computePxPerM(poses, heightM)); }
   catch (err) { if (activity !== "neck") throw err; }
   const [refA, refB] = spec.reference(F);
-  const { reps: bounds } = spec.findReps(F, conf);
+  const found = spec.findReps(F, conf);
+  const bounds = found.reps;
   const view = viewQuality(poses);
 
   const reps = bounds.map((b, i) => {
@@ -937,5 +973,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   });
 
   return { activity, fps, pxPerM, scaleDetail: detail, view, osimModel,
-           coverage: F._coverage, reps, columns: spec.columns };
+           coverage: F._coverage, reps, columns: spec.columns,
+           refused: found.refused || null,
+           footCoverage: F._footCoverage ?? null };
 }
