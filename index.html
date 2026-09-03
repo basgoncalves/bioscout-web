@@ -109,31 +109,34 @@
     <img src="logo.png" alt="" width="34" height="34">
     <h1>BioScout Web</h1>
   </div>
+  <div style="display:flex;justify-content:flex-end;margin:-6px 0 4px">
+    <select id="lang" style="width:auto;padding:5px 8px;font-size:12.5px;margin:0"></select>
+  </div>
   <p class="sub">Pull-ups and squats, tracked in the browser. Video never leaves your phone.
     <span class="note" id="build" style="opacity:.6"></span></p>
 
   <div class="card" id="setup">
     <div class="row" style="margin-bottom:11px">
       <div style="flex:1.4">
-        <label for="profile">Athlete</label>
-        <select id="profile"><option value="">— no profile —</option></select>
+        <label for="profile" data-i18n="athlete">Athlete</label>
+        <select id="profile"><option value="" data-i18n="noProfile">— no profile —</option></select>
       </div>
       <div style="flex:1">
-        <label for="profileName">Name</label>
+        <label for="profileName" data-i18n="name">Name</label>
         <input id="profileName" type="text" placeholder="e.g. Bas" autocomplete="off">
       </div>
     </div>
     <div class="row" style="margin-bottom:11px">
       <div>
-        <label for="height">Height (m)</label>
+        <label for="height" data-i18n="height">Height (m)</label>
         <input id="height" type="number" step="0.01" value="1.75" inputmode="decimal">
       </div>
       <div>
-        <label for="dob">Date of birth <span class="sub" id="ageOut"></span></label>
+        <label for="dob"><span data-i18n="dob">Date of birth</span> <span class="sub" id="ageOut"></span></label>
         <input id="dob" type="date" value="">
       </div>
       <div>
-        <label for="mass">Mass (kg) <span class="sub" id="massAge"></span></label>
+        <label for="mass"><span data-i18n="mass">Mass (kg)</span> <span class="sub" id="massAge"></span></label>
         <input id="mass" type="number" step="0.5" value="83" inputmode="decimal">
       </div>
     </div>
@@ -142,12 +145,12 @@
       current: it scales every joint moment and contact force on the page, so
       the field says how old the stored figure is.</p>
     <div class="row" style="margin-bottom:11px">
-      <button class="ghost" id="saveProfileBtn" style="margin:0;padding:9px">Save profile</button>
-      <button class="ghost" id="delProfileBtn" style="margin:0;padding:9px">Delete</button>
+      <button class="ghost" id="saveProfileBtn" style="margin:0;padding:9px" data-i18n="saveProfile">Save profile</button>
+      <button class="ghost" id="delProfileBtn" style="margin:0;padding:9px" data-i18n="delete">Delete</button>
     </div>
     <div class="row" style="margin-bottom:6px">
-      <button class="ghost" id="exportProfilesBtn" style="margin:0;padding:9px">Export my data</button>
-      <button class="ghost" id="importProfilesBtn" style="margin:0;padding:9px">Import</button>
+      <button class="ghost" id="exportProfilesBtn" style="margin:0;padding:9px" data-i18n="exportData">Export my data</button>
+      <button class="ghost" id="importProfilesBtn" style="margin:0;padding:9px" data-i18n="import">Import</button>
     </div>
     <input id="importProfilesFile" type="file" accept="application/json,.json" class="hidden">
     <p class="note" style="margin:0 0 11px">Profiles and training history live on
@@ -159,24 +162,24 @@
 
     <div class="row" style="margin-bottom:11px">
       <div>
-        <label for="activity">Movement</label>
+        <label for="activity" data-i18n="movement">Movement</label>
         <select id="activity">
-          <option value="auto">Detect automatically</option>
-          <option value="pullup">Pull-up</option>
-          <option value="squat">Squat</option>
-          <option value="cmj">Countermovement jump</option>
-          <option value="sj">Squat jump</option>
-          <option value="neck">Neck (close-up)</option>
+          <option value="auto" data-i18n="auto">Detect automatically</option>
+          <option value="pullup" data-i18n="pullup">Pull-up</option>
+          <option value="squat" data-i18n="squat">Squat</option>
+          <option value="cmj" data-i18n="cmj">Countermovement jump</option>
+          <option value="sj" data-i18n="sj">Squat jump</option>
+          <option value="neck" data-i18n="neck">Neck (close-up)</option>
         </select>
       </div>
     </div>
     <div class="row" style="margin-bottom:11px">
       <div>
-        <label for="added">Added load (kg)</label>
+        <label for="added" data-i18n="addedLoad">Added load (kg)</label>
         <input id="added" type="number" step="0.5" value="0" min="0" inputmode="decimal">
       </div>
       <div>
-        <label for="assist">Assistance (kg)</label>
+        <label for="assist" data-i18n="assistance">Assistance (kg)</label>
         <input id="assist" type="number" step="0.5" value="0" min="0" inputmode="decimal">
       </div>
     </div>
@@ -184,9 +187,9 @@
       <b>Added</b>; band or machine offload in <b>Assistance</b>. Both apply at
       once — a loaded bar with a band assist is added minus assist.</p>
     <div style="margin-bottom:11px">
-      <label for="avatar">Skeleton overlay</label>
+      <label for="avatar" data-i18n="overlay">Skeleton overlay</label>
       <select id="avatar">
-        <option value="">None — landmarks only</option>
+        <option value="" data-i18n="overlayNone">None — landmarks only</option>
         <option value="gpk_bones">Skeleton (OpenSim bone geometry)</option>
         <option value="gpk_generic">Generic body (GPK v3) — head/arms fixed to torso</option>
         <option value="bas_v3">Bas (v3) — full arms + head</option>
@@ -195,7 +198,7 @@
       </select>
     </div>
     <div id="headSizeRow" class="hidden" style="margin-bottom:11px">
-      <label for="headSize">Head size <span id="headSizeVal" class="sub">1.00×</span></label>
+      <label for="headSize"><span data-i18n="headSize">Head size</span> <span id="headSizeVal" class="sub">1.00×</span></label>
       <input id="headSize" type="range" min="0.5" max="2" step="0.05" value="1"
              style="width:100%;padding:0;margin:0">
       <p class="note" style="margin-top:2px">The head is sized from your ear
@@ -206,10 +209,10 @@
     <label style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="saveVideo" style="width:auto;margin:0">
-      Also keep the video in the export
+      <span data-i18n="keepVideo">Also keep the video in the export</span>
     </label>
-    <button id="startBtn" disabled>Start camera</button>
-    <button class="ghost" id="fileBtn">Analyse a video file</button>
+    <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
+    <button class="ghost" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
     <input id="fileInput" type="file" accept="video/*" class="hidden">
     <div class="status" id="status">Starting…</div>
   </div>
@@ -225,9 +228,9 @@
   </div>
 
   <div class="card hidden" id="controls">
-    <button id="recBtn">Start recording</button>
-    <button class="ghost" id="switchBtn">Switch camera</button>
-    <button class="ghost" id="stopBtn">Close camera</button>
+    <button id="recBtn" data-i18n="startRecording">Start recording</button>
+    <button class="ghost" id="switchBtn" data-i18n="switchCamera">Switch camera</button>
+    <button class="ghost" id="stopBtn" data-i18n="closeCamera">Close camera</button>
   </div>
 
   <div class="card hidden" id="trainingCard"></div>
@@ -242,8 +245,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v25";
-try { document.getElementById("build").textContent = "build v25"; } catch (e) {}
+window.BUILD = "v26";
+try { document.getElementById("build").textContent = "build v26"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -267,6 +270,10 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          saveCurves, getCurves, curveIndices }
        from "./profiles.js";
 import { Overlay } from "./overlay.js";
+// Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
+// array of times, and a translated string inside either of them would have
+// called the array.
+import { t as tr, getLang, setLang, LANGUAGES } from "./i18n.js";
 import { ensembleRep } from "./ensemble.js";
 import { makeZip, svgToPng, blobBytes } from "./zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
@@ -388,16 +395,16 @@ function ageFromDob(dob) {
 
 function refreshDerived() {
   const a = ageFromDob($("dob").value);
-  $("ageOut").textContent = a == null ? "" : `${a} y`;
+  $("ageOut").textContent = a == null ? "" : `${a} ${tr("years")}`;
   // How stale the stored mass is. Body mass scales every force on the page, so
   // a figure from two months ago is worth flagging -- quietly, not as an error.
   const st = getProfile($("profile").value);
   const when = st && st.massUpdated ? new Date(st.massUpdated) : null;
   if (!when || Number.isNaN(when.getTime())) { $("massAge").textContent = ""; return; }
   const days = Math.floor((Date.now() - when.getTime()) / 86400000);
-  $("massAge").textContent = days < 1 ? "today"
-    : days < 30 ? `${days} d ago`
-    : `${days} d ago — check it`;
+  $("massAge").textContent = days < 1 ? tr("today")
+    : days < 30 ? tr("daysAgo", { n: days })
+    : `${tr("daysAgo", { n: days })} — ${tr("checkMass")}`;
 }
 
 function currentSettings() {
@@ -441,7 +448,7 @@ function applyProfile(p) {
 function refreshProfiles(select) {
   const { profiles } = listProfiles();
   const sel = $("profile");
-  sel.innerHTML = '<option value="">— no profile —</option>' +
+  sel.innerHTML = `<option value="">${tr("noProfile")}</option>` +
     profiles.map((p) => `<option value="${p.name}">${p.name}</option>`).join("");
   if (select) sel.value = select;
 }
@@ -454,9 +461,9 @@ $("profile").onchange = (e) => {
 };
 $("saveProfileBtn").onclick = () => {
   const s = currentSettings();
-  if (!s.name) { say("Give the profile a name first.", true); return; }
+  if (!s.name) { say(tr("nameFirst"), true); return; }
   const ok = saveProfile(s);      // call once: it writes
-  say(ok ? `Profile “${s.name}” saved.`
+  say(ok ? tr("savedTo", { name: s.name })
          : "Could not save — browser storage is unavailable here.", !ok);
   refreshProfiles(s.name);
 };
@@ -482,8 +489,7 @@ function autosaveProfile() {
     // still perfectly usable for this session -- it just will not persist.
     if (!warnedNoProfile) {
       warnedNoProfile = true;
-      say("These settings apply to this session. Give the athlete a name and " +
-          "press Save profile to keep them.");
+      say(tr("sessionOnly"));
     }
     return;
   }
@@ -492,13 +498,45 @@ function autosaveProfile() {
     refreshProfiles(st.name);
     massTouched = null;
     refreshDerived();
-    say(`Saved to “${st.name}”.`);
+    say(tr("savedTo", { name: st.name }));
   }
 }
 for (const id of SAVED_FIELDS) {
   const el = $(id);
   if (el) el.addEventListener("change", autosaveProfile);
 }
+
+/* Language.
+ *
+ * Static markup carries data-i18n and is filled in one pass; everything the
+ * app renders calls tr() as it builds. Switching language therefore means:
+ * refill the markup, then re-render whatever is on screen. Nothing is
+ * reloaded, so an open session and the results card survive the switch.
+ */
+function applyStaticI18n() {
+  for (const el of document.querySelectorAll("[data-i18n]")) {
+    el.textContent = tr(el.dataset.i18n);
+  }
+  document.documentElement.lang = getLang();
+}
+
+(function initLang() {
+  const sel = $("lang");
+  sel.innerHTML = Object.entries(LANGUAGES)
+    .map(([k, v]) => `<option value="${k}"${k === getLang() ? " selected" : ""}>${v}</option>`)
+    .join("");
+  sel.onchange = () => {
+    if (!setLang(sel.value)) return;
+    applyStaticI18n();
+    refreshDerived();
+    renderTraining();
+    // Re-render exactly what is on screen, if anything is.
+    if (shownRes && !$("results").classList.contains("hidden")) {
+      render(shownRes, shownFps);
+    }
+  };
+  applyStaticI18n();
+})();
 
 $("exportProfilesBtn").onclick = () => {
   try {
@@ -546,7 +584,7 @@ $("delProfileBtn").onclick = () => {
   if (!n) return;
   deleteProfile(n);
   refreshProfiles("");
-  say(`Profile “${n}” deleted.`);
+  say(tr("profileDeleted", { name: n }));
 };
 
 /* Which per-set measure the training table and its chart show. Keys are the
@@ -642,8 +680,8 @@ function setChart(points, key) {
     g += `<text x="${x}" y="${H - 7}" font-size="9" text-anchor="middle" fill="var(--muted)">${pt.index}</text>`;
   });
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:150px">${g}</svg>
-    <div class="legend"><span><i class="swatch" style="background:${SET_COLOR}"></i>set mean</span>
-      <span>whisker: rep range within the set</span><span>${spec.unit}</span></div>
+    <div class="legend"><span><i class="swatch" style="background:${SET_COLOR}"></i>${tr("setMean")}</span>
+      <span>${tr("whisker")}</span><span>${spec.unit}</span></div>
     <p class="note" style="margin-top:2px">Set number on the horizontal axis —
       points are not joined because sets are ordinal, not a continuous time.</p>`;
 }
@@ -672,21 +710,21 @@ function renderTraining() {
     `<option value="${k}"${k === peakVar ? " selected" : ""}>${PEAK_VARS[k].label}</option>`).join("");
   const total = sess.sets.reduce((a, b) => a + b.reps, 0);
   card.innerHTML = `
-    <h1 style="font-size:17px;margin:0 0 2px">Training session</h1>
+    <h1 style="font-size:17px;margin:0 0 2px">${tr("trainingSession")}</h1>
     <p class="sub" style="margin-bottom:10px">${sess.profile ? sess.profile + " · " : ""}
       ${sess.sets.length} set${sess.sets.length===1?"":"s"} · ${total} reps ·
       started ${new Date(sess.started).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}${
         (() => { const n = listArchive().length;
                  return n ? ` · ${n} past session${n===1?"":"s"} on this device` : ""; })()}</p>
-    <table><thead><tr><th>Set</th><th>Movement</th><th>Reps</th><th>Load</th>
+    <table><thead><tr><th>${tr("set")}</th><th>${tr("movement")}</th><th>${tr("reps")}</th><th>${tr("load")}</th>
       <th>${vars.length
             ? `<select id="peakVar" class="thsel">${varOpts}</select>`
-            : "Peak"}</th><th>Time</th></tr></thead>
+            : "Peak"}</th><th>${tr("time")}</th></tr></thead>
       <tbody>${rows}</tbody></table>
     <div id="peakChartBox" style="margin-top:10px">${
       peakVar ? setChart(series, peakVar) : ""}</div>
-    <button class="ghost" id="summaryBtn" style="margin-top:10px">Finish and summarise</button>
-    <button class="ghost" id="newSessionBtn" style="margin-top:8px">Start a new session</button>
+    <button class="ghost" id="summaryBtn" style="margin-top:10px">${tr("finishSummarise")}</button>
+    <button class="ghost" id="newSessionBtn" style="margin-top:8px">${tr("newSession")}</button>
     <div id="summaryBox"></div>`;
   $("newSessionBtn").onclick = () => {
     // File the old one rather than dropping it: the export is only worth
@@ -727,18 +765,18 @@ function renderSummary() {
       <td style="color:${bad ? "var(--warn)" : "var(--muted)"}">${arrow} ${x.pct > 0 ? "+" : ""}${x.pct}%</td></tr>`;
   }).join("");
   $("summaryBox").innerHTML = `
-    <h2 style="font-size:15px;margin:14px 0 4px">Summary</h2>
+    <h2 style="font-size:15px;margin:14px 0 4px">${tr("summary")}</h2>
     <p class="sub" style="margin-bottom:8px">${sum.sets} sets · ${sum.total_reps} reps
       (${sum.reps_per_set.join(", ")}) · mean rep ${sum.mean_rep_duration_s}s</p>
-    ${t ? `<table><thead><tr><th>Measure</th><th>First set</th><th>Last set</th><th>Change</th></tr></thead>
+    ${t ? `<table><thead><tr><th>${tr("measure")}</th><th>${tr("firstSet")}</th><th>${tr("lastSet")}</th><th>${tr("change")}</th></tr></thead>
       <tbody>${t}</tbody></table>
       <p class="note">Change is first set to last, not a fitted trend — with a
         handful of sets a slope would imply precision that is not there. A
         falling depth or range and a lengthening concentric are the usual
         signatures of fatigue.</p>`
       : '<p class="note">Not enough sets yet to show a trend.</p>'}
-    <button class="ghost" id="saveExportBtn" style="margin-top:12px">Save &amp; export session (.zip)</button>
-    <button class="ghost" id="closeSummaryBtn" style="margin-top:8px">Close</button>
+    <button class="ghost" id="saveExportBtn" style="margin-top:12px">${tr("saveExport")}</button>
+    <button class="ghost" id="closeSummaryBtn" style="margin-top:8px">${tr("close")}</button>
     <div class="status" id="sessionZipStatus"></div>`;
   $("saveExportBtn").onclick = () => exportSession();
   $("closeSummaryBtn").onclick = () => { $("summaryBox").innerHTML = ""; };
@@ -866,11 +904,11 @@ renderTraining();
 
 
 
-if (!DEMO) say("Loading pose engine (about 45 MB the first time)…");
+if (!DEMO) say(tr("loadingEngine"));
 if (await loadMediaPipe()) {
   try {
     landmarker = await makeLandmarker();
-    if (!DEMO) say("Ready. Prop the phone up so your whole body is in frame.");
+    if (!DEMO) say(tr("ready"));
     $("startBtn").disabled = false;
   } catch (err) {
     if (!DEMO) say("Could not start the pose model: " + err.message, true);
@@ -1323,7 +1361,7 @@ function chart(rep, activity, res) {
     `<span><i class="swatch" style="${
       swatchStyle((o && o.color) || COLORS[i % COLORS.length], o)}"></i>${n}</span>`).join("");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>
-          <div class="legend">${legend}${bands ? '<span>shaded: ±1 SD between reps</span>' : ""}${
+          <div class="legend">${legend}${bands ? `<span>${tr("sdBetweenReps")}</span>` : ""}${
             rep.isMean && rep.eventAligned && marks.length
               ? `<span>dashed: ${marks.map(([, n2]) => n2).filter(Boolean).join(" · ")
                   || "phase boundaries"}</span>` : ""}</div>
@@ -1395,12 +1433,12 @@ function lineChart(t, series, unit, palette, bandsIn, opts) {
   const legend = series.map(([n], i) => sopt[i].noLegend ? "" :
     `<span><i class="swatch" style="${
       swatchStyle(sopt[i].color || pal[i % pal.length], sopt[i])}"></i>${n}</span>`).join("")
-    + (sopt.some((o) => o.dot) ? '<span>solid right · dotted left</span>' : "")
+    + (sopt.some((o) => o.dot) ? `<span>${tr("solidRightDottedLeft")}</span>` : "")
     + (hlines.length ? `<span><i class="swatch" style="${
-        swatchStyle(REF_COLOR, { dot: true })}"></i>gait literature, peak level</span>` : "");
+        swatchStyle(REF_COLOR, { dot: true })}"></i>${tr("gaitLevel")}</span>` : "");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:170px">${g}</svg>
           <div class="legend">${legend}<span>${unit}</span>${
-            bands ? '<span>shaded: \u00b11 SD between reps</span>' : ""}</div>`;
+            bands ? `<span>${tr("sdBetweenReps")}</span>` : ""}</div>`;
 }
 
 /* Moment arms, if they have been generated.
@@ -1674,7 +1712,7 @@ function momentPanel(rep, res) {
   if (!rep.dyn) return "";
   const d = rep.dyn;
   return `
-    <h1 style="font-size:16px;margin:16px 0 2px">Joint moments</h1>
+    <h1 style="font-size:16px;margin:16px 0 2px">${tr("jointMoments")}</h1>
     <p class="sub" style="margin-bottom:8px">Extension positive · per leg ·
       peak GRF ${(Math.max(...d.grf_vertical) / d.body_weight_n).toFixed(2)} × system weight
       ${loadNote(res)}</p>
@@ -1776,8 +1814,7 @@ function forcePanel(rep, res) {
                      sideOpt(col, side, side === "r" || !g.r)]);
       }
     });
-    pctChart = `<h1 style="font-size:14px;margin:14px 0 2px">Muscle force,
-        % of each muscle's own peak</h1>` +
+    pctChart = `<h1 style="font-size:14px;margin:14px 0 2px">${tr("musclePctPeak")}</h1>` +
       lineChart(rep.times, series, "% of peak", MCOLORS) +
       `<p class="note" style="margin-top:2px">Each curve is scaled to its own
         maximum, so this compares timing and shape rather than magnitude —
@@ -1836,7 +1873,7 @@ function forcePanel(rep, res) {
   const r2j = fm?.report?.["JRF magnitude"]?.r2_within_trial_median;
 
   return `
-    <h1 style="font-size:16px;margin:16px 0 2px">Muscle and joint forces</h1>
+    <h1 style="font-size:16px;margin:16px 0 2px">${tr("muscleAndJointForces")}</h1>
     <p class="note banner">Estimates from a surrogate trained on OpenSim static
       optimisation of running and single-leg squats — not a measurement.
       On subjects it never saw, the predicted curve tracks the real one with a
@@ -1847,14 +1884,14 @@ function forcePanel(rep, res) {
       <b>pull-up is out of its domain entirely</b>. Squats are a short
       extrapolation from single-leg squats; treat the ranking as more reliable
       than the absolute newtons.</p>
-    <table><thead><tr><th>Muscle</th><th>Right, peak N</th><th>Left, peak N</th></tr></thead>
+    <table><thead><tr><th>${tr("muscle")}</th><th>${tr("rightPeakN")}</th><th>${tr("leftPeakN")}</th></tr></thead>
       <tbody>${rows}</tbody></table>
     ${pctChart}
-    <h1 style="font-size:14px;margin:14px 0 2px">Joint contact force</h1>
+    <h1 style="font-size:14px;margin:14px 0 2px">${tr("jointContactForce")}</h1>
     ${jrfChart}
-    <table class="jcf"><thead><tr><th>Joint</th><th>Right</th><th>Left</th>
+    <table class="jcf"><thead><tr><th>${tr("joint")}</th><th>${tr("right")}</th><th>${tr("left")}</th>
       <th class="ref">${refCondT ? refCondT + " ref" : "squat ref"}</th>
-      <th class="ref">Walking</th><th class="ref">Running</th></tr></thead>
+      <th class="ref">${tr("walking")}</th><th class="ref">${tr("running")}</th></tr></thead>
       <tbody>${jrows}</tbody></table>
     <p class="note">All × bodyweight. The last three columns are references, not
       measurements: the squat column is this project's own CEINMS run, walking
@@ -2038,7 +2075,7 @@ function setSwitcher(res) {
       ok ? "" : " (curves no longer stored)"}</option>`;
   }).join("");
   return `<div style="margin-bottom:10px">
-      <label for="setSel">Showing</label>
+      <label for="setSel">${tr("showing")}</label>
       <select id="setSel">${opts}</select>
     </div>`;
 }
@@ -2064,20 +2101,22 @@ function wireSetSwitcher() {
   };
 }
 
+// What is currently drawn, so a language change can redraw exactly that. Not
+// `lastResult`: the demo path renders without ever setting it, and relying on
+// it meant the results table stayed English when the language was switched.
+let shownRes = null, shownFps = 30;
+
 function render(res, fps) {
+  shownRes = res; shownFps = fps;
   const el = $("results");
   el.classList.remove("hidden");
   const n = res.reps.length;
   const isSquat = res.activity === "squat";
 
   if (!n) {
-    el.innerHTML = `<h1 style="font-size:17px">No ${ACTIVITIES[res.activity].label} found</h1>
-      ${res.refused === "feet" ? `<p class="note banner">The feet were only in
-        frame for ${((res.footCoverage ?? 0) * 100).toFixed(0)}% of the clip.
-        A jump is measured entirely from the feet — when they leave the picture
-        MediaPipe keeps reporting a position for them anyway, and that guess
-        drifts, which reads as flight. Step back until your feet and head are
-        both in frame, film side on, and try again.</p>`
+    el.innerHTML = `<h1 style="font-size:17px">${tr("noRepsFound", { activity: tr(res.activity) })}</h1>
+      ${res.refused === "feet" ? `<p class="note banner">${
+        tr("feetNotInFrame", { pct: ((res.footCoverage ?? 0) * 100).toFixed(0) })}</p>`
       : `<p class="note">Pose coverage ${(res.coverage * 100).toFixed(0)}%. Check your whole
         body stayed in frame and the phone did not move. Partial reps may fall under the
         detection threshold.</p>`}`;
@@ -2102,8 +2141,8 @@ function render(res, fps) {
         <th>Side bend</th><th>Rotation</th></tr></thead><tbody>${nrows}</tbody></table>
       <div class="tabs" id="repTabs" style="margin-top:14px"></div>
       <div id="chartBox"></div>
-      <button class="ghost" id="dlBtn" style="margin-top:12px">Download angles (.mot)</button>
-      <button class="ghost" id="zipBtn" style="margin-top:8px">Download everything (.zip)</button>
+      <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMotOnly")}</button>
+      <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
       <div class="status" id="zipStatus"></div>
       <p class="note">Cervical angles estimated from ear, nose and shoulder
         positions in a single view. Yaw and pitch trade off against each other at
@@ -2172,11 +2211,11 @@ function render(res, fps) {
          <td>${r.elbow_flex_max_deg.toFixed(0)}°</td><td>${r.arm_flex_range_deg.toFixed(0)}°</td>
          <td>${r.pelvis_travel_m.toFixed(2)}</td></tr>`).join("");
   const head = isJump
-    ? `<tr><th>Jump</th><th>Flight s</th><th>Height cm<br>flight time</th>
-        <th>Height cm<br>hip rise</th><th>Counter-<br>move cm</th><th>Push s</th></tr>`
+    ? `<tr><th>${tr("jump")}</th><th>${tr("flightS")}</th><th>${tr("heightFlight")}</th>
+        <th>${tr("heightHipRise")}</th><th>${tr("countermove")}</th><th>${tr("pushS")}</th></tr>`
     : isSquat
-      ? "<tr><th>Rep</th><th>Down</th><th>Up</th><th>Knee</th><th>Hip</th><th>Depth m</th></tr>"
-      : "<tr><th>Rep</th><th>Up</th><th>Down</th><th>Elbow</th><th>Shldr</th><th>Rise m</th></tr>";
+      ? `<tr><th>${tr("rep")}</th><th>${tr("down")}</th><th>${tr("up")}</th><th>${tr("knee")}</th><th>${tr("hip")}</th><th>${tr("depthM")}</th></tr>`
+      : `<tr><th>${tr("rep")}</th><th>${tr("up")}</th><th>${tr("down")}</th><th>${tr("elbow")}</th><th>${tr("shoulder")}</th><th>${tr("riseM")}</th></tr>`;
 
   const meanRep = ensembleRep(res.reps);
   const items = meanRep ? [...res.reps, meanRep] : res.reps;
@@ -2187,7 +2226,7 @@ function render(res, fps) {
     return st ? `${st.mean.toFixed(d)}<span class="sub"> ±${st.sd.toFixed(d)}</span>` : "—";
   };
   const meanRow = !meanRep ? "" : isJump
-    ? `<tr class="meanrow"><td>Mean</td><td>${ms("flight_s", 3)}</td>
+    ? `<tr class="meanrow"><td>${tr("mean")}</td><td>${ms("flight_s", 3)}</td>
          <td>${(() => { const st = meanRep.stats.height_flight_m;
                         return st ? `${(st.mean * 100).toFixed(1)}<span class="sub"> ±${(st.sd * 100).toFixed(1)}</span>` : "—"; })()}</td>
          <td>${(() => { const st = meanRep.stats.height_com_m;
@@ -2196,41 +2235,32 @@ function render(res, fps) {
                         return st ? (st.mean * 100).toFixed(1) : "—"; })()}</td>
          <td>${ms("push_s")}</td></tr>`
     : (isSquat
-    ? `<tr class="meanrow"><td>Mean</td><td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
+    ? `<tr class="meanrow"><td>${tr("mean")}</td><td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
          <td>${ms("knee_flex_max_deg", 0)}°</td><td>${ms("hip_flex_max_deg", 0)}°</td>
          <td>${ms("depth_m")}</td></tr>`
-    : `<tr class="meanrow"><td>Mean</td><td>${ms("concentric_s")}</td><td>${ms("eccentric_s")}</td>
+    : `<tr class="meanrow"><td>${tr("mean")}</td><td>${ms("concentric_s")}</td><td>${ms("eccentric_s")}</td>
          <td>${ms("elbow_flex_max_deg", 0)}°</td><td>${ms("arm_flex_range_deg", 0)}°</td>
          <td>${ms("pelvis_travel_m")}</td></tr>`);
 
   el.innerHTML = `
-    <h1 style="font-size:19px;margin-bottom:2px">${n} ${ACTIVITIES[res.activity].label}${n === 1 ? "" : "s"}</h1>
+    <h1 style="font-size:19px;margin-bottom:2px">${n} × ${tr(res.activity)}</h1>
     <p class="sub" style="margin-bottom:12px">${fps.toFixed(0)} fps ·
       ${(res.coverage * 100).toFixed(0)}% tracked · ${res.pxPerM.toFixed(0)} px/m ·
       ${res.view?.view ?? "?"} view · .mot signed for ${res.osimModel}</p>
     ${setSwitcher(res)}
     <table><thead>${head}</thead><tbody>${isJump ? jumpRows : rows}${meanRow}</tbody></table>
-    ${suspect.length ? `<p class="note banner">The two heights disagree by more
-      than a factor of two on ${suspect.length} of ${n}. They are independent —
-      flight time knows nothing about the pixel scale, hip rise knows nothing
-      about gravity — so when they diverge one of them is wrong and which is not
-      knowable from here. Usual causes: a foot leaving the frame, or a view too
-      far from side-on for the hip to be tracked cleanly. Re-shoot with the
-      whole body in frame and side on before believing either number.</p>` : ""}
-    ${mismatched.length ? `<p class="note banner">${mismatched.length} of ${n}
-      ${res.activity === "sj"
-        ? `had a countermovement: the hip dipped before the push. A squat jump
-           starts from a held squat and goes straight up, so those are
-           countermovement jumps and will read higher.`
-        : `had no countermovement: the hip did not dip before the push, so those
-           are squat jumps and will read lower.`}</p>` : ""}
+    ${suspect.length ? `<p class="note banner">${
+      tr("heightsDisagree", { n: suspect.length, total: n })}</p>` : ""}
+    ${mismatched.length ? `<p class="note banner">${
+      tr(res.activity === "sj" ? "hadCountermovement" : "noCountermovement",
+        { n: mismatched.length, total: n })}</p>` : ""}
     <div class="tabs" id="repTabs" style="margin-top:14px"></div>
     <div id="chartBox"></div>
-    <button class="ghost" id="dlBtn" style="margin-top:12px">Download angles (.mot) + moments (.sto)</button>
-    <button class="ghost" id="zipBtn" style="margin-top:8px">Download everything (.zip)</button>
+    <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMot")}</button>
+    <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
     <div class="status" id="zipStatus"></div>
     ${res.detection ? `<p class="note" style="border-left:3px solid var(--good);
-        padding-left:11px;color:var(--good)">Detected <b>${ACTIVITIES[res.activity].label}</b>
+        padding-left:11px;color:var(--good)">Detected <b>${tr(res.activity)}</b>
         (${res.detection.confidence.toFixed(2)} confidence, margin
         ${res.detection.margin.toFixed(2)}) — ${res.detection.reason}.</p>` : ""}
     ${viewNote(res)}
