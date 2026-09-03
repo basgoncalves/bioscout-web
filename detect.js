@@ -25,7 +25,11 @@ const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
 export function features(poses) {
   const keys = Object.keys(poses).map(Number).sort((a, b) => a - b);
   const S = { hipY: [], shY: [], wrY: [], anY: [], earW: [], noseX: [], noseY: [],
-              knee: [], hipA: [], elbow: [], torso: [], footY: [], hipYa: [] };
+              knee: [], hipA: [], elbow: [], torso: [], footY: [], hipYa: [],
+              // Per side, plus the hip's horizontal position. The three tasks
+              // added here are all asymmetric or lateral, and none of them can
+              // be told apart from a squat using two-legged averages.
+              lFootY: [], rFootY: [], hipXa: [], kneeL: [], kneeR: [] };
   for (const fi of keys) {
     const lm = poses[fi];
     const ls = lm.left_shoulder, rs = lm.right_shoulder;
@@ -56,6 +60,13 @@ export function features(poses) {
     const feet = [la, ra, lm.left_foot_index, lm.right_foot_index]
       .filter(Boolean).map((q) => q[1]).filter(isNum);
     S.footY.push(feet.length ? Math.max(...feet) : NaN);
+    const fl = [la, lm.left_foot_index].filter(Boolean).map((q) => q[1]).filter(isNum);
+    const fr = [ra, lm.right_foot_index].filter(Boolean).map((q) => q[1]).filter(isNum);
+    S.lFootY.push(fl.length ? Math.max(...fl) : NaN);
+    S.rFootY.push(fr.length ? Math.max(...fr) : NaN);
+    S.hipXa.push(hp ? hp[0] : NaN);
+    S.kneeL.push(180 - angle3(lh, lk, la));
+    S.kneeR.push(180 - angle3(rh, rk, ra));
   }
 
   let torso = nanmedian(S.torso);
@@ -120,6 +131,41 @@ export function features(poses) {
     dip = (lowest - start) / torso;
   }
 
+  /* Lateral travel of the hips, in torso lengths. A side step is the only
+   * task here whose defining motion is sideways; everything else is vertical. */
+  const lateral = range(S.hipXa) / torso;
+
+  /* Support pattern. `alternating` is the fraction of onFloor frames with
+   * exactly ONE foot down, and it is what separates running from jumping: both
+   * leave the floor repeatedly, but a jump is two-footed on both sides of the
+   * flight and a stride is never two-footed at all. `oneFootUp` is the fraction
+   * of frames with one foot clearly raised and the other planted, which is what
+   * a single-leg squat looks like from start to finish.
+   *
+   * `bouts` counts separate airborne periods. One is a jump; four in three
+   * seconds is running. */
+  const upTol = 0.15 * torso, downTol = 0.07 * torso;
+  let oneDown = 0, onFloor = 0, oneUp = 0, nSide = 0, bouts = 0, wasAir = false;
+  for (let i = 0; i < S.footY.length; i++) {
+    const l = S.lFootY[i], r = S.rFootY[i];
+    const inAir = air[i];
+    if (inAir && !wasAir) bouts++;
+    wasAir = inAir;
+    if (!isNum(l) || !isNum(r)) continue;
+    nSide++;
+    const lUp = floorY - l > upTol, rUp = floorY - r > upTol;
+    const lDown = floorY - l < downTol, rDown = floorY - r < downTol;
+    if (!inAir) {
+      onFloor++;
+      if (lDown !== rDown) oneDown++;
+    }
+    if ((lUp && rDown) || (rUp && lDown)) oneUp++;
+  }
+
+  // Peak-to-peak difference between the two knees. On a single-leg squat the
+  // working knee bends and the free one does not.
+  const kneeAsym = Math.abs(range(S.kneeL) - range(S.kneeR));
+
   const earW = nanmedian(S.earW);
   const headFrac = isNum(earW) && earW > 0 ? earW / torso : 0;
   const noseTravel = Math.hypot(range(S.noseX), range(S.noseY))
@@ -137,6 +183,11 @@ export function features(poses) {
     nose_travel: noseTravel,
     flight_frac: nFoot ? airborne / nFoot : 0,
     countermovement_frac: dip,
+    lateral_travel: lateral,
+    alternating_frac: onFloor ? oneDown / onFloor : 0,
+    one_foot_up_frac: nSide ? oneUp / nSide : 0,
+    flight_bouts: bouts,
+    knee_asymmetry_deg: kneeAsym,
     frames: keys.length,
   };
 }
@@ -165,7 +216,11 @@ export function score(f) {
     // Feet planted, hips drop, knee and hip flex together, hands down. The
     // flight term is a veto, not an average: a squat with the feet in the air
     // is a jump, and no amount of agreement elsewhere changes that.
-    squat: (1 - clamp01(f.flight_frac / 0.04)) * mean([
+    // A single-leg squat also has planted feet, a dropping hip and flexing
+    // knees, so it scores well as a squat unless the raised foot vetoes it.
+    squat: (1 - clamp01(f.flight_frac / 0.04))
+         * (1 - clamp01(f.one_foot_up_frac / 0.55))
+         * (1 - clamp01(f.lateral_travel / 1.2)) * mean([
       clamp01(1 - f.hands_overhead_frac / 0.3),
       clamp01(f.knee_rom / 60),
       clamp01(f.hip_rom / 50),
@@ -177,10 +232,40 @@ export function score(f) {
     // countermovement alone, so each keeps a floor of 0.35 -- the movement IS a
     // jump either way, and calling the wrong one is a much smaller error than
     // calling it a squat.
-    cmj: clamp01(f.flight_frac / 0.06) * jumpShape(f)
-       * (f.countermovement_frac > 0.08 ? 1 : 0.35),
-    sj: clamp01(f.flight_frac / 0.06) * jumpShape(f)
-       * (f.countermovement_frac > 0.08 ? 0.35 : 1),
+    // Both jumps are two-footed. `alternating_frac` is near zero for a jump and
+    // near one for a stride, so it separates the two cleanly without needing
+    // either to know about the other.
+    cmj: clamp01(f.flight_frac / 0.06) * (1 - clamp01(f.alternating_frac / 0.5))
+       * jumpShape(f) * (f.countermovement_frac > 0.08 ? 1 : 0.35),
+    sj: clamp01(f.flight_frac / 0.06) * (1 - clamp01(f.alternating_frac / 0.5))
+      * jumpShape(f) * (f.countermovement_frac > 0.08 ? 0.35 : 1),
+    // Single-leg squat: one foot up for most of the clip, the other planted,
+    // knees disagreeing, nothing leaving the floor. The raised-foot term
+    // multiplies because without it this is simply a squat.
+    slsquat: clamp01(f.one_foot_up_frac / 0.55)
+           * (1 - clamp01(f.flight_frac / 0.04)) * mean([
+      clamp01(1 - f.hands_overhead_frac / 0.3),
+      clamp01(f.knee_rom / 40),
+      clamp01(f.knee_asymmetry_deg / 25),
+      clamp01(1 - f.lateral_travel / 1.0),
+    ]),
+    // Running: repeated flight, single support between flights, low hip rise.
+    // Two multiplying terms, because a run without either is not a run: several
+    // separate flights, and one foot down at a time when there is contact.
+    run: clamp01((f.flight_bouts - 1) / 2) * clamp01(f.alternating_frac / 0.6)
+       * mean([
+      clamp01(1 - f.hands_overhead_frac / 0.3),
+      clamp01(f.knee_rom / 45),
+      clamp01(1 - f.countermovement_frac / 0.25),
+    ]),
+    // Side step: the hips travel sideways further than anything else here does,
+    // the feet move, and the athlete stays on the floor.
+    sidestep: clamp01(f.lateral_travel / 0.8)
+            * (1 - clamp01(f.flight_bouts / 4)) * mean([
+      clamp01(1 - f.hands_overhead_frac / 0.3),
+      clamp01(f.feet_move / 0.4),
+      clamp01(1 - f.hip_drop / 1.0),
+    ]),
     // Head fills the frame and MOVES while the trunk stays put. nose_travel
     // multiplies rather than averages: three of the four terms reward
     // stillness, so without this a motionless person scores as a neck test.
@@ -197,7 +282,7 @@ export function score(f) {
 export function isStill(f) {
   return f.knee_rom < 8 && f.hip_rom < 8 && f.elbow_rom < 8
       && f.body_rise < 0.08 && f.hip_drop < 0.08 && f.nose_travel < 0.12
-      && f.flight_frac < 0.01;
+      && f.flight_frac < 0.01 && f.lateral_travel < 0.15;
 }
 
 export function classify(poses) {
@@ -205,6 +290,7 @@ export function classify(poses) {
   if (isStill(f)) {
     return { activity: null, confidence: 0, scores: score(f), features: f,
              margin: 0,
+             reasonKey: "whyStill", reasonVals: {},
              reason: "Nothing moved: no joint changed by more than a few degrees "
                    + "and the body did not translate. Record during the movement." };
   }
@@ -215,9 +301,37 @@ export function classify(poses) {
 
   if (conf < MIN_CONFIDENCE) {
     return { activity: null, confidence: conf, scores: sc, features: f, margin,
+      reasonKey: "whyNoMatch",
+      reasonVals: { best, conf: conf.toFixed(2), min: MIN_CONFIDENCE },
       reason: `Nothing matched: the strongest was ${best} at ${conf.toFixed(2)}, `
             + `below the ${MIN_CONFIDENCE} threshold.` };
   }
+  /* The reason is built twice: once as an English sentence, which is what the
+   * export and the .json carry, and once as a translation key plus its numbers,
+   * which is what the screen shows. Two representations of one thing is a cost,
+   * but the alternative was a sentence assembled from English fragments that no
+   * translation could reach -- which is exactly what the German and Portuguese
+   * pages were showing.
+   */
+  const pc = (x) => (100 * x).toFixed(0);
+  const vals = {
+    pullup: { pct: pc(f.hands_overhead_frac), rise: f.body_rise.toFixed(1),
+              elbow: f.elbow_rom.toFixed(0) },
+    squat: { knee: f.knee_rom.toFixed(0), hip: f.hip_rom.toFixed(0),
+             drop: f.hip_drop.toFixed(1) },
+    neck: { pct: pc(f.head_frac), nose: f.nose_travel.toFixed(1) },
+    cmj: { pct: pc(f.flight_frac), cmv: f.countermovement_frac.toFixed(2),
+           knee: f.knee_rom.toFixed(0) },
+    sj: { pct: pc(f.flight_frac), cmv: f.countermovement_frac.toFixed(2),
+          knee: f.knee_rom.toFixed(0) },
+    slsquat: { pct: pc(f.one_foot_up_frac), asym: f.knee_asymmetry_deg.toFixed(0),
+               knee: f.knee_rom.toFixed(0) },
+    run: { bouts: f.flight_bouts, alt: pc(f.alternating_frac),
+           knee: f.knee_rom.toFixed(0) },
+    sidestep: { lat: f.lateral_travel.toFixed(1), feet: f.feet_move.toFixed(1),
+                knee: f.knee_rom.toFixed(0) },
+  }[best] || {};
+
   const why = {
     pullup: `hands overhead ${(100 * f.hands_overhead_frac).toFixed(0)}% of the time, `
           + `body rose ${f.body_rise.toFixed(1)} torso lengths, `
@@ -235,6 +349,17 @@ export function classify(poses) {
       + `${(100 * f.flight_frac).toFixed(0)}% of the clip `
       + `with no dip before take-off (${f.countermovement_frac.toFixed(2)} torso `
       + `lengths), knee range ${f.knee_rom.toFixed(0)}°`,
+    slsquat: `one foot raised for ${pc(f.one_foot_up_frac)}% of the clip with `
+           + `the other planted, the two knees differing by `
+           + `${f.knee_asymmetry_deg.toFixed(0)}°, knee range `
+           + `${f.knee_rom.toFixed(0)}°`,
+    run: `${f.flight_bouts} separate flight phases with one foot down between `
+       + `them (${pc(f.alternating_frac)}% single support), knee range `
+       + `${f.knee_rom.toFixed(0)}°`,
+    sidestep: `hips travelled ${f.lateral_travel.toFixed(1)} torso lengths `
+            + `sideways and the feet moved ${f.feet_move.toFixed(1)}, with no `
+            + `flight phase`,
   }[best];
-  return { activity: best, confidence: conf, scores: sc, features: f, margin, reason: why };
+  return { activity: best, confidence: conf, scores: sc, features: f, margin,
+           reason: why, reasonKey: "why_" + best, reasonVals: vals };
 }

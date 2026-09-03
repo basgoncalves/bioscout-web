@@ -289,7 +289,15 @@ export function buildSquatFeatures(poses) {
   const n = hi - lo + 1;
   const keys = ["hip_cy", "hip_cx", "shoulder_cy", "shoulder_cx",
                 "ankle_cy", "ankle_cx", "knee_cy", "knee_cx", "toe_cy", "toe_cx",
-                "knee_flex", "hip_flex", "ankle_dorsi", "trunk_lean", "shank_len"];
+                "knee_flex", "hip_flex", "ankle_dorsi", "trunk_lean", "shank_len",
+                // Per side. The two-legged tasks average the sides because they
+                // are meant to be symmetric; a single-leg squat, a stride and a
+                // side step are not, and averaging them destroys the one thing
+                // worth measuring. Filled for every squat-like task so the code
+                // below can pick per-leg or averaged without a second pass.
+                "knee_flex_l", "knee_flex_r", "hip_flex_l", "hip_flex_r",
+                "ankle_dorsi_l", "ankle_dorsi_r", "foot_y_l", "foot_y_r",
+                "hip_y_l", "hip_y_r"];
   const F = {};
   for (const k of keys) F[k] = new Array(n).fill(NaN);
 
@@ -310,6 +318,20 @@ export function buildSquatFeatures(poses) {
     F.knee_flex[i] = 180 - nanmean([angle3(lh, lk, la), angle3(rh, rk, ra)]);
     F.hip_flex[i] = 180 - nanmean([angle3(ls, lh, lk), angle3(rs, rh, rk)]);
     F.ankle_dorsi[i] = 90 - nanmean([angle3(lk, la, lf), angle3(rk, ra, rf)]);
+    F.knee_flex_l[i] = 180 - angle3(lh, lk, la);
+    F.knee_flex_r[i] = 180 - angle3(rh, rk, ra);
+    F.hip_flex_l[i] = 180 - angle3(ls, lh, lk);
+    F.hip_flex_r[i] = 180 - angle3(rs, rh, rk);
+    F.ankle_dorsi_l[i] = 90 - angle3(lk, la, lf);
+    F.ankle_dorsi_r[i] = 90 - angle3(rk, ra, rf);
+    // Lowest point of each foot: whichever of ankle and toe is further down the
+    // image. Contact is about the foot, not about one landmark on it.
+    const fl = [la && la[1], lf && lf[1]].filter(isNum);
+    const fr = [ra && ra[1], rf && rf[1]].filter(isNum);
+    if (fl.length) F.foot_y_l[i] = Math.max(...fl);
+    if (fr.length) F.foot_y_r[i] = Math.max(...fr);
+    if (lh) F.hip_y_l[i] = lh[1];
+    if (rh) F.hip_y_r[i] = rh[1];
     if (sh && hp) {
       F.trunk_lean[i] = (Math.atan2(sh[0] - hp[0], Math.max(hp[1] - sh[1], 1e-6)) * 180) / Math.PI;
     }
@@ -938,6 +960,294 @@ export function jumpReferencePositions(F) {
   return squatReferencePositions(F);
 }
 
+
+// ---------------------------------------------------------------------------
+// single-leg squat, running and the side step
+// ---------------------------------------------------------------------------
+/* These three share the squat's feature builder and its coordinate set, and
+ * differ in what counts as a repetition and in which side is measured.
+ *
+ * The squat, the pull-up and both jumps are written to the model symmetrically:
+ * the two legs are averaged and the same curve is sent to left and right. That
+ * is a defensible approximation for a two-legged task filmed from one camera.
+ * It is not defensible here. A single-leg squat is asymmetric by definition, a
+ * stride is asymmetric by a half-cycle, and a side step is asymmetric on
+ * purpose -- so all three write the two legs separately, from the per-side
+ * angles filled in by buildSquatFeatures.
+ *
+ * What they DON'T get is inverse dynamics on the same terms as a squat. Running
+ * and the side step move the athlete through the frame, which breaks the fixed
+ * pixel-to-metre scale that the ground reaction is derived from, and a side
+ * step is a frontal-plane task that a sagittal camera cannot measure at all.
+ * Those refusals live in index.html, next to the other view refusals.
+ */
+
+/** Which leg is on the floor: the one whose foot sits nearest the floor line
+ *  for the largest share of the clip. Returns "l", "r", or null when neither
+ *  side is clearly loaded (a two-legged movement mislabelled as single-leg). */
+export function stanceSide(F, band = 0.10) {
+  const fl = interpNan(F.foot_y_l), fr = interpNan(F.foot_y_r);
+  const tol = band * F._scale;
+  let nl = 0, nr = 0, both = 0, n = 0;
+  for (let i = 0; i < F._n; i++) {
+    if (!isNum(fl[i]) || !isNum(fr[i])) continue;
+    n++;
+    const dl = F._floorY - fl[i], dr = F._floorY - fr[i];
+    const downL = dl < tol, downR = dr < tol;
+    if (downL && downR) both++;
+    else if (downL) nl++;
+    else if (downR) nr++;
+  }
+  if (!n) return null;
+  // Both feet down for most of the clip is a two-legged movement, whatever the
+  // athlete was asked to do. Saying so is more useful than picking a side.
+  if (both / n > 0.6) return null;
+  if (nl === nr) return null;
+  return nl > nr ? "l" : "r";
+}
+
+export const DEFAULT_SLSQUAT_CFG = {
+  // Shallower than a two-legged squat on every threshold. A single-leg squat to
+  // 45 deg of knee flexion is a normal one; using the squat's 45 deg minimum
+  // found no reps at all in the first pass over real footage.
+  minDepthFrac: 0.06, minRepFrames: 12, minKneeFlexionDeg: 25,
+  smoothWin: 5, minHipFlexionDeg: 15,
+};
+
+export function findSLSquatReps(F, cfg = DEFAULT_SLSQUAT_CFG) {
+  const side = stanceSide(F);
+  if (!side) {
+    return { reps: [], depth: F.depth,
+             refused: "bothFeetDown", stanceSide: null };
+  }
+  const knee = interpNan(F["knee_flex_" + side]);
+  const hip = interpNan(F["hip_flex_" + side]);
+  const depth = smooth(interpNan(F.depth), cfg.smoothWin);
+  const bottoms = localMaxima(depth, cfg.minRepFrames, cfg.minDepthFrac);
+  const reps = [];
+  for (let k = 0; k < bottoms.length; k++) {
+    const bot = bottoms[k];
+    const left = k > 0 ? bottoms[k - 1] : 0;
+    const right = k < bottoms.length - 1 ? bottoms[k + 1] : F._n - 1;
+    const t0 = bot > left ? argmin(depth, left, bot) : left;
+    const t1 = right > bot ? argmin(depth, bot, right) : right;
+    if ((knee[bot] - Math.min(knee[t0], knee[t1])) < cfg.minKneeFlexionDeg) continue;
+    if ((hip[bot] - Math.min(hip[t0], hip[t1])) < cfg.minHipFlexionDeg) continue;
+    if ((t1 - t0) < cfg.minRepFrames) continue;
+    if ((bot - t0) < 3 || (t1 - bot) < 3) continue;
+    reps.push([t0, bot, t1]);
+  }
+  return { reps, depth, stanceSide: side };
+}
+
+/* Foot contact, per side. A foot is down when it is within `band` shank lengths
+ * of the floor line. The floor is the 97th percentile of every observed foot
+ * position, which is robust to the one dropped frame that a plain minimum is
+ * not. Returns contiguous [start, end] index pairs. */
+function contactPeriods(F, side, band = 0.09, minFrames = 3, mergeGap = 3) {
+  const y = interpNan(F["foot_y_" + side]);
+  // Hysteresis: a foot has to come well clear of the floor to count as lifted,
+  // once it is down. A single threshold chopped one stance into three whenever
+  // the ankle landmark wobbled across the line -- and three stances is three
+  // strides, which is how a 0.63 s stride came out as 0.42 s.
+  const inTol = band * F._scale, outTol = 1.8 * band * F._scale;
+  const out = [];
+  let start = -1, down = false;
+  for (let i = 0; i < F._n; i++) {
+    const h = isNum(y[i]) ? F._floorY - y[i] : Infinity;
+    down = down ? h < outTol : h < inTol;
+    if (down && start < 0) start = i;
+    if (!down && start >= 0) { out.push([start, i - 1]); start = -1; }
+  }
+  if (start >= 0) out.push([start, F._n - 1]);
+  // Close brief gaps, then drop anything too short to be a stance. Order
+  // matters: dropping first would leave the two halves of a split stance to be
+  // discarded separately instead of joined.
+  const merged = [];
+  for (const c of out) {
+    const last = merged[merged.length - 1];
+    if (last && c[0] - last[1] <= mergeGap) last[1] = c[1];
+    else merged.push([c[0], c[1]]);
+  }
+  return merged.filter(([a, b]) => b - a + 1 >= minFrames);
+}
+
+/* Keep the contacts that are actually stances.
+ *
+ * Two kinds of rubbish come out of a threshold on foot height. The swing foot
+ * dips back under the line for a frame or two as it passes the stance foot,
+ * which looks like a very short contact; and the athlete stands still at both
+ * ends of the clip, which looks like one very long one. Neither is a stance,
+ * and both corrupt a stride: the short ones cut a 0.63 s stride to 0.42 s, and
+ * the long ones put the whole standing period inside the first stride's
+ * contact phase.
+ *
+ * The anchor is the 75th percentile of the observed lengths, not the median.
+ * At a slow cadence the short artefacts can OUTNUMBER the real stances -- six
+ * of them against four -- and a median then sits among the artefacts and throws
+ * the real stances away instead. The upper quartile stays inside the real
+ * stances in both cases. */
+function realStances(cs, n) {
+  if (cs.length < 3) return cs;
+  const lens = cs.map(([a, b]) => b - a + 1).sort((a, b) => a - b);
+  const typical = lens[Math.min(lens.length - 1,
+                                Math.floor(0.75 * lens.length))];
+  return cs.filter(([a, b], i) => {
+    const len = b - a + 1;
+    if (a === 0 || b === n - 1) return false;      // standing at either end
+    return len >= 0.5 * typical && len <= 2.0 * typical;
+  });
+}
+
+export const DEFAULT_RUN_CFG = {
+  contactBand: 0.09, minContactFrames: 3, minStrideFrames: 10,
+  maxStrideFrames: 90, smoothWin: 3,
+};
+
+/* A stride, not a step: contact of one foot to the next contact of the SAME
+ * foot. That is the unit every running-gait norm is written in, and it is the
+ * only unit whose start and end are the same event, which is what an ensemble
+ * average needs. The middle marker is toe-off, so phases come out as
+ * stance / swing rather than the squat's down / up. */
+export function findRunReps(F, cfg = DEFAULT_RUN_CFG) {
+  // Measure the side with more complete contact data; a stride is a stride
+  // whichever foot defines it.
+  const cl = realStances(contactPeriods(F, "l", cfg.contactBand,
+                                        cfg.minContactFrames), F._n);
+  const cr = realStances(contactPeriods(F, "r", cfg.contactBand,
+                                        cfg.minContactFrames), F._n);
+  const side = cl.length >= cr.length ? "l" : "r";
+  const cs = side === "l" ? cl : cr;
+  if (cs.length < 2) {
+    return { reps: [], depth: F.depth, refused: "noStrides", runSide: side,
+             contacts: cs };
+  }
+  const running = cs;
+  const reps = [];
+  for (let k = 0; k < running.length - 1; k++) {
+    const t0 = running[k][0], toeOff = running[k][1], t1 = running[k + 1][0];
+    const len = t1 - t0;
+    if (len < cfg.minStrideFrames || len > cfg.maxStrideFrames) continue;
+    if (toeOff <= t0 || toeOff >= t1) continue;
+    reps.push([t0, toeOff, t1]);
+  }
+  return { reps, depth: F.depth, runSide: side, contacts: cs,
+           otherContacts: side === "l" ? cr : cl };
+}
+
+export const DEFAULT_SIDESTEP_CFG = {
+  // A side step is judged by how far the hips travel sideways, in shank
+  // lengths. 0.5 is about a third of a metre on an adult -- below that it is
+  // shuffling, not a cut.
+  minExcursionFrac: 0.25, minRepFrames: 8, smoothWin: 5,
+};
+
+/* One rep is one lateral excursion and return: from a turning point in the hip
+ * x-trace, through the far extreme, to the next turning point. The far extreme
+ * is the plant, which is the instant the whole task is about. */
+export function findSidestepReps(F, cfg = DEFAULT_SIDESTEP_CFG) {
+  const x = smooth(interpNan(F.hip_cx), cfg.smoothWin);
+  const mid0 = nanmedian(x);
+  // Excursions to both sides. localMaxima only finds peaks, so the mirrored
+  // trace is searched too and the two sets merged in time order.
+  const dev = x.map((v) => Math.abs(v - mid0));
+  const peaks = localMaxima(dev, cfg.minRepFrames, cfg.minExcursionFrac * F._scale);
+  const reps = [];
+  for (let k = 0; k < peaks.length; k++) {
+    const pk = peaks[k];
+    const left = k > 0 ? peaks[k - 1] : 0;
+    const right = k < peaks.length - 1 ? peaks[k + 1] : F._n - 1;
+    const t0 = pk > left ? argmin(dev, left, pk) : left;
+    const t1 = right > pk ? argmin(dev, pk, right) : right;
+    if ((t1 - t0) < cfg.minRepFrames) continue;
+    if ((pk - t0) < 2 || (t1 - pk) < 2) continue;
+    reps.push([t0, pk, t1]);
+  }
+  return { reps, depth: dev, midX: mid0 };
+}
+
+/* Per-leg coordinates. Same shape as squatRepCoordinates, but left and right
+ * carry their own angles instead of one averaged curve. */
+export function perLegRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
+                                     { model = "gpk", ankleValid = true } = {}) {
+  const [t0, , t1] = rep, lo = F._lo;
+  const sl = (a) => interpNan(a).slice(t0, t1 + 1);
+  const lean = sl(F.trunk_lean);
+  const hipY = sl(F.hip_cy), hipX = sl(F.hip_cx), ankleY = sl(F.ankle_cy);
+  const times = [], z = [];
+  for (let i = t0; i <= t1; i++) { times.push((lo + i) / fps); z.push(0); }
+  const sign = KNEE_SIGN[model] ?? -1;
+  const kneeOf = (sd) => clipArr(sl(F["knee_flex_" + sd]), 0, 145).map((v) => sign * v);
+  const hipOf = (sd) => clipArr(sl(F["hip_flex_" + sd]), -20, 130);
+  const ankOf = (sd) => (ankleValid
+    ? clipArr(sl(F["ankle_dorsi_" + sd]), -40, 40)
+    : sl(F["ankle_dorsi_" + sd]).map(() => 0));
+  return {
+    times,
+    coords: {
+      pelvis_tx: z,
+      pelvis_ty: ankleY.map((ay, i) => (ay - hipY[i]) / pxPerM + ANKLE_JOINT_HEIGHT_M),
+      pelvis_tz: hipX.map((x) => (x - midX) / pxPerM),
+      hip_flexion_r: hipOf("r"), hip_flexion_l: hipOf("l"),
+      knee_angle_r: kneeOf("r"), knee_angle_l: kneeOf("l"),
+      ankle_angle_r: ankOf("r"), ankle_angle_l: ankOf("l"),
+      lumbar_extension: clipArr(lean.map((v) => -v), -60, 30),
+    },
+  };
+}
+
+/** Stride timing, in seconds, for one running rep. */
+export function strideMetrics(F, rep, fps, found) {
+  const [t0, toeOff, t1] = rep;
+  const stride = (t1 - t0) / fps;
+  const contact = (toeOff - t0 + 1) / fps;
+  const swing = stride - contact;
+  // Flight is the part of the stride with NEITHER foot down. On a walk it is
+  // zero or negative, which is the honest way to say "this was not a run".
+  const other = found.otherContacts || [];
+  let bothDown = 0;
+  for (const [a, b] of other) {
+    const s0 = Math.max(a, t0), s1 = Math.min(b, toeOff);
+    if (s1 >= s0) bothDown += s1 - s0 + 1;
+  }
+  let otherDown = 0;
+  for (const [a, b] of other) {
+    const s0 = Math.max(a, t0), s1 = Math.min(b, t1);
+    if (s1 >= s0) otherDown += s1 - s0 + 1;
+  }
+  const airborne = Math.max(0, (t1 - t0 + 1) - (toeOff - t0 + 1) - otherDown
+                               + bothDown);
+  return {
+    stride_s: +stride.toFixed(3),
+    contact_s: +contact.toFixed(3),
+    swing_s: +swing.toFixed(3),
+    flight_s: +(airborne / fps).toFixed(3),
+    duty_factor: +(contact / stride).toFixed(3),
+    cadence_spm: +(120 / stride).toFixed(1),
+    // A duty factor at or above 0.5 means at least one foot was always down.
+    // That is walking, and it is worth saying out loud on a screen that says
+    // "running" at the top.
+    walking: contact / stride >= 0.5,
+  };
+}
+
+/** Lateral excursion and plant timing for one side-step rep. */
+export function sidestepMetrics(F, rep, fps, pxPerM, midX) {
+  const [t0, pk, t1] = rep;
+  const x = interpNan(F.hip_cx);
+  const lean = interpNan(F.trunk_lean);
+  const side = x[pk] > midX ? "r" : "l";
+  const knee = interpNan(F["knee_flex_" + side]);
+  return {
+    excursion_m: +(Math.abs(x[pk] - midX) / pxPerM).toFixed(3),
+    plant_side: side,
+    out_s: +((pk - t0) / fps).toFixed(3),
+    back_s: +((t1 - pk) / fps).toFixed(3),
+    knee_flex_at_plant_deg: isNum(knee[pk]) ? +knee[pk].toFixed(1) : null,
+    trunk_lean_at_plant_deg: isNum(lean[pk]) ? +lean[pk].toFixed(1) : null,
+  };
+}
+
 export const ACTIVITIES = {
   pullup: {
     label: "pull-up", columns: DRIVEN_COORDS, defaultCfg: DEFAULT_PULLUP_CFG,
@@ -974,6 +1284,32 @@ export const ACTIVITIES = {
     coords: squatRepCoordinates, reference: jumpReferencePositions,
     phases: ["push_s", "landing_s"],
   },
+  // The three asymmetric tasks. `perLeg` means the two legs are written
+  // separately rather than averaged; `travels` means the athlete moves across
+  // the frame, which invalidates the fixed pixel-to-metre scale the ground
+  // reaction is derived from; `frontalTask` means the movement of interest is
+  // out of the sagittal plane and a side-on camera is the wrong camera.
+  slsquat: {
+    label: "single-leg squat", perLeg: true,
+    columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_SLSQUAT_CFG,
+    features: buildSquatFeatures, findReps: findSLSquatReps,
+    coords: perLegRepCoordinates, reference: squatReferencePositions,
+    phases: ["eccentric_s", "concentric_s"],
+  },
+  run: {
+    label: "running", perLeg: true, travels: true, cyclic: true,
+    columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_RUN_CFG,
+    features: buildSquatFeatures, findReps: findRunReps,
+    coords: perLegRepCoordinates, reference: squatReferencePositions,
+    phases: ["contact_phase_s", "swing_phase_s"],
+  },
+  sidestep: {
+    label: "side step", perLeg: true, travels: true, frontalTask: true,
+    columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_SIDESTEP_CFG,
+    features: buildSquatFeatures, findReps: findSidestepReps,
+    coords: perLegRepCoordinates, reference: squatReferencePositions,
+    phases: ["out_s", "back_s"],
+  },
 };
 
 export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
@@ -991,7 +1327,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   const view = viewQuality(poses);
 
   const reps = bounds.map((b, i) => {
-    const { times, coords } = (activity === "squat" || spec.jump)
+    const { times, coords } = (activity === "squat" || spec.jump || spec.perLeg)
       ? spec.coords(F, b, fps, pxPerM, refA, refB,
                     { model: osimModel, ankleValid: view.ankle_usable })
       : activity === "neck"
@@ -1019,7 +1355,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       s.flexion_extension_range_deg = span("pitch1", "pitch2");
       s.lateral_bend_range_deg = span("roll1", "roll2");
       s.rotation_range_deg = span("yaw1", "yaw2");
-    } else if (activity === "squat" || spec.jump) {
+    } else if (activity === "squat" || spec.jump || spec.perLeg) {
       // knee_angle is SIGNED per model family, so report peak flexion as a
       // magnitude; otherwise a GPK export summarises as "-2 deg".
       s.knee_flex_max_deg = Math.max(...coords.knee_angle_r.map(Math.abs));
@@ -1027,6 +1363,30 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       s.ankle_dorsi_max_deg = Math.max(...coords.ankle_angle_r.map(Math.abs));
       // pelvis_ty is an ABSOLUTE height, so depth is the drop, not -min.
       s.depth_m = Math.max(...coords.pelvis_ty) - Math.min(...coords.pelvis_ty);
+      if (spec.perLeg) {
+        // Both legs, separately. On an asymmetric task the difference between
+        // them IS the measurement, and a single averaged number hides it.
+        s.knee_flex_max_l_deg = Math.max(...coords.knee_angle_l.map(Math.abs));
+        s.knee_flex_max_r_deg = Math.max(...coords.knee_angle_r.map(Math.abs));
+        s.hip_flex_max_l_deg = Math.max(...coords.hip_flexion_l);
+        s.hip_flex_max_r_deg = Math.max(...coords.hip_flexion_r);
+        s.knee_asymmetry_deg =
+          +Math.abs(s.knee_flex_max_l_deg - s.knee_flex_max_r_deg).toFixed(1);
+      }
+      if (activity === "slsquat") {
+        s.stance_side = found.stanceSide || null;
+        // Peak knee flexion of the leg that was actually working. Reporting the
+        // averaged figure for a single-leg squat is how a 20 deg swinging leg
+        // turns a 70 deg rep into a 45 deg one.
+        const st = found.stanceSide === "l" ? "l" : "r";
+        s.stance_knee_flex_max_deg =
+          Math.max(...coords["knee_angle_" + st].map(Math.abs));
+        s.stance_hip_flex_max_deg = Math.max(...coords["hip_flexion_" + st]);
+      }
+      if (activity === "run") Object.assign(s, strideMetrics(F, b, fps, found));
+      if (activity === "sidestep") {
+        Object.assign(s, sidestepMetrics(F, b, fps, pxPerM, found.midX ?? refB));
+      }
     } else {
       s.elbow_flex_min_deg = Math.min(...coords.elbow_flex_r);
       s.elbow_flex_max_deg = Math.max(...coords.elbow_flex_r);

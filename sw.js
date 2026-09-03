@@ -15,7 +15,7 @@
  *
  * Bump CACHE when the vendored engine or model changes, to evict the old copy.
  */
-const CACHE = "bioscout-web-v27";
+const CACHE = "bioscout-web-v28";
 
 const SHELL = ["./", "./index.html", "./kinematics.js", "./dynamics.js",
                "./forces.js", "./overlay.js", "./zip.js", "./detect.js", "./profiles.js", "./ensemble.js", "./i18n.js", "./norms.json", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest",

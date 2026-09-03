@@ -112,7 +112,7 @@
   <div style="display:flex;justify-content:flex-end;margin:-6px 0 4px">
     <select id="lang" style="width:auto;padding:5px 8px;font-size:12.5px;margin:0"></select>
   </div>
-  <p class="sub">Pull-ups and squats, tracked in the browser. Video never leaves your phone.
+  <p class="sub"><span data-i18n="tagline">Movement analysis in the browser. Video never leaves your phone.</span>
     <span class="note" id="build" style="opacity:.6"></span></p>
 
   <div class="card" id="setup">
@@ -168,6 +168,9 @@
           <option value="pullup" data-i18n="pullup">Pull-up</option>
           <option value="squat" data-i18n="squat">Squat</option>
           <option value="cmj" data-i18n="cmj">Countermovement jump</option>
+          <option value="slsquat" data-i18n="slsquat">Single-leg squat</option>
+          <option value="run" data-i18n="run">Running</option>
+          <option value="sidestep" data-i18n="sidestep">Side step</option>
           <option value="sj" data-i18n="sj">Squat jump</option>
           <option value="neck" data-i18n="neck">Neck (close-up)</option>
         </select>
@@ -245,8 +248,11 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v27";
-try { document.getElementById("build").textContent = "build v27"; } catch (e) {}
+window.BUILD = "v28";
+// One source for the build number. It was written twice, and a release that
+// bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
+// which defeats the whole point of having a stamp.
+try { document.getElementById("build").textContent = "build " + window.BUILD; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -598,6 +604,17 @@ const PEAK_VARS = {
   countermovement_m:  { label: "Countermovement depth", unit: "m", dp: 3 },
   push_s:             { label: "Push time", unit: "s", dp: 2 },
   knee_flex_max_deg:  { label: "Peak knee flexion", unit: "°", dp: 0 },
+  stance_knee_flex_max_deg: { label: "Stance knee flexion", unit: "°", dp: 0 },
+  stance_hip_flex_max_deg:  { label: "Stance hip flexion", unit: "°", dp: 0 },
+  knee_asymmetry_deg: { label: "Left–right knee difference", unit: "°", dp: 0 },
+  stride_s:           { label: "Stride time", unit: "s", dp: 3 },
+  contact_s:          { label: "Ground contact time", unit: "s", dp: 3 },
+  swing_s:            { label: "Swing time", unit: "s", dp: 3 },
+  duty_factor:        { label: "Duty factor", unit: "", dp: 3 },
+  cadence_spm:        { label: "Cadence", unit: "steps/min", dp: 0 },
+  excursion_m:        { label: "Lateral excursion", unit: "m", dp: 2 },
+  knee_flex_at_plant_deg:  { label: "Knee flexion at plant", unit: "°", dp: 0 },
+  trunk_lean_at_plant_deg: { label: "Trunk lean at plant", unit: "°", dp: 0 },
   hip_flex_max_deg:   { label: "Peak hip flexion", unit: "°", dp: 0 },
   travel_m:           { label: "Body travel", unit: "m", dp: 2 },
   elbow_flex_max_deg: { label: "Peak elbow flexion", unit: "°", dp: 0 },
@@ -1211,7 +1228,21 @@ async function enrich(res, poses, fps, heightM, activity) {
 
   // Inverse dynamics: squats only. A pull-up has no ground reaction, so the
   // whole-body-COM derivation of the external load does not apply.
-  if ((activity === "squat" || ACTIVITIES[activity].jump) && res.reps.length) {
+  /* Inverse dynamics needs three things this app can only sometimes give it: a
+   * sagittal view, a fixed pixel-to-metre scale, and a movement whose ground
+   * reaction can be recovered from whole-body centre-of-mass acceleration.
+   *
+   * A single-leg squat has all three. Running and the side step do not: the
+   * athlete travels across the frame, so the scale drifts with distance from
+   * the camera, and for the side step the whole movement is out of the plane
+   * being measured. Producing a number anyway is the failure mode this app has
+   * hit repeatedly -- a 77,000 N·m knee moment from a frontal squat -- so these
+   * two get kinematics and timing, and no kinetics at all.
+   */
+  const spec = ACTIVITIES[activity];
+  const canDoDynamics = (activity === "squat" || spec.jump
+                         || activity === "slsquat") && !spec.travels;
+  if (canDoDynamics && res.reps.length) {
     try {
       const F = ACTIVITIES[activity].jump
         ? buildJumpFeatures(poses) : buildSquatFeatures(poses);
@@ -1277,23 +1308,29 @@ async function enrich(res, poses, fps, heightM, activity) {
 function viewNote(res) {
   const v = res.view || {};
   const bits = [];
-  const sagittal = res.activity === "squat" || ACTIVITIES[res.activity]?.jump;
+  const spec = ACTIVITIES[res.activity] || {};
+  const sagittal = res.activity === "squat" || spec.jump || res.activity === "slsquat"
+                   || res.activity === "run";
   if (sagittal && (v.view === "frontal" || v.view === "oblique")) {
-    bits.push(`This looks like a <b>${v.view}</b> view (frontality ${v.frontality}).
-      Knee, hip and ankle angles are sagittal measurements and are only valid
-      filmed from the side. Re-shoot side on.`);
+    bits.push(tr("viewNotSagittal", { view: tr("view_" + v.view),
+                                      frontality: v.frontality }));
   }
   if (ACTIVITIES[res.activity]?.jump && (v.view === "frontal" || v.view === "oblique")
       && res.reps.length) {
-    bits.push(`Filmed <b>${v.view}</b>. Flight time survives that, but the hip-rise
-      height does not: it measures vertical travel in the image, and off the
-      sagittal plane the hip moves toward or away from the camera as well. If
-      the two heights disagree, this is the first thing to fix.`);
+    bits.push(tr("viewJumpHeight", { view: tr("view_" + v.view) }));
   }
   if (sagittal && v.ankle_usable === false) {
-    bits.push(`Ankle angle could not be measured — the foot is pointing at or
-      away from the camera, which flattens the knee-ankle-toe angle. It is
-      written as 0 in the .mot rather than a fabricated value.`);
+    bits.push(tr("ankleNotMeasurable"));
+  }
+  if (spec.travels) {
+    bits.push(tr(res.activity === "run" ? "runNoKinetics" : "sidestepNoKinetics"));
+  }
+  if (res.activity === "run" && res.reps.some((r) => r.walking)) {
+    const w = res.reps.filter((r) => r.walking).length;
+    bits.push(tr("looksLikeWalking", { n: w, total: res.reps.length }));
+  }
+  if (res.activity === "slsquat" && res.refused === "bothFeetDown") {
+    bits.push(tr("bothFeetDown"));
   }
   return bits.length
     ? `<p class="note banner">${bits.join(" ")}</p>` : "";
@@ -1305,11 +1342,21 @@ function chart(rep, activity, res) {
   // jump does not have, and threw inside the chart after the table had already
   // rendered -- which is why the page looked fine and the panels below it were
   // silently empty.
-  const keys = (activity === "squat" || ACTIVITIES[activity]?.jump)
-    ? [["knee flexion", "knee_angle_r"], ["hip flexion", "hip_flexion_r"],
-       ["ankle dorsiflexion", "ankle_angle_r"]]
-    : [["elbow flexion", "elbow_flex_r"], ["shoulder flexion", "arm_flex_r"],
-       ["hip flexion", "hip_flexion_r"]];
+  const aspec = ACTIVITIES[activity] || {};
+  /* On an asymmetric task the two legs carry different curves, and showing one
+   * of them would hide the entire point of measuring the task. Same colour per
+   * structure, dashed for the left -- the convention used everywhere else in
+   * the app. */
+  const keys = aspec.perLeg
+    ? [[tr("kneeFlexion") + " " + tr("rightShort"), "knee_angle_r"],
+       [tr("kneeFlexion") + " " + tr("leftShort"), "knee_angle_l"],
+       [tr("hipFlexion") + " " + tr("rightShort"), "hip_flexion_r"],
+       [tr("hipFlexion") + " " + tr("leftShort"), "hip_flexion_l"]]
+    : (activity === "squat" || aspec.jump)
+    ? [[tr("kneeFlexion"), "knee_angle_r"], [tr("hipFlexion"), "hip_flexion_r"],
+       [tr("ankleDorsi"), "ankle_angle_r"]]
+    : [[tr("elbowFlexion"), "elbow_flex_r"], [tr("shoulderFlexion"), "arm_flex_r"],
+       [tr("hipFlexion"), "hip_flexion_r"]];
   const series = keys.map(([n, k]) => [n, rep.coords[k]]);
   // Reference angles, on the mean rep only: over a single rep they would be
   // three more lines competing with the measurement for attention.
@@ -1322,10 +1369,10 @@ function chart(rep, activity, res) {
     // a missing curve would otherwise shift every colour after it onto the
     // wrong joint, which is worse than showing no reference at all.
     const order = ["knee", "hip", "ankle"];
-    const names = ["knee flexion", "hip flexion", "ankle dorsiflexion"];
+    const names = [tr("kneeFlexion"), tr("hipFlexion"), tr("ankleDorsi")];
     order.forEach((ent, k) => {
       const c = refCurve(refCond, "joint_angle", ent);
-      if (c) refs.push([`${names[k]} (ref)`, c.mean,
+      if (c) refs.push([`${names[k]} (${tr("refShort")})`, c.mean,
                         { dash: true, color: COLORS[k % COLORS.length] }]);
     });
   }
@@ -1635,9 +1682,12 @@ function armSeries(joint, muscle, angles) {
 }
 
 const JOINTS = [
-  { key: "hip", label: "Hip", series: "hip_moment", coord: "hip_flexion_r" },
-  { key: "knee", label: "Knee", series: "knee_moment", coord: "knee_angle_r" },
-  { key: "ankle", label: "Ankle", series: "ankle_moment", coord: "ankle_angle_r" },
+  // `label` is a translation key, resolved at render time: the joint headings
+  // and the moment series names were the last English strings left on a
+  // translated results page.
+  { key: "hip", label: "hipJoint", series: "hip_moment", coord: "hip_flexion_r" },
+  { key: "knee", label: "kneeJoint", series: "knee_moment", coord: "knee_angle_r" },
+  { key: "ankle", label: "ankleJoint", series: "ankle_moment", coord: "ankle_angle_r" },
 ];
 
 /** Top muscles CROSSING a joint, ranked by predicted peak force.
@@ -1695,7 +1745,7 @@ function jointSubplot(rep, res, j) {
   const refM = refCond ? refCurve(refCond, "joint_moment", j.key) : null;
 
   const seenBase = new Set();
-  const series = [[`${j.label} moment (net)`, moment],
+  const series = [[tr("netMomentOf", { joint: tr(j.label) }), moment],
     ...contrib.map(([nm, vals]) => {
       const b = baseName(nm), first = !seenBase.has(b);
       seenBase.add(b);
@@ -1722,13 +1772,13 @@ function jointSubplot(rep, res, j) {
   }).join("");
 
   return `<div class="subplot">
-      <h2>${j.label} <span class="pk">peak ${pk.toFixed(0)} N·m
+      <h2>${tr(j.label)} <span class="pk">${tr("peakWord")} ${pk.toFixed(0)} N·m
         (${(pk / res.massKg).toFixed(2)} N·m/kg)</span></h2>
       ${momentChart}
       <p class="note" style="margin-top:2px">${contrib.length
-        ? (sel ? `Isolated: ${sel.name}. Tap it again to show all ${top.length}.`
-               : "Coloured curves are each muscle's contribution — force × moment arm. Tap one to isolate it.")
-        : "Muscle contributions need moment arms from the .osim model: run tools/moment_arms.py to add moment_arms.json and they appear on this plot."}</p>
+        ? (sel ? tr("isolatedMuscle", { name: sel.name, n: top.length })
+               : tr("contribHint"))
+        : tr("needMomentArms")}</p>
       <div class="muscles">${rows || '<span class="note">no muscle data</span>'}</div>
     </div>`;
 }
@@ -1747,8 +1797,9 @@ function momentPanel(rep, res) {
   const d = rep.dyn;
   return `
     <h1 style="font-size:16px;margin:16px 0 2px">${tr("jointMoments")}</h1>
-    <p class="sub" style="margin-bottom:8px">Extension positive · per leg ·
-      peak GRF ${(Math.max(...d.grf_vertical) / d.body_weight_n).toFixed(2)} × system weight
+    <p class="sub" style="margin-bottom:8px">${tr("extensionPositive")} ·
+      ${tr("perLegLabel")} · ${tr("peakGrfLabel")}
+      ${(Math.max(...d.grf_vertical) / d.body_weight_n).toFixed(2)} ${tr("timesSystemWeight")}
       ${loadNote(res)}</p>
     ${res.massKg + res.externalKg <= 0 ? `<p class="note banner">Assistance
       (${res.assistKg} kg) exceeds body mass plus load, so the system weight is
@@ -2166,11 +2217,14 @@ function render(res, fps) {
     el.innerHTML = `
       <h1 style="font-size:19px;margin-bottom:2px">${n} neck movement${n===1?"":"s"}</h1>
       <p class="sub" style="margin-bottom:12px">${fps.toFixed(0)} fps ·
-        ${(res.coverage*100).toFixed(0)}% tracked · .mot signed for ${res.osimModel}</p>
+        ${(res.coverage*100).toFixed(0)}% ${tr("trackedWord")} ·
+        ${tr("motSignedFor", { model: res.osimModel })}</p>
       ${setSwitcher(res)}
       ${res.detection ? `<p class="note" style="border-left:3px solid var(--good);
-        padding-left:11px;color:var(--good)">Detected automatically —
-        ${res.detection.reason}.</p>` : ""}
+        padding-left:11px;color:var(--good)">${tr("detectedAuto")} —
+        ${res.detection.reasonKey
+          ? tr(res.detection.reasonKey, res.detection.reasonVals || {})
+          : res.detection.reason}.</p>` : ""}
       <table><thead><tr><th>Rep</th><th>Out</th><th>Back</th><th>Flex/Ext</th>
         <th>Side bend</th><th>Rotation</th></tr></thead><tbody>${nrows}</tbody></table>
       <div class="tabs" id="repTabs" style="margin-top:14px"></div>
@@ -2189,7 +2243,8 @@ function render(res, fps) {
     const tabsN = $("repTabs");
     itemsN.forEach((r, i) => {
       const b = document.createElement("button");
-      b.textContent = r.isMean ? `Mean (${r.nReps})` : "Rep " + r.rep;
+      b.textContent = r.isMean ? tr("meanOfN", { n: r.nReps })
+                               : tr("repN", { n: r.rep });
       b.onclick = () => selN(i);
       tabsN.appendChild(b);
     });
@@ -2237,6 +2292,32 @@ function render(res, fps) {
   // Built only when it will be used: a jump has no eccentric_s or
   // concentric_s -- its phases are push and landing -- so computing these rows
   // eagerly threw on undefined.toFixed before the jump table was ever reached.
+  /* The three asymmetric tasks each get their own six columns. They are put in
+   * the same table as everything else on purpose: the tab wiring, the charts,
+   * the moment and force panels, the mean row and both exports all hang off the
+   * code below this point, and a separate early return for each task would have
+   * duplicated the markup while duplicating none of that. */
+  const isSL = res.activity === "slsquat";
+  const isRun = res.activity === "run";
+  const isSide = res.activity === "sidestep";
+  const nn = (v, d = 2) => (v == null ? "—" : v.toFixed(d));
+  const sideName = (sd) => (sd === "l" ? tr("left") : sd === "r" ? tr("right") : "—");
+
+  const slRows = !isSL ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+      <td>${sideName(r.stance_side)}</td>
+      <td>${nn(r.eccentric_s)}</td><td>${nn(r.concentric_s)}</td>
+      <td>${nn(r.stance_knee_flex_max_deg, 0)}°</td>
+      <td>${nn(r.knee_asymmetry_deg, 0)}°</td></tr>`).join("");
+  const runRows = !isRun ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+      <td>${nn(r.stride_s, 3)}</td><td>${nn(r.contact_s, 3)}</td>
+      <td>${nn(r.flight_s, 3)}</td><td>${nn(r.duty_factor, 2)}</td>
+      <td>${nn(r.cadence_spm, 0)}</td></tr>`).join("");
+  const sideRows = !isSide ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+      <td>${sideName(r.plant_side)}</td>
+      <td>${nn(r.out_s)}</td><td>${nn(r.back_s)}</td>
+      <td>${nn(r.excursion_m)}</td>
+      <td>${nn(r.knee_flex_at_plant_deg, 0)}°</td></tr>`).join("");
+
   const rows = isJump ? "" : res.reps.map((r) => isSquat
     ? `<tr><td>${r.rep}</td><td>${r.eccentric_s.toFixed(2)}</td><td>${r.concentric_s.toFixed(2)}</td>
          <td>${r.knee_flex_max_deg.toFixed(0)}°</td><td>${r.hip_flex_max_deg.toFixed(0)}°</td>
@@ -2244,7 +2325,16 @@ function render(res, fps) {
     : `<tr><td>${r.rep}</td><td>${r.concentric_s.toFixed(2)}</td><td>${r.eccentric_s.toFixed(2)}</td>
          <td>${r.elbow_flex_max_deg.toFixed(0)}°</td><td>${r.arm_flex_range_deg.toFixed(0)}°</td>
          <td>${r.pelvis_travel_m.toFixed(2)}</td></tr>`).join("");
-  const head = isJump
+  const head = isSL
+    ? `<tr><th>${tr("rep")}</th><th>${tr("stance")}</th><th>${tr("down")}</th>
+        <th>${tr("up")}</th><th>${tr("stanceKnee")}</th><th>${tr("lrDiff")}</th></tr>`
+    : isRun
+    ? `<tr><th>${tr("stride")}</th><th>${tr("strideS")}</th><th>${tr("contactS")}</th>
+        <th>${tr("flightS")}</th><th>${tr("dutyFactor")}</th><th>${tr("cadence")}</th></tr>`
+    : isSide
+    ? `<tr><th>${tr("step")}</th><th>${tr("plantSide")}</th><th>${tr("outS")}</th>
+        <th>${tr("backS")}</th><th>${tr("excursionM")}</th><th>${tr("kneeAtPlant")}</th></tr>`
+    : isJump
     ? `<tr><th>${tr("jump")}</th><th>${tr("flightS")}</th><th>${tr("heightFlight")}</th>
         <th>${tr("heightHipRise")}</th><th>${tr("countermove")}</th><th>${tr("pushS")}</th></tr>`
     : isSquat
@@ -2259,7 +2349,21 @@ function render(res, fps) {
     const st = meanRep && meanRep.stats[k];
     return st ? `${st.mean.toFixed(d)}<span class="sub"> ±${st.sd.toFixed(d)}</span>` : "—";
   };
-  const meanRow = !meanRep ? "" : isJump
+  const meanRow = !meanRep ? "" : isSL
+    ? `<tr class="meanrow"><td>${tr("mean")}</td><td>—</td>
+         <td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
+         <td>${ms("stance_knee_flex_max_deg", 0)}°</td>
+         <td>${ms("knee_asymmetry_deg", 0)}°</td></tr>`
+    : isRun
+    ? `<tr class="meanrow"><td>${tr("mean")}</td><td>${ms("stride_s", 3)}</td>
+         <td>${ms("contact_s", 3)}</td><td>${ms("flight_s", 3)}</td>
+         <td>${ms("duty_factor", 2)}</td><td>${ms("cadence_spm", 0)}</td></tr>`
+    : isSide
+    ? `<tr class="meanrow"><td>${tr("mean")}</td><td>—</td>
+         <td>${ms("out_s")}</td><td>${ms("back_s")}</td>
+         <td>${ms("excursion_m")}</td>
+         <td>${ms("knee_flex_at_plant_deg", 0)}°</td></tr>`
+    : isJump
     ? `<tr class="meanrow"><td>${tr("mean")}</td><td>${ms("flight_s", 3)}</td>
          <td>${(() => { const st = meanRep.stats.height_flight_m;
                         return st ? `${(st.mean * 100).toFixed(1)}<span class="sub"> ±${(st.sd * 100).toFixed(1)}</span>` : "—"; })()}</td>
@@ -2279,10 +2383,14 @@ function render(res, fps) {
   el.innerHTML = `
     <h1 style="font-size:19px;margin-bottom:2px">${n} × ${tr(res.activity)}</h1>
     <p class="sub" style="margin-bottom:12px">${fps.toFixed(0)} fps ·
-      ${(res.coverage * 100).toFixed(0)}% tracked · ${res.pxPerM.toFixed(0)} px/m ·
-      ${res.view?.view ?? "?"} view · .mot signed for ${res.osimModel}</p>
+      ${(res.coverage * 100).toFixed(0)}% ${tr("trackedWord")} ·
+      ${res.pxPerM.toFixed(0)} px/m ·
+      ${tr("viewLabel", { view: tr("view_" + (res.view?.view ?? "unknown")) })} ·
+      ${tr("motSignedFor", { model: res.osimModel })}</p>
     ${setSwitcher(res)}
-    <table><thead>${head}</thead><tbody>${isJump ? jumpRows : rows}${meanRow}</tbody></table>
+    <table><thead>${head}</thead><tbody>${
+      isSL ? slRows : isRun ? runRows : isSide ? sideRows
+           : isJump ? jumpRows : rows}${meanRow}</tbody></table>
     ${suspect.length ? `<p class="note banner">${
       tr("heightsDisagree", { n: suspect.length, total: n })}</p>` : ""}
     ${mismatched.length ? `<p class="note banner">${
@@ -2294,9 +2402,13 @@ function render(res, fps) {
     <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
     <div class="status" id="zipStatus"></div>
     ${res.detection ? `<p class="note" style="border-left:3px solid var(--good);
-        padding-left:11px;color:var(--good)">Detected <b>${tr(res.activity)}</b>
-        (${res.detection.confidence.toFixed(2)} confidence, margin
-        ${res.detection.margin.toFixed(2)}) — ${res.detection.reason}.</p>` : ""}
+        padding-left:11px;color:var(--good)">${tr("detectedAs", {
+          activity: tr(res.activity),
+          conf: res.detection.confidence.toFixed(2),
+          margin: res.detection.margin.toFixed(2),
+        })} — ${res.detection.reasonKey
+          ? tr(res.detection.reasonKey, res.detection.reasonVals || {})
+          : res.detection.reason}.</p>` : ""}
     ${viewNote(res)}
     <div id="dynBox"></div>
     <div id="forceBox"></div>
@@ -2317,7 +2429,8 @@ function render(res, fps) {
   const tabs = $("repTabs");
   items.forEach((r, i) => {
     const b = document.createElement("button");
-    b.textContent = r.isMean ? `Mean (${r.nReps})` : "Rep " + r.rep;
+    b.textContent = r.isMean ? tr("meanOfN", { n: r.nReps })
+                             : tr("repN", { n: r.rep });
     b.onclick = () => select(i);
     tabs.appendChild(b);
   });

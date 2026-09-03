@@ -298,6 +298,32 @@ function summariseRep(r, activity) {
     // it belongs in the export where it can be checked.
     o.free_fall_accel_ms2 = r.free_fall_accel_ms2 ?? null;
     o.knee_flex_max_deg = r.knee_flex_max_deg;
+  } else if (activity === "slsquat") {
+    // The stance leg's numbers, plus the side it was on. A single-leg squat
+    // logged without which leg it was is not a training record of anything.
+    o.stance_side = r.stance_side ?? null;
+    o.stance_knee_flex_max_deg = r.stance_knee_flex_max_deg ?? null;
+    o.stance_hip_flex_max_deg = r.stance_hip_flex_max_deg ?? null;
+    o.knee_asymmetry_deg = r.knee_asymmetry_deg ?? null;
+    o.depth_m = r.depth_m != null ? +r.depth_m.toFixed(3) : null;
+    o.down_s = +r.eccentric_s?.toFixed(2);
+    o.up_s = +r.concentric_s?.toFixed(2);
+  } else if (activity === "run") {
+    o.stride_s = r.stride_s ?? null;
+    o.contact_s = r.contact_s ?? null;
+    o.swing_s = r.swing_s ?? null;
+    o.flight_s = r.flight_s ?? null;
+    o.duty_factor = r.duty_factor ?? null;
+    o.cadence_spm = r.cadence_spm ?? null;
+    o.knee_flex_max_deg = r.knee_flex_max_deg;
+    o.knee_asymmetry_deg = r.knee_asymmetry_deg ?? null;
+  } else if (activity === "sidestep") {
+    o.excursion_m = r.excursion_m ?? null;
+    o.plant_side = r.plant_side ?? null;
+    o.knee_flex_at_plant_deg = r.knee_flex_at_plant_deg ?? null;
+    o.trunk_lean_at_plant_deg = r.trunk_lean_at_plant_deg ?? null;
+    o.out_s = r.out_s ?? null;
+    o.back_s = r.back_s ?? null;
   } else if (activity === "neck") {
     o.flex_ext_deg = r.flexion_extension_range_deg;
     o.bend_deg = r.lateral_bend_range_deg;
@@ -349,6 +375,24 @@ export function summariseSession(session) {
                 trend("height_com_m", "Jump height (hip rise)", "m", true),
                 trend("push_s", "Push time", "s", false),
                 trend("countermovement_m", "Countermovement depth", "m", false));
+  } else if (activity === "slsquat") {
+    // Depth falling and the left-right difference widening are the two things
+    // worth watching across a set of single-leg squats.
+    trends.push(trend("stance_knee_flex_max_deg", "Stance knee flexion", "°", true),
+                trend("depth_m", "Depth", "m", true),
+                trend("knee_asymmetry_deg", "Left\u2013right knee difference", "°", false),
+                trend("down_s", "Eccentric time", "s", false));
+  } else if (activity === "run") {
+    // Contact time lengthening and cadence dropping is what fatigue looks like
+    // in a run, the same way depth falling is in a squat.
+    trends.push(trend("cadence_spm", "Cadence", "steps/min", true),
+                trend("contact_s", "Ground contact time", "s", false),
+                trend("flight_s", "Flight time", "s", true),
+                trend("duty_factor", "Duty factor", "", false));
+  } else if (activity === "sidestep") {
+    trends.push(trend("excursion_m", "Lateral excursion", "m", true),
+                trend("out_s", "Time out", "s", false),
+                trend("knee_flex_at_plant_deg", "Knee flexion at plant", "°", true));
   } else if (activity === "neck") {
     trends.push(trend("rotation_deg", "Rotation range", "°", true),
                 trend("flex_ext_deg", "Flexion/extension range", "°", true));
