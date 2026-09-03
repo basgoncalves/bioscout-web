@@ -1118,20 +1118,28 @@ export function findRunReps(F, cfg = DEFAULT_RUN_CFG) {
                                         cfg.minContactFrames), F._n);
   const side = cl.length >= cr.length ? "l" : "r";
   const cs = side === "l" ? cl : cr;
+  // Strides for BOTH feet. The charts and the ensemble mean still run off one
+  // side -- they need a single cycle definition -- but reporting only that side
+  // throws away the comparison a runner actually wants, and which foot happened
+  // to track more cleanly is an accident of the camera, not a choice.
+  const strides = (contacts) => {
+    const out = [];
+    for (let k = 0; k < contacts.length - 1; k++) {
+      const t0 = contacts[k][0], toeOff = contacts[k][1], t1 = contacts[k + 1][0];
+      const len = t1 - t0;
+      if (len < cfg.minStrideFrames || len > cfg.maxStrideFrames) continue;
+      if (toeOff <= t0 || toeOff >= t1) continue;
+      out.push([t0, toeOff, t1]);
+    }
+    return out;
+  };
+  const sideReps = { l: strides(cl), r: strides(cr) };
   if (cs.length < 2) {
     return { reps: [], depth: F.depth, refused: "noStrides", runSide: side,
-             contacts: cs };
+             contacts: cs, sideContacts: { l: cl, r: cr }, sideReps };
   }
-  const running = cs;
-  const reps = [];
-  for (let k = 0; k < running.length - 1; k++) {
-    const t0 = running[k][0], toeOff = running[k][1], t1 = running[k + 1][0];
-    const len = t1 - t0;
-    if (len < cfg.minStrideFrames || len > cfg.maxStrideFrames) continue;
-    if (toeOff <= t0 || toeOff >= t1) continue;
-    reps.push([t0, toeOff, t1]);
-  }
-  return { reps, depth: F.depth, runSide: side, contacts: cs,
+  return { reps: sideReps[side], depth: F.depth, runSide: side, contacts: cs,
+           sideContacts: { l: cl, r: cr }, sideReps,
            otherContacts: side === "l" ? cr : cl };
 }
 
@@ -1228,6 +1236,62 @@ export function strideMetrics(F, rep, fps, found) {
     // That is walking, and it is worth saying out loud on a screen that says
     // "running" at the top.
     walking: contact / stride >= 0.5,
+  };
+}
+
+/** Whole-bout running summary: how long the running lasted, and each foot's
+ *  mean stride separately.
+ *
+ *  The bout is measured first foot-strike to last, not clip start to clip end.
+ *  A clip almost always opens with the runner walking into frame and closes
+ *  with them slowing down, and counting that as running quietly deflates every
+ *  per-minute figure derived from it.
+ *
+ *  Each side is averaged over ITS OWN strides. A left and a right mean built
+ *  from different numbers of strides are still comparable -- they are means --
+ *  whereas interleaving both feet into one list and averaging that would hide
+ *  exactly the left-right difference the two rows exist to show.
+ */
+export function runSummary(F, found, fps) {
+  const per = (contacts, other) => {
+    const reps = [];
+    for (let k = 0; k < contacts.length - 1; k++) {
+      const t0 = contacts[k][0], toeOff = contacts[k][1], t1 = contacts[k + 1][0];
+      if (toeOff <= t0 || toeOff >= t1) continue;
+      reps.push(strideMetrics(F, [t0, toeOff, t1], fps, { otherContacts: other }));
+    }
+    if (!reps.length) return null;
+    const mean = (k) => {
+      const v = reps.map((r) => r[k]).filter((x) => Number.isFinite(x));
+      return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+    };
+    const r3 = (x) => (x == null ? null : +x.toFixed(3));
+    return {
+      strides: reps.length,
+      stride_s: r3(mean("stride_s")),
+      contact_s: r3(mean("contact_s")),
+      flight_s: r3(mean("flight_s")),
+      duty_factor: r3(mean("duty_factor")),
+      cadence_spm: mean("cadence_spm") == null ? null
+                   : +mean("cadence_spm").toFixed(1),
+    };
+  };
+
+  const sc = found.sideContacts || { l: [], r: [] };
+  const all = [...sc.l, ...sc.r];
+  if (!all.length) return null;
+  const first = Math.min(...all.map((c) => c[0]));
+  const last = Math.max(...all.map((c) => c[1]));
+  const left = per(sc.l, sc.r);
+  const right = per(sc.r, sc.l);
+  return {
+    run_time_s: +((last - first + 1) / fps).toFixed(2),
+    strides: (left?.strides || 0) + (right?.strides || 0),
+    left, right,
+    // Only worth printing when both feet were actually measured; one side alone
+    // is a number with nothing to compare against.
+    asymmetry: left && right
+      ? +Math.abs(left.stride_s - right.stride_s).toFixed(3) : null,
   };
 }
 
@@ -1401,5 +1465,6 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   return { activity, fps, pxPerM, scaleDetail: detail, view, osimModel,
            coverage: F._coverage, reps, columns: spec.columns,
            refused: found.refused || null,
+           runSummary: activity === "run" ? runSummary(F, found, fps) : null,
            footCoverage: F._footCoverage ?? null };
 }

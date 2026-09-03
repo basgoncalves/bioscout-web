@@ -614,7 +614,11 @@ $("delProfileBtn").onclick = () => {
 
 /* Which per-set measure the training table and its chart show. Keys are the
  * fields profiles.js stores per rep, so anything summarised there can be
- * plotted without touching this list twice. */
+ * plotted without touching this list twice.
+ *
+ * Names and units are looked up at RENDER time, not baked in here: this object
+ * is built once at module init, and a label captured then would keep whatever
+ * language the page started in for the rest of the session. */
 const PEAK_VARS = {
   depth_m:            { label: "Depth", unit: "m", dp: 2 },
   height_flight_m:    { label: "Jump height (flight time)", unit: "m", dp: 3 },
@@ -648,6 +652,20 @@ const PEAK_VARS = {
   bend_deg:           { label: "Side-bend range", unit: "°", dp: 0 },
   rotation_deg:       { label: "Rotation range", unit: "°", dp: 0 },
 };
+/** A measure's name and unit in the current language. Falls back to the raw
+ *  key, which is what an unrecognised field deserves: visible, not invented. */
+function varSpec(key) {
+  const base = PEAK_VARS[key];
+  if (!base) return { label: key, unit: "", dp: 2 };
+  const name = tr("var_" + key);
+  return { ...base,
+           label: name === "var_" + key ? base.label : name,
+           unit: UNIT_KEYS[base.unit] ? tr(UNIT_KEYS[base.unit]) : base.unit };
+}
+// Units that are words rather than symbols. "m", "s" and "°" are the same in
+// every language this app speaks; "steps/min" is not.
+const UNIT_KEYS = { "steps/min": "unit_spm", "\u00d7BW": "unit_bw" };
+
 let peakVar = null;      // survives re-renders of the training card
 // Its own colour, not COLORS[0]: the training card renders at module
 // init, before the chart palette further down has been evaluated, and
@@ -686,7 +704,7 @@ function setSeries(sess, key) {
  *  line: sets are ordinal, and joining them implies you could read a value
  *  between set 2 and set 3. */
 function setChart(points, key) {
-  const spec = PEAK_VARS[key] || { label: key, unit: "", dp: 2 };
+  const spec = varSpec(key);
   const ok = points.filter((p) => p.mean != null);
   if (ok.length < 1) return `<p class="note">${tr("noteNoValues")}</p>`;
   const W = 320, H = 150, P = { l: 42, r: 10, t: 12, b: 24 };
@@ -729,20 +747,20 @@ function renderTraining() {
   const vars = availablePeakVars(sess);
   if (!vars.includes(peakVar)) peakVar = vars[0] || null;
   const series = peakVar ? setSeries(sess, peakVar) : [];
-  const spec = peakVar ? PEAK_VARS[peakVar] : null;
+  const spec = peakVar ? varSpec(peakVar) : null;
   const byIndex = Object.fromEntries(series.map((x) => [x.index, x]));
 
   const rows = sess.sets.map((s) => {
     const pv = byIndex[s.index];
     const cell = pv && pv.mean != null
       ? `${pv.mean.toFixed(spec.dp)}<span class="sub"> ${spec.unit}</span>` : "—";
-    return `<tr><td>Set ${s.index}</td><td>${s.activity}</td>
+    return `<tr><td>${tr("setLabel", { n: s.index })}</td><td>${tr(s.activity)}</td>
       <td>${s.reps}</td><td>${s.addedKg ? "+" + s.addedKg : ""}${s.assistKg ? " −" + s.assistKg : ""}</td>
       <td>${cell}</td>
       <td>${new Date(s.at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</td></tr>`;
   }).join("");
   const varOpts = vars.map((k) =>
-    `<option value="${k}"${k === peakVar ? " selected" : ""}>${PEAK_VARS[k].label}</option>`).join("");
+    `<option value="${k}"${k === peakVar ? " selected" : ""}>${varSpec(k).label}</option>`).join("");
   const total = sess.sets.reduce((a, b) => a + b.reps, 0);
   card.innerHTML = `
     <h1 style="font-size:17px;margin:0 0 2px">${tr("trainingSession")}</h1>
@@ -757,7 +775,7 @@ function renderTraining() {
     <table><thead><tr><th>${tr("set")}</th><th>${tr("movement")}</th><th>${tr("reps")}</th><th>${tr("load")}</th>
       <th>${vars.length
             ? `<select id="peakVar" class="thsel">${varOpts}</select>`
-            : "Peak"}</th><th>${tr("time")}</th></tr></thead>
+            : tr("peakCol")}</th><th>${tr("time")}</th></tr></thead>
       <tbody>${rows}</tbody></table>
     <div id="peakChartBox" style="margin-top:10px">${
       peakVar ? setChart(series, peakVar) : ""}</div>
@@ -782,7 +800,7 @@ function renderTraining() {
     const sess2 = getSession();
     const ser = setSeries(sess2, peakVar);
     $("peakChartBox").innerHTML = setChart(ser, peakVar);
-    const sp = PEAK_VARS[peakVar];
+    const sp = varSpec(peakVar);
     const byI = Object.fromEntries(ser.map((x) => [x.index, x]));
     [...$("trainingCard").querySelectorAll("tbody tr")].forEach((tr, i) => {
       const st = sess2.sets[i], hit = st && byI[st.index];
@@ -2312,6 +2330,30 @@ function render(res, fps) {
       <td>${nn(r.stride_s, 3)}</td><td>${nn(r.contact_s, 3)}</td>
       <td>${nn(r.flight_s, 3)}</td><td>${nn(r.duty_factor, 2)}</td>
       <td>${nn(r.cadence_spm, 0)}</td></tr>`).join("");
+  /* Running: the bout, and each foot's own mean.
+   *
+   * A separate little table rather than extra columns on the stride table --
+   * those rows are the strides of ONE foot (the cycle the charts and the
+   * ensemble mean are built on), and hanging a left-right comparison off them
+   * would imply the other foot's strides are in there too. */
+  const rs = isRun ? res.runSummary : null;
+  const footRow = (key, m) => (!m ? "" : `<tr><td>${tr(key)}</td>
+      <td>${nn(m.strides, 0)}</td><td>${nn(m.stride_s, 3)}</td>
+      <td>${nn(m.contact_s, 3)}</td><td>${nn(m.flight_s, 3)}</td>
+      <td>${nn(m.duty_factor, 2)}</td><td>${nn(m.cadence_spm, 0)}</td></tr>`);
+  const runPanel = !rs ? "" : `
+    <h1 style="font-size:15px;margin:14px 0 2px">${tr("perFoot")}</h1>
+    <p class="sub" style="margin-bottom:8px">${tr("runBout", {
+      t: rs.run_time_s.toFixed(2),
+      strides: tr(rs.strides === 1 ? "nStride" : "nStrides", { n: rs.strides }),
+    })}</p>
+    <table><thead><tr><th>${tr("colFoot")}</th><th>${tr("colStrides")}</th>
+      <th>${tr("var_stride_s")}</th><th>${tr("var_contact_s")}</th>
+      <th>${tr("var_flight_s")}</th><th>${tr("var_duty_factor")}</th>
+      <th>${tr("var_cadence_spm")}</th></tr></thead>
+      <tbody>${footRow("left", rs.left)}${footRow("right", rs.right)}</tbody></table>
+    <p class="note">${tr("noteRunBout")}</p>`;
+
   const sideRows = !isSide ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
       <td>${sideName(r.plant_side)}</td>
       <td>${nn(r.out_s)}</td><td>${nn(r.back_s)}</td>
@@ -2391,6 +2433,7 @@ function render(res, fps) {
     <table><thead>${head}</thead><tbody>${
       isSL ? slRows : isRun ? runRows : isSide ? sideRows
            : isJump ? jumpRows : rows}${meanRow}</tbody></table>
+    ${runPanel}
     ${suspect.length ? `<p class="note banner">${
       tr("heightsDisagree", { n: suspect.length, total: n })}</p>` : ""}
     ${mismatched.length ? `<p class="note banner">${

@@ -66,15 +66,19 @@ function slSquat({ reps = 3, depth = 0.28, side = 'r' } = {}) {
 }
 
 // ---------------------------------------------------------------- running
-function running({ strides = 4, contactS = 0.20, flightS = 0.11 } = {}) {
+function running({ strides = 4, contactS = 0.20, flightS = 0.11,
+                   leftContactS = null } = {}) {
   const f = [];
-  const stand = 0.92, cN = Math.round(contactS * fps), fN = Math.round(flightS * fps);
+  const stand = 0.92, fN = Math.round(flightS * fps);
+  const cR = Math.round(contactS * fps);
+  const cL = Math.round((leftContactS ?? contactS) * fps);
   const swingH = 0.20;
   for (let i = 0; i < 15; i++) f.push({ hip: stand, lf: 0, rf: 0 });
   // Two steps per stride, alternating which foot is down. During flight both
   // feet are up and the hip rides a shallow arc -- nothing like a jump's.
   for (let s = 0; s < strides * 2; s++) {
     const down = s % 2 === 0 ? 'r' : 'l';
+    const cN = down === 'l' ? cL : cR;
     for (let i = 0; i < cN; i++) {
       const dip = 0.05 * Math.sin(Math.PI * (i + 1) / cN);
       const other = swingH * Math.sin(Math.PI * (i + 1) / cN);
@@ -219,6 +223,67 @@ for (const [name, opts] of [['running', { strides: 4, contactS: 0.20, flightS: 0
   if (!ok) bad++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  a walk analysed as running -> `
     + (r ? `duty ${r.duty_factor}, walking=${r.walking}` : 'no strides'));
+}
+
+/* The whole-bout summary: running time, and BOTH feet.
+ *
+ * The synthetic clip is symmetric by construction -- the same contact and
+ * flight for each foot -- so the two rows must agree. They come from separate
+ * contact lists, so if the left row ever silently reused the right foot's
+ * strides this is what would notice. The bout is 15 standing frames at each
+ * end, and those must NOT be inside it. */
+console.log('\n--- run summary: bout and per-foot means ---');
+{
+  const opts = { strides: 4, contactS: 0.20, flightS: 0.11 };
+  const poses = running(opts);
+  const res = K.analyse(poses, fps,
+    { heightM: 1.81, activity: 'run', osimModel: 'gpk' });
+  const rs = res.runSummary;
+  const trueStride = 2 * (opts.contactS + opts.flightS);
+  const step = opts.contactS + opts.flightS;
+  const clipS = Object.keys(poses).length / fps;
+  // Eight steps, first contact to last: seven whole steps plus one contact.
+  const ideal = opts.strides * 2 * step - opts.flightS;
+  // A first step contiguous with the standing block cannot be told apart from
+  // the standing, so realStances drops it and the bout starts one step late.
+  // That is the honest floor, not a bug -- but a bout that has crept out to the
+  // clip length means the standing frames got back in.
+  if (!rs || !rs.left || !rs.right) {
+    console.log(`FAIL  run summary missing a side: ${JSON.stringify(rs)}`);
+    bad++;
+  } else {
+    const dL = Math.abs(rs.left.stride_s - trueStride);
+    const dR = Math.abs(rs.right.stride_s - trueStride);
+    const lr = Math.abs(rs.left.stride_s - rs.right.stride_s);
+    const boutOk = rs.run_time_s <= ideal + 0.1
+                   && rs.run_time_s >= ideal - 1.1 * step
+                   && rs.run_time_s < clipS - 0.5;
+    const ok = boutOk && dL <= 0.05 && dR <= 0.05 && lr <= 0.03
+               && rs.strides === rs.left.strides + rs.right.strides
+               && rs.left.strides > 0 && rs.right.strides > 0;
+    if (!ok) bad++;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  bout ${rs.run_time_s}s `
+      + `(ideal ${ideal.toFixed(2)}s, clip ${clipS.toFixed(2)}s), `
+      + `L ${rs.left.strides}x${rs.left.stride_s}s, `
+      + `R ${rs.right.strides}x${rs.right.stride_s}s, L-R ${lr.toFixed(3)}s`);
+  }
+
+  // A limp must actually show up. This is the whole point of two rows: hold
+  // the left foot down 80 ms longer per step and the left contact time has to
+  // come out longer than the right. Averaging both feet into one figure -- the
+  // old behaviour -- reports them identical and hides it.
+  {
+    const rs2 = K.analyse(running({ strides: 5, contactS: 0.20, flightS: 0.11,
+                                    leftContactS: 0.28 }), fps,
+      { heightM: 1.81, activity: 'run', osimModel: 'gpk' }).runSummary;
+    const gap = rs2 && rs2.left && rs2.right
+      ? rs2.left.contact_s - rs2.right.contact_s : null;
+    const ok = gap != null && gap > 0.04 && gap < 0.13;
+    if (!ok) bad++;
+    console.log(`${ok ? 'PASS' : 'FAIL'}  limp: left contact `
+      + `${rs2?.left?.contact_s}s vs right ${rs2?.right?.contact_s}s `
+      + `(built 80 ms apart, measured ${gap == null ? '—' : gap.toFixed(3)}s)`);
+  }
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nALL CHECKS PASSED');

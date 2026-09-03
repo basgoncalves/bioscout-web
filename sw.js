@@ -15,7 +15,7 @@
  *
  * Bump CACHE when the vendored engine or model changes, to evict the old copy.
  */
-const CACHE = "bioscout-web-v29";
+const CACHE = "bioscout-web-v30";
 
 const SHELL = ["./", "./index.html", "./kinematics.js", "./dynamics.js",
                "./forces.js", "./overlay.js", "./zip.js", "./detect.js", "./profiles.js", "./ensemble.js", "./i18n.js", "./norms.json", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest",
@@ -70,8 +70,15 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
+  // cache: "reload" bypasses the HTTP cache on the way out. Without it
+  // "network-first" is only first past the BROWSER cache, and GitHub Pages
+  // serves the shell with max-age=600 -- so a pushed fix could sit invisible
+  // for ten minutes behind a service worker that believed it had gone to the
+  // network. Falls back to a plain fetch where the option is unsupported.
+  const fresh = (r) => fetch(r, { cache: "reload" }).catch(() => fetch(r));
+
   e.respondWith(                                        // network-first
-    fetch(req).then((res) => {
+    fresh(req).then((res) => {
       const copy = res.clone();
       caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
       return res;
