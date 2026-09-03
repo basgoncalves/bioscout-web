@@ -147,12 +147,12 @@
         </select>
       </div>
       <div>
-        <label for="height">Height (m)</label>
+        <label for="height">Height (m) <span class="sub">saved</span></label>
         <input id="height" type="number" step="0.01" value="1.75" inputmode="decimal">
       </div>
       <div>
-        <label for="mass">Mass (kg)</label>
-        <input id="mass" type="number" step="0.5" value="75" inputmode="decimal">
+        <label for="mass">Mass (kg) <span class="sub">this session</span></label>
+        <input id="mass" type="number" step="0.5" value="83" inputmode="decimal">
       </div>
     </div>
     <div class="row" style="margin-bottom:11px">
@@ -227,8 +227,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v17";
-try { document.getElementById("build").textContent = "build v17"; } catch (e) {}
+window.BUILD = "v18";
+try { document.getElementById("build").textContent = "build v18"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -359,7 +359,6 @@ function currentSettings() {
   return {
     name: ($("profileName").value || "").trim(),
     heightM: parseFloat($("height").value) || 1.75,
-    massKg: parseFloat($("mass").value) || 75,
     activity: $("activity").value,
     avatar: $("avatar").value,
     headScale: parseFloat($("headSize").value) || 1,
@@ -372,7 +371,10 @@ function applyProfile(p) {
   if (!p) return;
   $("profileName").value = p.name || "";
   if (p.heightM) $("height").value = p.heightM;
-  if (p.massKg) $("mass").value = p.massKg;
+  // Body mass is deliberately NOT restored from the profile. Height is a
+  // property of the person; mass is a property of the day, and it scales every
+  // moment and contact force on the page. Silently reusing a figure from weeks
+  // ago is the kind of wrong that never announces itself.
   if (p.activity) $("activity").value = p.activity;
   if (p.addedKg != null) $("added").value = p.addedKg;
   if (p.assistKg != null) $("assist").value = p.assistKg;
@@ -754,6 +756,14 @@ separate the sides.
   }
 }
 
+// Mass belongs to the session, so a reload mid-session picks it back up from
+// the last set rather than dropping to the default.
+(() => {
+  const s = getSession();
+  const last = s && s.sets && s.sets[s.sets.length - 1];
+  if (last && last.massKg) $("mass").value = last.massKg;
+})();
+
 refreshProfiles(lastUsedProfile()?.name || "");
 if (lastUsedProfile()) applyProfile(lastUsedProfile());
 renderTraining();
@@ -1127,7 +1137,7 @@ function chart(rep, activity, res) {
     const names = ["knee flexion", "hip flexion", "ankle dorsiflexion"];
     order.forEach((ent, k) => {
       const c = refCurve(refCond, "joint_angle", ent);
-      if (c) refs.push([`${names[k]} (ref)`, c.mean,
+      if (c) refs.push([`${names[k]} — CEINMS ref`, c.mean,
                         { dash: true, color: COLORS[k % COLORS.length] }]);
     });
   }
@@ -1179,8 +1189,8 @@ function chart(rep, activity, res) {
   g += `<text x="${P.l}" y="${H - 6}" font-size="9" fill="var(--muted)">${lab(t[0])}</text>`;
   g += `<text x="${W - P.r}" y="${H - 6}" font-size="9" text-anchor="end" fill="var(--muted)">${lab(t[t.length - 1])}</text>`;
   const legend = allSeries.map(([n, , o], i) =>
-    `<span><i class="swatch" style="background:${(o && o.color) || COLORS[i % COLORS.length]}${
-      o && o.dash ? ";opacity:.75" : ""}"></i>${n}</span>`).join("");
+    `<span><i class="swatch" style="${
+      swatchStyle((o && o.color) || COLORS[i % COLORS.length], o)}"></i>${n}</span>`).join("");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>
           <div class="legend">${legend}${bands ? '<span>shaded: ±1 SD between reps</span>' : ""}</div>
           ${refs.length ? refNote(refCond) : ""}`;
@@ -1233,17 +1243,27 @@ function lineChart(t, series, unit, palette, bandsIn, opts) {
       dash} stroke-linejoin="round" points="${
       vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
   });
-  for (const h of hlines) {
+  // Walking hip and walking knee sit 0.2 xBW apart, so their labels landed on
+  // top of each other and neither could be read. Draw the lines where they
+  // belong and push only the LABELS apart -- downward from the top of the plot,
+  // because pushing up marches them off the canvas as soon as the topmost line
+  // is near the top, which is exactly where a running-speed reference sits.
+  let nextFree = P.t + 8;
+  for (const h of [...hlines].sort((a, b) => sy(a.y) - sy(b.y))) {
     const yy = sy(h.y);
     g += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="${
       h.color || REF_COLOR}" stroke-width="1" stroke-dasharray="2 3"/>`;
-    g += `<text x="${W - P.r - 2}" y="${yy - 3}" font-size="8.5" text-anchor="end" fill="${
+    const ty = Math.min(Math.max(yy - 3, nextFree), H - P.b - 1);
+    nextFree = ty + 9.5;
+    g += `<text x="${W - P.r - 2}" y="${ty}" font-size="8.5" text-anchor="end" fill="${
       h.color || REF_COLOR}">${h.label}</text>`;
   }
   const legend = series.map(([n], i) => sopt[i].noLegend ? "" :
-    `<span><i class="swatch" style="background:${sopt[i].color || pal[i % pal.length]}${
-      sopt[i].dash ? ";opacity:.75" : ""}"></i>${n}</span>`).join("")
-    + (sopt.some((o) => o.dot) ? '<span>solid right · dotted left</span>' : "");
+    `<span><i class="swatch" style="${
+      swatchStyle(sopt[i].color || pal[i % pal.length], sopt[i])}"></i>${n}</span>`).join("")
+    + (sopt.some((o) => o.dot) ? '<span>solid right · dotted left</span>' : "")
+    + (hlines.length ? `<span><i class="swatch" style="${
+        swatchStyle(REF_COLOR, { dot: true })}"></i>gait literature, peak level</span>` : "");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:170px">${g}</svg>
           <div class="legend">${legend}<span>${unit}</span>${
             bands ? '<span>shaded: \u00b11 SD between reps</span>' : ""}</div>`;
@@ -1353,11 +1373,22 @@ function groupBySide(names, peakOf) {
 const sideOpt = (color, side, first) =>
   ({ color, dot: side === "l", noLegend: !first });
 
+/* A legend swatch has to be drawn in its line's own style. A solid block next
+ * to the words "bodyweight reference" tells the reader there is a solid line
+ * of that colour on the chart -- there is not, so the dashed curve goes
+ * unexplained and gets read as whatever the reader assumes it is. */
+function swatchStyle(color, o) {
+  o = o || {};
+  if (o.dash) return `background:repeating-linear-gradient(90deg,${color} 0 5px,transparent 5px 8px)`;
+  if (o.dot) return `background:repeating-linear-gradient(90deg,${color} 0 2px,transparent 2px 4.5px)`;
+  return `background:${color}`;
+}
+
 function refNote(cond) {
   if (!cond || !norms) return "";
   const src = norms.sources && norms.sources[Object.keys(norms.sources)
     .find((k) => /squat/i.test(k))];
-  return `<p class="note">Dashed: this project's own ${cond} squat, from
+  return `<p class="note"><b>Dashed lines</b> are this project's own ${cond} squat, from
     OpenSim inverse dynamics and CEINMS — <b>one athlete, two trials</b>, band
     ±1 SD across those trials. A reference for what this pipeline produces, not
     a population range.${src ? ` ${src.citation}.` : ""}</p>`;
@@ -1465,7 +1496,7 @@ function jointSubplot(rep, res, j) {
       return [first ? prettyBase(nm) : nm, vals,
               sideOpt(mcol(nm), sideOf(nm), first)];
     })];
-  if (refM) series.push([`${refCond} reference`, refM.mean,
+  if (refM) series.push([`${refCond} squat — CEINMS ref`, refM.mean,
                          { dash: true, color: REF_COLOR }]);
   const pal = ["#8892a6", ...MCOLORS];
   const bands = sdd && sdd[j.series]
@@ -1615,7 +1646,7 @@ function forcePanel(rep, res) {
       for (const ent of ["hip", "knee", "ankle"]) {
         const c = refCurve(refCond, "joint_contact_force", ent);
         if (!c) continue;
-        series.push([`${ent} reference`, c.mean,
+        series.push([`${ent} — CEINMS ref`, c.mean,
                      { dash: true, color: jcol[ent] || REF_COLOR }]);
         bands.push(refBand(c));
       }
