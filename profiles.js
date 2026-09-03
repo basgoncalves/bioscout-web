@@ -15,6 +15,19 @@
 const PKEY = "bioscout.profiles.v1";
 const SKEY = "bioscout.session.v1";
 const AKEY = "bioscout.archive.v1";
+const CKEY = "bioscout.curves.v1";
+
+/* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
+ * one; curves are not, so only the most recent sets keep those.
+ *
+ * The earlier design kept no curves at all, on the grounds that 80 muscle
+ * forces per frame would blow the quota -- which is true of the forces and of
+ * nothing else. Times, joint angles and the inverse-dynamics traces are about
+ * 10 kB per set after rounding, so a dozen sets is ~120 kB against a quota of
+ * several megabytes. Dropping them meant the set dropdown greyed out every set
+ * from before the last reload, which is the wrong trade by two orders of
+ * magnitude. */
+const CURVE_SETS_MAX = 12;
 
 // Finished sessions kept per device. Capped, because localStorage is a few
 // megabytes and silently starts throwing when it is full -- and the thing it
@@ -102,6 +115,66 @@ export function archiveSession() {
   return trimmed.length;
 }
 
+// --- stored waveforms ------------------------------------------------------
+const r3 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(3) : 0));
+const r2 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(2) : 0));
+
+/** Everything a chart needs, and nothing it does not. Muscle forces are left
+ *  out on purpose: they are 80 traces per frame, an order of magnitude more
+ *  than all the rest together, and the app can say so rather than not store
+ *  the angles either. */
+export function saveCurves(sessionStarted, index, result) {
+  if (!sessionStarted || !result || !result.reps) return false;
+  const store = read(CKEY, {});
+  const key = `${sessionStarted}|${index}`;
+  store[key] = {
+    at: new Date().toISOString(),
+    activity: result.activity, osimModel: result.osimModel,
+    massKg: result.massKg, addedKg: result.addedKg, assistKg: result.assistKg,
+    externalKg: result.externalKg, ageY: result.ageY ?? null,
+    coverage: result.coverage, pxPerM: result.pxPerM, view: result.view,
+    fps: result.fps,
+    setIndex: index,
+    reps: result.reps.map((rp) => {
+      const o = { rep: rp.rep, bounds: rp.bounds, times: r3(rp.times), coords: {} };
+      for (const [k, v] of Object.entries(rp.coords || {})) o.coords[k] = r3(v);
+      if (rp.dyn) {
+        o.dyn = {};
+        for (const [k, v] of Object.entries(rp.dyn)) {
+          o.dyn[k] = Array.isArray(v) || ArrayBuffer.isView(v) ? r2(v) : v;
+        }
+      }
+      for (const [k, v] of Object.entries(rp)) {
+        if (typeof v === "number" || typeof v === "boolean") o[k] = v;
+      }
+      return o;
+    }),
+  };
+  // Newest first, then trim. If the quota still refuses, drop the oldest and
+  // try again rather than losing the write outright.
+  let keys = Object.keys(store).sort((a, b) => store[b].at.localeCompare(store[a].at));
+  for (const k of keys.slice(CURVE_SETS_MAX)) delete store[k];
+  keys = Object.keys(store).sort((a, b) => store[b].at.localeCompare(store[a].at));
+  while (keys.length) {
+    if (write(CKEY, store)) return true;
+    const oldest = keys.pop();
+    if (oldest === key) return false;      // this set alone will not fit
+    delete store[oldest];
+  }
+  return false;
+}
+
+export function getCurves(sessionStarted, index) {
+  const store = read(CKEY, {});
+  return store[`${sessionStarted}|${index}`] || null;
+}
+
+export function curveIndices(sessionStarted) {
+  return Object.keys(read(CKEY, {}))
+    .filter((k) => k.startsWith(sessionStarted + "|"))
+    .map((k) => +k.split("|")[1]);
+}
+
 // --- export and import -----------------------------------------------------
 /* No server, so no automatic sync. What there is instead: one file carrying
  * everything this device knows, which the athlete moves themselves. That is a
@@ -183,6 +256,7 @@ export function addSet(result, fps, extra = {}) {
     fps: +fps.toFixed(1),
     reps: result.reps.length,
     massKg: result.massKg, addedKg: result.addedKg, assistKg: result.assistKg,
+    ageY: result.ageY ?? null,
     view: result.view?.view ?? null,
     detected: result.detection ? result.detection.activity : null,
     perRep: result.reps.map((r) => summariseRep(r, result.activity)),

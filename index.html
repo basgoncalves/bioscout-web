@@ -156,6 +156,11 @@
         <input id="height" type="number" step="0.01" value="1.75" inputmode="decimal">
       </div>
       <div>
+        <label for="age">Age <span class="sub">saved</span></label>
+        <input id="age" type="number" step="1" min="0" max="120" value=""
+               placeholder="years" inputmode="numeric">
+      </div>
+      <div>
         <label for="mass">Mass (kg) <span class="sub">this session</span></label>
         <input id="mass" type="number" step="0.5" value="83" inputmode="decimal">
       </div>
@@ -232,8 +237,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v19";
-try { document.getElementById("build").textContent = "build v19"; } catch (e) {}
+window.BUILD = "v21";
+try { document.getElementById("build").textContent = "build v21"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -253,7 +258,8 @@ import { inverseDynamics } from "./dynamics.js";
 import { classify, MIN_CONFIDENCE } from "./detect.js";
 import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          newSession, getSession, clearSession, addSet, summariseSession,
-         archiveSession, listArchive, exportAll, importAll }
+         archiveSession, listArchive, exportAll, importAll,
+         saveCurves, getCurves, curveIndices }
        from "./profiles.js";
 import { Overlay } from "./overlay.js";
 import { ensembleRep } from "./ensemble.js";
@@ -365,6 +371,7 @@ function currentSettings() {
   return {
     name: ($("profileName").value || "").trim(),
     heightM: parseFloat($("height").value) || 1.75,
+    ageY: $("age").value === "" ? null : (parseInt($("age").value, 10) || null),
     activity: $("activity").value,
     avatar: $("avatar").value,
     headScale: parseFloat($("headSize").value) || 1,
@@ -377,6 +384,7 @@ function applyProfile(p) {
   if (!p) return;
   $("profileName").value = p.name || "";
   if (p.heightM) $("height").value = p.heightM;
+  $("age").value = p.ageY == null ? "" : p.ageY;
   // Body mass is deliberately NOT restored from the profile. Height is a
   // property of the person; mass is a property of the day, and it scales every
   // moment and contact force on the page. Silently reusing a figure from weeks
@@ -413,6 +421,39 @@ $("saveProfileBtn").onclick = () => {
          : "Could not save — browser storage is unavailable here.", !ok);
   refreshProfiles(s.name);
 };
+/* Every field marked "saved" writes straight back to the profile.
+ *
+ * Typing a new height and pressing nothing used to discard it on the next
+ * reload: the value was on screen, the profile still held the old one, and
+ * nothing said so. A field labelled as part of the athlete's profile should
+ * behave like one. Save profile still exists for naming and for the first
+ * save; this just stops the silent loss.
+ */
+const SAVED_FIELDS = ["height", "age", "activity", "avatar", "headSize"];
+let warnedNoProfile = false;
+function autosaveProfile() {
+  const st = currentSettings();
+  if (!st.name) {
+    // Say it once. Repeating on every keystroke is nagging, and the value is
+    // still perfectly usable for this session -- it just will not persist.
+    if (!warnedNoProfile) {
+      warnedNoProfile = true;
+      say("These settings apply to this session. Give the athlete a name and " +
+          "press Save profile to keep them.");
+    }
+    return;
+  }
+  warnedNoProfile = false;
+  if (saveProfile(st)) {
+    refreshProfiles(st.name);
+    say(`Saved to “${st.name}”.`);
+  }
+}
+for (const id of SAVED_FIELDS) {
+  const el = $(id);
+  if (el) el.addEventListener("change", autosaveProfile);
+}
+
 $("exportProfilesBtn").onclick = () => {
   try {
     const data = exportAll();
@@ -1017,6 +1058,8 @@ async function finish() {
         const set = addSet(lastResult, fps, { profile: $("profile").value || null });
         lastResult.setIndex = set.index;
         pageSets.push({ index: set.index, res: lastResult, fps });
+        const sess = getSession();
+        if (sess) saveCurves(sess.started, set.index, lastResult);
         viewingSet = set.index;
         renderTraining();
       } catch (e) {
@@ -1045,6 +1088,7 @@ async function enrich(res, poses, fps, heightM, activity) {
   const addedKg = Math.max(0, parseFloat($("added").value) || 0);
   const assistKg = Math.max(0, parseFloat($("assist").value) || 0);
   res.massKg = massKg;
+  res.ageY = $("age").value === "" ? null : (parseInt($("age").value, 10) || null);
   res.addedKg = addedKg;
   res.assistKg = assistKg;
   res.externalKg = addedKg - assistKg;
@@ -1158,7 +1202,7 @@ function chart(rep, activity, res) {
     const names = ["knee flexion", "hip flexion", "ankle dorsiflexion"];
     order.forEach((ent, k) => {
       const c = refCurve(refCond, "joint_angle", ent);
-      if (c) refs.push([`${names[k]} — CEINMS ref`, c.mean,
+      if (c) refs.push([`${names[k]} (ref)`, c.mean,
                         { dash: true, color: COLORS[k % COLORS.length] }]);
     });
   }
@@ -1517,7 +1561,7 @@ function jointSubplot(rep, res, j) {
       return [first ? prettyBase(nm) : nm, vals,
               sideOpt(mcol(nm), sideOf(nm), first)];
     })];
-  if (refM) series.push([`${refCond} squat — CEINMS ref`, refM.mean,
+  if (refM) series.push([`${refCond} squat (ref)`, refM.mean,
                          { dash: true, color: REF_COLOR }]);
   const pal = ["#8892a6", ...MCOLORS];
   const bands = sdd && sdd[j.series]
@@ -1588,7 +1632,14 @@ function momentPanel(rep, res) {
 }
 
 function forcePanel(rep, res) {
-  if (!rep.forces || !rep.forces.length) return "";
+  if (!rep.forces || !rep.forces.length) {
+    return res && res.restored
+      ? `<p class="note">Muscle and joint forces are not kept between sessions:
+         eighty traces per frame is an order of magnitude more storage than
+         everything else on this page combined. Angles and moments above are
+         the stored ones. Re-analyse the clip to get the forces back.</p>`
+      : "";
+  }
   const fm = rep.forceModel;
   const bad = rep.forceImplausible || 0;
   // Peaks per muscle NAME first, then folded onto the muscle itself: one row
@@ -1685,7 +1736,7 @@ function forcePanel(rep, res) {
       for (const ent of ["hip", "knee", "ankle"]) {
         const c = refCurve(refCond, "joint_contact_force", ent);
         if (!c) continue;
-        series.push([`${ent} — CEINMS ref`, c.mean,
+        series.push([`${ent} (ref)`, c.mean,
                      { dash: true, color: jcol[ent] || REF_COLOR }]);
         bands.push(refBand(c));
       }
@@ -1907,13 +1958,15 @@ WHAT NOT TO TRUST
 function setSwitcher(res) {
   const sess = getSession();
   if (!sess || sess.sets.length < 2) return "";
-  const have = new Set(pageSets.map((x) => x.index));
+  // In memory, or stored on this device. Either can be drawn.
+  const have = new Set([...pageSets.map((x) => x.index),
+                        ...curveIndices(sess.started)]);
   const cur = res.setIndex ?? viewingSet;
   const opts = sess.sets.map((x) => {
     const ok = have.has(x.index);
     return `<option value="${x.index}"${ok ? "" : " disabled"}${
       x.index === cur ? " selected" : ""}>Set ${x.index} — ${x.reps} ${x.activity}${
-      ok ? "" : " (curves not kept past a reload)"}</option>`;
+      ok ? "" : " (curves no longer stored)"}</option>`;
   }).join("");
   return `<div style="margin-bottom:10px">
       <label for="setSel">Showing</label>
@@ -1925,8 +1978,17 @@ function wireSetSwitcher() {
   const sel = $("setSel");
   if (!sel) return;
   sel.onchange = () => {
-    const hit = pageSets.find((x) => x.index === +sel.value);
-    if (!hit) return;
+    const want = +sel.value;
+    let hit = pageSets.find((x) => x.index === want);
+    if (!hit) {
+      // Not in memory: rebuild it from what was stored. Angles and moments
+      // come back; muscle forces do not, and the panel says so rather than
+      // showing an empty box.
+      const sess = getSession();
+      const c = sess && getCurves(sess.started, want);
+      if (!c) return;
+      hit = { index: want, fps: c.fps || 30, res: { ...c, restored: true } };
+    }
     viewingSet = hit.index;
     render(hit.res, hit.fps);
     $("results").scrollIntoView({ behavior: "smooth", block: "start" });
