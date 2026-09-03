@@ -25,7 +25,7 @@ const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
 export function features(poses) {
   const keys = Object.keys(poses).map(Number).sort((a, b) => a - b);
   const S = { hipY: [], shY: [], wrY: [], anY: [], earW: [], noseX: [], noseY: [],
-              knee: [], hipA: [], elbow: [], torso: [] };
+              knee: [], hipA: [], elbow: [], torso: [], footY: [] };
   for (const fi of keys) {
     const lm = poses[fi];
     const ls = lm.left_shoulder, rs = lm.right_shoulder;
@@ -48,6 +48,10 @@ export function features(poses) {
     S.hipA.push(180 - nanmean([angle3(ls, lh, lk), angle3(rs, rh, rk)]));
     S.elbow.push(180 - nanmean([angle3(ls, le, lw), angle3(rs, re, rw)]));
     if (sh && hp) S.torso.push(Math.abs(sh[1] - hp[1]));
+    // Lowest point of either foot this frame. Larger y is lower on screen.
+    const feet = [la, ra, lm.left_foot_index, lm.right_foot_index]
+      .filter(Boolean).map((q) => q[1]).filter(isNum);
+    S.footY.push(feet.length ? Math.max(...feet) : NaN);
   }
 
   let torso = nanmedian(S.torso);
@@ -60,6 +64,34 @@ export function features(poses) {
     const sh = mid(lm.left_shoulder, lm.right_shoulder);
     const wr = mid(lm.left_wrist, lm.right_wrist);
     if (sh && wr) { nOver++; if (sh[1] - wr[1] > 0.25 * torso) overhead++; }
+  }
+
+  /* Flight. This is the one feature that separates a jump from everything
+   * else here: in a squat, a pull-up and a neck test the feet never leave the
+   * floor, so a foot rise of several centimetres is not ambiguous. The floor is
+   * the lowest foot position seen anywhere in the clip -- the athlete is on the
+   * ground for most of any recording. */
+  const floorY = Math.max(...S.footY.filter(isNum), -Infinity);
+  let airborne = 0, nFoot = 0;
+  const air = [];
+  for (const y of S.footY) {
+    if (!isNum(y)) { air.push(false); continue; }
+    nFoot++;
+    const up = floorY - y > 0.15 * torso;
+    if (up) airborne++;
+    air.push(up);
+  }
+  // Did the hips dip below where they started, before the feet left the floor?
+  // That is the countermovement, and it is what separates the two jumps.
+  let firstAir = air.indexOf(true);
+  let dip = 0;
+  if (firstAir > 0 && S.hipY.length >= firstAir) {
+    const start = S.hipY[0];
+    let lowest = start;
+    for (let i = 0; i < Math.min(firstAir, S.hipY.length); i++) {
+      if (isNum(S.hipY[i]) && S.hipY[i] > lowest) lowest = S.hipY[i];
+    }
+    dip = (lowest - start) / torso;
   }
 
   const earW = nanmedian(S.earW);
@@ -77,27 +109,52 @@ export function features(poses) {
     elbow_rom: range(S.elbow),
     head_frac: headFrac,
     nose_travel: noseTravel,
+    flight_frac: nFoot ? airborne / nFoot : 0,
+    countermovement_frac: dip,
     frames: keys.length,
   };
+}
+
+/** How much this looks like a two-footed vertical jump, flight aside. */
+function jumpShape(f) {
+  return mean([
+    clamp01(1 - f.hands_overhead_frac / 0.4),
+    clamp01(f.knee_rom / 55),
+    clamp01(f.hip_rom / 40),
+  ]);
 }
 
 export function score(f) {
   return {
     // Hands overhead, whole body rises, elbows do the work, feet free.
-    pullup: mean([
+    // Overhead is a veto for the same reason flight is one for the squat: a
+    // jump also raises the whole body and frees the feet, and averaging let it
+    // score 0.46 as a pull-up. Hands not overhead, not a pull-up.
+    pullup: clamp01(f.hands_overhead_frac / 0.3) * mean([
       clamp01(f.hands_overhead_frac / 0.5),
       clamp01(f.body_rise / 1.2),
       clamp01(f.elbow_rom / 80),
       clamp01(f.feet_move / 0.8),
     ]),
-    // Feet planted, hips drop, knee and hip flex together, hands down.
-    squat: mean([
+    // Feet planted, hips drop, knee and hip flex together, hands down. The
+    // flight term is a veto, not an average: a squat with the feet in the air
+    // is a jump, and no amount of agreement elsewhere changes that.
+    squat: (1 - clamp01(f.flight_frac / 0.04)) * mean([
       clamp01(1 - f.hands_overhead_frac / 0.3),
       clamp01(f.knee_rom / 60),
       clamp01(f.hip_rom / 50),
       clamp01(1 - f.feet_move / 0.5),
       clamp01(f.hip_drop / 0.8),
     ]),
+    // The jumps. Flight multiplies for the same reason: without it there is no
+    // jump, however squat-like the rest looks. The two are told apart by the
+    // countermovement alone, so each keeps a floor of 0.35 -- the movement IS a
+    // jump either way, and calling the wrong one is a much smaller error than
+    // calling it a squat.
+    cmj: clamp01(f.flight_frac / 0.06) * jumpShape(f)
+       * (f.countermovement_frac > 0.08 ? 1 : 0.35),
+    sj: clamp01(f.flight_frac / 0.06) * jumpShape(f)
+       * (f.countermovement_frac > 0.08 ? 0.35 : 1),
     // Head fills the frame and MOVES while the trunk stays put. nose_travel
     // multiplies rather than averages: three of the four terms reward
     // stillness, so without this a motionless person scores as a neck test.
@@ -113,7 +170,8 @@ export function score(f) {
  *  frame can match a shape by accident, so this is checked first. */
 export function isStill(f) {
   return f.knee_rom < 8 && f.hip_rom < 8 && f.elbow_rom < 8
-      && f.body_rise < 0.08 && f.hip_drop < 0.08 && f.nose_travel < 0.12;
+      && f.body_rise < 0.08 && f.hip_drop < 0.08 && f.nose_travel < 0.12
+      && f.flight_frac < 0.01;
 }
 
 export function classify(poses) {
@@ -143,6 +201,12 @@ export function classify(poses) {
          + `${f.hip_drop.toFixed(1)} torso lengths`,
     neck: `head fills ${(100 * f.head_frac).toFixed(0)}% of a torso length, `
         + `nose moved ${f.nose_travel.toFixed(1)} head widths, trunk barely moved`,
+    cmj: `feet off the floor for ${(100 * f.flight_frac).toFixed(0)}% of the clip, `
+       + `hips dipped ${f.countermovement_frac.toFixed(2)} torso lengths before `
+       + `take-off, knee range ${f.knee_rom.toFixed(0)}°`,
+    sj: `feet off the floor for ${(100 * f.flight_frac).toFixed(0)}% of the clip `
+      + `with no dip before take-off (${f.countermovement_frac.toFixed(2)} torso `
+      + `lengths), knee range ${f.knee_rom.toFixed(0)}°`,
   }[best];
   return { activity: best, confidence: conf, scores: sc, features: f, margin, reason: why };
 }

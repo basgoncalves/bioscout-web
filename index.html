@@ -66,6 +66,9 @@
        color:var(--muted); font-weight:600; }
   .note { font-size:12.5px; color:var(--muted); margin-top:10px; }
   tr.meanrow td { border-top:1.5px solid var(--line); font-weight:600; }
+  table.jcf th, table.jcf td { padding:7px 3px; font-size:13px; }
+  table.jcf .ref { color:var(--muted); }
+  table.jcf th.ref { font-size:10px; }
   tr.meanrow td .sub { font-weight:400; font-size:11.5px; }
   th select, .thsel { font-size:11px; padding:3px 4px; margin:0; width:auto;
                       max-width:130px; text-transform:none; letter-spacing:0; }
@@ -143,6 +146,8 @@
           <option value="auto">Detect automatically</option>
           <option value="pullup">Pull-up</option>
           <option value="squat">Squat</option>
+          <option value="cmj">Countermovement jump</option>
+          <option value="sj">Squat jump</option>
           <option value="neck">Neck (close-up)</option>
         </select>
       </div>
@@ -227,8 +232,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v18";
-try { document.getElementById("build").textContent = "build v18"; } catch (e) {}
+window.BUILD = "v19";
+try { document.getElementById("build").textContent = "build v19"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -242,7 +247,8 @@ setTimeout(function () {
 </script>
 <script type="module">
 import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
-         buildSquatFeatures, computePxPerM, jointPositionsM } from "./kinematics.js";
+         buildSquatFeatures, buildJumpFeatures, computePxPerM,
+         jointPositionsM } from "./kinematics.js";
 import { inverseDynamics } from "./dynamics.js";
 import { classify, MIN_CONFIDENCE } from "./detect.js";
 import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
@@ -461,6 +467,11 @@ $("delProfileBtn").onclick = () => {
  * plotted without touching this list twice. */
 const PEAK_VARS = {
   depth_m:            { label: "Depth", unit: "m", dp: 2 },
+  height_flight_m:    { label: "Jump height (flight time)", unit: "m", dp: 3 },
+  height_com_m:       { label: "Jump height (hip rise)", unit: "m", dp: 3 },
+  flight_s:           { label: "Flight time", unit: "s", dp: 3 },
+  countermovement_m:  { label: "Countermovement depth", unit: "m", dp: 3 },
+  push_s:             { label: "Push time", unit: "s", dp: 2 },
   knee_flex_max_deg:  { label: "Peak knee flexion", unit: "°", dp: 0 },
   hip_flex_max_deg:   { label: "Peak hip flexion", unit: "°", dp: 0 },
   travel_m:           { label: "Body travel", unit: "m", dp: 2 },
@@ -1040,9 +1051,10 @@ async function enrich(res, poses, fps, heightM, activity) {
 
   // Inverse dynamics: squats only. A pull-up has no ground reaction, so the
   // whole-body-COM derivation of the external load does not apply.
-  if (activity === "squat" && res.reps.length) {
+  if ((activity === "squat" || ACTIVITIES[activity].jump) && res.reps.length) {
     try {
-      const F = buildSquatFeatures(poses);
+      const F = ACTIVITIES[activity].jump
+        ? buildJumpFeatures(poses) : buildSquatFeatures(poses);
       const { pxPerM } = computePxPerM(poses, heightM);
       for (const r of res.reps) {
         r.dyn = inverseDynamics(
@@ -1071,7 +1083,8 @@ async function enrich(res, poses, fps, heightM, activity) {
       // The surrogate was trained on RAJAGOPAL signs (its knee_angle_r training
       // mean is +56.9 deg). A GPK-signed knee would silently invert that input.
       const mc = { ...r.coords };
-      if (activity === "squat" && KNEE_SIGN[res.osimModel] < 0) {
+      if ((activity === "squat" || ACTIVITIES[activity].jump)
+          && KNEE_SIGN[res.osimModel] < 0) {
         mc.knee_angle_r = r.coords.knee_angle_r.map((v) => -v);
         mc.knee_angle_l = r.coords.knee_angle_l.map((v) => -v);
       }
@@ -1104,12 +1117,13 @@ async function enrich(res, poses, fps, heightM, activity) {
 function viewNote(res) {
   const v = res.view || {};
   const bits = [];
-  if (res.activity === "squat" && (v.view === "frontal" || v.view === "oblique")) {
+  const sagittal = res.activity === "squat" || ACTIVITIES[res.activity]?.jump;
+  if (sagittal && (v.view === "frontal" || v.view === "oblique")) {
     bits.push(`This looks like a <b>${v.view}</b> view (frontality ${v.frontality}).
       Knee, hip and ankle angles are sagittal measurements and are only valid
       filmed from the side. Re-shoot side on.`);
   }
-  if (res.activity === "squat" && v.ankle_usable === false) {
+  if (sagittal && v.ankle_usable === false) {
     bits.push(`Ankle angle could not be measured — the foot is pointing at or
       away from the camera, which flattens the knee-ankle-toe angle. It is
       written as 0 in the .mot rather than a fabricated value.`);
@@ -1119,7 +1133,12 @@ function viewNote(res) {
 }
 
 function chart(rep, activity, res) {
-  const keys = activity === "squat"
+  // Jumps are written in the squat coordinate set, so they get the squat
+  // curves. Falling through to the pull-up set asked for elbow_flex_r, which a
+  // jump does not have, and threw inside the chart after the table had already
+  // rendered -- which is why the page looked fine and the panels below it were
+  // silently empty.
+  const keys = (activity === "squat" || ACTIVITIES[activity]?.jump)
     ? [["knee flexion", "knee_angle_r"], ["hip flexion", "hip_flexion_r"],
        ["ankle dorsiflexion", "ankle_angle_r"]]
     : [["elbow flexion", "elbow_flex_r"], ["shoulder flexion", "arm_flex_r"],
@@ -1128,6 +1147,8 @@ function chart(rep, activity, res) {
   // Reference angles, on the mean rep only: over a single rep they would be
   // three more lines competing with the measurement for attention.
   const refCond = rep.isMean && activity === "squat" ? normCondition(res || {}) : null;
+  // No reference is offered for a jump: nothing in the corpus is a jump, and a
+  // squat curve laid over one would be the gait mistake all over again.
   const refs = [];
   if (refCond) {
     // Index off the joint, not off how many references happened to be found:
@@ -1593,10 +1614,28 @@ function forcePanel(rep, res) {
     ? groupBySide(rep.jrfNames.map((n) => n.replace("_mag", "")),
                   (n) => jrfPeaks.get(n + "_mag") ?? jrfPeaks.get(n) ?? 0)
     : [];
+  // Reference peaks beside the measured ones. A number is only worth reading
+  // next to the number it should be compared with.
+  const refCondT = res && res.activity ? normCondition(res) : null;
+  const levelFor = (ent, re) => {
+    const hit = (norms && norms.levels ? norms.levels : [])
+      .filter((L) => L.entity === ent && L.variable === "joint_contact_force"
+                     && re.test(L.label))
+      .map((L) => L.value);
+    return hit.length ? Math.max(...hit) : null;
+  };
+  const refPeak = (ent) => {
+    const c = refCondT ? refCurve(refCondT, "joint_contact_force", ent) : null;
+    return c ? Math.max(...c.mean) : null;
+  };
+  const n2 = (v) => (v == null ? "—" : v.toFixed(2));
   const jrows = jGroups.map((g) =>
     `<tr><td>${prettyBase(g.base)}</td>
       <td>${g.r ? g.r.peak.toFixed(2) : "—"}</td>
-      <td>${g.l ? g.l.peak.toFixed(2) : "—"}</td></tr>`).join("");
+      <td>${g.l ? g.l.peak.toFixed(2) : "—"}</td>
+      <td class="ref">${n2(refPeak(g.base))}</td>
+      <td class="ref">${n2(levelFor(g.base, /walk/i))}</td>
+      <td class="ref">${n2(levelFor(g.base, /run/i))}</td></tr>`).join("");
 
   // Muscle force as a percentage of each muscle's OWN peak in this rep.
   // Normalising sidesteps the surrogate's magnitude problem: the shapes are
@@ -1693,8 +1732,15 @@ function forcePanel(rep, res) {
     ${pctChart}
     <h1 style="font-size:14px;margin:14px 0 2px">Joint contact force</h1>
     ${jrfChart}
-    <table><thead><tr><th>Joint</th><th>Right, × BW</th><th>Left, × BW</th></tr></thead>
+    <table class="jcf"><thead><tr><th>Joint</th><th>Right</th><th>Left</th>
+      <th class="ref">${refCondT ? refCondT + " ref" : "squat ref"}</th>
+      <th class="ref">Walking</th><th class="ref">Running</th></tr></thead>
       <tbody>${jrows}</tbody></table>
+    <p class="note">All × bodyweight. The last three columns are references, not
+      measurements: the squat column is this project's own CEINMS run, walking
+      and running are peaks from the gait literature. Walking and running are
+      different tasks entirely — they are there to say whether a predicted
+      force is even the right size.</p>
     <p class="note">${rep.forceMissing?.length || 0} of the model's
       ${fm ? new Set(fm.feat.filter((f) => f.startsWith("q_"))).size : "?"}
       joint coordinates cannot be seen by one camera and take the training
@@ -1966,16 +2012,32 @@ function render(res, fps) {
     return;
   }
 
-  const rows = res.reps.map((r) => isSquat
+  const isJump = !!ACTIVITIES[res.activity].jump;
+  const cm = (v, dp = 1) => (v == null ? "—" : (v * 100).toFixed(dp));
+  const jumpRows = !isJump ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+      <td>${r.flight_s == null ? "—" : r.flight_s.toFixed(3)}</td>
+      <td>${r.height_flight_m == null ? "—" : cm(r.height_flight_m) +
+            `<span class="sub"> ±${cm(r.flight_uncertainty_m)}</span>`}</td>
+      <td>${cm(r.height_com_m)}</td><td>${cm(r.countermovement_m)}</td>
+      <td>${r.push_s == null ? "—" : r.push_s.toFixed(2)}</td></tr>`).join("");
+  const mismatched = isJump ? res.reps.filter((r) => r.mismatch) : [];
+
+  // Built only when it will be used: a jump has no eccentric_s or
+  // concentric_s -- its phases are push and landing -- so computing these rows
+  // eagerly threw on undefined.toFixed before the jump table was ever reached.
+  const rows = isJump ? "" : res.reps.map((r) => isSquat
     ? `<tr><td>${r.rep}</td><td>${r.eccentric_s.toFixed(2)}</td><td>${r.concentric_s.toFixed(2)}</td>
          <td>${r.knee_flex_max_deg.toFixed(0)}°</td><td>${r.hip_flex_max_deg.toFixed(0)}°</td>
          <td>${r.depth_m.toFixed(2)}</td></tr>`
     : `<tr><td>${r.rep}</td><td>${r.concentric_s.toFixed(2)}</td><td>${r.eccentric_s.toFixed(2)}</td>
          <td>${r.elbow_flex_max_deg.toFixed(0)}°</td><td>${r.arm_flex_range_deg.toFixed(0)}°</td>
          <td>${r.pelvis_travel_m.toFixed(2)}</td></tr>`).join("");
-  const head = isSquat
-    ? "<tr><th>Rep</th><th>Down</th><th>Up</th><th>Knee</th><th>Hip</th><th>Depth m</th></tr>"
-    : "<tr><th>Rep</th><th>Up</th><th>Down</th><th>Elbow</th><th>Shldr</th><th>Rise m</th></tr>";
+  const head = isJump
+    ? `<tr><th>Jump</th><th>Flight s</th><th>Height cm<br>flight time</th>
+        <th>Height cm<br>hip rise</th><th>Counter-<br>move cm</th><th>Push s</th></tr>`
+    : isSquat
+      ? "<tr><th>Rep</th><th>Down</th><th>Up</th><th>Knee</th><th>Hip</th><th>Depth m</th></tr>"
+      : "<tr><th>Rep</th><th>Up</th><th>Down</th><th>Elbow</th><th>Shldr</th><th>Rise m</th></tr>";
 
   const meanRep = ensembleRep(res.reps);
   const items = meanRep ? [...res.reps, meanRep] : res.reps;
@@ -1985,7 +2047,16 @@ function render(res, fps) {
     const st = meanRep && meanRep.stats[k];
     return st ? `${st.mean.toFixed(d)}<span class="sub"> ±${st.sd.toFixed(d)}</span>` : "—";
   };
-  const meanRow = !meanRep ? "" : (isSquat
+  const meanRow = !meanRep ? "" : isJump
+    ? `<tr class="meanrow"><td>Mean</td><td>${ms("flight_s", 3)}</td>
+         <td>${(() => { const st = meanRep.stats.height_flight_m;
+                        return st ? `${(st.mean * 100).toFixed(1)}<span class="sub"> ±${(st.sd * 100).toFixed(1)}</span>` : "—"; })()}</td>
+         <td>${(() => { const st = meanRep.stats.height_com_m;
+                        return st ? (st.mean * 100).toFixed(1) : "—"; })()}</td>
+         <td>${(() => { const st = meanRep.stats.countermovement_m;
+                        return st ? (st.mean * 100).toFixed(1) : "—"; })()}</td>
+         <td>${ms("push_s")}</td></tr>`
+    : (isSquat
     ? `<tr class="meanrow"><td>Mean</td><td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
          <td>${ms("knee_flex_max_deg", 0)}°</td><td>${ms("hip_flex_max_deg", 0)}°</td>
          <td>${ms("depth_m")}</td></tr>`
@@ -1999,7 +2070,14 @@ function render(res, fps) {
       ${(res.coverage * 100).toFixed(0)}% tracked · ${res.pxPerM.toFixed(0)} px/m ·
       ${res.view?.view ?? "?"} view · .mot signed for ${res.osimModel}</p>
     ${setSwitcher(res)}
-    <table><thead>${head}</thead><tbody>${rows}${meanRow}</tbody></table>
+    <table><thead>${head}</thead><tbody>${isJump ? jumpRows : rows}${meanRow}</tbody></table>
+    ${mismatched.length ? `<p class="note banner">${mismatched.length} of ${n}
+      ${res.activity === "sj"
+        ? `had a countermovement: the hip dipped before the push. A squat jump
+           starts from a held squat and goes straight up, so those are
+           countermovement jumps and will read higher.`
+        : `had no countermovement: the hip did not dip before the push, so those
+           are squat jumps and will read lower.`}</p>` : ""}
     <div class="tabs" id="repTabs" style="margin-top:14px"></div>
     <div id="chartBox"></div>
     <button class="ghost" id="dlBtn" style="margin-top:12px">Download angles (.mot) + moments (.sto)</button>
@@ -2012,6 +2090,15 @@ function render(res, fps) {
     ${viewNote(res)}
     <div id="dynBox"></div>
     <div id="forceBox"></div>
+    ${isJump ? `<p class="note"><b>Two heights, two sets of assumptions.</b>
+      <i>Flight time</i> is h = g·t²/8, the textbook method. It assumes the same
+      posture leaving the floor and landing on it — tuck your legs up and it
+      flatters you — and its resolution is the frame rate, which is the ± in the
+      table. <i>Hip rise</i> is how far the hip centre actually travelled: no
+      posture assumption, but it inherits pose jitter and the pixel-to-metre
+      scale, and the hip is not the whole-body centre of mass. They usually
+      differ by a few centimetres. Against synthetic jumps of known height both
+      landed within 2 cm at 30 and 60 fps. Neither is a force plate.</p>` : ""}
     <p class="note">Angles and depth are measured. Durations depend on the frame rate the
       browser actually delivered (${fps.toFixed(1)} fps), which varies with lighting and
       phone load — treat tempo as approximate. Left and right are mirrored: one camera
@@ -2082,17 +2169,73 @@ function render(res, fps) {
 }
 
 // --- demo mode (last: everything above must be initialised first) ----------
+/* A jump with a known answer, for ?demo=cmj and ?demo=sj.
+ *
+ * The recorded fixtures are a pull-up and two squats; there is no jump in them,
+ * and the point of a demo is to exercise the real render path. This builds a
+ * projectile with an exact height so the two height estimates can be checked
+ * against a number rather than against each other -- at 60 fps both land
+ * within 2 cm of the truth.
+ */
+function syntheticJump(kind, { fps = 60, jumpH = 0.32, pxPerM = 520 } = {}) {
+  const G = 9.80665, cmv = kind === "sj" ? 0 : 0.26;
+  const stand = 0.95, dip = stand - cmv;
+  const flight = 2 * Math.sqrt((2 * jumpH) / G);
+  const H = [], FOOT = [];
+  const still = Math.round(0.5 * fps), dipN = Math.round(0.45 * fps);
+  const pushN = Math.round(0.3 * fps), flightN = Math.round(flight * fps);
+  for (let i = 0; i < still; i++) { H.push(kind === "sj" ? dip : stand); FOOT.push(0); }
+  for (let i = 0; i < (kind === "sj" ? 0 : dipN); i++) {
+    H.push(stand - cmv * (i + 1) / dipN); FOOT.push(0);
+  }
+  for (let i = 0; i < pushN; i++) { H.push(dip + (stand - dip) * (i + 1) / pushN); FOOT.push(0); }
+  const v = (G * flight) / 2;
+  for (let i = 0; i < flightN; i++) {
+    const t = (i + 1) / fps;
+    H.push(stand + v * t - 0.5 * G * t * t);
+    FOOT.push(Math.max(0, v * t - 0.5 * G * t * t));
+  }
+  for (let i = 0; i < Math.round(0.8 * fps); i++) { H.push(stand); FOOT.push(0); }
+
+  const poses = {};
+  H.forEach((h, i) => {
+    const hipY = 1000 - h * pxPerM, footY = 1000 - FOOT[i] * pxPerM;
+    const kneeY = footY - 0.42 * pxPerM, shY = hipY - 0.45 * pxPerM;
+    // The knee travels forward and the trunk leans as the hip drops. Without
+    // it hip, knee and ankle stay collinear and nothing flexes.
+    const drop = stand - h, kx = drop * 0.9 * pxPerM, tx = -drop * 0.5 * pxPerM;
+    poses[i] = {
+      left_shoulder: [240 + tx, shY], right_shoulder: [260 + tx, shY],
+      left_hip: [245, hipY], right_hip: [255, hipY],
+      left_knee: [245 + kx, kneeY], right_knee: [255 + kx, kneeY],
+      left_ankle: [245, footY], right_ankle: [255, footY],
+      left_foot_index: [265, footY + 4], right_foot_index: [275, footY + 4],
+      left_elbow: [235 + tx, shY + 110], right_elbow: [265 + tx, shY + 110],
+      left_wrist: [235 + tx, shY + 220], right_wrist: [265 + tx, shY + 220],
+      left_ear: [245 + tx, shY - 70], right_ear: [255 + tx, shY - 70],
+      nose: [250 + tx, shY - 80],
+    };
+  });
+  return { poses, fps, height_m: 1.81, activity: kind, true_height_m: jumpH };
+}
+
 if (DEMO) {
   try {
-    const ref = await (await fetch("reference.json")).json();
-    const c = ref.cases[DEMO === "squat" ? "squat_synthetic" : "pullup_P01"];
+    const c = (DEMO === "cmj" || DEMO === "sj")
+      ? syntheticJump(DEMO)
+      : (await (await fetch("reference.json")).json())
+          .cases[DEMO === "squat" ? "squat_synthetic" : "pullup_P01"];
     $("activity").value = c.activity;
     const demoRes = analyse(c.poses, c.fps,
       { heightM: c.height_m, activity: c.activity, osimModel: OSIM_MODEL });
     await enrich(demoRes, c.poses, c.fps, c.height_m, c.activity);
     render(demoRes, c.fps);
-    say("Demo data — no camera used. Reload without ?demo to record.");
+    say(c.true_height_m
+      ? `Synthetic ${ACTIVITIES[c.activity].label}, true height ${
+          (c.true_height_m * 100).toFixed(0)} cm — compare the table.`
+      : "Demo data — no camera used. Reload without ?demo to record.");
   } catch (err) {
+    console.error("demo failed", err);
     say("Demo failed: " + err.message, true);
   }
 }

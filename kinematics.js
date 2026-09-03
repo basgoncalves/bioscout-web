@@ -595,6 +595,198 @@ export function jointPositionsM(F, rep, pxPerM, floorY) {
 // ---------------------------------------------------------------------------
 // orchestration
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// vertical jumps: countermovement (CMJ) and squat jump (SJ)
+// ---------------------------------------------------------------------------
+/* A jump is the one task here with a FLIGHT phase, and that is what makes it
+ * findable: during a squat the feet never leave the floor, so a foot rise of
+ * more than a few centimetres is not ambiguous. It is also what makes the
+ * height computable, by two independent routes that are worth reporting
+ * separately because they fail in different ways.
+ *
+ *   flight time    h = g t^2 / 8. The textbook method. It assumes the body is
+ *                  in the same posture at take-off and at touch-down; land
+ *                  with more knee flexion than you took off with and it
+ *                  overestimates. Its resolution is the frame rate: one frame
+ *                  of error at 30 fps is about 2 cm at a 40 cm jump, 1 cm at
+ *                  60 fps. Reported with that uncertainty attached.
+ *
+ *   COM rise       how far the hip centre actually travelled, in metres,
+ *                  from take-off to the apex. No posture assumption, but it
+ *                  inherits every bit of pose jitter and the pixel-to-metre
+ *                  scale, and the hip is not the whole-body centre of mass.
+ *
+ * They usually disagree by a few centimetres. That disagreement is information
+ * about the jump, not an error to hide, so both are shown.
+ */
+export const DEFAULT_JUMP_CFG = {
+  smoothWin: 3,
+  // Foot rise that counts as airborne, as a fraction of shank length (~0.4 m),
+  // so it scales with the athlete and the camera distance. 0.15 is about 6 cm:
+  // far above heel lift in a deep squat, far below any real flight.
+  liftFrac: 0.15,
+  // The threshold that FINDS a jump is the wrong one to TIME it with. Timing
+  // from the moment the foot passes 6 cm cost 30% of the flight in testing
+  // (0.35 s measured against 0.50 s true), because the foot spends real time
+  // between the floor and 6 cm at both ends. So the edges are located at a
+  // near-floor threshold instead, and the crossing is interpolated between
+  // frames -- which also buys back most of the frame-rate resolution.
+  edgeFrac: 0.02,
+  minFlightFrames: 2,     // 2 frames at 30 fps is a 6.7 cm jump -- the floor
+  maxFlightFrames: 60,
+  // A countermovement is a dip below the starting hip height, as a fraction of
+  // shank length. 0.08 is about 3 cm, past pose jitter.
+  dipFrac: 0.08,
+  preRollFrames: 45,      // how far back to look for the start of the movement
+  postRollFrames: 30,
+};
+
+export function buildJumpFeatures(poses) {
+  const F = buildSquatFeatures(poses);
+  // Height of the LOWEST part of the foot above the floor, in pixels. The
+  // floor is the lowest foot position seen anywhere in the clip, which for a
+  // jump is a stance frame -- the athlete is on the ground far more of the
+  // time than in the air.
+  const n = F._n;
+  F.foot_rise = new Array(n).fill(NaN);
+  for (let i = 0; i < n; i++) {
+    const a = F.ankle_cy[i], t = F.toe_cy[i];
+    const low = Math.max(isNum(a) ? a : -Infinity, isNum(t) ? t : -Infinity);
+    if (Number.isFinite(low)) F.foot_rise[i] = F._floorY - low;
+  }
+  return F;
+}
+
+/** Contiguous runs where the feet are off the floor. */
+function flightRuns(rise, thresh, cfg) {
+  const runs = [];
+  let start = -1;
+  for (let i = 0; i < rise.length; i++) {
+    const air = rise[i] > thresh;
+    if (air && start < 0) start = i;
+    if ((!air || i === rise.length - 1) && start >= 0) {
+      const end = air ? i : i - 1;
+      const len = end - start + 1;
+      if (len >= cfg.minFlightFrames && len <= cfg.maxFlightFrames) {
+        runs.push([start, end]);
+      }
+      start = -1;
+    }
+  }
+  return runs;
+}
+
+/** One "rep" per jump: [start of movement, take-off, end of landing]. */
+export function findJumpReps(F, cfg = DEFAULT_JUMP_CFG) {
+  const n = F._n;
+  const rise = smooth(interpNan(F.foot_rise), cfg.smoothWin);
+  const hipY = smooth(interpNan(F.hip_cy), cfg.smoothWin);
+  const thresh = cfg.liftFrac * (F._scale || 1);
+  const reps = [];
+  let prevEnd = -1;
+  for (const [a, b] of flightRuns(rise, thresh, cfg)) {
+    const takeoff = a;
+    // Walk back to where the hip stopped being still: the top of the dip for a
+    // countermovement jump, the start of the push for a squat jump.
+    let t0 = Math.max(prevEnd + 1, takeoff - cfg.preRollFrames);
+    let best = takeoff;
+    for (let i = takeoff; i > t0; i--) {
+      if (hipY[i] > hipY[best]) best = i;      // larger y = lower on screen
+    }
+    // the frame before the descent began, searching back from the lowest point
+    let s0 = best;
+    while (s0 > t0 && hipY[s0 - 1] < hipY[s0]) s0--;
+    t0 = Math.min(best, s0);
+    const t1 = Math.min(n - 1, b + cfg.postRollFrames);
+    if (t1 - t0 < 4) continue;
+    reps.push([t0, takeoff, t1]);
+    prevEnd = t1;
+  }
+  return { reps, rise };
+}
+
+/**
+ * Jump metrics for one rep. `rep` is [t0, takeoff, t1] from findJumpReps.
+ * Returns null when the flight phase cannot be located again, which should not
+ * happen but is not worth throwing over.
+ */
+export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
+  const [t0, takeoff, t1] = rep;
+  // Two versions of the same signal, on purpose. Smoothing is what makes the
+  // FLIGHT PHASE findable through pose jitter, and it is also what ruins the
+  // take-off INSTANT: a 3-frame average spreads a transition that really
+  // happens between two frames, and at 30 fps the foot covers ~10 cm in one
+  // frame, so the smeared edge overestimated height by up to 10 cm. Detect on
+  // the smoothed signal, time on the raw one.
+  const riseRaw = interpNan(F.foot_rise);
+  const rise = smooth(riseRaw, cfg.smoothWin);
+  const hipY = smooth(interpNan(F.hip_cy), cfg.smoothWin);
+  const thresh = cfg.liftFrac * (F._scale || 1);
+  const edge = cfg.edgeFrac * (F._scale || 1);
+  let land = takeoff;
+  while (land + 1 <= t1 && rise[land + 1] > thresh) land++;
+  const flightFrames = land - takeoff + 1;
+  if (flightFrames < cfg.minFlightFrames) return null;
+
+  // Walk out to the near-floor crossings, then interpolate between the two
+  // frames that straddle each one for a sub-frame instant.
+  let a = takeoff;
+  while (a > t0 && riseRaw[a - 1] > edge) a--;
+  let b2 = land;
+  while (b2 < t1 && riseRaw[b2 + 1] > edge) b2++;
+  const cross = (i, j) => {
+    const yi = riseRaw[i], yj = riseRaw[j];
+    if (!Number.isFinite(yi) || !Number.isFinite(yj) || yj === yi) return i;
+    return i + (edge - yi) / (yj - yi);
+  };
+  const offF = a > 0 ? cross(a - 1, a) : a;          // rising through the edge
+  const onF = b2 < rise.length - 1 ? cross(b2 + 1, b2) : b2;  // falling back
+  const G = 9.80665;
+  const flight_s = Math.max(0, (onF - offF)) / fps;
+  const height_flight_m = (G * flight_s * flight_s) / 8;
+  // One frame either side of the flight phase, converted to height. This is
+  // the resolution of the method, not a confidence interval.
+  const dt = 1 / fps;
+  const hPlus = (G * (flight_s + dt) ** 2) / 8;
+  const hMinus = (G * Math.max(0, flight_s - dt) ** 2) / 8;
+  const flight_uncertainty_m = Math.max(hPlus - height_flight_m,
+                                        height_flight_m - hMinus);
+
+  // Apex of the hip centre during flight, in metres above its height at the
+  // instant the feet left the floor -- not at the threshold crossing, which is
+  // already several centimetres into the rise.
+  const offIdx = Math.max(0, Math.round(offF));
+  let apex = offIdx;
+  for (let i = offIdx; i <= b2; i++) if (hipY[i] < hipY[apex]) apex = i;
+  const height_com_m = pxPerM > 0 ? (hipY[offIdx] - hipY[apex]) / pxPerM : NaN;
+
+  // Countermovement: how far the hip dipped below where it started.
+  let lowest = t0;
+  for (let i = t0; i <= offIdx; i++) if (hipY[i] > hipY[lowest]) lowest = i;
+  const dip_px = hipY[lowest] - hipY[t0];
+  const countermovement_m = pxPerM > 0 ? dip_px / pxPerM : NaN;
+  const hasCountermovement = dip_px > cfg.dipFrac * (F._scale || 1);
+
+  return {
+    takeoff_frame: offIdx, land_frame: b2, apex_frame: apex,
+    flight_s: +flight_s.toFixed(3),
+    height_flight_m: +height_flight_m.toFixed(3),
+    flight_uncertainty_m: +flight_uncertainty_m.toFixed(3),
+    height_com_m: Number.isFinite(height_com_m) ? +height_com_m.toFixed(3) : null,
+    countermovement_m: Number.isFinite(countermovement_m)
+      ? +countermovement_m.toFixed(3) : null,
+    has_countermovement: hasCountermovement,
+    // Time from the start of the movement to take-off. For a CMJ this is the
+    // whole countermovement plus push; for an SJ it is the push alone.
+    push_s: +((offIdx - t0) / fps).toFixed(3),
+  };
+}
+
+export function jumpReferencePositions(F) {
+  return squatReferencePositions(F);
+}
+
 export const ACTIVITIES = {
   pullup: {
     label: "pull-up", columns: DRIVEN_COORDS, defaultCfg: DEFAULT_PULLUP_CFG,
@@ -613,6 +805,24 @@ export const ACTIVITIES = {
     coords: squatRepCoordinates, reference: squatReferencePositions,
     phases: ["eccentric_s", "concentric_s"],
   },
+  // Both jumps share everything but the label and what the athlete was asked
+  // to do. Keeping them as separate activities means the app can say when the
+  // recording disagrees with the instruction -- a squat jump with a 9 cm dip
+  // in it is a countermovement jump, whatever it was called.
+  cmj: {
+    label: "countermovement jump", jump: true, expectCountermovement: true,
+    columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_JUMP_CFG,
+    features: buildJumpFeatures, findReps: findJumpReps,
+    coords: squatRepCoordinates, reference: jumpReferencePositions,
+    phases: ["push_s", "landing_s"],
+  },
+  sj: {
+    label: "squat jump", jump: true, expectCountermovement: false,
+    columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_JUMP_CFG,
+    features: buildJumpFeatures, findReps: findJumpReps,
+    coords: squatRepCoordinates, reference: jumpReferencePositions,
+    phases: ["push_s", "landing_s"],
+  },
 };
 
 export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
@@ -629,7 +839,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   const view = viewQuality(poses);
 
   const reps = bounds.map((b, i) => {
-    const { times, coords } = activity === "squat"
+    const { times, coords } = (activity === "squat" || spec.jump)
       ? spec.coords(F, b, fps, pxPerM, refA, refB,
                     { model: osimModel, ankleValid: view.ankle_usable })
       : activity === "neck"
@@ -640,6 +850,13 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       rep: i + 1, times, coords, bounds: b,
       duration_s: (b1 - b0) / fps,
     };
+    if (spec.jump) {
+      const jm = jumpMetrics(F, b, fps, pxPerM, conf);
+      if (jm) {
+        Object.assign(s, jm);
+        s.mismatch = spec.expectCountermovement !== jm.has_countermovement;
+      }
+    }
     s[spec.phases[0]] = (top - b0) / fps;
     s[spec.phases[1]] = (b1 - top) / fps;
     if (activity === "neck") {
@@ -650,7 +867,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       s.flexion_extension_range_deg = span("pitch1", "pitch2");
       s.lateral_bend_range_deg = span("roll1", "roll2");
       s.rotation_range_deg = span("yaw1", "yaw2");
-    } else if (activity === "squat") {
+    } else if (activity === "squat" || spec.jump) {
       // knee_angle is SIGNED per model family, so report peak flexion as a
       // magnitude; otherwise a GPK export summarises as "-2 deg".
       s.knee_flex_max_deg = Math.max(...coords.knee_angle_r.map(Math.abs));

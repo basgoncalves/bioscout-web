@@ -213,6 +213,13 @@ function summariseRep(r, activity) {
     o.travel_m = r.pelvis_travel_m != null ? +r.pelvis_travel_m.toFixed(3) : null;
     o.up_s = +r.concentric_s?.toFixed(2);
     o.down_s = +r.eccentric_s?.toFixed(2);
+  } else if (activity === "cmj" || activity === "sj") {
+    o.height_flight_m = r.height_flight_m ?? null;
+    o.height_com_m = r.height_com_m ?? null;
+    o.flight_s = r.flight_s ?? null;
+    o.countermovement_m = r.countermovement_m ?? null;
+    o.push_s = r.push_s ?? null;
+    o.knee_flex_max_deg = r.knee_flex_max_deg;
   } else if (activity === "neck") {
     o.flex_ext_deg = r.flexion_extension_range_deg;
     o.bend_deg = r.lateral_bend_range_deg;
@@ -257,6 +264,13 @@ export function summariseSession(session) {
     trends.push(trend("travel_m", "Body travel", "m", true),
                 trend("elbow_flex_max_deg", "Peak elbow flexion", "°", true),
                 trend("up_s", "Concentric time", "s", false));
+  } else if (activity === "cmj" || activity === "sj") {
+    // Height falling and contact time lengthening across a session is the
+    // usual signature of fatigue in a jump, the same way depth is in a squat.
+    trends.push(trend("height_flight_m", "Jump height (flight time)", "m", true),
+                trend("height_com_m", "Jump height (hip rise)", "m", true),
+                trend("push_s", "Push time", "s", false),
+                trend("countermovement_m", "Countermovement depth", "m", false));
   } else if (activity === "neck") {
     trends.push(trend("rotation_deg", "Rotation range", "°", true),
                 trend("flex_ext_deg", "Flexion/extension range", "°", true));
