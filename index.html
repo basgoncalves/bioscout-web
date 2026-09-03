@@ -168,6 +168,15 @@
         <option value="gohan_ss_v6">Gohan (SS v6, Meshy sculpt) — arms fixed to torso</option>
       </select>
     </div>
+    <div id="headSizeRow" class="hidden" style="margin-bottom:11px">
+      <label for="headSize">Head size <span id="headSizeVal" class="sub">1.00×</span></label>
+      <input id="headSize" type="range" min="0.5" max="2" step="0.05" value="1"
+             style="width:100%;padding:0;margin:0">
+      <p class="note" style="margin-top:2px">The head is sized from your ear
+        landmarks, which are the only ones a close-up shot measures honestly.
+        A sculpt with a lot of hair still needs a nudge — set it once and it
+        saves with the profile.</p>
+    </div>
     <label style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="saveVideo" style="width:auto;margin:0">
@@ -207,8 +216,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v12";
-try { document.getElementById("build").textContent = "build v12"; } catch (e) {}
+window.BUILD = "v14";
+try { document.getElementById("build").textContent = "build v14"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -284,12 +293,14 @@ let viewingSet = null;  // index of the set currently rendered, or null
 
 async function setAvatar(name) {
   const cv = $("avatarCanvas");
+  $("headSizeRow").classList.toggle("hidden", !name);
   if (!name) { if (avatar) { avatar.dispose(); avatar.setName = null; avatar.clear(); }
                cv.style.display = "none"; return; }
   if (avatarBusy) return;
   avatarBusy = true;
   try {
     if (!avatar) avatar = new Overlay(cv);
+    avatar.setHeadScale(parseFloat($("headSize").value) || 1);
     say(`Loading ${name}…`);
     await avatar.load(name);
     cv.style.display = "";
@@ -339,6 +350,7 @@ function currentSettings() {
     massKg: parseFloat($("mass").value) || 75,
     activity: $("activity").value,
     avatar: $("avatar").value,
+    headScale: parseFloat($("headSize").value) || 1,
     addedKg: parseFloat($("added").value) || 0,
     assistKg: parseFloat($("assist").value) || 0,
   };
@@ -352,6 +364,11 @@ function applyProfile(p) {
   if (p.activity) $("activity").value = p.activity;
   if (p.addedKg != null) $("added").value = p.addedKg;
   if (p.assistKg != null) $("assist").value = p.assistKg;
+  if (p.headScale) {
+    $("headSize").value = p.headScale;
+    $("headSizeVal").textContent = (+p.headScale).toFixed(2) + "×";
+    if (avatar) avatar.setHeadScale(p.headScale);
+  }
   if (p.avatar) { $("avatar").value = p.avatar; setAvatar(p.avatar); }
 }
 
@@ -801,6 +818,11 @@ function draw(res) {
 // markup instead.
 $("startBtn").onclick = startCamera;
 $("avatar").onchange = (e) => setAvatar(e.target.value);
+$("headSize").oninput = (e) => {
+  const k = parseFloat(e.target.value) || 1;
+  $("headSizeVal").textContent = k.toFixed(2) + "×";
+  if (avatar) avatar.setHeadScale(k);
+};
 $("stopBtn").onclick = stopCamera;
 $("switchBtn").onclick = async () => {
   facing = facing === "user" ? "environment" : "user";

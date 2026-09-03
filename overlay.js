@@ -61,6 +61,35 @@ const RIG = [
   { body: "hand_l",    localTo: null,             from: "lWrist", to: "lIndex", modelLen: 0.09, fallbackLen: 0.09 },
 ];
 
+/* Head fit, per character set.
+ *
+ * The head cannot be sized like the other segments. Every other body is scaled
+ * from pxPerM, which is derived from the shoulder-hip and hip-knee segments --
+ * and in a close-up of the face those landmarks are not measured, they are
+ * MediaPipe's guesses, so pxPerM is meaningless there. The ear landmarks are
+ * measured in exactly the shot where the body's are not.
+ *
+ * So the head is sized from the ear span alone: scale = ear span in pixels
+ * divided by the model's own ear span in model metres. Both numbers below are
+ * in the mesh's local units:
+ *
+ *   earSpan   distance between the ears of the actual head. NOT the mesh
+ *             width -- a Super Saiyan's bounding box is mostly hair, and
+ *             sizing off it shrinks the face to nothing.
+ *   centre    where the middle of the head sits in the mesh, again ignoring
+ *             hair. The ear midpoint is placed here.
+ *
+ * A character whose set is not listed falls back to its bounding box, which is
+ * right for a bare skull and too big for anything with hair -- hence the head
+ * size control in the app, which multiplies whatever this table says.
+ */
+const HEAD_FIT = {
+  gohan_ss_v6: { earSpan: 0.17, centre: [0.05, 0.14, 0.00] },
+  gohan_ss_v4: { earSpan: 0.17, centre: [0.05, 0.14, 0.00] },
+  gwen_v3:     { earSpan: 0.16, centre: [0.00, 0.10, 0.00] },
+  bas_v3:      { earSpan: 0.15, centre: [0.00, 0.10, 0.00] },
+};
+
 const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
 
 export class Overlay {
@@ -91,6 +120,12 @@ export class Overlay {
     this.anchors = {};
     this._lastScale = {};
     this.setName = null;
+    this.headScale = 1;     // user correction, 1 = the table's own fit
+  }
+
+  /** Multiplier on the automatic head fit. */
+  setHeadScale(k) {
+    this.headScale = Number.isFinite(k) && k > 0 ? k : 1;
   }
 
   dispose() {
@@ -293,27 +328,37 @@ export class Overlay {
     // spike over the face. Instead: sit it on the torso's own neck anchor so
     // the two actually meet, size it from the measured ear span, and orient it
     // from the head. Ears drive size and roll; the torso decides where it sits.
-    const skull = this.meshes.skull, torsoMesh = this.meshes.torso;
-    const torsoScale = this._lastScale.torso || this._lastScale.femur_r
-                    || this._lastScale.humerus_r || 0;
+    const skull = this.meshes.skull;
     if (skull && skull.userData.bbox) {
       const bb = skull.userData.bbox;
       const size = new THREE.Vector3(); bb.getSize(size);
-      const centre = new THREE.Vector3(); bb.getCenter(centre);
-      // Scale the head with the rest of the character, NOT from the ear span.
-      // The model is internally consistent; sizing the skull independently
-      // makes the head too large the moment the camera is close, because the
-      // ear span then fills the frame.
-      const sk = torsoScale || fallbackScale;
+      const bbCentre = new THREE.Vector3(); bb.getCenter(bbCentre);
+      const fit = HEAD_FIT[this.setName] || null;
+
+      // Model ear span. Without a table entry, guess from the mesh width --
+      // correct for a bare skull, generous for anything with hair.
+      const modelEarSpan = fit ? fit.earSpan : Math.max(1e-3, size.z * 0.62);
+      const headCentreLocal = fit ? v3(fit.centre) : bbCentre.clone();
+
+      const earSpanPx = OK.headCentre ? pts.rEar.distanceTo(pts.lEar) : 0;
+      // Fall back to the body scale only when the ears are not visible; that
+      // is the case the ear measurement cannot cover.
+      const auto = earSpanPx > 1
+        ? earSpanPx / modelEarSpan
+        : (this._lastScale.torso || fallbackScale);
+      const sk = auto * (this.headScale || 1);
 
       const up = pts.headCentre.clone().sub(pts.shoulderMid);
-      if (up.lengthSq() > 1e-6) {
-        up.normalize();
+      const haveUp = up.lengthSq() > 1e-6 && OK.shoulderMid;
+      if (OK.headCentre || haveUp) {
+        // Orientation: up the neck when the shoulders are visible, otherwise
+        // straight up the image, which is right for a head-and-shoulders shot.
+        const b1 = haveUp ? up.normalize() : new THREE.Vector3(0, -1, 0);
         const lat = pts.rEar.clone().sub(pts.lEar);
         const b3 = lat.lengthSq() > 1e-6
-          ? lat.normalize().sub(up.clone().multiplyScalar(lat.dot(up))).normalize()
+          ? lat.normalize().sub(b1.clone().multiplyScalar(lat.dot(b1))).normalize()
           : worldRight.clone();
-        const b1 = up, b2 = b3.clone().cross(b1);
+        const b2 = b3.clone().cross(b1);
         const a1 = new THREE.Vector3(0, 1, 0), a3 = new THREE.Vector3(0, 0, 1);
         const a2 = a3.clone().cross(a1);
         const A = new THREE.Matrix4().makeBasis(a1, a2, a3);
@@ -322,26 +367,13 @@ export class Overlay {
         const M = new THREE.Matrix4().multiplyMatrices(
           R, new THREE.Matrix4().makeScale(sk, sk, sk));
 
-        // Where the neck ends, in world: the torso's own cerv7 anchor.
-        const tAnch = this.anchors.torso || {};
-        let neck = null;
-        if (torsoMesh && torsoMesh.visible && tAnch.cerv7) {
-          neck = v3(tAnch.cerv7).applyMatrix4(torsoMesh.matrix);
-        }
-        // Put the BOTTOM of the skull there, then blend toward the measured
-        // head centre so a bad torso scale cannot drag the head off the face.
-        const bottomLocal = new THREE.Vector3(centre.x, bb.min.y, centre.z);
-        const bottomShift = bottomLocal.clone().applyMatrix4(M);
-        const target = neck
-          ? neck.clone().lerp(
-              pts.headCentre.clone().sub(
-                new THREE.Vector3().subVectors(
-                  centre.clone().applyMatrix4(M), bottomShift)), 0.5)
-          : pts.headCentre.clone().sub(
-              new THREE.Vector3().subVectors(centre.clone().applyMatrix4(M), bottomShift));
-        M.setPosition(target.x - bottomShift.x,
-                      target.y - bottomShift.y,
-                      target.z - bottomShift.z);
+        // Put the model's head centre on the measured ear midpoint. Nothing
+        // else: the ear midpoint is the one point on a head that both the
+        // landmarks and the mesh agree about, so anchoring there is what keeps
+        // the face on the face.
+        const shift = headCentreLocal.clone().applyMatrix4(M);
+        const target = OK.headCentre ? pts.headCentre : pts.nose;
+        M.setPosition(target.x - shift.x, target.y - shift.y, target.z - shift.z);
         skull.matrix.copy(M);
         skull.matrixWorldNeedsUpdate = true;
         skull.visible = true;
