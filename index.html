@@ -227,8 +227,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v16";
-try { document.getElementById("build").textContent = "build v16"; } catch (e) {}
+window.BUILD = "v17";
+try { document.getElementById("build").textContent = "build v17"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -1120,11 +1120,16 @@ function chart(rep, activity, res) {
   const refCond = rep.isMean && activity === "squat" ? normCondition(res || {}) : null;
   const refs = [];
   if (refCond) {
-    for (const [n, , ent] of [["knee flexion", 0, "knee"], ["hip flexion", 0, "hip"],
-                              ["ankle dorsiflexion", 0, "ankle"]]) {
+    // Index off the joint, not off how many references happened to be found:
+    // a missing curve would otherwise shift every colour after it onto the
+    // wrong joint, which is worse than showing no reference at all.
+    const order = ["knee", "hip", "ankle"];
+    const names = ["knee flexion", "hip flexion", "ankle dorsiflexion"];
+    order.forEach((ent, k) => {
       const c = refCurve(refCond, "joint_angle", ent);
-      if (c) refs.push([`${n} (ref)`, c.mean, { dash: true, color: REF_COLOR }]);
-    }
+      if (c) refs.push([`${names[k]} (ref)`, c.mean,
+                        { dash: true, color: COLORS[k % COLORS.length] }]);
+    });
   }
   // On the mean rep, the between-rep SD is drawn as a band. It is the point of
   // an ensemble average: a mean with a wide band is three different squats.
@@ -1164,8 +1169,10 @@ function chart(rep, activity, res) {
   }
   allSeries.forEach(([, vals, o], i) => {
     const col = (o && o.color) || COLORS[i % COLORS.length];
+    const dash = o && o.dash ? ' stroke-dasharray="4 3"'
+               : o && o.dot ? ` stroke-dasharray="${SIDE_DASH}"` : "";
     g += `<polyline fill="none" stroke="${col}" stroke-width="${o && o.dash ? 1.4 : 1.9}"${
-      o && o.dash ? ' stroke-dasharray="4 3"' : ""} stroke-linejoin="round" points="${
+      dash} stroke-linejoin="round" points="${
       vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
   });
   const lab = (v) => (pct ? `${v.toFixed(0)}%` : `${v.toFixed(1)}s`);
@@ -1220,8 +1227,10 @@ function lineChart(t, series, unit, palette, bandsIn, opts) {
   }
   series.forEach(([, vals], i) => {
     const o = sopt[i], col = o.color || pal[i % pal.length];
+    const dash = o.dash ? ' stroke-dasharray="4 3"'
+               : o.dot ? ` stroke-dasharray="${SIDE_DASH}"` : "";
     g += `<polyline fill="none" stroke="${col}" stroke-width="${o.dash ? 1.4 : 1.7}"${
-      o.dash ? ' stroke-dasharray="4 3"' : ""} stroke-linejoin="round" points="${
+      dash} stroke-linejoin="round" points="${
       vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
   });
   for (const h of hlines) {
@@ -1231,9 +1240,10 @@ function lineChart(t, series, unit, palette, bandsIn, opts) {
     g += `<text x="${W - P.r - 2}" y="${yy - 3}" font-size="8.5" text-anchor="end" fill="${
       h.color || REF_COLOR}">${h.label}</text>`;
   }
-  const legend = series.map(([n], i) =>
+  const legend = series.map(([n], i) => sopt[i].noLegend ? "" :
     `<span><i class="swatch" style="background:${sopt[i].color || pal[i % pal.length]}${
-      sopt[i].dash ? ";opacity:.75" : ""}"></i>${n}</span>`).join("");
+      sopt[i].dash ? ";opacity:.75" : ""}"></i>${n}</span>`).join("")
+    + (sopt.some((o) => o.dot) ? '<span>solid right · dotted left</span>' : "");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:170px">${g}</svg>
           <div class="legend">${legend}<span>${unit}</span>${
             bands ? '<span>shaded: \u00b11 SD between reps</span>' : ""}</div>`;
@@ -1311,11 +1321,43 @@ function refBand(n) {
 
 const REF_COLOR = "#9aa4b8";
 
+/* Left and right are the SAME structure, so they get the same colour and are
+ * told apart by line style. Spending a colour on the side means six colours
+ * for three joints, and the eye then groups hip-right with knee-left because
+ * they happen to sit next to each other in the palette -- the opposite of what
+ * the plot is for. Side-by-side subplots would do the same job with more room,
+ * but there is no room on a phone.
+ *
+ *   solid   right      dotted  left      dashed grey  reference
+ */
+const SIDE_DASH = "1.6 2.4";
+const sideOf = (n) => (/_l$/i.test(n) ? "l" : /_r$/i.test(n) ? "r" : null);
+const baseName = (n) => String(n).replace(/_[rl]$/i, "");
+const prettyBase = (n) => baseName(n).replace(/_/g, " ");
+
+/** Group names that differ only by side, ranked by the larger of the two
+ *  peaks, so a top-N list is N muscles rather than N/2 muscles twice. */
+function groupBySide(names, peakOf) {
+  const by = new Map();
+  names.forEach((n, i) => {
+    const b = baseName(n), side = sideOf(n) || "r";
+    const g = by.get(b) || { base: b, peak: 0 };
+    g[side] = { name: n, index: i, peak: peakOf(n, i) };
+    g.peak = Math.max(g.peak, g[side].peak);
+    by.set(b, g);
+  });
+  return [...by.values()].sort((a, b) => b.peak - a.peak);
+}
+
+/** Series options for one side: same colour, style says which leg. */
+const sideOpt = (color, side, first) =>
+  ({ color, dot: side === "l", noLegend: !first });
+
 function refNote(cond) {
   if (!cond || !norms) return "";
   const src = norms.sources && norms.sources[Object.keys(norms.sources)
     .find((k) => /squat/i.test(k))];
-  return `<p class="note">Dashed grey: this project's own ${cond} squat, from
+  return `<p class="note">Dashed: this project's own ${cond} squat, from
     OpenSim inverse dynamics and CEINMS — <b>one athlete, two trials</b>, band
     ±1 SD across those trials. A reference for what this pipeline produces, not
     a population range.${src ? ` ${src.citation}.` : ""}</p>`;
@@ -1384,6 +1426,13 @@ function jointSubplot(rep, res, j) {
   const sel = selectedMuscle[j.key];
   const sdd = rep.sd && rep.sd.dyn;
 
+  // Colour by MUSCLE, so vaslat_r and vaslat_l are one colour and the button
+  // list reads as five muscles rather than five halves of muscles.
+  const bases = [];
+  for (const [nm] of top) if (!bases.includes(baseName(nm))) bases.push(baseName(nm));
+  const mcol = (nm) => MCOLORS[bases.indexOf(baseName(nm)) % MCOLORS.length];
+
+
   // Muscle contributions to THIS moment, where the model's moment arms are
   // available: force x arm, in the same newton-metres and the same
   // extension-positive convention as the net moment they sit on.
@@ -1399,7 +1448,7 @@ function jointSubplot(rep, res, j) {
     for (const [nm, , i] of shown) {
       const arm = armSeries(j.key, nm, a);
       if (!arm) continue;
-      contrib.push([nm, rep.forces.map((r, k) => ARM_SIGN[j.key] * r[i] * arm[k])]);
+      contrib.push([nm, rep.forces.map((r, k) => ARM_SIGN[j.key] * r[i] * arm[k]), nm]);
     }
   }
 
@@ -1408,7 +1457,14 @@ function jointSubplot(rep, res, j) {
   const refCond = rep.isMean && res.activity === "squat" ? normCondition(res) : null;
   const refM = refCond ? refCurve(refCond, "joint_moment", j.key) : null;
 
-  const series = [[`${j.label} moment (net)`, moment], ...contrib];
+  const seenBase = new Set();
+  const series = [[`${j.label} moment (net)`, moment],
+    ...contrib.map(([nm, vals]) => {
+      const b = baseName(nm), first = !seenBase.has(b);
+      seenBase.add(b);
+      return [first ? prettyBase(nm) : nm, vals,
+              sideOpt(mcol(nm), sideOf(nm), first)];
+    })];
   if (refM) series.push([`${refCond} reference`, refM.mean,
                          { dash: true, color: REF_COLOR }]);
   const pal = ["#8892a6", ...MCOLORS];
@@ -1418,11 +1474,12 @@ function jointSubplot(rep, res, j) {
   const momentChart = lineChart(rep.times, series, "N·m", pal, bands)
     + (refM ? refNote(refCond) : "");
 
-  const rows = top.map(([nm, p, i], k) => {
+  const rows = top.map(([nm, p, i]) => {
     const on = sel && sel.idx === i;
     return `<button class="muscle${on ? " on" : ""}" data-joint="${j.key}"
               data-idx="${i}" data-name="${nm}" title="Peak ${p.toFixed(0)} N">
-              <i class="dot" style="background:${MCOLORS[k]}"></i>${nm}
+              <i class="dot" style="background:${mcol(nm)}${
+                sideOf(nm) === "l" ? ";opacity:.55" : ""}"></i>${nm}
               <span class="mval">${p > 1000 ? (p / 1000).toFixed(1) + "k" : p.toFixed(0)} N</span>
             </button>`;
   }).join("");
@@ -1482,25 +1539,52 @@ function forcePanel(rep, res) {
   if (!rep.forces || !rep.forces.length) return "";
   const fm = rep.forceModel;
   const bad = rep.forceImplausible || 0;
-  const top = peakByMuscle(rep.forces, rep.forceNames, 6);
-  const rows = top.map(([n, v]) =>
-    `<tr><td>${n}</td><td${v > MAX_PLAUSIBLE_FORCE_N ? ' style="color:var(--warn)"' : ""}>${v.toFixed(0)}</td></tr>`).join("");
+  // Peaks per muscle NAME first, then folded onto the muscle itself: one row
+  // per muscle with a column per leg, rather than the same muscle twice.
+  const allPeaks = new Map(peakByMuscle(rep.forces, rep.forceNames,
+                                        rep.forceNames.length));
+  // As many muscles as the palette has colours. One more and the sixth reuses
+  // the first, which on a chart where colour MEANS the muscle is not a cosmetic
+  // problem -- it reads as one muscle with four curves.
+  const groups = groupBySide(rep.forceNames, (n) => allPeaks.get(n) || 0)
+                   .slice(0, MCOLORS.length);
+  const cell = (g, side) => {
+    if (!g[side]) return "—";
+    const v = g[side].peak;
+    return `<span${v > MAX_PLAUSIBLE_FORCE_N ? ' style="color:var(--warn)"' : ""}>${v.toFixed(0)}</span>`;
+  };
+  const rows = groups.map((g) =>
+    `<tr><td>${g.base}</td><td>${cell(g, "r")}</td><td>${cell(g, "l")}</td></tr>`).join("");
 
-  const jrows = (rep.jrf ? peakJRF(rep.jrf, rep.jrfNames) : [])
-    .map(([n, v]) => `<tr><td>${n.replace("_mag", "").replace("_", " ")}</td>
-      <td>${v.toFixed(2)}</td></tr>`).join("");
+  const jrfPeaks = new Map((rep.jrf ? peakJRF(rep.jrf, rep.jrfNames) : [])
+    .map(([n, v]) => [n, v]));
+  const jGroups = rep.jrfNames
+    ? groupBySide(rep.jrfNames.map((n) => n.replace("_mag", "")),
+                  (n) => jrfPeaks.get(n + "_mag") ?? jrfPeaks.get(n) ?? 0)
+    : [];
+  const jrows = jGroups.map((g) =>
+    `<tr><td>${prettyBase(g.base)}</td>
+      <td>${g.r ? g.r.peak.toFixed(2) : "—"}</td>
+      <td>${g.l ? g.l.peak.toFixed(2) : "—"}</td></tr>`).join("");
 
   // Muscle force as a percentage of each muscle's OWN peak in this rep.
   // Normalising sidesteps the surrogate's magnitude problem: the shapes are
   // the part that survived validation, and on a shared newton axis the largest
   // muscle flattens every other curve onto the floor.
   let pctChart = "";
-  if (top.length) {
-    const series = top.map(([nm]) => {
-      const i = rep.forceNames.indexOf(nm);
-      const col = rep.forces.map((r) => Math.abs(r[i]));
-      const mx = Math.max(...col) || 1;
-      return [nm, col.map((v) => (100 * v) / mx)];
+  if (groups.length) {
+    const series = [];
+    groups.forEach((g, k) => {
+      const col = MCOLORS[k % MCOLORS.length];
+      for (const side of ["r", "l"]) {
+        const hit = g[side];
+        if (!hit) continue;
+        const raw = rep.forces.map((r) => Math.abs(r[hit.index]));
+        const mx = Math.max(...raw) || 1;
+        series.push([side === "r" ? g.base : hit.name,
+                     raw.map((v) => (100 * v) / mx),
+                     sideOpt(col, side, side === "r" || !g.r)]);
+      }
     });
     pctChart = `<h1 style="font-size:14px;margin:14px 0 2px">Muscle force,
         % of each muscle's own peak</h1>` +
@@ -1513,8 +1597,17 @@ function forcePanel(rep, res) {
   // Joint contact forces, already in bodyweights.
   let jrfChart = "";
   if (rep.jrf && rep.jrf.length && rep.jrfNames) {
-    const series = rep.jrfNames.map((n, i) =>
-      [n.replace("_mag", "").replace(/_/g, " "), rep.jrf.map((r) => r[i])]);
+    const jcol = {};
+    jGroups.forEach((g, k) => { jcol[g.base] = COLORS[k % COLORS.length]; });
+    const series = [];
+    for (const g of jGroups) {
+      for (const side of ["r", "l"]) {
+        if (!g[side]) continue;
+        series.push([side === "r" ? prettyBase(g.base) : g[side].name,
+                     rep.jrf.map((r) => r[g[side].index]),
+                     sideOpt(jcol[g.base], side, side === "r" || !g.r)]);
+      }
+    }
     const bands = series.map(() => null);
     const refCond = rep.isMean && res && res.activity === "squat"
       ? normCondition(res) : null;
@@ -1522,8 +1615,8 @@ function forcePanel(rep, res) {
       for (const ent of ["hip", "knee", "ankle"]) {
         const c = refCurve(refCond, "joint_contact_force", ent);
         if (!c) continue;
-        series.push([`${ent} (${refCond} reference)`, c.mean,
-                     { dash: true, color: REF_COLOR }]);
+        series.push([`${ent} reference`, c.mean,
+                     { dash: true, color: jcol[ent] || REF_COLOR }]);
         bands.push(refBand(c));
       }
     }
@@ -1564,11 +1657,12 @@ function forcePanel(rep, res) {
       <b>pull-up is out of its domain entirely</b>. Squats are a short
       extrapolation from single-leg squats; treat the ranking as more reliable
       than the absolute newtons.</p>
-    <table><thead><tr><th>Muscle</th><th>Peak N</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th>Muscle</th><th>Right, peak N</th><th>Left, peak N</th></tr></thead>
+      <tbody>${rows}</tbody></table>
     ${pctChart}
     <h1 style="font-size:14px;margin:14px 0 2px">Joint contact force</h1>
     ${jrfChart}
-    <table><thead><tr><th>Joint</th><th>Peak × bodyweight</th></tr></thead>
+    <table><thead><tr><th>Joint</th><th>Right, × BW</th><th>Left, × BW</th></tr></thead>
       <tbody>${jrows}</tbody></table>
     <p class="note">${rep.forceMissing?.length || 0} of the model's
       ${fm ? new Set(fm.feat.filter((f) => f.startsWith("q_"))).size : "?"}
