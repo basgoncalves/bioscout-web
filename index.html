@@ -124,6 +124,24 @@
       </div>
     </div>
     <div class="row" style="margin-bottom:11px">
+      <div>
+        <label for="height">Height (m)</label>
+        <input id="height" type="number" step="0.01" value="1.75" inputmode="decimal">
+      </div>
+      <div>
+        <label for="dob">Date of birth <span class="sub" id="ageOut"></span></label>
+        <input id="dob" type="date" value="">
+      </div>
+      <div>
+        <label for="mass">Mass (kg) <span class="sub" id="massAge"></span></label>
+        <input id="mass" type="number" step="0.5" value="83" inputmode="decimal">
+      </div>
+    </div>
+    <p class="note" style="margin:-4px 0 11px">These three belong to the athlete
+      and are saved with the profile as you change them. Mass is the one to keep
+      current: it scales every joint moment and contact force on the page, so
+      the field says how old the stored figure is.</p>
+    <div class="row" style="margin-bottom:11px">
       <button class="ghost" id="saveProfileBtn" style="margin:0;padding:9px">Save profile</button>
       <button class="ghost" id="delProfileBtn" style="margin:0;padding:9px">Delete</button>
     </div>
@@ -150,19 +168,6 @@
           <option value="sj">Squat jump</option>
           <option value="neck">Neck (close-up)</option>
         </select>
-      </div>
-      <div>
-        <label for="height">Height (m) <span class="sub">saved</span></label>
-        <input id="height" type="number" step="0.01" value="1.75" inputmode="decimal">
-      </div>
-      <div>
-        <label for="age">Age <span class="sub">saved</span></label>
-        <input id="age" type="number" step="1" min="0" max="120" value=""
-               placeholder="years" inputmode="numeric">
-      </div>
-      <div>
-        <label for="mass">Mass (kg) <span class="sub">this session</span></label>
-        <input id="mass" type="number" step="0.5" value="83" inputmode="decimal">
       </div>
     </div>
     <div class="row" style="margin-bottom:11px">
@@ -237,8 +242,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v21";
-try { document.getElementById("build").textContent = "build v21"; } catch (e) {}
+window.BUILD = "v22";
+try { document.getElementById("build").textContent = "build v22"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -367,11 +372,43 @@ if (new URLSearchParams(location.search).has("fresh")) {
 
 // --- model -----------------------------------------------------------------
 // --- profiles and the training session -------------------------------------
+/* Date of birth rather than an age, because an age is only true for a year and
+ * nothing warns you when it stops being true. The age shown beside the field is
+ * derived on the spot. */
+function ageFromDob(dob) {
+  if (!dob) return null;
+  const d = new Date(dob + "T00:00:00");
+  if (Number.isNaN(d.getTime())) return null;
+  const now = new Date();
+  let a = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--;
+  return a >= 0 && a < 130 ? a : null;
+}
+
+function refreshDerived() {
+  const a = ageFromDob($("dob").value);
+  $("ageOut").textContent = a == null ? "" : `${a} y`;
+  // How stale the stored mass is. Body mass scales every force on the page, so
+  // a figure from two months ago is worth flagging -- quietly, not as an error.
+  const st = getProfile($("profile").value);
+  const when = st && st.massUpdated ? new Date(st.massUpdated) : null;
+  if (!when || Number.isNaN(when.getTime())) { $("massAge").textContent = ""; return; }
+  const days = Math.floor((Date.now() - when.getTime()) / 86400000);
+  $("massAge").textContent = days < 1 ? "today"
+    : days < 30 ? `${days} d ago`
+    : `${days} d ago — check it`;
+}
+
 function currentSettings() {
   return {
     name: ($("profileName").value || "").trim(),
     heightM: parseFloat($("height").value) || 1.75,
-    ageY: $("age").value === "" ? null : (parseInt($("age").value, 10) || null),
+    dob: $("dob").value || null,
+    ageY: ageFromDob($("dob").value),
+    massKg: parseFloat($("mass").value) || null,
+    massUpdated: massTouched || (getProfile(($("profileName").value || "").trim()) || {}).massUpdated
+                 || new Date().toISOString(),
     activity: $("activity").value,
     avatar: $("avatar").value,
     headScale: parseFloat($("headSize").value) || 1,
@@ -384,7 +421,8 @@ function applyProfile(p) {
   if (!p) return;
   $("profileName").value = p.name || "";
   if (p.heightM) $("height").value = p.heightM;
-  $("age").value = p.ageY == null ? "" : p.ageY;
+  $("dob").value = p.dob || "";
+  if (p.massKg) $("mass").value = p.massKg;
   // Body mass is deliberately NOT restored from the profile. Height is a
   // property of the person; mass is a property of the day, and it scales every
   // moment and contact force on the page. Silently reusing a figure from weeks
@@ -411,6 +449,7 @@ function refreshProfiles(select) {
 $("profile").onchange = (e) => {
   const p = getProfile(e.target.value);
   if (p) applyProfile(p);
+  refreshDerived();
   renderTraining();
 };
 $("saveProfileBtn").onclick = () => {
@@ -429,7 +468,12 @@ $("saveProfileBtn").onclick = () => {
  * behave like one. Save profile still exists for naming and for the first
  * save; this just stops the silent loss.
  */
-const SAVED_FIELDS = ["height", "age", "activity", "avatar", "headSize"];
+const SAVED_FIELDS = ["height", "dob", "mass", "activity", "avatar", "headSize"];
+// Set when the mass field itself is edited, so the "last updated" stamp moves
+// only when the number does -- not every time some other field is saved.
+let massTouched = null;
+$("mass").addEventListener("change", () => { massTouched = new Date().toISOString(); });
+$("dob").addEventListener("change", refreshDerived);
 let warnedNoProfile = false;
 function autosaveProfile() {
   const st = currentSettings();
@@ -446,6 +490,8 @@ function autosaveProfile() {
   warnedNoProfile = false;
   if (saveProfile(st)) {
     refreshProfiles(st.name);
+    massTouched = null;
+    refreshDerived();
     say(`Saved to “${st.name}”.`);
   }
 }
@@ -808,15 +854,13 @@ separate the sides.
   }
 }
 
-// Mass belongs to the session, so a reload mid-session picks it back up from
-// the last set rather than dropping to the default.
-(() => {
-  const s = getSession();
-  const last = s && s.sets && s.sets[s.sets.length - 1];
-  if (last && last.massKg) $("mass").value = last.massKg;
-})();
+// Mass now lives on the profile, so the profile is the single source for it.
+// The previous mid-session restore is gone: two places setting the same field
+// meant whichever ran last won, which is not something a reader should have to
+// work out.
 
 refreshProfiles(lastUsedProfile()?.name || "");
+queueMicrotask(refreshDerived);
 if (lastUsedProfile()) applyProfile(lastUsedProfile());
 renderTraining();
 
@@ -1088,7 +1132,7 @@ async function enrich(res, poses, fps, heightM, activity) {
   const addedKg = Math.max(0, parseFloat($("added").value) || 0);
   const assistKg = Math.max(0, parseFloat($("assist").value) || 0);
   res.massKg = massKg;
-  res.ageY = $("age").value === "" ? null : (parseInt($("age").value, 10) || null);
+  res.ageY = ageFromDob($("dob").value);
   res.addedKg = addedKg;
   res.assistKg = assistKg;
   res.externalKg = addedKg - assistKg;
