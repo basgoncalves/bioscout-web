@@ -242,8 +242,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v24";
-try { document.getElementById("build").textContent = "build v24"; } catch (e) {}
+window.BUILD = "v25";
+try { document.getElementById("build").textContent = "build v25"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -1282,9 +1282,24 @@ function chart(rep, activity, res) {
     g += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="var(--line)" stroke-width=".8"/>`;
     g += `<text x="${P.l - 5}" y="${yy + 3.5}" font-size="9" text-anchor="end" fill="var(--muted)">${val.toFixed(0)}</text>`;
   }
-  const topT = pct ? rep.topPct : t[rep.bounds[1] - rep.bounds[0]];
-  if (topT !== undefined && topT !== null) {
-    g += `<line x1="${sx(topT)}" y1="${P.t}" x2="${sx(topT)}" y2="${H - P.b}" stroke="var(--muted)" stroke-width=".8" stroke-dasharray="3 3"/>`;
+  /* Event markers. On the mean these are where every rep's turnaround and
+   * touch-down now sit, which is the whole point of aligning on them: a
+   * vertical line that means the same instant in every rep. */
+  const marks = [];
+  if (pct) {
+    const isJump = !!ACTIVITIES[activity]?.jump;
+    if (rep.topPct != null) marks.push([rep.topPct, isJump ? "take-off" : "turnaround"]);
+    if (rep.landPct != null) marks.push([rep.landPct, "touch-down"]);
+  } else {
+    const tt = t[rep.bounds[1] - rep.bounds[0]];
+    if (tt !== undefined) marks.push([tt, ""]);
+    if (rep.land_frame != null && rep.bounds) {
+      const li = rep.land_frame - rep.bounds[0];
+      if (li > 0 && li < t.length) marks.push([t[li], ""]);
+    }
+  }
+  for (const [mv] of marks) {
+    g += `<line x1="${sx(mv)}" y1="${P.t}" x2="${sx(mv)}" y2="${H - P.b}" stroke="var(--muted)" stroke-width=".8" stroke-dasharray="3 3"/>`;
   }
   if (allBands) {
     allSeries.forEach(([, vals], i) => {
@@ -1308,7 +1323,10 @@ function chart(rep, activity, res) {
     `<span><i class="swatch" style="${
       swatchStyle((o && o.color) || COLORS[i % COLORS.length], o)}"></i>${n}</span>`).join("");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>
-          <div class="legend">${legend}${bands ? '<span>shaded: ±1 SD between reps</span>' : ""}</div>
+          <div class="legend">${legend}${bands ? '<span>shaded: ±1 SD between reps</span>' : ""}${
+            rep.isMean && rep.eventAligned && marks.length
+              ? `<span>dashed: ${marks.map(([, n2]) => n2).filter(Boolean).join(" · ")
+                  || "phase boundaries"}</span>` : ""}</div>
           ${refs.length ? refNote(refCond) : ""}`;
 }
 
@@ -2244,11 +2262,18 @@ function render(res, fps) {
   function select(i) {
     [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
     $("chartBox").innerHTML = chart(items[i], res.activity, res)
-      + (items[i].isMean ? `<p class="note">Every rep stretched to 0–100% of
-         itself and averaged across ${items[i].nReps} reps, so the bottom of a
-         slow rep lines up with the bottom of a fast one. The shaded band is
-         ±1 SD between reps: a wide band means the reps did not repeat, which
-         is usually more informative than the mean.</p>` : "");
+      + (items[i].isMean ? `<p class="note">${items[i].eventAligned
+         ? `Averaged across ${items[i].nReps} reps with each PHASE normalised
+            separately, so the turnaround lands on the turnaround and the
+            touch-down on the touch-down. Stretching each rep end to end
+            instead lines up only the ends: two jumps with 0.09 s and 0.62 s of
+            flight then had take-off at completely different points and the
+            "mean" averaged one rep's push against the other's flight.`
+         : `Every rep stretched to 0–100% of itself and averaged across
+            ${items[i].nReps} reps, so the bottom of a slow rep lines up with
+            the bottom of a fast one.`} The shaded band is ±1 SD between reps:
+         a wide band means the reps did not repeat, which is usually more
+         informative than the mean.</p>` : "");
     $("dynBox").innerHTML = momentPanel(items[i], res);
     $("dynBox").querySelectorAll("button.muscle").forEach((b) => {
       b.onclick = () => {

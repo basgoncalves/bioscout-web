@@ -18,6 +18,68 @@
  */
 export const GRID = 101;                 // 0, 1, ... 100 percent
 
+/* Event alignment.
+ *
+ * Stretching each rep from its first frame to its last lines up the ENDS of
+ * the window and nothing else. For a squat that is nearly enough, because the
+ * window is the rep. For a jump it is not: the window is a bit of pre-roll,
+ * a push, a flight and a landing, and their proportions differ from jump to
+ * jump. Two jumps with 0.09 s and 0.62 s of flight had take-off at completely
+ * different points on the normalised axis, so the "mean" was averaging the
+ * push of one against the flight of the other -- an average of nothing.
+ *
+ * The fix is the standard one from gait, where stance and swing are normalised
+ * separately so heel-strike and toe-off always land on the same percent. Each
+ * rep declares the events it knows -- start, turnaround (bottom of a squat,
+ * take-off of a jump), touch-down where there is one, end -- and each interval
+ * between events is resampled on its own. The events on the mean curve sit at
+ * the MEAN of where they fell in the individual reps, so the mean keeps the
+ * timing of a real rep rather than being forced onto arbitrary round numbers.
+ */
+function eventFracs(rep) {
+  const n = rep.times.length;
+  if (!(n > 1)) return null;
+  const [b0, mid, b1] = rep.bounds || [];
+  const out = [0];
+  const push = (frame) => {
+    if (!Number.isFinite(frame)) return;
+    const f = (frame - b0) / (b1 - b0);
+    if (f > (out[out.length - 1] ?? 0) + 1e-6 && f < 1 - 1e-6) out.push(f);
+  };
+  if (Number.isFinite(b0) && Number.isFinite(b1) && b1 > b0) {
+    push(mid);
+    push(rep.land_frame);
+  }
+  out.push(1);
+  return out;
+}
+
+/** Linear resample of `y` (sampled evenly over [0,1]) at fractional position f. */
+function sampleAt(y, f) {
+  const x = Math.max(0, Math.min(1, f)) * (y.length - 1);
+  const i = Math.floor(x), j = Math.min(y.length - 1, i + 1);
+  const t = x - i;
+  const a = y[i], b = y[j];
+  if (!Number.isFinite(a)) return Number.isFinite(b) ? b : 0;
+  if (!Number.isFinite(b)) return a;
+  return a + (b - a) * t;
+}
+
+/** Resample `y` so that `src` events land on `dst` events. */
+export function resampleEvents(y, src, dst, n = GRID) {
+  const out = new Array(n);
+  for (let k = 0; k < n; k++) {
+    const p = k / (n - 1);
+    let seg = 0;
+    while (seg < dst.length - 2 && p > dst[seg + 1]) seg++;
+    const d0 = dst[seg], d1 = dst[seg + 1];
+    const s0 = src[seg], s1 = src[seg + 1];
+    const u = d1 === d0 ? 0 : (p - d0) / (d1 - d0);
+    out[k] = sampleAt(y, s0 + (s1 - s0) * u);
+  }
+  return out;
+}
+
 /** Linear resample of `y` (sampled at `x`) onto `n` points spanning x's range. */
 export function resample(x, y, n = GRID) {
   const out = new Array(n);
@@ -57,7 +119,7 @@ function meanAndSd(curves) {
 /** Average a dict of per-frame arrays across reps. Keys missing from any rep
  *  are dropped rather than averaged over a subset, which would silently mix
  *  different numbers of reps into different curves of the same plot. */
-function meanDict(reps, get) {
+function meanDict(reps, get, align) {
   const first = get(reps[0]);
   if (!first) return [null, null];
   const out = {}, sd = {};
@@ -72,7 +134,7 @@ function meanDict(reps, get) {
     for (const r of reps) {
       const d = get(r), a = d && d[key];
       if (!isNumArray(a) || a.length !== r.times.length) { curves.length = 0; break; }
-      curves.push(resample(r.times, a));
+      curves.push(align ? align(r, a) : resample(r.times, a));
     }
     if (!curves.length) continue;
     const [m, s] = meanAndSd(curves);
@@ -82,7 +144,7 @@ function meanDict(reps, get) {
 }
 
 /** Average the frames x muscles force matrix. */
-function meanMatrix(reps, key) {
+function meanMatrix(reps, key, align) {
   const first = reps[0][key];
   if (!Array.isArray(first) || !first.length || !isNumArray(first[0])) return null;
   const width = first[0].length;
@@ -93,7 +155,8 @@ function meanMatrix(reps, key) {
     // Resample each muscle column, then re-assemble rows.
     const cols = [];
     for (let i = 0; i < width; i++) {
-      cols.push(resample(r.times, mat.map((row) => row[i] ?? 0)));
+      const col = mat.map((row) => row[i] ?? 0);
+      cols.push(align ? align(r, col) : resample(r.times, col));
     }
     perRep.push(cols);
   }
@@ -133,25 +196,42 @@ export function ensembleRep(reps) {
   if (usable.length < 2) return null;
 
   const pct = Array.from({ length: GRID }, (_, k) => k);
-  const [coords, coordSd] = meanDict(usable, (r) => r.coords);
-  const [dyn, dynSd] = meanDict(usable, (r) => r.dyn);
+
+  // Events, if every rep agrees on how many it has. A rep that reports a
+  // touch-down and one that does not cannot be aligned on touch-down, and
+  // guessing would be worse than falling back to the ends.
+  const fracs = usable.map(eventFracs);
+  const nEv = fracs[0] ? fracs[0].length : 0;
+  const aligned = fracs.every((f) => f && f.length === nEv) && nEv > 2;
+  const dst = aligned
+    ? Array.from({ length: nEv }, (_, i) =>
+        fracs.reduce((a, f) => a + f[i], 0) / fracs.length)
+    : null;
+  const align = aligned
+    ? (r, y) => resampleEvents(y, fracs[usable.indexOf(r)], dst)
+    : null;
+
+  const [coords, coordSd] = meanDict(usable, (r) => r.coords, align);
+  const [dyn, dynSd] = meanDict(usable, (r) => r.dyn, align);
 
   const out = {
     rep: "mean", isMean: true, nReps: usable.length,
     times: pct, timeUnit: "%",
     coords, sd: { coords: coordSd },
     bounds: usable[0].bounds,
-    // Where the turnaround falls, averaged as a FRACTION of each rep rather
-    // than in seconds: on the normalised axis that is the only position that
-    // means the same thing for a slow rep and a fast one.
-    topPct: 100 * usable.reduce((a, r) => {
+    // Where the turnaround falls. When the reps were event-aligned this is
+    // exactly where every rep's turnaround now sits; otherwise it is the mean
+    // of where they fell, which is the best that unaligned curves allow.
+    topPct: 100 * (dst ? dst[1] : usable.reduce((a, r) => {
       const [b0, top, b1] = r.bounds || [];
       return a + (b1 > b0 ? (top - b0) / (b1 - b0) : 0.5);
-    }, 0) / usable.length,
+    }, 0) / usable.length),
+    landPct: dst && dst.length > 3 ? 100 * dst[2] : null,
+    eventAligned: aligned,
   };
   if (dyn && Object.keys(dyn).length) { out.dyn = dyn; out.sd.dyn = dynSd; }
 
-  const forces = meanMatrix(usable, "forces");
+  const forces = meanMatrix(usable, "forces", align);
   if (forces) {
     out.forces = forces;
     out.forceNames = usable[0].forceNames;
@@ -159,7 +239,7 @@ export function ensembleRep(reps) {
     out.forceMissing = usable[0].forceMissing;
     out.forceImplausible = Math.max(...usable.map((r) => r.forceImplausible || 0));
   }
-  const jrf = meanMatrix(usable, "jrf");
+  const jrf = meanMatrix(usable, "jrf", align);
   if (jrf) { out.jrf = jrf; out.jrfNames = usable[0].jrfNames; }
 
   // Scalar per-rep measures: mean, and the spread that says whether the mean
