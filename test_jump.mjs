@@ -151,3 +151,53 @@ try {
   console.log('feet out of frame ->', r.reps.length, 'jumps, refused:', r.refused,
     ' footCoverage', (r.footCoverage ?? 0).toFixed(2), '(want 0 jumps, refused "feet")');
 } catch (e) { console.log('feet out of frame -> threw:', e.message); }
+
+// ---------------------------------------------------------------------------
+// The real failure: a frontal-view SQUAT read as three squat jumps, with peak
+// moments of 77 kN.m. The feet never leave the floor, but the foot landmark
+// drifts upward while the athlete is deep in the squat -- which is what a
+// camera sees when the feet are near the bottom of the frame and the model is
+// guessing. No threshold on the feet alone can tell that from flight; the hip
+// can, because in a squat it never rises above standing and it is never in
+// free fall.
+// ---------------------------------------------------------------------------
+function squatWithFootDrift({ fps = 48, pxPerM = 260, drift = 0.12, reps = 3 }) {
+  const H = [], FOOT = [], stand = 0.95, depth = 0.45;
+  for (let r = 0; r < reps; r++) {
+    const n = Math.round(1.6 * fps);
+    for (let i = 0; i < n; i++) {
+      const ph = i / (n - 1);
+      const d = depth * Math.sin(Math.PI * ph);   // down and back up
+      H.push(stand - d);
+      // the foot marker drifts up in proportion to how deep the squat is
+      FOOT.push(drift * (d / depth));
+    }
+    for (let i = 0; i < Math.round(0.4 * fps); i++) { H.push(stand); FOOT.push(0); }
+  }
+  const poses = {};
+  H.forEach((h, i) => {
+    const hipY = 1000 - h * pxPerM, footY = 1000 - FOOT[i] * pxPerM;
+    const kneeY = footY - 0.42 * pxPerM, shY = hipY - 0.45 * pxPerM;
+    const drop = stand - h, kx = drop * 0.9 * pxPerM, tx = -drop * 0.5 * pxPerM;
+    poses[i] = {
+      left_shoulder: [240 + tx, shY], right_shoulder: [260 + tx, shY],
+      left_hip: [245, hipY], right_hip: [255, hipY],
+      left_knee: [245 + kx, kneeY], right_knee: [255 + kx, kneeY],
+      left_ankle: [245, footY], right_ankle: [255, footY],
+      left_foot_index: [265, footY + 4], right_foot_index: [275, footY + 4],
+      left_elbow: [235 + tx, shY + 110], right_elbow: [265 + tx, shY + 110],
+      left_wrist: [235 + tx, shY + 220], right_wrist: [265 + tx, shY + 220],
+    };
+  });
+  return poses;
+}
+for (const drift of [0.08, 0.12, 0.20]) {
+  const poses = squatWithFootDrift({ drift });
+  const asJump = K.analyse(poses, 48, { heightM: 1.81, activity: 'sj', osimModel: 'gpk' });
+  const asSquat = K.analyse(poses, 48, { heightM: 1.81, activity: 'squat', osimModel: 'gpk' });
+  const D = await import('./detect.js');
+  const c = D.classify(poses);
+  console.log(`squat, foot drifts ${(drift*100).toFixed(0)}cm -> analysed as jump: ${asJump.reps.length} jump(s)`
+    + `  | as squat: ${asSquat.reps.length} rep(s)  | auto-detect: ${c.activity} (${c.confidence.toFixed(2)})`
+    + `   [want 0 jumps, 3 squats, detect squat]`);
+}

@@ -25,7 +25,7 @@ const mean = (a) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
 export function features(poses) {
   const keys = Object.keys(poses).map(Number).sort((a, b) => a - b);
   const S = { hipY: [], shY: [], wrY: [], anY: [], earW: [], noseX: [], noseY: [],
-              knee: [], hipA: [], elbow: [], torso: [], footY: [] };
+              knee: [], hipA: [], elbow: [], torso: [], footY: [], hipYa: [] };
   for (const fi of keys) {
     const lm = poses[fi];
     const ls = lm.left_shoulder, rs = lm.right_shoulder;
@@ -37,6 +37,10 @@ export function features(poses) {
     const sh = mid(ls, rs), hp = mid(lh, rh), an = mid(la, ra), wr = mid(lw, rw);
     if (sh) S.shY.push(sh[1]);
     if (hp) S.hipY.push(hp[1]);
+    // Frame-aligned copy. S.hipY only gets a value when the hip was found, so
+    // its indices do not line up with S.footY and the two cannot be compared
+    // frame by frame -- which is exactly what the flight test needs to do.
+    S.hipYa.push(hp ? hp[1] : NaN);
     if (an) S.anY.push(an[1]);
     if (wr) S.wrY.push(wr[1]);
     if (lm.left_ear && lm.right_ear) {
@@ -72,12 +76,34 @@ export function features(poses) {
    * the lowest foot position seen anywhere in the clip -- the athlete is on the
    * ground for most of any recording. */
   const floorY = Math.max(...S.footY.filter(isNum), -Infinity);
+  /* The feet alone are not enough. A squat filmed face-on drifts its foot
+   * landmark upward as the athlete goes deep -- the model is guessing at feet
+   * near the edge of the frame -- and a foot-only test read that as flight,
+   * scoring a squat as a countermovement jump at 1.00 confidence.
+   *
+   * The hip settles it. In a jump the hip rises ABOVE where it ever got with
+   * the feet down; in a squat it only ever goes lower. So a frame counts as
+   * airborne only if the feet are up AND the hip is higher than the standing
+   * reference, which is taken over the frames whose feet are demonstrably
+   * down. */
+  const grounded = [];
+  for (let i = 0; i < S.footY.length; i++) {
+    if (isNum(S.footY[i]) && floorY - S.footY[i] <= 0.04 * torso && isNum(S.hipYa[i])) {
+      grounded.push(S.hipYa[i]);
+    }
+  }
+  grounded.sort((a, b) => a - b);
+  const standRef = grounded.length ? grounded[Math.floor(0.10 * (grounded.length - 1))]
+                                   : -Infinity;
   let airborne = 0, nFoot = 0;
   const air = [];
-  for (const y of S.footY) {
+  for (let i = 0; i < S.footY.length; i++) {
+    const y = S.footY[i];
     if (!isNum(y)) { air.push(false); continue; }
     nFoot++;
-    const up = floorY - y > 0.15 * torso;
+    const feetUp = floorY - y > 0.15 * torso;
+    const hipUp = isNum(S.hipYa[i]) && standRef - S.hipYa[i] > 0.06 * torso;
+    const up = feetUp && hipUp;
     if (up) airborne++;
     air.push(up);
   }
@@ -201,10 +227,12 @@ export function classify(poses) {
          + `${f.hip_drop.toFixed(1)} torso lengths`,
     neck: `head fills ${(100 * f.head_frac).toFixed(0)}% of a torso length, `
         + `nose moved ${f.nose_travel.toFixed(1)} head widths, trunk barely moved`,
-    cmj: `feet off the floor for ${(100 * f.flight_frac).toFixed(0)}% of the clip, `
+    cmj: `feet off the floor and hips above standing for `
+       + `${(100 * f.flight_frac).toFixed(0)}% of the clip, `
        + `hips dipped ${f.countermovement_frac.toFixed(2)} torso lengths before `
        + `take-off, knee range ${f.knee_rom.toFixed(0)}°`,
-    sj: `feet off the floor for ${(100 * f.flight_frac).toFixed(0)}% of the clip `
+    sj: `feet off the floor and hips above standing for `
+      + `${(100 * f.flight_frac).toFixed(0)}% of the clip `
       + `with no dip before take-off (${f.countermovement_frac.toFixed(2)} torso `
       + `lengths), knee range ${f.knee_rom.toFixed(0)}°`,
   }[best];

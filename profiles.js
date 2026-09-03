@@ -293,6 +293,10 @@ function summariseRep(r, activity) {
     o.flight_s = r.flight_s ?? null;
     o.countermovement_m = r.countermovement_m ?? null;
     o.push_s = r.push_s ?? null;
+    // The measured free-fall acceleration. About 9.8 means the body really was
+    // in the air; anything else is the reason the rep should be distrusted, and
+    // it belongs in the export where it can be checked.
+    o.free_fall_accel_ms2 = r.free_fall_accel_ms2 ?? null;
     o.knee_flex_max_deg = r.knee_flex_max_deg;
   } else if (activity === "neck") {
     o.flex_ext_deg = r.flexion_extension_range_deg;

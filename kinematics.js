@@ -671,6 +671,23 @@ export const DEFAULT_JUMP_CFG = {
    * they agree within a few centimetres. A factor of 1.5 is already far outside
    * that. */
   maxHeightRatio: 1.5,
+  /* Two physical tests that a squat cannot pass, however the foot signal
+   * misbehaves. A frontal-view squat produced three "squat jumps" with peak
+   * moments of 77 kN.m, and no threshold on the FEET alone was ever going to
+   * stop it -- the feet are exactly what the camera sees worst.
+   *
+   *   the hip must leave the ground   during flight the hip has to rise above
+   *   the highest it reached with the feet down. In a squat it never does; the
+   *   hip only ever goes lower than standing.
+   *
+   *   the hip must be in free fall    fit the hip's path during flight and its
+   *   acceleration must be about g. A body in the air has no choice about
+   *   this; a body squatting has no reason to obey it.
+   */
+  minApexRiseFrac: 0.03,   // ~3 cm of hip height above the standing reference
+  freeFallMin: 4.0,        // m/s^2 -- wide, because pxPerM and pose both wobble
+  freeFallMax: 20.0,
+  freeFallMinFrames: 5,
 };
 
 export function buildJumpFeatures(poses) {
@@ -725,8 +742,20 @@ export function findJumpReps(F, cfg = DEFAULT_JUMP_CFG) {
   const reps = [];
   let prevEnd = -1;
   const runs = flightRuns(rise, thresh, cfg);
+  /* How high the hip gets while the feet are demonstrably on the floor. The
+   * 10th percentile rather than the minimum, so one noisy frame cannot raise
+   * the bar the jump has to clear. */
+  const edge = cfg.edgeFrac * (F._scale || 1);
+  const grounded = [];
+  for (let i = 0; i < n; i++) if (!(rise[i] > edge) && isNum(hipY[i])) grounded.push(hipY[i]);
+  const standRef = grounded.length ? nanpercentile(grounded, 10) : -Infinity;
+
   for (let ri = 0; ri < runs.length; ri++) {
     const [a, b] = runs[ri];
+    // Smaller y is higher on screen: the apex must beat the standing reference.
+    let apexY = Infinity;
+    for (let i = a; i <= b; i++) if (isNum(hipY[i]) && hipY[i] < apexY) apexY = hipY[i];
+    if (!(standRef - apexY > cfg.minApexRiseFrac * (F._scale || 1))) continue;
     // Never let one jump's trailing window swallow the next one's start. The
     // half-second of post-roll is for watching the landing, not for claiming
     // the frames the following jump needs.
@@ -843,6 +872,42 @@ export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
    * pixel scale, hip rise knows nothing about gravity. When they disagree by
    * more than a factor of two something is wrong with one of them, and which
    * one is not knowable from here. */
+  /* Free fall. Least squares parabola through the hip during flight; the
+   * quadratic term is half the acceleration. Image y grows downward, so a body
+   * in the air gives a POSITIVE acceleration of about g. Anything else was not
+   * in the air. */
+  let freeFallA = null;
+  if (b2 - offIdx + 1 >= cfg.freeFallMinFrames && pxPerM > 0) {
+    let n0 = 0, sx1 = 0, sx2 = 0, sx3 = 0, sx4 = 0, sy0 = 0, sxy = 0, sx2y = 0;
+    for (let i = offIdx; i <= b2; i++) {
+      const y = hipY[i];
+      if (!Number.isFinite(y)) continue;
+      const x = (i - offIdx) / fps;
+      const x2 = x * x;
+      n0++; sx1 += x; sx2 += x2; sx3 += x2 * x; sx4 += x2 * x2;
+      sy0 += y; sxy += x * y; sx2y += x2 * y;
+    }
+    if (n0 >= cfg.freeFallMinFrames) {
+      // Solve the 3x3 normal equations by elimination; only the quadratic
+      // coefficient is wanted.
+      const M = [[n0, sx1, sx2, sy0], [sx1, sx2, sx3, sxy], [sx2, sx3, sx4, sx2y]];
+      for (let c = 0; c < 3; c++) {
+        let piv = c;
+        for (let r = c + 1; r < 3; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+        [M[c], M[piv]] = [M[piv], M[c]];
+        if (Math.abs(M[c][c]) < 1e-12) { freeFallA = null; break; }
+        for (let r = 0; r < 3; r++) {
+          if (r === c) continue;
+          const f = M[r][c] / M[c][c];
+          for (let k = c; k < 4; k++) M[r][k] -= f * M[c][k];
+        }
+      }
+      if (Math.abs(M[2][2]) > 1e-12) freeFallA = 2 * (M[2][3] / M[2][2]) / pxPerM;
+    }
+  }
+  const notFalling = freeFallA != null
+    && (freeFallA < cfg.freeFallMin || freeFallA > cfg.freeFallMax);
+
   const tooLong = flight_s > cfg.maxFlightFrames / fps;
   const tooHigh = height_flight_m > cfg.maxHeightM
     || (Number.isFinite(height_com_m) && height_com_m > cfg.maxHeightM);
@@ -850,10 +915,11 @@ export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
   const R = cfg.maxHeightRatio;
   const disagree = comH != null && comH > 0.02
     && (height_flight_m > R * comH || comH > R * height_flight_m);
-  if (tooLong || tooHigh) return null;
+  if (tooLong || tooHigh || notFalling) return null;
 
   return {
     implausible: disagree,
+    free_fall_accel_ms2: freeFallA == null ? null : +freeFallA.toFixed(2),
     takeoff_frame: offIdx, land_frame: b2, apex_frame: apex,
     flight_s: +flight_s.toFixed(3),
     height_flight_m: +height_flight_m.toFixed(3),

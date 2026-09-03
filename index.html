@@ -245,8 +245,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v26";
-try { document.getElementById("build").textContent = "build v26"; } catch (e) {}
+window.BUILD = "v27";
+try { document.getElementById("build").textContent = "build v27"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -812,9 +812,13 @@ async function exportSession() {
     for (const x of sess.sets) for (const r of x.perRep || []) {
       for (const k of Object.keys(r)) if (!keys.includes(k)) keys.push(k);
     }
-    const repHdr = ["set", ...keys];
+    // The movement goes on every row. A session can mix squats and jumps, and
+    // a rep table whose rows do not say which is which cannot be read on its
+    // own -- which is the whole point of exporting it.
+    const repHdr = ["set", "activity", ...keys];
     const repRows = sess.sets.flatMap((x) =>
-      (x.perRep || []).map((r) => [x.index, ...keys.map((k) => r[k] ?? "")].join(",")));
+      (x.perRep || []).map((r) =>
+        [x.index, x.activity, ...keys.map((k) => r[k] ?? "")].join(",")));
     files.push({ name: "training/reps.csv",
                  data: repHdr.join(",") + "\n" + repRows.join("\n") + "\n" });
 
@@ -835,6 +839,18 @@ async function exportSession() {
     const kept = [];
     for (const ps of pageSets) {
       const cols = ACTIVITIES[ps.res.activity].columns;
+      // What the set was, beside the set's own files, so a folder can be read
+      // without going back to training/sets.csv.
+      files.push({ name: `set${ps.index}/set.json`, data: JSON.stringify({
+        set: ps.index, activity: ps.res.activity,
+        activity_label: ACTIVITIES[ps.res.activity]?.label ?? ps.res.activity,
+        reps: ps.res.reps.length, fps: ps.fps,
+        mass_kg: ps.res.massKg, added_kg: ps.res.addedKg, assist_kg: ps.res.assistKg,
+        net_external_kg: ps.res.externalKg, osim_model: ps.res.osimModel,
+        camera_view: ps.res.view, px_per_m: ps.res.pxPerM,
+        pose_coverage: ps.res.coverage,
+      }, null, 2) });
+
       for (const r of ps.res.reps) {
         const d = `set${ps.index}/rep${r.rep}/`;
         files.push({ name: d + "joint_angles.mot",
@@ -845,6 +861,22 @@ async function exportSession() {
           files.push({ name: d + "joint_moments.sto",
                        data: writeMot("joint_moments", dc, r.times,
                          Object.fromEntries(dc.map((k) => [k, r.dyn[k]]))) });
+        }
+        // Muscle and joint contact forces were only ever written by the
+        // per-set "Download everything". A session archive therefore had
+        // angles and moments and nothing else, for every activity -- which
+        // read as "no muscle forces for jumps".
+        if (r.forces && r.forces.length && r.forceNames) {
+          files.push({ name: d + "muscle_forces.csv",
+                       data: csvFromColumns(["time", ...r.forceNames],
+                         [r.times, ...r.forceNames.map((_, j) => r.forces.map((row) => row[j]))],
+                         r.times.length) });
+        }
+        if (r.jrf && r.jrf.length && r.jrfNames) {
+          files.push({ name: d + "joint_contact_forces.csv",
+                       data: csvFromColumns(["time", ...r.jrfNames],
+                         [r.times, ...r.jrfNames.map((_, j) => r.jrf.map((row) => row[j]))],
+                         r.times.length) });
         }
       }
       kept.push(ps.index);
@@ -858,10 +890,12 @@ ${sum.sets} sets, ${sum.total_reps} reps (${sum.reps_per_set.join(", ")})
 training/sets.json     every set as recorded, with its per-rep summary.
 training/summary.json  the same, plus first-set-to-last trends.
 training/sets.csv      one row per set.
-training/reps.csv      one row per rep, every measure.
+training/reps.csv      one row per rep, every measure, with the movement.
 training/trends.csv    first set vs last set.
 plots/                 the measure plotted in the app.
-set<N>/rep<M>/         full waveforms — ONLY for sets ${kept.length ? kept.join(", ") : "(none)"},
+set<N>/set.json        what that set was: movement, load, camera view, scale.
+set<N>/rep<M>/         joint angles, joint moments, muscle forces and joint
+                       contact forces — ONLY for sets ${kept.length ? kept.join(", ") : "(none)"},
                        which are the ones still in memory. Waveforms are not
                        written to browser storage (a session would exceed the
                        quota), so sets recorded before the last page reload
