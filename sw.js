@@ -15,7 +15,7 @@
  *
  * Bump CACHE when the vendored engine or model changes, to evict the old copy.
  */
-const CACHE = "bioscout-web-v28";
+const CACHE = "bioscout-web-v29";
 
 const SHELL = ["./", "./index.html", "./kinematics.js", "./dynamics.js",
                "./forces.js", "./overlay.js", "./zip.js", "./detect.js", "./profiles.js", "./ensemble.js", "./i18n.js", "./norms.json", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest",
@@ -28,7 +28,6 @@ const HEAVY = [
   "./vendor/three.core.min.js",
   "./meshes/gwen_v3.json", "./meshes/gwen_v3.bin",
   "./meshes/gohan_ss_v6.json", "./meshes/gohan_ss_v6.bin",
-  "./meshes/gpk_generic.json", "./meshes/gpk_generic.bin",
   "./meshes/bas_v3.json", "./meshes/bas_v3.bin",
   "./meshes/gpk_bones.json", "./meshes/gpk_bones.bin",
   "./vendor/wasm/vision_wasm_internal.js",

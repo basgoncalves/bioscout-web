@@ -35,9 +35,10 @@ import numpy as np
 #: welds head and arms onto the torso, and those STLs are authored in the
 #: TORSO's coordinate frame. Moving them to a skull/humerus body places them by
 #: a frame they were never expressed in, and the arms shoot off across the
-#: scene. A welded mesh has to stay on the body it was authored against; the
-#: fix for articulating arms is a model that actually has arm bodies
-#: (bas_v3, gwen_v3), not a reassignment here.
+#: scene. A welded mesh has to stay on the body it was authored against.
+#: Where the source model has no arm bodies, the fix is a model that does
+#: (bas_v3, gwen_v3) or tools/split_welded.py, which cuts the welded geometry
+#: and gives each piece a frame built from the cut -- what it is placed by.
 
 RIGGED_BODIES = [
     "pelvis", "torso", "skull",

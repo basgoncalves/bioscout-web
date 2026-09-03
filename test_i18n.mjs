@@ -23,23 +23,51 @@ for (const lang of m.ALL_LANGS) {
     + (stale.length ? `\n         stale:   ${stale.join(", ")}` : ""));
 }
 
-// Placeholders must survive translation: a {name} dropped from one language
-// silently prints a sentence with a hole in it.
-const WITH_VARS = { savedTo: ["name"], profileDeleted: ["name"], daysAgo: ["n"],
-                    feetNotInFrame: ["pct"], heightsDisagree: ["n", "total"],
-                    hadCountermovement: ["n", "total"], noCountermovement: ["n", "total"],
-                    noRepsFound: ["activity"] };
-for (const lang of m.ALL_LANGS) {
-  m.setLang(lang);
-  for (const [key, vars] of Object.entries(WITH_VARS)) {
+/* Every key the page ASKS for must exist, and every placeholder a key declares
+ * must survive into each translation.
+ *
+ * The two failures this catches are the ones the dictionary check above cannot
+ * see: tr("noteCoverge") is not a missing translation, it is a typo, and t()
+ * answers it with the key itself -- so the page prints "noteCoverge" in all
+ * three languages and every dictionary still reports complete. The same goes
+ * for a data-i18n attribute pointing at a key that was renamed.
+ */
+import { readFileSync } from "node:fs";
+const html = readFileSync("./index.html", "utf8");
+const asked = new Set();
+for (const mm of html.matchAll(/\btr\(\s*"([A-Za-z0-9_.]+)"/g)) asked.add(mm[1]);
+for (const mm of html.matchAll(/data-i18n(?:-html)?="([A-Za-z0-9_.]+)"/g)) asked.add(mm[1]);
+// Keys built at runtime from data rather than written out literally.
+const DYNAMIC = /^(cond_|why_|view_)/;
+m.setLang("en");
+// Membership, not t() -- a key whose English value happens to equal its name
+// ("years") is present, and t() cannot tell that from a miss.
+const unknown = [...asked].filter((k) => !DYNAMIC.test(k) && !(k in m.EN_KEYS)).sort();
+if (unknown.length) {
+  bad++;
+  console.log(`  [FAIL] index.html asks for ${unknown.length} key(s) no dictionary has:\n`
+    + `         ${unknown.join(", ")}`);
+} else {
+  console.log(`  [OK  ] index.html: all ${asked.size} keys it asks for exist`);
+}
+
+// Placeholders, for every key that declares one, in every language.
+let holes = 0;
+for (const key of Object.keys(m.EN_KEYS)) {
+  const vars = [...m.EN_KEYS[key].matchAll(/\{(\w+)\}/g)].map((x) => x[1]);
+  if (!vars.length) continue;
+  for (const lang of m.ALL_LANGS) {
+    m.setLang(lang);
     for (const v of vars) {
-      const out = m.t(key, { [v]: "@@" });
-      if (!out.includes("@@")) {
+      if (!m.t(key, { [v]: "@@" }).includes("@@")) {
         console.log(`  [FAIL] ${lang}/${key}: placeholder {${v}} is missing`);
-        bad++;
+        holes++;
       }
     }
   }
 }
+if (!holes) console.log("  [OK  ] every placeholder survives every translation");
+bad += holes;
+
 console.log(bad ? "\nTRANSLATIONS INCOMPLETE" : "\nALL TRANSLATIONS COMPLETE AND CONSISTENT");
 process.exit(bad ? 1 : 0);

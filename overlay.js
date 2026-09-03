@@ -84,6 +84,11 @@ const RIG = [
  * size control in the app, which multiplies whatever this table says.
  */
 const HEAD_FIT = {
+  // A bare skull has no pinna, so the fallback (0.62 of the mesh width) is too
+  // small for it -- the ear landmark sits on the tragus, which on this
+  // geometry is near the skull's widest point, not two thirds of the way out.
+  // Measured off the mesh: the ear canals are 0.132 apart at y = 0.545.
+  gpk_bones:   { earSpan: 0.132, centre: [-0.015, 0.545, 0.00] },
   gohan_ss_v6: { earSpan: 0.17, centre: [0.05, 0.14, 0.00] },
   gohan_ss_v4: { earSpan: 0.17, centre: [0.05, 0.14, 0.00] },
   gwen_v3:     { earSpan: 0.16, centre: [0.00, 0.10, 0.00] },

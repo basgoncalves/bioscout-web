@@ -140,7 +140,7 @@
         <input id="mass" type="number" step="0.5" value="83" inputmode="decimal">
       </div>
     </div>
-    <p class="note" style="margin:-4px 0 11px">These three belong to the athlete
+    <p class="note" style="margin:-4px 0 11px" data-i18n-html="noteAthleteFields">These three belong to the athlete
       and are saved with the profile as you change them. Mass is the one to keep
       current: it scales every joint moment and contact force on the page, so
       the field says how old the stored figure is.</p>
@@ -153,7 +153,7 @@
       <button class="ghost" id="importProfilesBtn" style="margin:0;padding:9px" data-i18n="import">Import</button>
     </div>
     <input id="importProfilesFile" type="file" accept="application/json,.json" class="hidden">
-    <p class="note" style="margin:0 0 11px">Profiles and training history live on
+    <p class="note" style="margin:0 0 11px" data-i18n-html="notePrivacy">Profiles and training history live on
       <b>this device only</b> — there is no account and nothing is uploaded, so
       nobody else can see your sessions and neither can I. To carry them to
       another phone or laptop, export the file here and import it there. That
@@ -186,25 +186,24 @@
         <input id="assist" type="number" step="0.5" value="0" min="0" inputmode="decimal">
       </div>
     </div>
-    <p class="note" style="margin:-4px 0 10px">Barbell, vest or belt in
+    <p class="note" style="margin:-4px 0 10px" data-i18n-html="noteLoad">Barbell, vest or belt in
       <b>Added</b>; band or machine offload in <b>Assistance</b>. Both apply at
       once — a loaded bar with a band assist is added minus assist.</p>
     <div style="margin-bottom:11px">
       <label for="avatar" data-i18n="overlay">Skeleton overlay</label>
       <select id="avatar">
         <option value="" data-i18n="overlayNone">None — landmarks only</option>
-        <option value="gpk_bones">Skeleton (OpenSim bone geometry)</option>
-        <option value="gpk_generic">Generic body (GPK v3) — head/arms fixed to torso</option>
-        <option value="bas_v3">Bas (v3) — full arms + head</option>
-        <option value="gwen_v3">Gwen (v3) — full arms + head</option>
-        <option value="gohan_ss_v6">Gohan (SS v6, Meshy sculpt) — arms fixed to torso</option>
+        <option value="gpk_bones" data-i18n="overlayBones">Skeleton (OpenSim bone geometry) — skull + spine</option>
+        <option value="bas_v3" data-i18n="overlayBas">Bas (v3) — full arms + head</option>
+        <option value="gwen_v3" data-i18n="overlayGwen">Gwen (v3) — full arms + head</option>
+        <option value="gohan_ss_v6" data-i18n="overlayGohan">Gohan (SS v6, Meshy sculpt) — full arms + head</option>
       </select>
     </div>
     <div id="headSizeRow" class="hidden" style="margin-bottom:11px">
       <label for="headSize"><span data-i18n="headSize">Head size</span> <span id="headSizeVal" class="sub">1.00×</span></label>
       <input id="headSize" type="range" min="0.5" max="2" step="0.05" value="1"
              style="width:100%;padding:0;margin:0">
-      <p class="note" style="margin-top:2px">The head is sized from your ear
+      <p class="note" style="margin-top:2px" data-i18n-html="noteHeadSize">The head is sized from your ear
         landmarks, which are the only ones a close-up shot measures honestly.
         A sculpt with a lot of hair still needs a nudge — set it once and it
         saves with the profile.</p>
@@ -217,7 +216,7 @@
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
     <input id="fileInput" type="file" accept="video/*" class="hidden">
-    <div class="status" id="status">Starting…</div>
+    <div class="status" id="status" data-i18n="statusStarting">Starting…</div>
   </div>
 
   <div id="stage">
@@ -225,7 +224,7 @@
     <canvas class="overlay" id="overlay"></canvas>
     <canvas class="overlay" id="avatarCanvas"></canvas>
     <div class="hud">
-      <span class="pill" id="hudLeft">standing by</span>
+      <span class="pill" id="hudLeft" data-i18n="hudStandingBy">standing by</span>
       <span class="pill" id="hudRight"></span>
     </div>
   </div>
@@ -299,7 +298,7 @@ async function loadMediaPipe() {
     FilesetResolver = mp.FilesetResolver; PoseLandmarker = mp.PoseLandmarker;
     return true;
   } catch (err) {
-    say("Could not load the pose engine: " + err.message, true);
+    say(tr("sayEngineFailed", { err: err.message }), true);
     return false;
   }
 }
@@ -343,15 +342,15 @@ async function setAvatar(name) {
   try {
     if (!avatar) avatar = new Overlay(cv);
     avatar.setHeadScale(parseFloat($("headSize").value) || 1);
-    say(`Loading ${name}…`);
+    say(tr("sayLoadingOverlay", { name }));
     await avatar.load(name);
     cv.style.display = "";
-    say(running ? "Tracking with overlay." : "Overlay ready.");
+    say(tr(running ? "sayTrackingOverlay" : "sayOverlayReady"));
   } catch (err) {
     // Report it: on a phone this is usually WebGL being refused (a second GL
     // context alongside MediaPipe's, or memory pressure), and a blank canvas
     // gives no clue which.
-    say("Overlay failed: " + (err && err.message ? err.message : err), true);
+    say(tr("sayOverlayFailed", { err: err && err.message ? err.message : err }), true);
     cv.style.display = "none";
     $("avatar").value = "";
   } finally { avatarBusy = false; }
@@ -448,7 +447,16 @@ function applyProfile(p) {
     $("headSizeVal").textContent = (+p.headScale).toFixed(2) + "×";
     if (avatar) avatar.setHeadScale(p.headScale);
   }
-  if (p.avatar) { $("avatar").value = p.avatar; setAvatar(p.avatar); }
+  // A profile saved before a character was retired still names it. Loading it
+  // would fetch a mesh that is no longer shipped and leave the overlay off with
+  // an error, so fall back to the bone skeleton, which every build has.
+  if (p.avatar) {
+    const sel = $("avatar");
+    const known = [...sel.options].some((o) => o.value === p.avatar);
+    const pick = known ? p.avatar : "gpk_bones";
+    sel.value = pick;
+    setAvatar(pick);
+  }
 }
 
 function refreshProfiles(select) {
@@ -523,6 +531,13 @@ function applyStaticI18n() {
   for (const el of document.querySelectorAll("[data-i18n]")) {
     el.textContent = tr(el.dataset.i18n);
   }
+  // The notes carry <b> and <i>. textContent would print the tags, and using
+  // innerHTML for every key would make each future string an injection
+  // surface, so the two cases are separate attributes and only these are
+  // trusted as markup.
+  for (const el of document.querySelectorAll("[data-i18n-html]")) {
+    el.innerHTML = tr(el.dataset.i18nHtml);
+  }
   document.documentElement.lang = getLang();
 }
 
@@ -557,10 +572,14 @@ $("exportProfilesBtn").onclick = () => {
     document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
     const n = (data.archive || []).length;
-    say(`Exported ${data.profiles.profiles.length} profile(s), ${n} past session(s)` +
-        `${data.session ? " and the open session" : ""}.`);
+    const np = data.profiles.profiles.length;
+    say(tr("sayExported", {
+      profiles: tr(np === 1 ? "nProfile" : "nProfiles", { n: np }),
+      sessions: tr(n === 1 ? "nPastSession" : "nPastSessions", { n }),
+      open: data.session ? tr("andOpenSession") : "",
+    }));
   } catch (err) {
-    say("Export failed: " + err.message, true);
+    say(tr("sayExportFailed", { err: err.message }), true);
   }
 };
 $("importProfilesBtn").onclick = () => $("importProfilesFile").click();
@@ -575,14 +594,14 @@ $("importProfilesFile").onchange = async (e) => {
     if (p) applyProfile(p);
     renderTraining();
     const bits = [];
-    if (rep.profilesAdded) bits.push(`${rep.profilesAdded} new profile(s)`);
-    if (rep.profilesUpdated) bits.push(`${rep.profilesUpdated} updated`);
-    if (rep.sessionsAdded) bits.push(`${rep.sessionsAdded} session(s) into history`);
-    if (rep.sessionAdopted) bits.push("picked up the open session");
-    say(bits.length ? "Imported " + bits.join(", ") + "."
-                    : "Nothing new — this device already has everything in that file.");
+    if (rep.profilesAdded) bits.push(tr("impNewProfiles", { n: rep.profilesAdded }));
+    if (rep.profilesUpdated) bits.push(tr("impUpdated", { n: rep.profilesUpdated }));
+    if (rep.sessionsAdded) bits.push(tr("impSessions", { n: rep.sessionsAdded }));
+    if (rep.sessionAdopted) bits.push(tr("impAdopted"));
+    say(bits.length ? tr("sayImported", { bits: bits.join(", ") })
+                    : tr("sayNothingNew"));
   } catch (err) {
-    say("Import failed: " + err.message, true);
+    say(tr("sayImportFailed", { err: err.message }), true);
   }
 };
 $("delProfileBtn").onclick = () => {
@@ -669,7 +688,7 @@ function setSeries(sess, key) {
 function setChart(points, key) {
   const spec = PEAK_VARS[key] || { label: key, unit: "", dp: 2 };
   const ok = points.filter((p) => p.mean != null);
-  if (ok.length < 1) return '<p class="note">No values for this measure yet.</p>';
+  if (ok.length < 1) return `<p class="note">${tr("noteNoValues")}</p>`;
   const W = 320, H = 150, P = { l: 42, r: 10, t: 12, b: 24 };
   const vals = ok.flatMap((p) => [p.min, p.max, p.mean]);
   let lo = Math.min(...vals), hi = Math.max(...vals);
@@ -699,8 +718,7 @@ function setChart(points, key) {
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:150px">${g}</svg>
     <div class="legend"><span><i class="swatch" style="background:${SET_COLOR}"></i>${tr("setMean")}</span>
       <span>${tr("whisker")}</span><span>${spec.unit}</span></div>
-    <p class="note" style="margin-top:2px">Set number on the horizontal axis —
-      points are not joined because sets are ordinal, not a continuous time.</p>`;
+    <p class="note" style="margin-top:2px">${tr("noteSetAxis")}</p>`;
 }
 
 function renderTraining() {
@@ -729,10 +747,13 @@ function renderTraining() {
   card.innerHTML = `
     <h1 style="font-size:17px;margin:0 0 2px">${tr("trainingSession")}</h1>
     <p class="sub" style="margin-bottom:10px">${sess.profile ? sess.profile + " · " : ""}
-      ${sess.sets.length} set${sess.sets.length===1?"":"s"} · ${total} reps ·
-      started ${new Date(sess.started).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}${
-        (() => { const n = listArchive().length;
-                 return n ? ` · ${n} past session${n===1?"":"s"} on this device` : ""; })()}</p>
+      ${tr("sessionSub", {
+        sets: tr(sess.sets.length === 1 ? "nSet" : "nSets", { n: sess.sets.length }),
+        reps: tr(total === 1 ? "nRep" : "nRepsCount", { n: total }),
+        time: new Date(sess.started).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}),
+      })}${(() => { const n = listArchive().length;
+             return n ? tr("pastOnDevice", {
+               sessions: tr(n === 1 ? "nPastSession" : "nPastSessions", { n }) }) : ""; })()}</p>
     <table><thead><tr><th>${tr("set")}</th><th>${tr("movement")}</th><th>${tr("reps")}</th><th>${tr("load")}</th>
       <th>${vars.length
             ? `<select id="peakVar" class="thsel">${varOpts}</select>`
@@ -749,7 +770,8 @@ function renderTraining() {
     const kept = archiveSession();
     newSession($("profile").value || null);
     $("trainingCard").classList.add("hidden");
-    say(`New training session started. ${kept} past session(s) kept on this device.`);
+    say(tr("sayNewSession", {
+      kept: tr(kept === 1 ? "nPastSession" : "nPastSessions", { n: kept }) }));
   };
   $("summaryBtn").onclick = () => renderSummary();
   const pv = $("peakVar");
@@ -783,15 +805,14 @@ function renderSummary() {
   }).join("");
   $("summaryBox").innerHTML = `
     <h2 style="font-size:15px;margin:14px 0 4px">${tr("summary")}</h2>
-    <p class="sub" style="margin-bottom:8px">${sum.sets} sets · ${sum.total_reps} reps
-      (${sum.reps_per_set.join(", ")}) · mean rep ${sum.mean_rep_duration_s}s</p>
+    <p class="sub" style="margin-bottom:8px">${tr("summarySub", {
+      sets: tr(sum.sets === 1 ? "nSet" : "nSets", { n: sum.sets }),
+      reps: tr(sum.total_reps === 1 ? "nRep" : "nRepsCount", { n: sum.total_reps }),
+      perSet: sum.reps_per_set.join(", "), dur: sum.mean_rep_duration_s })}</p>
     ${t ? `<table><thead><tr><th>${tr("measure")}</th><th>${tr("firstSet")}</th><th>${tr("lastSet")}</th><th>${tr("change")}</th></tr></thead>
       <tbody>${t}</tbody></table>
-      <p class="note">Change is first set to last, not a fitted trend — with a
-        handful of sets a slope would imply precision that is not there. A
-        falling depth or range and a lengthening concentric are the usual
-        signatures of fatigue.</p>`
-      : '<p class="note">Not enough sets yet to show a trend.</p>'}
+      <p class="note">${tr("noteChangeFirstLast")}</p>`
+      : `<p class="note">${tr("noteNotEnoughSets")}</p>`}
     <button class="ghost" id="saveExportBtn" style="margin-top:12px">${tr("saveExport")}</button>
     <button class="ghost" id="closeSummaryBtn" style="margin-top:8px">${tr("close")}</button>
     <div class="status" id="sessionZipStatus"></div>`;
@@ -937,9 +958,9 @@ separate the sides.
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
-    note(`Saved ${files.length} files, ${(blob.size / 1e6).toFixed(2)} MB.`);
+    note(tr("savedFiles", { n: files.length, mb: (blob.size / 1e6).toFixed(2) }));
   } catch (err) {
-    note("Export failed: " + err.message);
+    note(tr("exportFailedShort", { err: err.message }));
   }
 }
 
@@ -962,7 +983,7 @@ if (await loadMediaPipe()) {
     if (!DEMO) say(tr("ready"));
     $("startBtn").disabled = false;
   } catch (err) {
-    if (!DEMO) say("Could not start the pose model: " + err.message, true);
+    if (!DEMO) say(tr("sayModelFailed", { err: err.message }), true);
   }
 }
 
@@ -971,7 +992,7 @@ const video = $("video"), overlay = $("overlay"), ctx = overlay.getContext("2d")
 
 async function startCamera() {
   if (!window.isSecureContext) {
-    say("The camera needs HTTPS. Open the hosted URL, not a local file.", true);
+    say(tr("sayNeedsHttps"), true);
     return;
   }
   try {
@@ -980,7 +1001,7 @@ async function startCamera() {
       audio: false,
     });
   } catch (err) {
-    say("Camera unavailable: " + err.message, true);
+    say(tr("sayCameraUnavailable", { err: err.message }), true);
     return;
   }
   video.srcObject = stream;
@@ -990,7 +1011,7 @@ async function startCamera() {
   $("controls").classList.remove("hidden");
   $("startBtn").classList.add("hidden");
   $("fileBtn").classList.add("hidden");
-  say("Tracking. Press record when you're set.");
+  say(tr("sayTrackingReady"));
   running = true;
   requestAnimationFrame(loop);
 }
@@ -1003,8 +1024,8 @@ function stopCamera() {
   $("controls").classList.add("hidden");
   $("startBtn").classList.remove("hidden");
   $("fileBtn").classList.remove("hidden");
-  $("recBtn").textContent = "Start recording";
-  say("Camera closed.");
+  $("recBtn").textContent = tr("startRecording");
+  say(tr("sayCameraClosed"));
 }
 
 let lastTs = -1;
@@ -1046,10 +1067,11 @@ function draw(res) {
   if (overlay.width !== w) { overlay.width = w; overlay.height = h; }
   ctx.clearRect(0, 0, w, h);
   if (!res.landmarks || !res.landmarks.length) {
-    $("hudLeft").textContent = "no body detected";
+    $("hudLeft").textContent = tr("hudNoBody");
     return;
   }
-  $("hudLeft").innerHTML = recording ? '<span class="rec">● recording</span>' : "tracking";
+  $("hudLeft").innerHTML = recording
+    ? `<span class="rec">${tr("hudRecording")}</span>` : tr("hudTracking");
   const lm = res.landmarks[0];
   const mirror = facing === "user";
   const X = (p) => (mirror ? (1 - p.x) : p.x) * w, Y = (p) => p.y * h;
@@ -1102,12 +1124,12 @@ $("recBtn").onclick = () => {
         recorder.start();
       } catch { recorder = null; }
     }
-    $("recBtn").textContent = "Stop and analyse";
+    $("recBtn").textContent = tr("stopAndAnalyse");
     $("results").classList.add("hidden");
-    say("Recording. Do your set, then stop.");
+    say(tr("sayRecordingNow"));
   } else {
     recording = false;
-    $("recBtn").textContent = "Start recording";
+    $("recBtn").textContent = tr("startRecording");
     $("hudRight").textContent = "";
     if (recorder && recorder.state !== "inactive") {
       recorder.onstop = () => {
@@ -1125,7 +1147,7 @@ $("fileBtn").onclick = () => $("fileInput").click();
 $("fileInput").onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  say("Reading video…");
+  say(tr("sayReadingVideo"));
   const v = document.createElement("video");
   v.src = URL.createObjectURL(file); v.muted = true; v.playsInline = true;
   await new Promise((r) => { v.onloadedmetadata = r; });
@@ -1140,7 +1162,8 @@ $("fileInput").onchange = async (e) => {
     if (res.landmarks && res.landmarks.length) {
       frames.push({ t: meta.mediaTime * 1000, lm: toNamed(res.landmarks[0], v.videoWidth, v.videoHeight) });
     }
-    say(`Tracking ${v.currentTime.toFixed(1)}s / ${v.duration.toFixed(1)}s — ${frames.length} frames`);
+    say(tr("sayTrackingProgress", { t: v.currentTime.toFixed(1),
+                                    dur: v.duration.toFixed(1), frames: frames.length }));
   }
   off.close();
   finish();
@@ -1149,7 +1172,7 @@ $("fileInput").onchange = async (e) => {
 // --- analysis --------------------------------------------------------------
 async function finish() {
   if (frames.length < 20) {
-    say(`Only ${frames.length} frames captured — too few to find a rep.`, true);
+    say(tr("sayTooFewFrames", { n: frames.length }), true);
     return;
   }
   const span = (frames[frames.length - 1].t - frames[0].t) / 1000;
@@ -1164,17 +1187,17 @@ async function finish() {
     if (!detection.activity) {
       // Refusing is the useful answer: analysing a squat as a pull-up gives
       // numbers that look fine and mean nothing.
-      say("Movement not recognised. " + detection.reason, true);
+      say(tr("sayNotRecognised", { reason: detection.reason }), true);
       $("results").classList.remove("hidden");
       $("results").innerHTML =
-        `<h1 style="font-size:18px">Movement not recognised</h1>
+        `<h1 style="font-size:18px">${tr("notRecognisedTitle")}</h1>
          <p class="note">${detection.reason}</p>
-         <table style="margin-top:8px"><thead><tr><th>Movement</th><th>Score</th></tr></thead><tbody>
+         <table style="margin-top:8px"><thead><tr><th>${tr("movement")}</th>
+           <th>${tr("scoreCol")}</th></tr></thead><tbody>
          ${Object.entries(detection.scores).sort((a,b)=>b[1]-a[1])
-            .map(([k,v])=>`<tr><td>${k}</td><td>${v.toFixed(2)}</td></tr>`).join("")}
+            .map(([k,v])=>`<tr><td>${tr(k)}</td><td>${v.toFixed(2)}</td></tr>`).join("")}
          </tbody></table>
-         <p class="note">Pick the movement by hand, or re-shoot with the whole
-         body in frame and side on.</p>`;
+         <p class="note">${tr("notePickByHand")}</p>`;
       return;
     }
     activity = detection.activity;
@@ -1200,9 +1223,9 @@ async function finish() {
       }
     }
     render(lastResult, fps);
-    say(`Analysed ${frames.length} frames at ${fps.toFixed(1)} fps.`);
+    say(tr("sayAnalysed", { frames: frames.length, fps: fps.toFixed(1) }));
   } catch (err) {
-    say("Analysis failed: " + err.message, true);
+    say(tr("sayAnalysisFailed", { err: err.message }), true);
   }
 }
 
@@ -1444,8 +1467,9 @@ function chart(rep, activity, res) {
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>
           <div class="legend">${legend}${bands ? `<span>${tr("sdBetweenReps")}</span>` : ""}${
             rep.isMean && rep.eventAligned && marks.length
-              ? `<span>dashed: ${marks.map(([, n2]) => n2).filter(Boolean).join(" · ")
-                  || "phase boundaries"}</span>` : ""}</div>
+              ? `<span>${tr("dashedLabel", { items:
+                  marks.map(([, n2]) => n2).filter(Boolean).join(" · ")
+                  || tr("phaseBoundaries") })}</span>` : ""}</div>
           ${refs.length ? refNote(refCond) : ""}`;
 }
 
@@ -1637,14 +1661,23 @@ function swatchStyle(color, o) {
   return `background:${color}`;
 }
 
+/** Condition names come from norms.json. "bodyweight" is a word and gets a
+ *  translation; "35kg" is a number and does not need one. */
+function condName(cond) {
+  if (!cond) return cond;
+  const key = "cond_" + String(cond).replace(/[^\w]/g, "_");
+  // tr() returns the key itself when there is no entry, which would print
+  // "cond_35kg" on the page. A condition with no entry is already readable.
+  const got = tr(key);
+  return got === key ? cond : got;
+}
+
 function refNote(cond) {
   if (!cond || !norms) return "";
   const src = norms.sources && norms.sources[Object.keys(norms.sources)
     .find((k) => /squat/i.test(k))];
-  return `<p class="note"><b>Dashed lines</b> are this project's own ${cond} squat, from
-    OpenSim inverse dynamics and CEINMS — <b>one athlete, two trials</b>, band
-    ±1 SD across those trials. A reference for what this pipeline produces, not
-    a population range.${src ? ` ${src.citation}.` : ""}</p>`;
+  return `<p class="note">${tr("noteRefDashed", {
+    cond: condName(cond), cite: src ? ` ${src.citation}.` : "" })}</p>`;
 }
 
 let momentArms = null, momentArmsTried = false;
@@ -1752,7 +1785,7 @@ function jointSubplot(rep, res, j) {
       return [first ? prettyBase(nm) : nm, vals,
               sideOpt(mcol(nm), sideOf(nm), first)];
     })];
-  if (refM) series.push([`${refCond} squat (ref)`, refM.mean,
+  if (refM) series.push([tr("refSeries", { cond: condName(refCond), ref: tr("refShort") }), refM.mean,
                          { dash: true, color: REF_COLOR }]);
   const pal = ["#8892a6", ...MCOLORS];
   const bands = sdd && sdd[j.series]
@@ -1801,35 +1834,19 @@ function momentPanel(rep, res) {
       ${tr("perLegLabel")} · ${tr("peakGrfLabel")}
       ${(Math.max(...d.grf_vertical) / d.body_weight_n).toFixed(2)} ${tr("timesSystemWeight")}
       ${loadNote(res)}</p>
-    ${res.massKg + res.externalKg <= 0 ? `<p class="note banner">Assistance
-      (${res.assistKg} kg) exceeds body mass plus load, so the system weight is
-      zero or negative. The moments below are not meaningful.</p>` : ""}
+    ${res.massKg + res.externalKg <= 0
+      ? `<p class="note banner">${tr("noteAssistExceeds", { kg: res.assistKg })}</p>` : ""}
     ${JOINTS.map((j) => jointSubplot(rep, res, j)).join("")}
-    <p class="note">Inverse dynamics from your body mass. The ground reaction is
-      derived from whole-body centre-of-mass acceleration, not assumed. Centre of
-      pressure is taken as the midfoot and the two legs are assumed symmetric —
-      a visible lean breaks that. A small flexor knee moment in a shallow squat
-      is physical, not an error.</p>
+    <p class="note">${tr("noteInverseDynamics")}</p>
     <p class="note banner">${momentArms
-      ? `Contributions are predicted muscle force times the moment arm read from
-         the <b>${momentArms.model || "OpenSim"}</b> model at that joint angle.
-         The arms are the model's; the forces are the surrogate's and carry its
-         errors, so read the contributions as a ranking of who is doing the
-         work, not as newton-metres you could publish. They will not sum to the
-         net moment: only the muscles crossing the joint are drawn,
-         co-contraction is not resolved, and the two legs are lumped.`
-      : `The muscles listed under each joint are those that <b>cross</b> it,
-         ranked by predicted peak force — not by their contribution to the
-         moment, which needs moment arms this surrogate does not provide.`}</p>`;
+      ? tr("noteContribArms", { model: momentArms.model || "OpenSim" })
+      : tr("noteContribNoArms")}</p>`;
 }
 
 function forcePanel(rep, res) {
   if (!rep.forces || !rep.forces.length) {
     return res && res.restored
-      ? `<p class="note">Muscle and joint forces are not kept between sessions:
-         eighty traces per frame is an order of magnitude more storage than
-         everything else on this page combined. Angles and moments above are
-         the stored ones. Re-analyse the clip to get the forces back.</p>`
+      ? `<p class="note">${tr("noteForcesNotKept")}</p>`
       : "";
   }
   const fm = rep.forceModel;
@@ -1900,10 +1917,8 @@ function forcePanel(rep, res) {
       }
     });
     pctChart = `<h1 style="font-size:14px;margin:14px 0 2px">${tr("musclePctPeak")}</h1>` +
-      lineChart(rep.times, series, "% of peak", MCOLORS) +
-      `<p class="note" style="margin-top:2px">Each curve is scaled to its own
-        maximum, so this compares timing and shape rather than magnitude —
-        which is the part of this model worth reading.</p>`;
+      lineChart(rep.times, series, tr("unitPctPeak"), MCOLORS) +
+      `<p class="note" style="margin-top:2px">${tr("notePctPeak")}</p>`;
   }
 
   // Joint contact forces, already in bodyweights.
@@ -1939,13 +1954,10 @@ function forcePanel(rep, res) {
     const hl = (norms && norms.levels ? norms.levels : [])
       .filter((L) => L.variable === "joint_contact_force" && L.unit === "xBW")
       .map((L) => ({ y: L.value, label: `${L.entity} ${L.label}` }));
-    jrfChart = lineChart(rep.times, series, "× bodyweight", COLORS, bands,
+    jrfChart = lineChart(rep.times, series, tr("unitBodyweight"), COLORS, bands,
                          { hlines: hl })
-      + (hl.length ? `<p class="note">Dotted lines are peaks from the gait
-          literature — ${[...new Set(hl.map((h) => h.label))].length} reference
-          levels, walking and running. They are levels, not waveforms: a gait
-          cycle is not a squat rep. Use them to see whether a predicted force
-          is the right order of magnitude at all.</p>` : "")
+      + (hl.length ? `<p class="note">${tr("noteGaitDotted", {
+          n: [...new Set(hl.map((h) => h.label))].length })}</p>` : "")
       + (refCond ? refNote(refCond) : "");
   }
 
@@ -1959,36 +1971,25 @@ function forcePanel(rep, res) {
 
   return `
     <h1 style="font-size:16px;margin:16px 0 2px">${tr("muscleAndJointForces")}</h1>
-    <p class="note banner">Estimates from a surrogate trained on OpenSim static
-      optimisation of running and single-leg squats — not a measurement.
-      On subjects it never saw, the predicted curve tracks the real one with a
-      median R² of ${r2 == null ? "—" : r2.toFixed(2)} for muscle force and
-      ${r2j == null ? "—" : r2j.toFixed(2)} for joint contact force. Two limits are structural: it takes kinematics only, so it
-      <b>cannot know external load</b> — an empty bar and a loaded bar at the
-      same depth read the same; and every output is a lower-limb muscle, so a
-      <b>pull-up is out of its domain entirely</b>. Squats are a short
-      extrapolation from single-leg squats; treat the ranking as more reliable
-      than the absolute newtons.</p>
+    <p class="note banner">${tr("noteSurrogate", {
+      r2: r2 == null ? "—" : r2.toFixed(2),
+      r2j: r2j == null ? "—" : r2j.toFixed(2) })}</p>
     <table><thead><tr><th>${tr("muscle")}</th><th>${tr("rightPeakN")}</th><th>${tr("leftPeakN")}</th></tr></thead>
       <tbody>${rows}</tbody></table>
     ${pctChart}
     <h1 style="font-size:14px;margin:14px 0 2px">${tr("jointContactForce")}</h1>
     ${jrfChart}
     <table class="jcf"><thead><tr><th>${tr("joint")}</th><th>${tr("right")}</th><th>${tr("left")}</th>
-      <th class="ref">${refCondT ? refCondT + " ref" : "squat ref"}</th>
+      <th class="ref">${refCondT ? tr("refSuffix", { cond: refCondT }) : tr("squatRef")}</th>
       <th class="ref">${tr("walking")}</th><th class="ref">${tr("running")}</th></tr></thead>
       <tbody>${jrows}</tbody></table>
-    <p class="note">All × bodyweight. The last three columns are references, not
-      measurements: the squat column is this project's own CEINMS run, walking
-      and running are peaks from the gait literature. Walking and running are
-      different tasks entirely — they are there to say whether a predicted
-      force is even the right size.</p>
-    <p class="note">${rep.forceMissing?.length || 0} of the model's
-      ${fm ? new Set(fm.feat.filter((f) => f.startsWith("q_"))).size : "?"}
-      joint coordinates cannot be seen by one camera and take the training
-      mean. Velocities and accelerations are differentiated from the measured
-      angles.${bad > 0 ? ` ${(bad * 100).toFixed(1)}% of predicted values exceed
-      ${MAX_PLAUSIBLE_FORCE_N} N and are flagged.` : ""}</p>`;
+    <p class="note">${tr("noteContactRefs")}</p>
+    <p class="note">${tr("noteMissingCoords", {
+      missing: rep.forceMissing?.length || 0,
+      total: fm ? new Set(fm.feat.filter((f) => f.startsWith("q_"))).size : "?",
+      flagged: bad > 0 ? tr("noteFlagged", { pct: (bad * 100).toFixed(1),
+                                             max: MAX_PLAUSIBLE_FORCE_N }) : "",
+    })}</p>`;
 }
 
 function csvFromColumns(header, cols, n) {
@@ -2137,9 +2138,9 @@ WHAT NOT TO TRUST
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
-    note(`Saved ${files.length} files, ${(blob.size / 1e6).toFixed(1)} MB.`);
+    note(tr("savedFiles", { n: files.length, mb: (blob.size / 1e6).toFixed(1) }));
   } catch (err) {
-    note("Export failed: " + err.message);
+    note(tr("exportFailedShort", { err: err.message }));
   }
 }
 
@@ -2156,8 +2157,9 @@ function setSwitcher(res) {
   const opts = sess.sets.map((x) => {
     const ok = have.has(x.index);
     return `<option value="${x.index}"${ok ? "" : " disabled"}${
-      x.index === cur ? " selected" : ""}>Set ${x.index} — ${x.reps} ${x.activity}${
-      ok ? "" : " (curves no longer stored)"}</option>`;
+      x.index === cur ? " selected" : ""}>${tr("setOption", {
+        i: x.index, reps: x.reps, activity: tr(x.activity) })}${
+      ok ? "" : tr("curvesGone")}</option>`;
   }).join("");
   return `<div style="margin-bottom:10px">
       <label for="setSel">${tr("showing")}</label>
@@ -2202,9 +2204,8 @@ function render(res, fps) {
     el.innerHTML = `<h1 style="font-size:17px">${tr("noRepsFound", { activity: tr(res.activity) })}</h1>
       ${res.refused === "feet" ? `<p class="note banner">${
         tr("feetNotInFrame", { pct: ((res.footCoverage ?? 0) * 100).toFixed(0) })}</p>`
-      : `<p class="note">Pose coverage ${(res.coverage * 100).toFixed(0)}%. Check your whole
-        body stayed in frame and the phone did not move. Partial reps may fall under the
-        detection threshold.</p>`}`;
+      : `<p class="note">${tr("noteCoverage", {
+          pct: (res.coverage * 100).toFixed(0) })}</p>`}`;
     return;
   }
 
@@ -2215,7 +2216,8 @@ function render(res, fps) {
        <td>${r.flexion_extension_range_deg}°</td><td>${r.lateral_bend_range_deg}°</td>
        <td>${r.rotation_range_deg}°</td></tr>`).join("");
     el.innerHTML = `
-      <h1 style="font-size:19px;margin-bottom:2px">${n} neck movement${n===1?"":"s"}</h1>
+      <h1 style="font-size:19px;margin-bottom:2px">${
+        tr(n === 1 ? "nNeckMovement" : "nNeckMovements", { n })}</h1>
       <p class="sub" style="margin-bottom:12px">${fps.toFixed(0)} fps ·
         ${(res.coverage*100).toFixed(0)}% ${tr("trackedWord")} ·
         ${tr("motSignedFor", { model: res.osimModel })}</p>
@@ -2225,18 +2227,16 @@ function render(res, fps) {
         ${res.detection.reasonKey
           ? tr(res.detection.reasonKey, res.detection.reasonVals || {})
           : res.detection.reason}.</p>` : ""}
-      <table><thead><tr><th>Rep</th><th>Out</th><th>Back</th><th>Flex/Ext</th>
-        <th>Side bend</th><th>Rotation</th></tr></thead><tbody>${nrows}</tbody></table>
+      <table><thead><tr><th>${tr("colRep")}</th><th>${tr("colOut")}</th>
+        <th>${tr("colBack")}</th><th>${tr("colFlexExt")}</th>
+        <th>${tr("colSideBend")}</th><th>${tr("colRotation")}</th></tr></thead>
+        <tbody>${nrows}</tbody></table>
       <div class="tabs" id="repTabs" style="margin-top:14px"></div>
       <div id="chartBox"></div>
       <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMotOnly")}</button>
       <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
       <div class="status" id="zipStatus"></div>
-      <p class="note">Cervical angles estimated from ear, nose and shoulder
-        positions in a single view. Yaw and pitch trade off against each other at
-        large angles, and upper and lower cervical motion are not separated —
-        the export splits each angle between the two joints in proportion to
-        their ranges. A screening measure, not goniometry.</p>`;
+      <p class="note">${tr("noteCervical")}</p>`;
     const meanN = ensembleRep(res.reps);
     const itemsN = meanN ? [...res.reps, meanN] : res.reps;
     shownItems = itemsN;
@@ -2412,19 +2412,8 @@ function render(res, fps) {
     ${viewNote(res)}
     <div id="dynBox"></div>
     <div id="forceBox"></div>
-    ${isJump ? `<p class="note"><b>Two heights, two sets of assumptions.</b>
-      <i>Flight time</i> is h = g·t²/8, the textbook method. It assumes the same
-      posture leaving the floor and landing on it — tuck your legs up and it
-      flatters you — and its resolution is the frame rate, which is the ± in the
-      table. <i>Hip rise</i> is how far the hip centre actually travelled: no
-      posture assumption, but it inherits pose jitter and the pixel-to-metre
-      scale, and the hip is not the whole-body centre of mass. They usually
-      differ by a few centimetres. Against synthetic jumps of known height both
-      landed within 2 cm at 30 and 60 fps. Neither is a force plate.</p>` : ""}
-    <p class="note">Angles and depth are measured. Durations depend on the frame rate the
-      browser actually delivered (${fps.toFixed(1)} fps), which varies with lighting and
-      phone load — treat tempo as approximate. Left and right are mirrored: one camera
-      cannot separate the sides.</p>`;
+    ${isJump ? `<p class="note">${tr("noteTwoHeights")}</p>` : ""}
+    <p class="note">${tr("noteAnglesMeasured", { fps: fps.toFixed(1) })}</p>`;
 
   const tabs = $("repTabs");
   items.forEach((r, i) => {
@@ -2439,18 +2428,9 @@ function render(res, fps) {
   function select(i) {
     [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
     $("chartBox").innerHTML = chart(items[i], res.activity, res)
-      + (items[i].isMean ? `<p class="note">${items[i].eventAligned
-         ? `Averaged across ${items[i].nReps} reps with each PHASE normalised
-            separately, so the turnaround lands on the turnaround and the
-            touch-down on the touch-down. Stretching each rep end to end
-            instead lines up only the ends: two jumps with 0.09 s and 0.62 s of
-            flight then had take-off at completely different points and the
-            "mean" averaged one rep's push against the other's flight.`
-         : `Every rep stretched to 0–100% of itself and averaged across
-            ${items[i].nReps} reps, so the bottom of a slow rep lines up with
-            the bottom of a fast one.`} The shaded band is ±1 SD between reps:
-         a wide band means the reps did not repeat, which is usually more
-         informative than the mean.</p>` : "");
+      + (items[i].isMean ? `<p class="note">${tr(
+           items[i].eventAligned ? "noteMeanEventAligned" : "noteMeanStretched",
+           { n: items[i].nReps })}${tr("noteMeanBand")}</p>` : "");
     $("dynBox").innerHTML = momentPanel(items[i], res);
     $("dynBox").querySelectorAll("button.muscle").forEach((b) => {
       b.onclick = () => {
@@ -2561,12 +2541,12 @@ if (DEMO) {
     await enrich(demoRes, c.poses, c.fps, c.height_m, c.activity);
     render(demoRes, c.fps);
     say(c.true_height_m
-      ? `Synthetic ${ACTIVITIES[c.activity].label}, true height ${
-          (c.true_height_m * 100).toFixed(0)} cm — compare the table.`
-      : "Demo data — no camera used. Reload without ?demo to record.");
+      ? tr("demoSynthetic", { activity: tr(c.activity),
+                              cm: (c.true_height_m * 100).toFixed(0) })
+      : tr("demoNoCamera"));
   } catch (err) {
     console.error("demo failed", err);
-    say("Demo failed: " + err.message, true);
+    say(tr("demoFailed", { err: err.message }), true);
   }
 }
 
