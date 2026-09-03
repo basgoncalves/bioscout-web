@@ -1273,20 +1273,26 @@ async function enrich(res, poses, fps, heightM, activity) {
    * sagittal view, a fixed pixel-to-metre scale, and a movement whose ground
    * reaction can be recovered from whole-body centre-of-mass acceleration.
    *
-   * A single-leg squat has all three. Running and the side step do not: the
-   * athlete travels across the frame, so the scale drifts with distance from
-   * the camera, and for the side step the whole movement is out of the plane
-   * being measured. Producing a number anyway is the failure mode this app has
-   * hit repeatedly -- a 77,000 N·m knee moment from a frontal squat -- so these
-   * two get kinematics and timing, and no kinetics at all.
+   * A single-leg squat has all three. A side step never does: the whole
+   * movement is out of the plane being measured. Producing a number anyway is
+   * the failure mode this app has hit repeatedly -- a 77,000 N·m knee moment
+   * from a frontal squat.
+   *
+   * Running is the case that depends on the clip rather than the task. What
+   * disqualifies it is TRAVEL, not running: crossing the frame changes the
+   * distance to the camera and the scale with it. A runner on the spot or on a
+   * treadmill never moves, so the scale is as fixed as a squat's and the same
+   * derivation applies. So ask the clip -- res.travel, measured off the hip --
+   * instead of refusing the whole task.
    */
   const spec = ACTIVITIES[activity];
   const canDoDynamics = (activity === "squat" || spec.jump
-                         || activity === "slsquat") && !spec.travels;
+                         || activity === "slsquat"
+                         || (activity === "run" && res.travel?.stationary))
+                        && (!spec.travels || res.travel?.stationary);
   if (canDoDynamics && res.reps.length) {
     try {
-      const F = ACTIVITIES[activity].jump
-        ? buildJumpFeatures(poses) : buildSquatFeatures(poses);
+      const F = spec.jump ? buildJumpFeatures(poses) : buildSquatFeatures(poses);
       const { pxPerM } = computePxPerM(poses, heightM);
       for (const r of res.reps) {
         r.dyn = inverseDynamics(
@@ -1295,6 +1301,14 @@ async function enrich(res, poses, fps, heightM, activity) {
       }
     } catch (err) { console.warn("dynamics failed", err); }
   }
+
+  /* Muscle forces, under the same rule as the moments above -- and they were
+   * NOT under it before, which made the note on a running clip a lie: it said
+   * no muscle forces were shown while the panel showed them. The surrogate
+   * reads pelvis translations in metres, so it inherits the drifting
+   * pixel-to-metre scale exactly as the ground reaction does. A travelling clip
+   * gets kinematics and timing; a stationary one gets everything. */
+  if (spec.travels && !res.travel?.stationary) return;
 
   // Muscle forces and joint reaction forces from the static-optimisation
   // surrogate. See forces.js. The self-test replays the network at its own
@@ -1364,7 +1378,9 @@ function viewNote(res) {
     bits.push(tr("ankleNotMeasurable"));
   }
   if (spec.travels) {
-    bits.push(tr(res.activity === "run" ? "runNoKinetics" : "sidestepNoKinetics"));
+    bits.push(res.activity !== "run" ? tr("sidestepNoKinetics")
+              : res.travel?.stationary ? tr("runStationaryKinetics")
+              : tr("runNoKinetics"));
   }
   if (res.activity === "run" && res.reps.some((r) => r.walking)) {
     const w = res.reps.filter((r) => r.walking).length;
@@ -2222,6 +2238,7 @@ function render(res, fps) {
     el.innerHTML = `<h1 style="font-size:17px">${tr("noRepsFound", { activity: tr(res.activity) })}</h1>
       ${res.refused === "feet" ? `<p class="note banner">${
         tr("feetNotInFrame", { pct: ((res.footCoverage ?? 0) * 100).toFixed(0) })}</p>`
+      : res.refused === "noStrides" ? `<p class="note banner">${tr("noStrides")}</p>`
       : `<p class="note">${tr("noteCoverage", {
           pct: (res.coverage * 100).toFixed(0) })}</p>`}`;
     return;
@@ -2327,6 +2344,7 @@ function render(res, fps) {
       <td>${nn(r.stance_knee_flex_max_deg, 0)}°</td>
       <td>${nn(r.knee_asymmetry_deg, 0)}°</td></tr>`).join("");
   const runRows = !isRun ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+      <td>${sideName(r.stance_side)}</td>
       <td>${nn(r.stride_s, 3)}</td><td>${nn(r.contact_s, 3)}</td>
       <td>${nn(r.flight_s, 3)}</td><td>${nn(r.duty_factor, 2)}</td>
       <td>${nn(r.cadence_spm, 0)}</td></tr>`).join("");
@@ -2345,8 +2363,10 @@ function render(res, fps) {
     <h1 style="font-size:15px;margin:14px 0 2px">${tr("perFoot")}</h1>
     <p class="sub" style="margin-bottom:8px">${tr("runBout", {
       t: rs.run_time_s.toFixed(2),
+      steps: tr(rs.steps === 1 ? "nStep" : "nSteps", { n: rs.steps }),
       strides: tr(rs.strides === 1 ? "nStride" : "nStrides", { n: rs.strides }),
-    })}</p>
+    })}${res.travel ? tr(res.travel.stationary ? "onTheSpot" : "travelled",
+                         { m: res.travel.travel_m.toFixed(2) }) : ""}</p>
     <table><thead><tr><th>${tr("colFoot")}</th><th>${tr("colStrides")}</th>
       <th>${tr("var_stride_s")}</th><th>${tr("var_contact_s")}</th>
       <th>${tr("var_flight_s")}</th><th>${tr("var_duty_factor")}</th>
@@ -2371,8 +2391,9 @@ function render(res, fps) {
     ? `<tr><th>${tr("rep")}</th><th>${tr("stance")}</th><th>${tr("down")}</th>
         <th>${tr("up")}</th><th>${tr("stanceKnee")}</th><th>${tr("lrDiff")}</th></tr>`
     : isRun
-    ? `<tr><th>${tr("stride")}</th><th>${tr("strideS")}</th><th>${tr("contactS")}</th>
-        <th>${tr("flightS")}</th><th>${tr("dutyFactor")}</th><th>${tr("cadence")}</th></tr>`
+    ? `<tr><th>${tr("stride")}</th><th>${tr("colFoot")}</th><th>${tr("strideS")}</th>
+        <th>${tr("contactS")}</th><th>${tr("flightS")}</th><th>${tr("dutyFactor")}</th>
+        <th>${tr("cadence")}</th></tr>`
     : isSide
     ? `<tr><th>${tr("step")}</th><th>${tr("plantSide")}</th><th>${tr("outS")}</th>
         <th>${tr("backS")}</th><th>${tr("excursionM")}</th><th>${tr("kneeAtPlant")}</th></tr>`
@@ -2383,8 +2404,21 @@ function render(res, fps) {
       ? `<tr><th>${tr("rep")}</th><th>${tr("down")}</th><th>${tr("up")}</th><th>${tr("knee")}</th><th>${tr("hip")}</th><th>${tr("depthM")}</th></tr>`
       : `<tr><th>${tr("rep")}</th><th>${tr("up")}</th><th>${tr("down")}</th><th>${tr("elbow")}</th><th>${tr("shoulder")}</th><th>${tr("riseM")}</th></tr>`;
 
-  const meanRep = ensembleRep(res.reps);
-  const items = meanRep ? [...res.reps, meanRep] : res.reps;
+  /* Running gets a mean PER FOOT, not one mean over both.
+   *
+   * The reps of a run are the strides of both feet interleaved, so a single
+   * ensemble would average a left stride against a right one and hand back a
+   * figure that is neither -- and it would do it silently, which is how a limp
+   * disappears into a mean. Every other task has one mean because its reps are
+   * one thing. */
+  const meanRep = isRun ? null : ensembleRep(res.reps);
+  const runMeans = !isRun ? [] : ["l", "r"].map((sd) => {
+    const m = ensembleRep(res.reps.filter((r) => r.stance_side === sd));
+    if (m) m.stance_side = sd;
+    return m;
+  }).filter(Boolean);
+  const items = isRun ? [...res.reps, ...runMeans]
+                      : meanRep ? [...res.reps, meanRep] : res.reps;
   shownItems = items;
   // Mean +- SD across the reps, on the same row shape as the reps above it.
   const ms = (k, d = 2) => {
@@ -2397,9 +2431,17 @@ function render(res, fps) {
          <td>${ms("stance_knee_flex_max_deg", 0)}°</td>
          <td>${ms("knee_asymmetry_deg", 0)}°</td></tr>`
     : isRun
-    ? `<tr class="meanrow"><td>${tr("mean")}</td><td>${ms("stride_s", 3)}</td>
-         <td>${ms("contact_s", 3)}</td><td>${ms("flight_s", 3)}</td>
-         <td>${ms("duty_factor", 2)}</td><td>${ms("cadence_spm", 0)}</td></tr>`
+    ? runMeans.map((m) => {
+        const q = (k, d = 2) => {
+          const st = m.stats[k];
+          return st ? `${st.mean.toFixed(d)}<span class="sub"> ±${st.sd.toFixed(d)}</span>`
+                    : "—";
+        };
+        return `<tr class="meanrow"><td>${tr("mean")}</td>
+          <td>${sideName(m.stance_side)}</td><td>${q("stride_s", 3)}</td>
+          <td>${q("contact_s", 3)}</td><td>${q("flight_s", 3)}</td>
+          <td>${q("duty_factor", 2)}</td><td>${q("cadence_spm", 0)}</td></tr>`;
+      }).join("")
     : isSide
     ? `<tr class="meanrow"><td>${tr("mean")}</td><td>—</td>
          <td>${ms("out_s")}</td><td>${ms("back_s")}</td>
@@ -2461,8 +2503,13 @@ function render(res, fps) {
   const tabs = $("repTabs");
   items.forEach((r, i) => {
     const b = document.createElement("button");
-    b.textContent = r.isMean ? tr("meanOfN", { n: r.nReps })
-                             : tr("repN", { n: r.rep });
+    b.textContent = r.isMean
+      ? (r.stance_side ? tr("meanOfNSide", { n: r.nReps,
+                                             side: sideName(r.stance_side) })
+                       : tr("meanOfN", { n: r.nReps }))
+      : (isRun && r.stance_side
+          ? tr("repNSide", { n: r.rep, side: sideName(r.stance_side) })
+          : tr("repN", { n: r.rep }));
     b.onclick = () => select(i);
     tabs.appendChild(b);
   });

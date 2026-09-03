@@ -1102,7 +1102,40 @@ function realStances(cs, n) {
 export const DEFAULT_RUN_CFG = {
   contactBand: 0.09, minContactFrames: 3, minStrideFrames: 10,
   maxStrideFrames: 90, smoothWin: 3,
+  // Below this much horizontal hip travel, in metres, the runner is on the
+  // spot. See runTravel().
+  stationaryM: 0.35,
 };
+
+/* Running on the spot is a different measurement problem from running past a
+ * camera, and a better one.
+ *
+ * The reason this app refuses moments and ground reaction for running is not
+ * running itself -- it is TRAVEL. As the athlete crosses the frame their
+ * distance to the camera changes, the pixel-to-metre scale drifts with it, and
+ * the ground reaction is derived from that scale. On a treadmill, or running on
+ * the spot, none of that happens: the athlete stays put, the scale is as fixed
+ * as it is in a squat, and the kinetics are as defensible as a squat's.
+ *
+ * So measure the travel rather than assuming it. The hip's horizontal position
+ * is smoothed first, because a stride swings the pelvis a few centimetres
+ * side to side and the raw range would count that as travel. The threshold is
+ * in metres, not frame fractions: a third of a metre is less than one stride
+ * length, so anything genuinely moving down the frame is well past it, while
+ * a runner holding station drifts far less.
+ */
+export function runTravel(F, pxPerM, cfg = DEFAULT_RUN_CFG) {
+  const x = smooth(interpNan(F.hip_cx), 9).filter(isNum);
+  if (x.length < 5 || !(pxPerM > 0)) return null;
+  // 5th to 95th percentile, not min to max: one dropped-out frame at either end
+  // would otherwise decide the answer.
+  const sorted = [...x].sort((a, b) => a - b);
+  const at = (q) => sorted[Math.min(sorted.length - 1,
+                                    Math.max(0, Math.round(q * (sorted.length - 1))))];
+  const travel_m = (at(0.95) - at(0.05)) / pxPerM;
+  return { travel_m: +travel_m.toFixed(3),
+           stationary: travel_m <= cfg.stationaryM };
+}
 
 /* A stride, not a step: contact of one foot to the next contact of the SAME
  * foot. That is the unit every running-gait norm is written in, and it is the
@@ -1134,11 +1167,20 @@ export function findRunReps(F, cfg = DEFAULT_RUN_CFG) {
     return out;
   };
   const sideReps = { l: strides(cl), r: strides(cr) };
-  if (cs.length < 2) {
+  // Every stride of BOTH feet, in the order they happened, each carrying the
+  // foot it belongs to. Reporting one foot was the old behaviour and it hid the
+  // comparison a runner is actually after; which foot tracked more cleanly is
+  // an accident of where the camera stood, not a choice worth making for them.
+  const tagged = [...sideReps.l.map((b) => ({ b, sd: "l" })),
+                  ...sideReps.r.map((b) => ({ b, sd: "r" }))]
+    .sort((p, q) => p.b[0] - q.b[0]);
+  if (!tagged.length) {
     return { reps: [], depth: F.depth, refused: "noStrides", runSide: side,
-             contacts: cs, sideContacts: { l: cl, r: cr }, sideReps };
+             contacts: cs, sideContacts: { l: cl, r: cr }, sideReps,
+             repSides: [] };
   }
-  return { reps: sideReps[side], depth: F.depth, runSide: side, contacts: cs,
+  return { reps: tagged.map((t) => t.b), repSides: tagged.map((t) => t.sd),
+           depth: F.depth, runSide: side, contacts: cs,
            sideContacts: { l: cl, r: cr }, sideReps,
            otherContacts: side === "l" ? cr : cl };
 }
@@ -1286,6 +1328,10 @@ export function runSummary(F, found, fps) {
   const right = per(sc.r, sc.l);
   return {
     run_time_s: +((last - first + 1) / fps).toFixed(2),
+    // A step is one foot going down; a stride is the same foot going down
+    // twice. Both are worth printing -- steps is what a watch counts, strides
+    // is the unit every running-gait norm is written in.
+    steps: all.length,
     strides: (left?.strides || 0) + (right?.strides || 0),
     left, right,
     // Only worth printing when both feet were actually measured; one side alone
@@ -1447,7 +1493,16 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
           Math.max(...coords["knee_angle_" + st].map(Math.abs));
         s.stance_hip_flex_max_deg = Math.max(...coords["hip_flexion_" + st]);
       }
-      if (activity === "run") Object.assign(s, strideMetrics(F, b, fps, found));
+      if (activity === "run") {
+        // Which foot this stride belongs to decides what "the other foot" means
+        // when flight is worked out, so it has to be this rep's side and not
+        // the clip's dominant one.
+        const sd = found.repSides ? found.repSides[i] : found.runSide;
+        s.stance_side = sd || null;
+        const sc = found.sideContacts || {};
+        Object.assign(s, strideMetrics(F, b, fps,
+          { otherContacts: sd === "l" ? sc.r : sc.l }));
+      }
       if (activity === "sidestep") {
         Object.assign(s, sidestepMetrics(F, b, fps, pxPerM, found.midX ?? refB));
       }
@@ -1466,5 +1521,8 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
            coverage: F._coverage, reps, columns: spec.columns,
            refused: found.refused || null,
            runSummary: activity === "run" ? runSummary(F, found, fps) : null,
+           // Whether the athlete held station. Only running asks -- it is the
+           // one task whose kinetics are refused for travel alone.
+           travel: activity === "run" ? runTravel(F, pxPerM, conf) : null,
            footCoverage: F._footCoverage ?? null };
 }

@@ -67,7 +67,7 @@ function slSquat({ reps = 3, depth = 0.28, side = 'r' } = {}) {
 
 // ---------------------------------------------------------------- running
 function running({ strides = 4, contactS = 0.20, flightS = 0.11,
-                   leftContactS = null } = {}) {
+                   leftContactS = null, travelM = 0 } = {}) {
   const f = [];
   const stand = 0.92, fN = Math.round(flightS * fps);
   const cR = Math.round(contactS * fps);
@@ -91,6 +91,8 @@ function running({ strides = 4, contactS = 0.20, flightS = 0.11,
     }
   }
   for (let i = 0; i < 15; i++) f.push({ hip: stand, lf: 0, rf: 0 });
+  // Drift the whole body down the frame, if asked. On the spot is travelM = 0.
+  if (travelM) f.forEach((fr, i) => { fr.x = travelM * i / (f.length - 1); });
   return build(f);
 }
 
@@ -284,6 +286,117 @@ console.log('\n--- run summary: bout and per-foot means ---');
       + `${rs2?.left?.contact_s}s vs right ${rs2?.right?.contact_s}s `
       + `(built 80 ms apart, measured ${gap == null ? '—' : gap.toFixed(3)}s)`);
   }
+}
+
+/* Stationary running. What disqualifies a run from inverse dynamics is TRAVEL
+ * -- crossing the frame changes the distance to the camera and the
+ * pixel-to-metre scale with it, and the ground reaction is derived from that
+ * scale. A runner on the spot never moves, so the scale is as fixed as a
+ * squat's. This checks the measurement that decision rests on, in both
+ * directions: a clip built with no drift must read stationary, and one built
+ * with 3 m of drift must not. */
+console.log('\n--- stationary vs travelling ---');
+for (const [name, travelM, wantStationary] of [['on the spot', 0, true],
+                                               ['3 m down the frame', 3.0, false]]) {
+  const res = K.analyse(running({ strides: 4, travelM }), fps,
+    { heightM: 1.81, activity: 'run', osimModel: 'gpk' });
+  const t = res.travel;
+  const ok = t && t.stationary === wantStationary;
+  if (!ok) bad++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}: travel `
+    + `${t ? t.travel_m : '—'} m, stationary=${t ? t.stationary : '—'} `
+    + `(want ${wantStationary})`);
+}
+
+/* Both feet are reps now, each tagged with its foot, so the mean can be taken
+ * per foot. A left mean built from right strides is the failure this guards. */
+console.log('\n--- strides of both feet as reps ---');
+{
+  const res = K.analyse(running({ strides: 5 }), fps,
+    { heightM: 1.81, activity: 'run', osimModel: 'gpk' });
+  const sides = res.reps.map((r) => r.stance_side);
+  const nl = sides.filter((x) => x === 'l').length;
+  const nr = sides.filter((x) => x === 'r').length;
+  const ordered = res.reps.every((r, i) =>
+    i === 0 || r.bounds[0] >= res.reps[i - 1].bounds[0]);
+  const ok = nl > 0 && nr > 0 && nl + nr === res.reps.length && ordered;
+  if (!ok) bad++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${res.reps.length} reps: `
+    + `${nl} left, ${nr} right, in time order=${ordered}`);
+}
+
+/* The point of all of the above: a stationary run must actually produce
+ * moments, and they must be the right size. This runs the same two steps
+ * enrich() runs in the page -- joint positions in metres, then inverse
+ * dynamics -- so a regression that leaves rep.dyn empty, or that produces the
+ * 77,000 N·m nonsense this app has hit before, fails here rather than on a
+ * phone. Peak knee moment in running lands around 1.5-3.5 N·m/kg; the band
+ * below is deliberately wide because the input is a synthetic clip, and its
+ * job is to catch wrong ORDERS of magnitude, not to grade the model. */
+console.log('\n--- stationary running: moments ---');
+{
+  const D = await import('./dynamics.js');
+  const massKg = 75, heightM = 1.81;
+  const poses = running({ strides: 5 });
+  const res = K.analyse(poses, fps, { heightM, activity: 'run', osimModel: 'gpk' });
+  const F = K.buildSquatFeatures(poses);
+  const { pxPerM } = K.computePxPerM(poses, heightM);
+  let worst = 0, got = 0;
+  for (const r of res.reps) {
+    const dyn = D.inverseDynamics(
+      K.jointPositionsM(F, r.bounds, pxPerM, F._floorY), massKg, fps, {});
+    if (!dyn) continue;
+    got++;
+    worst = Math.max(worst, Math.max(...dyn.knee_moment.map(Math.abs)) / massKg);
+  }
+  const ok = res.travel?.stationary && got === res.reps.length && got > 0
+             && worst > 0.2 && worst < 12;
+  if (!ok) bad++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${got}/${res.reps.length} strides got `
+    + `moments, peak knee ${worst.toFixed(2)} N·m/kg (want 0.2-12)`);
+}
+
+/* The per-foot mean, end to end. This is the shape the page draws: dynamics
+ * on every stride, then one ensemble per foot. The mean has to carry the
+ * averaged moments through -- a mean with no .dyn draws an empty panel, which
+ * is exactly what "moments for the average step" must not be. */
+console.log('\n--- per-foot mean moments ---');
+{
+  const D = await import('./dynamics.js');
+  const E = await import('./ensemble.js');
+  const massKg = 75, heightM = 1.81;
+  const poses = running({ strides: 6, contactS: 0.20, flightS: 0.11,
+                          leftContactS: 0.28 });
+  const res = K.analyse(poses, fps, { heightM, activity: 'run', osimModel: 'gpk' });
+  const F = K.buildSquatFeatures(poses);
+  const { pxPerM } = K.computePxPerM(poses, heightM);
+  for (const r of res.reps) {
+    r.dyn = D.inverseDynamics(
+      K.jointPositionsM(F, r.bounds, pxPerM, F._floorY), massKg, fps, {});
+  }
+  const means = {};
+  for (const sd of ['l', 'r']) {
+    means[sd] = E.ensembleRep(res.reps.filter((r) => r.stance_side === sd));
+  }
+  const peak = (m, j) => (m && m.dyn && m.dyn[j]
+    ? Math.max(...m.dyn[j].map(Math.abs)) / massKg : null);
+  const joints = ['hip_moment', 'knee_moment', 'ankle_moment'];
+  const haveAll = means.l && means.r
+    && joints.every((j) => peak(means.l, j) != null && peak(means.r, j) != null);
+  // The clip was built with the left foot down 80 ms longer, so the two feet
+  // must NOT come back identical -- that would mean one ensemble was fed the
+  // other foot's strides.
+  const differ = haveAll && joints.some((j) =>
+    Math.abs(peak(means.l, j) - peak(means.r, j)) > 0.02);
+  const sane = haveAll && joints.every((j) =>
+    peak(means.l, j) > 0.05 && peak(means.l, j) < 12
+    && peak(means.r, j) > 0.05 && peak(means.r, j) < 12);
+  const ok = haveAll && differ && sane;
+  if (!ok) bad++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  mean L (${means.l?.nReps} strides) vs `
+    + `R (${means.r?.nReps}): `
+    + joints.map((j) => `${j.split('_')[0]} ${peak(means.l, j)?.toFixed(2)}/`
+        + `${peak(means.r, j)?.toFixed(2)}`).join(', ') + ' N·m/kg');
 }
 
 console.log(bad ? `\n${bad} FAILURE(S)` : '\nALL CHECKS PASSED');
