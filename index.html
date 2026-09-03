@@ -227,8 +227,8 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v15";
-try { document.getElementById("build").textContent = "build v15"; } catch (e) {}
+window.BUILD = "v16";
+try { document.getElementById("build").textContent = "build v16"; } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -1049,6 +1049,7 @@ async function enrich(res, poses, fps, heightM, activity) {
   try {
     const fm = await loadForceModel();
     await loadMomentArms();
+    await loadNorms();
     const st = forceSelfTest(fm);
     if (!st.plausible) throw new Error(
       `force model self-test failed: ${st.peakMuscleBW.toFixed(1)} BW at the training mean`);
@@ -1107,22 +1108,35 @@ function viewNote(res) {
     ? `<p class="note banner">${bits.join(" ")}</p>` : "";
 }
 
-function chart(rep, activity) {
+function chart(rep, activity, res) {
   const keys = activity === "squat"
     ? [["knee flexion", "knee_angle_r"], ["hip flexion", "hip_flexion_r"],
        ["ankle dorsiflexion", "ankle_angle_r"]]
     : [["elbow flexion", "elbow_flex_r"], ["shoulder flexion", "arm_flex_r"],
        ["hip flexion", "hip_flexion_r"]];
   const series = keys.map(([n, k]) => [n, rep.coords[k]]);
+  // Reference angles, on the mean rep only: over a single rep they would be
+  // three more lines competing with the measurement for attention.
+  const refCond = rep.isMean && activity === "squat" ? normCondition(res || {}) : null;
+  const refs = [];
+  if (refCond) {
+    for (const [n, , ent] of [["knee flexion", 0, "knee"], ["hip flexion", 0, "hip"],
+                              ["ankle dorsiflexion", 0, "ankle"]]) {
+      const c = refCurve(refCond, "joint_angle", ent);
+      if (c) refs.push([`${n} (ref)`, c.mean, { dash: true, color: REF_COLOR }]);
+    }
+  }
   // On the mean rep, the between-rep SD is drawn as a band. It is the point of
   // an ensemble average: a mean with a wide band is three different squats.
   const sdc = rep.sd && rep.sd.coords;
   const bands = sdc ? keys.map(([, k]) => sdc[k] || null) : null;
+  const allSeries = series.concat(refs);
+  const allBands = bands ? bands.concat(refs.map(() => null)) : null;
 
   const pct = rep.timeUnit === "%";
   const t = rep.times, W = 320, H = 190, P = { l: 34, r: 8, t: 10, b: 22 };
-  const all = series.flatMap(([, v], i) => {
-    const b = bands && bands[i];
+  const all = allSeries.flatMap(([, v], i) => {
+    const b = allBands && allBands[i];
     return b ? v.flatMap((x, j) => [x + b[j], x - b[j]]) : v;
   });
   const y0 = Math.min(...all), y1 = Math.max(...all);
@@ -1141,24 +1155,28 @@ function chart(rep, activity) {
   if (topT !== undefined && topT !== null) {
     g += `<line x1="${sx(topT)}" y1="${P.t}" x2="${sx(topT)}" y2="${H - P.b}" stroke="var(--muted)" stroke-width=".8" stroke-dasharray="3 3"/>`;
   }
-  if (bands) {
-    series.forEach(([, vals], i) => {
-      const b = bands[i];
+  if (allBands) {
+    allSeries.forEach(([, vals], i) => {
+      const b = allBands[i];
       if (!b) return;
-      g += bandPath(t, vals, b, sx, sy, COLORS[i]);
+      g += bandPath(t, vals, b, sx, sy, COLORS[i % COLORS.length]);
     });
   }
-  series.forEach(([, vals], i) => {
-    g += `<polyline fill="none" stroke="${COLORS[i]}" stroke-width="1.9" stroke-linejoin="round" points="${
+  allSeries.forEach(([, vals, o], i) => {
+    const col = (o && o.color) || COLORS[i % COLORS.length];
+    g += `<polyline fill="none" stroke="${col}" stroke-width="${o && o.dash ? 1.4 : 1.9}"${
+      o && o.dash ? ' stroke-dasharray="4 3"' : ""} stroke-linejoin="round" points="${
       vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
   });
   const lab = (v) => (pct ? `${v.toFixed(0)}%` : `${v.toFixed(1)}s`);
   g += `<text x="${P.l}" y="${H - 6}" font-size="9" fill="var(--muted)">${lab(t[0])}</text>`;
   g += `<text x="${W - P.r}" y="${H - 6}" font-size="9" text-anchor="end" fill="var(--muted)">${lab(t[t.length - 1])}</text>`;
-  const legend = series.map(([n], i) =>
-    `<span><i class="swatch" style="background:${COLORS[i]}"></i>${n}</span>`).join("");
+  const legend = allSeries.map(([n, , o], i) =>
+    `<span><i class="swatch" style="background:${(o && o.color) || COLORS[i % COLORS.length]}${
+      o && o.dash ? ";opacity:.75" : ""}"></i>${n}</span>`).join("");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>
-          <div class="legend">${legend}${bands ? '<span>shaded: ±1 SD between reps</span>' : ""}</div>`;
+          <div class="legend">${legend}${bands ? '<span>shaded: ±1 SD between reps</span>' : ""}</div>
+          ${refs.length ? refNote(refCond) : ""}`;
 }
 
 /** Mean ± SD ribbon: forward along the upper edge, back along the lower. */
@@ -1168,12 +1186,19 @@ function bandPath(t, mean, sd, sx, sy, color) {
   return `<polygon points="${up.concat(dn).join(" ")}" fill="${color}" fill-opacity=".15" stroke="none"/>`;
 }
 
-function lineChart(t, series, unit, palette, bands) {
+function lineChart(t, series, unit, palette, bandsIn, opts) {
+  // A series may carry a third element of options: {dash, color}. Reference
+  // curves use it so they read as a reference and not as another measurement.
+  const sopt = series.map((x) => x[2] || {});
+  const hlines = (opts && opts.hlines) || [];
+  // An array of nothing but nulls is not a band. Passing one through drew the
+  // "shaded: +-1 SD" legend on charts that had no shading at all.
+  const bands = bandsIn && bandsIn.some((b) => b && b.length) ? bandsIn : null;
   const W = 320, H = 170, P = { l: 40, r: 8, t: 10, b: 22 };
   const all = series.flatMap(([, v], i) => {
     const b = bands && bands[i];
     return b ? v.flatMap((x, j) => [x + b[j], x - b[j]]) : v;
-  });
+  }).concat(hlines.map((h) => h.y));
   const y0 = Math.min(...all), y1 = Math.max(...all);
   const pad = (y1 - y0) * 0.08 || 1, lo = y0 - pad, hi = y1 + pad;
   const sx = (v) => P.l + ((v - t[0]) / (t[t.length - 1] - t[0] || 1)) * (W - P.l - P.r);
@@ -1194,11 +1219,21 @@ function lineChart(t, series, unit, palette, bands) {
     });
   }
   series.forEach(([, vals], i) => {
-    g += `<polyline fill="none" stroke="${pal[i % pal.length]}" stroke-width="1.7" stroke-linejoin="round" points="${
+    const o = sopt[i], col = o.color || pal[i % pal.length];
+    g += `<polyline fill="none" stroke="${col}" stroke-width="${o.dash ? 1.4 : 1.7}"${
+      o.dash ? ' stroke-dasharray="4 3"' : ""} stroke-linejoin="round" points="${
       vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
   });
+  for (const h of hlines) {
+    const yy = sy(h.y);
+    g += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="${
+      h.color || REF_COLOR}" stroke-width="1" stroke-dasharray="2 3"/>`;
+    g += `<text x="${W - P.r - 2}" y="${yy - 3}" font-size="8.5" text-anchor="end" fill="${
+      h.color || REF_COLOR}">${h.label}</text>`;
+  }
   const legend = series.map(([n], i) =>
-    `<span><i class="swatch" style="background:${pal[i % pal.length]}"></i>${n}</span>`).join("");
+    `<span><i class="swatch" style="background:${sopt[i].color || pal[i % pal.length]}${
+      sopt[i].dash ? ";opacity:.75" : ""}"></i>${n}</span>`).join("");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:170px">${g}</svg>
           <div class="legend">${legend}<span>${unit}</span>${
             bands ? '<span>shaded: \u00b11 SD between reps</span>' : ""}</div>`;
@@ -1215,6 +1250,77 @@ function lineChart(t, series, unit, palette, bands) {
  * The file is optional on purpose: without it the moment plots show the net
  * moment only, rather than a contribution invented from a guessed constant
  * arm. */
+/* Reference curves and levels, built from bioscout by tools/build_norms.py.
+ *
+ * Two different kinds of thing, because the corpus holds two:
+ *
+ *   squat curves   this project's own OpenSim + CEINMS squat runs. Same
+ *                  movement, same model family, so they can be drawn over a
+ *                  mean rep on the same 0-100% axis.
+ *
+ *   gait levels    peak hip and knee contact force in walking and running,
+ *                  from the literature. A gait cycle is NOT a squat rep, so
+ *                  these are horizontal lines with a label, never waveforms.
+ *                  They are here to make a magnitude that cannot be true --
+ *                  the surrogate's speciality -- obvious at a glance.
+ *
+ * Optional, like moment_arms.json: without the file the plots are exactly what
+ * they were.
+ */
+let norms = null, normsTried = false;
+async function loadNorms() {
+  if (normsTried) return norms;
+  normsTried = true;
+  try {
+    const r = await fetch("norms.json");
+    if (r.ok) norms = await r.json();
+  } catch { norms = null; }
+  return norms;
+}
+
+/** Which reference condition this recording should be compared against.
+ *  Loaded squats are not bodyweight squats, and showing the wrong one would be
+ *  worse than showing none. */
+function normCondition(res) {
+  if (!norms || !norms.squat) return null;
+  const ext = Math.abs(res.externalKg || 0);
+  const conds = Object.keys(norms.squat);
+  if (!conds.length) return null;
+  const num = (c) => (/^([\d.]+)\s*kg$/i.test(c) ? parseFloat(c) : 0);
+  let best = conds[0];
+  for (const c of conds) {
+    if (Math.abs(num(c) - ext) < Math.abs(num(best) - ext)) best = c;
+  }
+  // A 35 kg reference against a bodyweight squat is not a comparison. Only
+  // offer one whose load is within 15 kg of what was actually lifted.
+  return Math.abs(num(best) - ext) <= 15 ? best : null;
+}
+
+function refCurve(cond, variable, entity) {
+  const n = norms && norms.squat && norms.squat[cond]
+    && norms.squat[cond][variable] && norms.squat[cond][variable][entity];
+  return n && Array.isArray(n.mean) ? n : null;
+}
+
+/** Half-width of the reference band, for the chart's band channel. */
+function refBand(n) {
+  if (!n || !n.lower || !n.upper) return null;
+  return n.mean.map((v, i) => Math.max(Math.abs(n.upper[i] - v),
+                                       Math.abs(v - n.lower[i])));
+}
+
+const REF_COLOR = "#9aa4b8";
+
+function refNote(cond) {
+  if (!cond || !norms) return "";
+  const src = norms.sources && norms.sources[Object.keys(norms.sources)
+    .find((k) => /squat/i.test(k))];
+  return `<p class="note">Dashed grey: this project's own ${cond} squat, from
+    OpenSim inverse dynamics and CEINMS — <b>one athlete, two trials</b>, band
+    ±1 SD across those trials. A reference for what this pipeline produces, not
+    a population range.${src ? ` ${src.citation}.` : ""}</p>`;
+}
+
 let momentArms = null, momentArmsTried = false;
 async function loadMomentArms() {
   if (momentArmsTried) return momentArms;
@@ -1297,11 +1403,20 @@ function jointSubplot(rep, res, j) {
     }
   }
 
+  // Reference moment, mean rep only. Same movement, same model family, same
+  // extension-positive convention -- build_norms.py flips it on the way out.
+  const refCond = rep.isMean && res.activity === "squat" ? normCondition(res) : null;
+  const refM = refCond ? refCurve(refCond, "joint_moment", j.key) : null;
+
   const series = [[`${j.label} moment (net)`, moment], ...contrib];
+  if (refM) series.push([`${refCond} reference`, refM.mean,
+                         { dash: true, color: REF_COLOR }]);
   const pal = ["#8892a6", ...MCOLORS];
   const bands = sdd && sdd[j.series]
-    ? [sdd[j.series], ...contrib.map(() => null)] : null;
-  const momentChart = lineChart(rep.times, series, "N·m", pal, bands);
+    ? [sdd[j.series], ...contrib.map(() => null), ...(refM ? [refBand(refM)] : [])]
+    : null;
+  const momentChart = lineChart(rep.times, series, "N·m", pal, bands)
+    + (refM ? refNote(refCond) : "");
 
   const rows = top.map(([nm, p, i], k) => {
     const on = sel && sel.idx === i;
@@ -1363,7 +1478,7 @@ function momentPanel(rep, res) {
          moment, which needs moment arms this surrogate does not provide.`}</p>`;
 }
 
-function forcePanel(rep) {
+function forcePanel(rep, res) {
   if (!rep.forces || !rep.forces.length) return "";
   const fm = rep.forceModel;
   const bad = rep.forceImplausible || 0;
@@ -1400,7 +1515,33 @@ function forcePanel(rep) {
   if (rep.jrf && rep.jrf.length && rep.jrfNames) {
     const series = rep.jrfNames.map((n, i) =>
       [n.replace("_mag", "").replace(/_/g, " "), rep.jrf.map((r) => r[i])]);
-    jrfChart = lineChart(rep.times, series, "× bodyweight", COLORS);
+    const bands = series.map(() => null);
+    const refCond = rep.isMean && res && res.activity === "squat"
+      ? normCondition(res) : null;
+    if (refCond) {
+      for (const ent of ["hip", "knee", "ankle"]) {
+        const c = refCurve(refCond, "joint_contact_force", ent);
+        if (!c) continue;
+        series.push([`${ent} (${refCond} reference)`, c.mean,
+                     { dash: true, color: REF_COLOR }]);
+        bands.push(refBand(c));
+      }
+    }
+    // Horizontal lines from the GAIT literature. Deliberately not curves: a
+    // gait cycle is not a rep, and drawing one across a squat would invite
+    // exactly the comparison that is not valid. As levels they do the one job
+    // worth doing here -- showing when a predicted force cannot be true.
+    const hl = (norms && norms.levels ? norms.levels : [])
+      .filter((L) => L.variable === "joint_contact_force" && L.unit === "xBW")
+      .map((L) => ({ y: L.value, label: `${L.entity} ${L.label}` }));
+    jrfChart = lineChart(rep.times, series, "× bodyweight", COLORS, bands,
+                         { hlines: hl })
+      + (hl.length ? `<p class="note">Dotted lines are peaks from the gait
+          literature — ${[...new Set(hl.map((h) => h.label))].length} reference
+          levels, walking and running. They are levels, not waveforms: a gait
+          cycle is not a squat rep. Use them to see whether a predicted force
+          is the right order of magnitude at all.</p>` : "")
+      + (refCond ? refNote(refCond) : "");
   }
 
   // The WITHIN-TRIAL figure, not the pooled one. Pooled R2 is computed across
@@ -1762,7 +1903,7 @@ function render(res, fps) {
   wireSetSwitcher();
   function select(i) {
     [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
-    $("chartBox").innerHTML = chart(items[i], res.activity)
+    $("chartBox").innerHTML = chart(items[i], res.activity, res)
       + (items[i].isMean ? `<p class="note">Every rep stretched to 0–100% of
          itself and averaged across ${items[i].nReps} reps, so the bottom of a
          slow rep lines up with the bottom of a fast one. The shaded band is
@@ -1778,7 +1919,7 @@ function render(res, fps) {
         select(i);
       };
     });
-    $("forceBox").innerHTML = forcePanel(items[i]);
+    $("forceBox").innerHTML = forcePanel(items[i], res);
   }
   select(0);
 
