@@ -89,8 +89,15 @@ const HEAD_FIT = {
   // geometry is near the skull's widest point, not two thirds of the way out.
   // Measured off the mesh: the ear canals are 0.132 apart at y = 0.545.
   gpk_bones:   { earSpan: 0.132, centre: [-0.015, 0.545, 0.00] },
-  gohan_ss_v6: { earSpan: 0.17, centre: [0.05, 0.14, 0.00] },
-  gohan_ss_v4: { earSpan: 0.17, centre: [0.05, 0.14, 0.00] },
+  // Measured off the mesh rather than eyeballed, which is what the first pair
+  // of numbers were. The sculpt's hair is 84% of the skull body's geometry and
+  // spans 0.53 m, so anything derived from the bounding box is a hair
+  // measurement. Excluding the hair colour leaves the face: it is widest at
+  // y = 0.03, where the ears sit 0.234 apart, and its centre is off-axis in z.
+  // The old earSpan of 0.17 rendered the head 1.38x too big, and the old centre
+  // y of 0.14 sat near the top of the forehead -- so the mesh was hung 0.112
+  // too low and the chin landed on the subject's mouth.
+  gohan_ss_v6: { earSpan: 0.234, centre: [0.083, 0.028, 0.025] },
   gwen_v3:     { earSpan: 0.16, centre: [0.00, 0.10, 0.00] },
   bas_v3:      { earSpan: 0.15, centre: [0.00, 0.10, 0.00] },
 };
