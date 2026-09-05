@@ -18,11 +18,15 @@
 const CACHE = "bioscout-web-v31";
 
 const SHELL = ["./", "./index.html", "./kinematics.js", "./dynamics.js",
-               "./forces.js", "./overlay.js", "./zip.js", "./detect.js", "./profiles.js", "./ensemble.js", "./i18n.js", "./norms.json", "./force_model.json", "./muscle_joints.json", "./manifest.webmanifest",
+               "./forces.js", "./overlay.js", "./zip.js", "./detect.js", "./profiles.js", "./ensemble.js", "./i18n.js", "./norms.json", "./muscle_joints.json", "./manifest.webmanifest",
                "./logo.png", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png",
                "./apple-touch-icon.png", "./favicon.ico"];
 const HEAVY = [
   "./pose_landmarker_full.task",
+  // The force model is 1.4 MB and only changes when it is retrained, which
+  // already requires a CACHE bump for the pose model beside it. Network-first
+  // meant paying for it on every single load.
+  "./force_model.json",
   "./vendor/vision_bundle.mjs",
   "./vendor/three.module.min.js",
   "./vendor/three.core.min.js",
@@ -38,14 +42,27 @@ const HEAVY = [
   "./vendor/wasm/vision_wasm_module_internal.wasm",
 ];
 
+// Must classify every HEAVY entry as heavy and every SHELL entry as not.
+// test_sw_cache.mjs asserts exactly that: when the two lists and this predicate
+// disagree, a precached file is still served network-first, and `cache:
+// "reload"` below means it is refetched in full on every load -- the cached
+// copy only ever gets used offline. That is how the 15 MB of meshes came to be
+// downloaded on every avatar switch while sitting in the cache untouched.
 const isHeavy = (url) =>
-  url.pathname.includes("/vendor/") || url.pathname.endsWith(".task");
+  url.pathname.includes("/vendor/") ||
+  url.pathname.includes("/meshes/") ||
+  url.pathname.endsWith(".task") ||
+  url.pathname.endsWith("/force_model.json");
 
 self.addEventListener("install", (e) => {
   // Individually, not addAll: one 404 must not fail the whole install.
   e.waitUntil(
     caches.open(CACHE)
-      .then((c) => Promise.all([...SHELL, ...HEAVY].map((u) => c.add(u).catch(() => {}))))
+      // Individually so one 404 cannot fail the whole install -- but not
+      // silently: a renamed file that drops out of this list leaves the app
+      // half-cached and broken offline, with nothing to show for it.
+      .then((c) => Promise.all([...SHELL, ...HEAVY].map(
+        (u) => c.add(u).catch((err) => console.warn("[sw] precache failed:", u, err)))))
       .then(() => self.skipWaiting()));
 });
 
