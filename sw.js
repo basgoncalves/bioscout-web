@@ -18,7 +18,7 @@
 const CACHE = "bioscout-web-v31";
 
 const SHELL = ["./", "./index.html", "./kinematics.js", "./dynamics.js",
-               "./forces.js", "./overlay.js", "./zip.js", "./detect.js", "./profiles.js", "./ensemble.js", "./i18n.js", "./norms.json", "./muscle_joints.json", "./manifest.webmanifest",
+               "./forces.js", "./overlay.js", "./zip.js", "./detect.js", "./profiles.js", "./ensemble.js", "./dashboard.js", "./i18n.js", "./norms.json", "./muscle_joints.json", "./manifest.webmanifest",
                "./logo.png", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png",
                "./apple-touch-icon.png", "./favicon.ico"];
 const HEAVY = [

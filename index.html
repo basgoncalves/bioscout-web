@@ -45,6 +45,40 @@
                  font-weight:500; }
   button:disabled { opacity:.45; cursor:default; }
   button + button { margin-top:8px; }
+
+  /* --- training history ------------------------------------------------ */
+  .tiles { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:10px 0 4px; }
+  .tile { background:var(--bg); border:1px solid var(--line); border-radius:10px;
+          padding:8px 6px; text-align:center; min-width:0; }
+  .tile b { display:block; font-size:19px; line-height:1.15; }
+  .tile span { display:block; font-size:11px; color:var(--muted); }
+  .calnav { display:flex; align-items:center; gap:8px; margin:14px 0 6px; }
+  .calmonth { flex:1; text-align:center; font-weight:600; }
+  button.calbtn { width:38px; flex:none; padding:6px 0; font-size:18px; line-height:1; }
+  .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
+  .dow { text-align:center; font-size:11px; color:var(--muted); padding-bottom:2px; }
+  /* Square cells without a fixed pixel size, so the grid survives a 320px
+     phone and a tablet without a media query for each. */
+  button.day { width:100%; aspect-ratio:1; padding:0; font-size:13px; font-weight:500;
+               border-radius:8px; background:var(--bg); color:var(--ink);
+               border:1px solid transparent; display:flex; align-items:center;
+               justify-content:center; }
+  button.day.out { opacity:.32; }
+  button.day:disabled { opacity:.5; cursor:default; }
+  button.day.out:disabled { opacity:.22; }
+  /* Four steps of the accent colour. Text flips to white only on the two
+     darkest, where the contrast actually needs it. */
+  button.day.l1 { background:color-mix(in srgb, var(--accent) 22%, var(--bg)); }
+  button.day.l2 { background:color-mix(in srgb, var(--accent) 45%, var(--bg)); }
+  button.day.l3 { background:color-mix(in srgb, var(--accent) 70%, var(--bg)); color:#fff; }
+  button.day.l4 { background:var(--accent); color:#fff; }
+  button.day.today { border-color:var(--ink); }
+  button.day.sel { outline:2px solid var(--accent); outline-offset:1px; }
+  .daybox { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
+  .vbars { display:flex; align-items:flex-end; gap:3px; height:56px; }
+  .vbar { flex:1; height:100%; display:flex; align-items:flex-end; }
+  .vbar i { display:block; width:100%; min-height:2px; border-radius:3px 3px 0 0;
+            background:var(--accent); opacity:.75; }
   #stage { position:relative; border-radius:12px; overflow:hidden;
            background:#000; aspect-ratio:3/4; display:none; }
   #stage.on { display:block; }
@@ -151,6 +185,7 @@
     <div class="row" style="margin-bottom:6px">
       <button class="ghost" id="exportProfilesBtn" style="margin:0;padding:9px" data-i18n="exportData">Export my data</button>
       <button class="ghost" id="importProfilesBtn" style="margin:0;padding:9px" data-i18n="import">Import</button>
+    <button class="ghost" id="historyBtn" data-i18n="trainingHistory">Training history</button>
     </div>
     <input id="importProfilesFile" type="file" accept="application/json,.json" class="hidden">
     <p class="note" style="margin:0 0 11px" data-i18n-html="notePrivacy">Profiles and training history live on
@@ -236,6 +271,7 @@
   </div>
 
   <div class="card hidden" id="trainingCard"></div>
+  <div class="card hidden" id="dashboardCard"></div>
   <div class="card hidden" id="results"></div>
 </div>
 
@@ -247,7 +283,7 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v28";
+window.BUILD = "v29";
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -274,6 +310,8 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices }
        from "./profiles.js";
+import { renderDashboard, dayKey, allSessions, collectDays }
+       from "./dashboard.js";
 import { Overlay } from "./overlay.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
 // array of times, and a translated string inside either of them would have
@@ -739,6 +777,58 @@ function setChart(points, key) {
     <p class="note" style="margin-top:2px">${tr("noteSetAxis")}</p>`;
 }
 
+/* --- training history ------------------------------------------------------
+ * The dashboard owns which month is on screen and which day is selected. It
+ * has to: paging to July and tapping a day must survive the re-render that
+ * follows, and recording a set must not throw the view back to today.
+ */
+let dashView = null;
+
+function dashboardData() {
+  return allSessions(listArchive(), getSession());
+}
+
+/** Open on the most recent day that has training, not blankly on today. */
+function defaultDashView() {
+  const days = collectDays(dashboardData());
+  const keys = [...days.keys()].sort();
+  const pick = keys.length ? keys[keys.length - 1] : dayKey(new Date());
+  const [y, m] = pick.split("-").map(Number);
+  return { year: y, month: m - 1, selected: pick };
+}
+
+function renderDash() {
+  const card = $("dashboardCard");
+  if (card.classList.contains("hidden")) return;
+  if (!dashView) dashView = defaultDashView();
+  card.innerHTML = renderDashboard(dashboardData(), dashView) +
+    `<button class="ghost" id="dashCloseBtn" style="margin-top:12px">${tr("closeDashboard")}</button>`;
+
+  const step = (n) => {
+    const d = new Date(dashView.year, dashView.month + n, 1);
+    dashView = { ...dashView, year: d.getFullYear(), month: d.getMonth() };
+    renderDash();
+  };
+  if ($("dashPrev")) $("dashPrev").onclick = () => step(-1);
+  if ($("dashNext")) $("dashNext").onclick = () => step(1);
+  card.querySelectorAll("button.day[data-day]").forEach((b) => {
+    b.onclick = () => { dashView = { ...dashView, selected: b.dataset.day }; renderDash(); };
+  });
+  $("dashCloseBtn").onclick = () => card.classList.add("hidden");
+}
+
+$("historyBtn").onclick = () => {
+  const card = $("dashboardCard");
+  const opening = card.classList.contains("hidden");
+  card.classList.toggle("hidden", !opening);
+  if (!opening) return;
+  // Reopening should land on what is current, not on wherever the last visit
+  // left off half an hour and two sets ago.
+  dashView = defaultDashView();
+  renderDash();
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
 function renderTraining() {
   const card = $("trainingCard");
   const sess = getSession();
@@ -792,6 +882,7 @@ function renderTraining() {
       kept: tr(kept === 1 ? "nPastSession" : "nPastSessions", { n: kept }) }));
   };
   $("summaryBtn").onclick = () => renderSummary();
+  renderDash();          // no-op while the history card is closed
   const pv = $("peakVar");
   if (pv) pv.onchange = () => {
     peakVar = pv.value;
