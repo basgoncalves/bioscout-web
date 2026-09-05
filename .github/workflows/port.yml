@@ -57,3 +57,9 @@ jobs:
 
       - name: JavaScript agrees with reference.json
         run: node test_port.mjs
+
+      # The rest of the suite. These were in the repository but not in CI, so
+      # test_force_model.mjs -- the regression test written after a model
+      # shipped predicting 113,250 N -- was not actually guarding anything.
+      - name: The rest of the tests
+        run: npm test
