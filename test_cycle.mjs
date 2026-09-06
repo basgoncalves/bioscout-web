@@ -12,7 +12,7 @@ process.env.TZ = process.env.TZ || "Europe/Vienna";
 
 import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
          dayOfCycle, daysBetween, shiftDay, dayKey, FLOWS,
-         periodLengths, phaseModel, LUTEAL_DAYS } from "./cycle.js";
+         periodLengths, phaseModel, LUTEAL_DAYS, ASSUMED_CYCLE } from "./cycle.js";
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {
@@ -143,8 +143,23 @@ ok(collectCycle(on("2026-01-05")[0] ? [{ at: "2026-01-05T10:00:00.000Z", flow: 3
      `${m.fertile.from}-${m.fertile.to}`);
   ok(m.fertile.from > m.period, "and never overlaps the period itself");
 
-  ok(phaseModel(collectCycle([...run("2026-01-01", 5), ...run("2026-01-29", 5)], "A")) === null,
-     "two starts give one length, which is not a model");
+  ok(m.provisional === false, "with three lengths the model is the athlete's own");
+
+  // One period is enough to draw a ring, and not enough to predict from.
+  const one = phaseModel(collectCycle(run("2026-01-01", 5), "A"));
+  ok(one !== null, "a single logged period still gives something to draw");
+  ok(one.provisional === true, "and says it is provisional");
+  ok(one.cycle === ASSUMED_CYCLE, "against an assumed length", String(one.cycle));
+  ok(one.period === 5, "with the period length actually logged");
+  ok(one.ovulation === null && one.fertile === null,
+     "but no ovulation or fertile window, which would be arithmetic on a guess");
+
+  const two = phaseModel(collectCycle([...run("2026-01-01", 5), ...run("2026-01-29", 5)], "A"));
+  ok(two.provisional === true, "two starts give one length, which is still provisional");
+  ok(two.cycle === ASSUMED_CYCLE, "so the ring is still drawn against the assumption",
+     String(two.cycle));
+
+  ok(phaseModel(collectCycle([], "A")) === null, "nothing logged is still nothing");
 }
 
 {
