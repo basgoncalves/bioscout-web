@@ -25,7 +25,7 @@ import { t as tr } from "./i18n.js";
 import { MOODS, collectDiary, moodTrend, tagLevels, LEVEL_MAX } from "./diary.js";
 import { collectWeights, weightOn, weightSeries } from "./weight.js";
 import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
-         dayOfCycle, FLOWS } from "./cycle.js";
+         dayOfCycle, phaseModel, LUTEAL_DAYS, FLOWS } from "./cycle.js";
 import { itemKcal, mealKcal, describe } from "./foods.js";
 
 /* Plurals come from the dictionary keys the session card already uses, rather
@@ -445,11 +445,88 @@ function cycleHTML(cycleDays, key, todayKey) {
         date: shortDay(pred.due), spread: nDays(pred.spread), n: pred.stats.n }))}</p>`
     : "";
 
+  const model = phaseModel(cycleDays);
+  const ring = model ? ringHTML(model, cycleDays, todayKey) : "";
+  const legend = model ? `<div class="ringKey">
+      <span><i class="kPeriod"></i>${esc(tr("phasePeriod"))}</span>
+      ${model.fertile ? `<span><i class="kFertile"></i>${esc(tr("phaseFertile"))}</span>` : ""}
+      ${model.ovulation ? `<span><i class="kOvu"></i>${esc(tr("phaseOvulation"))}</span>` : ""}
+      <span><i class="kLogged"></i>${esc(tr("phaseLogged"))}</span>
+    </div>
+    <p class="note" style="margin:6px 0 0">${esc(tr("phaseNote", { luteal: LUTEAL_DAYS }))}</p>` : "";
+
   return `<div class="daybox">
     <div style="font-weight:600">${esc(tr("cycle"))}</div>
+    ${ring}${legend}
     ${dayLine}${histLine}${predLine}
     <p class="note" style="margin:6px 0 0">${esc(tr("cycleCaveat"))}</p>
   </div>`;
+}
+
+/* ---- the ring ---------------------------------------------------------- */
+
+const R = 74, CX = 100, CY = 100, W = 20;
+
+/** Polar to cartesian, with day 1 at the top and the cycle running clockwise. */
+function pt(day, cycle, r = R) {
+  const a = ((day - 1) / cycle) * 2 * Math.PI - Math.PI / 2;
+  return [CX + r * Math.cos(a), CY + r * Math.sin(a)];
+}
+
+/** An arc from day `a` to day `b` inclusive, as an SVG path. */
+function arc(a, b, cycle) {
+  const [x1, y1] = pt(a, cycle);
+  // b + 1 so a single-day segment has width: day 5 spans 5 to 6, not 5 to 5.
+  const [x2, y2] = pt(b + 1, cycle);
+  const big = (b + 1 - a) / cycle > 0.5 ? 1 : 0;
+  return `M ${x1.toFixed(1)} ${y1.toFixed(1)} A ${R} ${R} 0 ${big} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+}
+
+/**
+ * The cycle as a ring: where today sits, and what is estimated around it.
+ *
+ * Two kinds of thing are drawn and they must not look alike. Days actually
+ * logged are solid. Everything derived -- the expected period, the fertile
+ * window, ovulation -- is dashed, because it is arithmetic from an average
+ * and not a record of anything. A ring that renders both the same way is how
+ * these apps end up being trusted for things they cannot do.
+ */
+function ringHTML(model, cycleDays, todayKey) {
+  const { cycle, period, ovulation, fertile } = model;
+  const starts = model.starts;
+  const day = dayOfCycle(starts, todayKey);
+
+  const seg = (a, b, cls) => (b >= a
+    ? `<path class="${cls}" d="${arc(a, b, cycle)}" fill="none" stroke-width="${W}"/>` : "");
+
+  // Logged days of the current cycle, drawn over the estimate as short solid
+  // ticks: the difference between "you bled on the 3rd" and "a period is due
+  // around the 3rd" is the whole point of the picture.
+  const last = starts[starts.length - 1];
+  const logged = [...cycleDays.keys()].filter((k) => k >= last)
+    .map((k) => dayOfCycle(starts, k)).filter((n) => n && n <= cycle);
+  const ticks = logged.map((n) =>
+    `<path class="ringLogged" d="${arc(n, n, cycle)}" fill="none" stroke-width="${W}"/>`).join("");
+
+  const marker = day && day <= cycle ? (() => {
+    const [x, y] = pt(day + 0.5, cycle);
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6" class="ringToday"/>`;
+  })() : "";
+
+  const centre = day
+    ? `<tspan x="${CX}" dy="-4" class="ringBig">${day}</tspan>
+       <tspan x="${CX}" dy="17" class="ringSmall">${esc(tr("ofNDays", { n: cycle }))}</tspan>`
+    : `<tspan x="${CX}" dy="4" class="ringSmall">${esc(tr("cycleNoToday"))}</tspan>`;
+
+  return `<svg viewBox="0 0 200 200" class="ring" role="img"
+    aria-label="${esc(tr("cycleRingLabel", { day: day ?? "—", n: cycle }))}">
+    <circle cx="${CX}" cy="${CY}" r="${R}" class="ringBase" fill="none" stroke-width="${W}"/>
+    ${seg(1, period, "ringPeriod")}
+    ${fertile ? seg(fertile.from, fertile.to, "ringFertile") : ""}
+    ${ovulation ? seg(ovulation, ovulation, "ringOvu") : ""}
+    ${ticks}${marker}
+    <text x="${CX}" y="${CY}" text-anchor="middle" class="ringText">${centre}</text>
+  </svg>`;
 }
 
 /** The cycle form, for the Add dialog. */

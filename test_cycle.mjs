@@ -11,7 +11,8 @@
 process.env.TZ = process.env.TZ || "Europe/Vienna";
 
 import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
-         dayOfCycle, daysBetween, shiftDay, dayKey, FLOWS } from "./cycle.js";
+         dayOfCycle, daysBetween, shiftDay, dayKey, FLOWS,
+         periodLengths, phaseModel, LUTEAL_DAYS } from "./cycle.js";
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {
@@ -111,6 +112,52 @@ ok(collectCycle(on("2026-01-05")[0] ? [{ at: "2026-01-05T10:00:00.000Z", flow: 3
   ok(dayOfCycle(starts, "2026-01-01") === null, "before any record there is no cycle day");
   ok(dayOfCycle(starts, "2026-08-01") === null,
      "and after a long silence the count is not fiction", String(dayOfCycle(starts, "2026-08-01")));
+}
+
+/* ---- period length and phases ------------------------------------------ */
+{
+  const days = collectCycle([...run("2026-01-05", 5), ...run("2026-02-02", 4)], "A");
+  ok(periodLengths(days).join(",") === "5,4", "each run's length", periodLengths(days).join(","));
+
+  // A missed day mid-period must not read as a longer period: it is counted
+  // as logged days, not first-to-last.
+  const gappy = collectCycle(on("2026-01-05", "2026-01-06", "2026-01-08", "2026-01-09"), "A");
+  ok(periodLengths(gappy)[0] === 4, "a missed day does not inflate the length",
+     String(periodLengths(gappy)[0]));
+}
+
+{
+  const days = collectCycle([
+    ...run("2026-01-01", 5), ...run("2026-01-29", 5),
+    ...run("2026-02-26", 5), ...run("2026-03-26", 5),
+  ], "A");
+  const m = phaseModel(days);
+  ok(m !== null, "three lengths is enough for a phase model");
+  ok(m.cycle === 28, "mean cycle length", String(m.cycle));
+  ok(m.period === 5, "mean period length", String(m.period));
+  ok(m.ovulation === 28 - LUTEAL_DAYS,
+     "ovulation is counted back from the next period, not forward from the last",
+     String(m.ovulation));
+  ok(m.fertile.from === m.ovulation - 5 && m.fertile.to === m.ovulation + 1,
+     "the window sits mostly before ovulation, because sperm outlive the egg",
+     `${m.fertile.from}-${m.fertile.to}`);
+  ok(m.fertile.from > m.period, "and never overlaps the period itself");
+
+  ok(phaseModel(collectCycle([...run("2026-01-01", 5), ...run("2026-01-29", 5)], "A")) === null,
+     "two starts give one length, which is not a model");
+}
+
+{
+  // A short cycle would put ovulation inside the period. Draw the period and
+  // nothing else rather than an impossible split.
+  const days = collectCycle([
+    ...run("2026-01-01", 6), ...run("2026-01-17", 6),
+    ...run("2026-02-02", 6), ...run("2026-02-18", 6),
+  ], "A");
+  const m = phaseModel(days);
+  ok(m.cycle === 16, "a short cycle is still modelled", String(m.cycle));
+  ok(m.ovulation === null && m.fertile === null,
+     "but its phases are not invented when they would not fit");
 }
 
 console.log(bad ? `\nFAIL  ${bad} check(s)` : "\nALL CHECKS PASSED");
