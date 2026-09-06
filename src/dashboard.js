@@ -27,6 +27,7 @@ import { collectWeights, weightOn, weightSeries } from "./weight.js";
 import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
          dayOfCycle, phaseModel, cycleDayKey, LUTEAL_DAYS, FLOWS } from "./cycle.js";
 import { itemKcal, mealKcal, describe } from "./foods.js";
+import { collectSleep, meanSleep, duration as sleepMins, fmt as fmtSleep } from "./sleep.js";
 
 /* Plurals come from the dictionary keys the session card already uses, rather
  * than from new ones. "3 reps in 1 sets" is the kind of thing that makes an
@@ -458,7 +459,7 @@ function cycleHTML(cycleDays, key, todayKey) {
       ? tr("phaseNoteProvisional", { n: model.cycle })
       : tr("phaseNote", { luteal: LUTEAL_DAYS }))}</p>`;
 
-  return `<div class="daybox">
+  return `<div class="daybox cycleSub">
     <div style="font-weight:600">${esc(tr("cycle"))}</div>
     ${ring}${legend}
     ${dayLine}${histLine}${predLine}
@@ -532,6 +533,45 @@ function ringHTML(model, cycleDays, todayKey) {
     ${ticks}${marker}
     <text x="${CX}" y="${CY}" text-anchor="middle" class="ringText">${centre}</text>
   </svg>`;
+}
+
+/** The night that ended on this day, and the form to record it. */
+function sleepHTML(sleepDays, key, todayKey, trend) {
+  const hit = sleepDays.get(key);
+  const line = hit
+    ? (hit.minutes === null
+        ? `<p class="sub" style="margin:6px 0 0">${esc(tr("sleepUnclear", { bed: hit.bed, wake: hit.wake }))}</p>`
+        : `<p class="sub" style="margin:6px 0 0">${esc(tr("sleepLine", {
+            dur: fmtSleep(hit.minutes), bed: hit.bed, wake: hit.wake }))}</p>`)
+    : `<p class="sub" style="margin:6px 0 0">${esc(tr("noSleepThatDay"))}</p>`;
+
+  /* Said with the number of nights behind it. "7 h 20" from three nights and
+   * from fourteen are different claims, and most fortnights have gaps. */
+  const trendLine = trend
+    ? `<p class="sub" style="margin:2px 0 0">${esc(tr("sleepMean", {
+        dur: fmtSleep(trend.mean), n: trend.nights }))}</p>`
+    : "";
+
+  return `<div class="daybox">
+    <div style="font-weight:600">${esc(tr("sleep"))}</div>
+    ${trendLine}${line}
+    <div class="row" style="margin-top:8px">
+      <div>
+        <label for="sleepBed">${esc(tr("toBed"))}</label>
+        <input id="sleepBed" type="time" value="${esc(hit?.bed || "")}">
+      </div>
+      <div>
+        <label for="sleepWake">${esc(tr("gotUp"))}</label>
+        <input id="sleepWake" type="time" value="${esc(hit?.wake || "")}">
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button type="button" class="ghost" id="sleepSave" style="margin:0;padding:9px">${
+        esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
+      ${hit ? `<button type="button" class="ghost" id="sleepClear" style="margin:0;padding:9px">${
+        esc(tr("clearDay"))}</button>` : ""}
+    </div>
+  </div>`;
 }
 
 /* ---- the cycle view ---------------------------------------------------- */
@@ -791,23 +831,22 @@ export function weightFormHTML(key, todayKey, current) {
  * does not lose the selected day, and re-rendering after a new set does not
  * throw the athlete back to today.
  */
-export function renderDashboard(sessions, meals, diary, weights, cycle, view, today = new Date()) {
+export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, view, today = new Date()) {
   const days = collectDays(sessions);
   const mealDays = collectMeals(meals);
   const diaryDays = collectDiary(diary);
   const wts = collectWeights(weights);
   const cycleDays = collectCycle(cycle);
+  const sleepDays = collectSleep(sleep);
   const o = overall(days, today);
   const todayKey = dayKey(today);
   const mode = ["meals", "diary", "cycle"].includes(view.mode) ? view.mode : "training";
 
   // An athlete with no training but a week of meals still has a dashboard.
-  if (!o.days && !mealDays.size && !diaryDays.size && !cycleDays.size) {
-    return `<p class="sub" style="margin:0 0 10px">${esc(tr("dashboardEmpty"))}</p>
-      ${calendarHTML(days, view.year, view.month, view.selected, todayKey, "training")}
-      <button class="ghost" id="addBtn" style="margin-top:10px">${esc(tr("addEntry"))}</button>`;
-  }
-
+  /* No special empty state. Every section already says when it has nothing --
+   * and the old shortcut rendered a calendar and an Add button ONLY, which
+   * meant the first thing anybody wanted to log could not be logged until
+   * something else existed. */
   return `
     <div style="font-weight:600;margin:0 0 2px">${esc(tr("monthlySummary"))}</div>
     ${intakeHTML(mealDays, wts, view.year, view.month)}
@@ -830,7 +869,13 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, view, to
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey)}
     ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey,
                 moodTrend(diaryDays, 30, today))}
+    ${sleepHTML(sleepDays, view.selected, todayKey, meanSleep(sleepDays, 14, today))}
     ${cycleHTML(cycleDays, view.selected, todayKey)}
     ${volumeHTML(days, today)}
+    <div class="daybox">
+      <div style="font-weight:600">${esc(tr("yourData"))}</div>
+      <p class="sub" style="margin:6px 0 8px">${esc(tr("uploadSoon"))}</p>
+      <button type="button" class="ghost" id="uploadBtn" disabled>${esc(tr("uploadData"))}</button>
+    </div>
     <p class="sub" style="margin:12px 0 0">${esc(tr("dashboardCap"))}</p>`;
 }

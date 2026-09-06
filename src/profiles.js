@@ -20,6 +20,7 @@ const MKEY = "bioscout.meals.v1";
 const DKEY = "bioscout.diary.v1";
 const WKEY = "bioscout.weights.v1";
 const CYKEY = "bioscout.cycle.v1";
+const SLKEY = "bioscout.sleep.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
  * one; curves are not, so only the most recent sets keep those.
@@ -311,6 +312,37 @@ export function clearCycleDay(at, profile = null) {
   return kept.length;
 }
 
+// --- sleep -----------------------------------------------------------------
+/* One record per night, keyed on the morning it ended -- see sleep.js for why.
+ * Logging the same night twice is a correction, not a second night. */
+const SLEEP_MAX = 2000;
+
+export function listSleep() {
+  const s = read(SLKEY, []);
+  return Array.isArray(s) ? s : [];
+}
+
+export function setSleep({ profile = null, at, bed = "", wake = "" }) {
+  if (!at) return null;
+  const entry = { at, profile, bed: String(bed).slice(0, 5), wake: String(wake).slice(0, 5) };
+  if (!entry.bed || !entry.wake) return null;
+  const day = String(at).slice(0, 10);
+  const all = listSleep().filter(
+    (x) => !(x.profile === entry.profile && String(x.at).slice(0, 10) === day));
+  all.push(entry);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(SLKEY, all.slice(-SLEEP_MAX));
+  return entry;
+}
+
+export function clearSleep(at, profile = null) {
+  const day = String(at).slice(0, 10);
+  const kept = listSleep().filter(
+    (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
+  write(SLKEY, kept);
+  return kept.length;
+}
+
 // --- stored waveforms ------------------------------------------------------
 const r3 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(3) : 0));
 const r2 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(2) : 0));
@@ -389,6 +421,7 @@ export function exportAll() {
     diary: listDiary(),
     weights: listWeights(),
     cycle: listCycle(),
+    sleep: listSleep(),
   };
 }
 
@@ -409,7 +442,7 @@ export function importAll(data) {
   }
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
                    sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
-                   weightsAdded: 0, cycleAdded: 0 };
+                   weightsAdded: 0, cycleAdded: 0, sleepAdded: 0 };
 
   const store = listProfiles();
   for (const p of (data.profiles && data.profiles.profiles) || []) {
@@ -482,6 +515,15 @@ export function importAll(data) {
   }
   cyc.sort((x, y) => String(x.at).localeCompare(String(y.at)));
   write(CYKEY, cyc.slice(-CYCLE_MAX));
+
+  const slp = listSleep();
+  const seenS = new Set(slp.map((x) => `${x.profile}|${String(x.at).slice(0, 10)}`));
+  for (const x of data.sleep || []) {
+    if (!x || !x.at || seenS.has(`${x.profile}|${String(x.at).slice(0, 10)}`)) continue;
+    slp.push(x); seenS.add(`${x.profile}|${String(x.at).slice(0, 10)}`); report.sleepAdded++;
+  }
+  slp.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(SLKEY, slp.slice(-SLEEP_MAX));
 
   // Photos are not in the export. They live in IndexedDB and would multiply
   // the file size by an order of magnitude in base64 -- an export you cannot

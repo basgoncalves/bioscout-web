@@ -18,7 +18,7 @@
 const CACHE = "bioscout-web-v31";
 
 const SHELL = ["./", "./index.html", "./src/kinematics.js", "./src/dynamics.js",
-               "./src/forces.js", "./src/overlay.js", "./src/zip.js", "./src/detect.js", "./src/profiles.js", "./src/ensemble.js", "./src/dashboard.js", "./src/fetcher.js", "./src/diary.js", "./src/media.js", "./src/weight.js", "./src/cycle.js", "./src/foods.js", "./src/share.js", "./src/i18n.js", "./data/norms.json", "./data/muscle_joints.json", "./manifest.webmanifest",
+               "./src/forces.js", "./src/overlay.js", "./src/zip.js", "./src/detect.js", "./src/profiles.js", "./src/ensemble.js", "./src/dashboard.js", "./src/fetcher.js", "./src/diary.js", "./src/media.js", "./src/weight.js", "./src/cycle.js", "./src/foods.js", "./src/share.js", "./src/sleep.js", "./src/i18n.js", "./data/norms.json", "./data/muscle_joints.json", "./manifest.webmanifest",
                "./logo.png", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png",
                "./apple-touch-icon.png", "./favicon.ico"];
 const HEAVY = [

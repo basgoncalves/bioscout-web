@@ -103,6 +103,10 @@
   /* The day wheel. Filled = logged, hollow = expected; the fill carries the
      difference between a record and an estimate, and the colour only says
      which phase the arithmetic puts a day in. */
+  /* Cycle reads as part of the diary, not a peer of it. */
+  .daybox.cycleSub { border-top:0; margin-top:6px; padding-top:0; padding-left:12px;
+                     border-left:2px solid var(--line); }
+  input[type="time"] { width:100%; }
   .dotRing { width:100%; max-width:330px; display:block; margin:6px auto 0; }
   .dot { fill:none; stroke-width:2; cursor:pointer; }
   .dot.dPeriod { stroke:#c0563f; } .dot.dFertile { stroke:#4d8a5a; }
@@ -446,7 +450,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 41;
+window.BUILD = 42;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -475,6 +479,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listMeals, addMeal, deleteMeal,
          listDiary, addDiary, deleteDiary, profileTags, saveProfileTags,
          listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
+         listSleep, setSleep, clearSleep,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices }
@@ -1081,14 +1086,14 @@ function openAdd(step = null) {
       <h2 style="font-size:16px;margin:0 0 10px">${tr("addTo", { date: when })}</h2>
       <button class="ghost" data-step="training">${tr("newTrainingSession")}</button>
       <button class="ghost" data-step="meal">${tr("meal")}</button>
-      <button class="ghost" data-step="diary">${tr("diary")}</button>
-      <button class="ghost" data-step="weight">${tr("weightKg")}</button>
-      <button class="ghost" data-step="cycle">${tr("cycle")}</button>`;
+      <button class="ghost" data-step="diary">${tr("diary")}</button>`;
     body.querySelectorAll("button[data-step]").forEach((b) => {
       b.onclick = () => {
         // Training and cycle are places, not forms: they get a screen.
-        if (b.dataset.step === "training") { dlg.close(); startTraining(); return; }
-        if (b.dataset.step === "cycle") { dlg.close(); openCycle(dashView.selected); return; }
+        // Training asks for today's weight first if it does not have one --
+        // mass scales every joint moment the session will report, so this is
+        // the one moment where the number actually matters.
+        if (b.dataset.step === "training") return openAdd("weight");
         openAdd(b.dataset.step);
       };
     });
@@ -1103,15 +1108,18 @@ function openAdd(step = null) {
     wireDiaryForm(key);
   } else if (step === "weight") {
     const current = weightOn(collectWeights(myWeights()), key);
-    body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("weightKg")}</h2>`
-      + weightFormHTML(key, todayKey, current);
+    body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("weightBeforeSession")}</h2>`
+      + weightFormHTML(key, todayKey, current)
+      + `<button class="ghost" id="weightSkip" style="margin-top:8px">${tr("skipToSession")}</button>`;
+    const go = () => { dlg.close(); startTraining(); };
     $("weightAddDay").onclick = () => {
       const kg = $("weightKg").value;
       if (!addWeight({ profile: currentAthlete(), kg, at: atOnDay(key) })) {
         say(tr("weightNeedsNumber"), true); return;
       }
-      done();
+      go();
     };
+    $("weightSkip").onclick = go;
   }
   if (!dlg.open) dlg.showModal();
 }
@@ -1418,6 +1426,11 @@ function myWeights() {
   return listWeights().filter((w) => w.profile === who);
 }
 
+function mySleep() {
+  const who = currentAthlete();
+  return listSleep().filter((s) => s.profile === who);
+}
+
 function myCycle() {
   const who = currentAthlete();
   return listCycle().filter((c) => c.profile === who);
@@ -1454,7 +1467,7 @@ function renderDash() {
   const card = $("dashboardCard");
   if (!dashView) dashView = defaultDashView();
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
-                                   myWeights(), myCycle(), dashView);
+                                   myWeights(), myCycle(), mySleep(), dashView);
   $("whoName").textContent = currentAthlete() || tr("noProfile");
   $("whoSince").textContent = tr("dashboardSub", { first: monthLabel(dashView) });
 
@@ -1498,6 +1511,17 @@ function renderDash() {
   if ($("addBtn")) $("addBtn").onclick = () => openAdd();
   if ($("shareBtn")) $("shareBtn").onclick = shareMonth;
   if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);
+  if ($("sleepSave")) $("sleepSave").onclick = () => {
+    if (!setSleep({ profile: currentAthlete(), at: atOnDay(dashView.selected),
+                    bed: $("sleepBed").value, wake: $("sleepWake").value })) {
+      say(tr("sleepNeedsBoth"), true); return;
+    }
+    renderDash();
+  };
+  if ($("sleepClear")) $("sleepClear").onclick = () => {
+    clearSleep(atOnDay(dashView.selected), currentAthlete());
+    renderDash();
+  };
 
 }
 
