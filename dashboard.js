@@ -204,6 +204,10 @@ export function weeklyVolume(days, n = 12, today = new Date()) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+/** "6 Sep", for buttons and captions that name a day other than today. */
+const shortDay = (key) =>
+  localeDay(key).toLocaleDateString([], { day: "numeric", month: "short" });
+
 const localeDay = (key) => {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d);
