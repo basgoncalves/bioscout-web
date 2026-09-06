@@ -11,7 +11,7 @@
 globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 Object.defineProperty(globalThis, "navigator",
   { value: { languages: ["en"] }, configurable: true });
-const m = await import("./i18n.js");
+const m = await import("../src/i18n.js");
 
 let bad = 0;
 for (const lang of m.ALL_LANGS) {
@@ -27,7 +27,7 @@ for (const lang of m.ALL_LANGS) {
  * and cannot be found by searching for the value you can see.
  */
 {
-  const src = readFileSync("i18n.js", "utf8");
+  const src = readFileSync("src/i18n.js", "utf8");
   for (const name of ["EN", "PT", "DE"]) {
     const start = src.indexOf(`const ${name} =`);
     const end = src.indexOf("\n};", start);

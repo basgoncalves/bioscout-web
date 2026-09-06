@@ -446,7 +446,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 40;
+window.BUILD = 41;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -467,9 +467,9 @@ setTimeout(function () {
 <script type="module">
 import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          buildSquatFeatures, buildJumpFeatures, computePxPerM,
-         jointPositionsM } from "./kinematics.js";
-import { inverseDynamics } from "./dynamics.js";
-import { classify, MIN_CONFIDENCE } from "./detect.js";
+         jointPositionsM } from "./src/kinematics.js";
+import { inverseDynamics } from "./src/dynamics.js";
+import { classify, MIN_CONFIDENCE } from "./src/detect.js";
 import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          newSession, getSession, clearSession, addSet, summariseSession,
          listMeals, addMeal, deleteMeal,
@@ -478,29 +478,29 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices }
-       from "./profiles.js";
+       from "./src/profiles.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML, weightFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
-         collectDays } from "./dashboard.js";
-import { probe as probeHelper, fetchClip } from "./fetcher.js";
-import { DEFAULT_TAGS, toggleTag, stepTag } from "./diary.js";
-import { collectWeights, weightOn } from "./weight.js";
+         collectDays } from "./src/dashboard.js";
+import { probe as probeHelper, fetchClip } from "./src/fetcher.js";
+import { DEFAULT_TAGS, toggleTag, stepTag } from "./src/diary.js";
+import { collectWeights, weightOn } from "./src/weight.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
-         dayOfCycle } from "./cycle.js";
-import { densityFor, foodNames, describe, mealKcal } from "./foods.js";
-import { CARD, cardStats, drawCard, shareCard } from "./share.js";
-import { collectMeals } from "./dashboard.js";
-import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./media.js";
-import { Overlay } from "./overlay.js";
+         dayOfCycle } from "./src/cycle.js";
+import { densityFor, foodNames, describe, mealKcal } from "./src/foods.js";
+import { CARD, cardStats, drawCard, shareCard } from "./src/share.js";
+import { collectMeals } from "./src/dashboard.js";
+import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
+import { Overlay } from "./src/overlay.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
 // array of times, and a translated string inside either of them would have
 // called the array.
-import { t as tr, getLang, setLang, LANGUAGES } from "./i18n.js";
-import { ensembleRep } from "./ensemble.js";
-import { makeZip, svgToPng, blobBytes } from "./zip.js";
+import { t as tr, getLang, setLang, LANGUAGES } from "./src/i18n.js";
+import { ensembleRep } from "./src/ensemble.js";
+import { makeZip, svgToPng, blobBytes } from "./src/zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
          peakJRF, selfTest as forceSelfTest,
-         MAX_PLAUSIBLE_FORCE_N } from "./forces.js";
+         MAX_PLAUSIBLE_FORCE_N } from "./src/forces.js";
 
 // MediaPipe is vendored into vendor/ rather than pulled from a CDN: the app
 // then works offline, loads faster on a second visit, and cannot be broken by
@@ -522,7 +522,7 @@ async function loadMediaPipe() {
 async function makeLandmarker() {
   const fileset = await FilesetResolver.forVisionTasks("./vendor/wasm");
   return PoseLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: "pose_landmarker_full.task", delegate: "GPU" },
+    baseOptions: { modelAssetPath: "assets/pose_landmarker_full.task", delegate: "GPU" },
     runningMode: "VIDEO", numPoses: 1,
     minPoseDetectionConfidence: 0.3, minPosePresenceConfidence: 0.3,
     minTrackingConfidence: 0.3,
@@ -2091,7 +2091,7 @@ async function enrich(res, poses, fps, heightM, activity) {
     if (!st.plausible) throw new Error(
       `force model self-test failed: ${st.peakMuscleBW.toFixed(1)} BW at the training mean`);
     if (!muscleJoints) {
-      try { muscleJoints = await (await fetch("muscle_joints.json")).json(); }
+      try { muscleJoints = await (await fetch("data/muscle_joints.json")).json(); }
       catch { muscleJoints = null; }
     }
     for (const r of res.reps) {
@@ -2382,7 +2382,7 @@ async function loadNorms() {
   if (normsTried) return norms;
   normsTried = true;
   try {
-    const r = await fetch("norms.json");
+    const r = await fetch("data/norms.json");
     if (r.ok) norms = await r.json();
   } catch { norms = null; }
   return norms;
@@ -2488,7 +2488,7 @@ async function loadMomentArms() {
   if (momentArmsTried) return momentArms;
   momentArmsTried = true;
   try {
-    const r = await fetch("moment_arms.json");
+    const r = await fetch("data/moment_arms.json");
     if (r.ok) momentArms = await r.json();
   } catch { momentArms = null; }
   return momentArms;
@@ -3392,7 +3392,7 @@ if (DEMO) {
   try {
     const c = (DEMO === "cmj" || DEMO === "sj")
       ? syntheticJump(DEMO)
-      : (await (await fetch("reference.json")).json())
+      : (await (await fetch("data/reference.json")).json())
           .cases[DEMO === "squat" ? "squat_synthetic" : "pullup_P01"];
     $("activity").value = c.activity;
     const demoRes = analyse(c.poses, c.fps,

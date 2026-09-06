@@ -56,7 +56,7 @@ jobs:
         run: python tools/check_reference.py
 
       - name: JavaScript agrees with reference.json
-        run: node test_port.mjs
+        run: node tests/test_port.mjs
 
       # The rest of the suite. These were in the repository but not in CI, so
       # test_force_model.mjs -- the regression test written after a model

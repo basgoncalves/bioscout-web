@@ -26,7 +26,7 @@ from bioscout.movement_detector.markerless.squat import joint_positions_m
 from bioscout.tests.markerless.test_squat import synth_squats
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REFERENCE = os.path.join(os.path.dirname(HERE), "reference.json")
+REFERENCE = os.path.join(os.path.dirname(HERE), "data", "reference.json")
 
 
 def case(poses, fps, activity, height_m=1.75, osim_model="gpk"):

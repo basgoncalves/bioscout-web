@@ -9,7 +9,7 @@
  *   node test_foods.mjs
  */
 import { DEFAULT_FOODS, itemKcal, mealKcal, densityFor, foodNames, describe }
-  from "./foods.js";
+  from "../src/foods.js";
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {

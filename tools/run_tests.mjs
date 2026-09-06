@@ -5,7 +5,7 @@
  * Windows, where an npm script runs under cmd. Node is the one interpreter
  * both sides already have.
  *
- *   node tools/run_tests.mjs          all of them
+ *   node tools/run_tests.mjs          all of them (from the repo root)
  *   node tools/run_tests.mjs port sw  only tests whose name contains these
  */
 import { readdirSync } from "node:fs";
@@ -16,7 +16,8 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const filters = process.argv.slice(2);
 
-const tests = readdirSync(root)
+const dir = path.join(root, "tests");
+const tests = readdirSync(dir)
   .filter((f) => /^test_.*\.mjs$/.test(f))
   .filter((f) => !filters.length || filters.some((s) => f.includes(s)))
   .sort();
@@ -29,7 +30,7 @@ if (!tests.length) {
 const failed = [];
 for (const t of tests) {
   process.stdout.write(`\n=== ${t} ${"=".repeat(Math.max(0, 60 - t.length))}\n`);
-  const r = spawnSync(process.execPath, [t], { cwd: root, stdio: "inherit" });
+  const r = spawnSync(process.execPath, [path.join("tests", t)], { cwd: root, stdio: "inherit" });
   if (r.status !== 0) failed.push(t);
 }
 

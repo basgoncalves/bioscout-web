@@ -26,8 +26,8 @@ const fail = (msg) => { bad++; console.error("  - " + msg); };
 /* ---- what each local module offers ------------------------------------ */
 
 const exportsOf = new Map();
-for (const f of readdirSync(".").filter((f) => f.endsWith(".js") && f !== "sw.js")) {
-  const src = readFileSync(f, "utf8");
+for (const f of readdirSync("src").filter((f) => f.endsWith(".js") && f !== "sw.js")) {
+  const src = readFileSync("src/" + f, "utf8");
   const names = new Set();
   for (const m of src.matchAll(/^export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)) names.add(m[1]);
   for (const m of src.matchAll(/^export\s+(?:const|let|class)\s+([A-Za-z_$][\w$]*)/gm)) names.add(m[1]);
@@ -38,7 +38,7 @@ for (const f of readdirSync(".").filter((f) => f.endsWith(".js") && f !== "sw.js
       if (name) names.add(name);
     }
   }
-  exportsOf.set("./" + f, names);
+  exportsOf.set("./src/" + f, names);
 }
 
 /* ---- what the page imported ------------------------------------------- */
@@ -194,8 +194,8 @@ const declaredIn = (src) => {
 };
 
 const files = [["index.html (module)", script],
-  ...readdirSync(".").filter((f) => f.endsWith(".js") && f !== "sw.js")
-    .map((f) => [f, readFileSync(f, "utf8")])];
+  ...readdirSync("src").filter((f) => f.endsWith(".js") && f !== "sw.js")
+    .map((f) => [f, readFileSync("src/" + f, "utf8")])];
 
 for (const [label, raw] of files) {
   const src = codeOnly(raw);

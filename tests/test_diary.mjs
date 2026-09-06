@@ -11,10 +11,10 @@
 process.env.TZ = process.env.TZ || "Europe/Vienna";
 
 import { collectDiary, tagCounts, moodTrend, toggleTag, stepTag, tagLevels,
-         isMood, MOODS, LEVEL_MAX, dayKey } from "./diary.js";
-import { photoId, targetDims } from "./media.js";
+         isMood, MOODS, LEVEL_MAX, dayKey } from "../src/diary.js";
+import { photoId, targetDims } from "../src/media.js";
 import { collectWeights, weightOn, latestWeight, weightSeries, daysBetween }
-  from "./weight.js";
+  from "../src/weight.js";
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {

@@ -26,8 +26,8 @@ const declared = new Set([...markup.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]
 
 // Ids built at runtime, in the page's own scripts or in any module it loads.
 const runtime = new Set();
-const sources = [html, ...readdirSync(".").filter((f) => f.endsWith(".js"))
-  .map((f) => readFileSync(f, "utf8"))];
+const sources = [html, ...readdirSync("src").filter((f) => f.endsWith(".js"))
+  .map((f) => readFileSync("src/" + f, "utf8"))];
 for (const src of sources) {
   for (const m of src.matchAll(/id=\\?["']([A-Za-z0-9_-]+)\\?["']/g)) runtime.add(m[1]);
 }

@@ -13,7 +13,7 @@ process.env.TZ = process.env.TZ || "Europe/Vienna";
 import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
          dayOfCycle, daysBetween, shiftDay, dayKey, FLOWS,
          periodLengths, phaseModel, LUTEAL_DAYS, ASSUMED_CYCLE,
-         cycleDayKey } from "./cycle.js";
+         cycleDayKey } from "../src/cycle.js";
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {

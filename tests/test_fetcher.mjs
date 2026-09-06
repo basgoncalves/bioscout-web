@@ -8,7 +8,7 @@
  *
  *   node test_fetcher.mjs
  */
-import { videoId, parseRange, probe, fetchClip, HELPER } from "./fetcher.js";
+import { videoId, parseRange, probe, fetchClip, HELPER } from "../src/fetcher.js";
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {

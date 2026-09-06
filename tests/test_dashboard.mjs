@@ -17,7 +17,7 @@ Object.defineProperty(globalThis, "navigator",
   { value: { languages: ["en"] }, configurable: true });
 
 const { dayKey, allSessions, collectDays, collectMeals, streak, overall,
-        monthMatrix, weeklyVolume } = await import("./dashboard.js");
+        monthMatrix, weeklyVolume } = await import("../src/dashboard.js");
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {

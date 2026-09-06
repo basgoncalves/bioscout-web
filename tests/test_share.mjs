@@ -7,8 +7,8 @@
  *
  *   node test_share.mjs
  */
-import { cardStats, volumeBars, fitName, CARD } from "./share.js";
-import { collectDays, collectMeals } from "./dashboard.js";
+import { cardStats, volumeBars, fitName, CARD } from "../src/share.js";
+import { collectDays, collectMeals } from "../src/dashboard.js";
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {

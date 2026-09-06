@@ -17,29 +17,29 @@
  */
 const CACHE = "bioscout-web-v31";
 
-const SHELL = ["./", "./index.html", "./kinematics.js", "./dynamics.js",
-               "./forces.js", "./overlay.js", "./zip.js", "./detect.js", "./profiles.js", "./ensemble.js", "./dashboard.js", "./fetcher.js", "./diary.js", "./media.js", "./weight.js", "./cycle.js", "./foods.js", "./share.js", "./i18n.js", "./norms.json", "./muscle_joints.json", "./manifest.webmanifest",
+const SHELL = ["./", "./index.html", "./src/kinematics.js", "./src/dynamics.js",
+               "./src/forces.js", "./src/overlay.js", "./src/zip.js", "./src/detect.js", "./src/profiles.js", "./src/ensemble.js", "./src/dashboard.js", "./src/fetcher.js", "./src/diary.js", "./src/media.js", "./src/weight.js", "./src/cycle.js", "./src/foods.js", "./src/share.js", "./src/i18n.js", "./data/norms.json", "./data/muscle_joints.json", "./manifest.webmanifest",
                "./logo.png", "./icon-192.png", "./icon-512.png", "./icon-maskable-512.png",
                "./apple-touch-icon.png", "./favicon.ico"];
 const HEAVY = [
-  "./pose_landmarker_full.task",
+  "./assets/pose_landmarker_full.task",
   // The force model is 1.4 MB and only changes when it is retrained, which
   // already requires a CACHE bump for the pose model beside it. Network-first
   // meant paying for it on every single load.
-  "./force_model.json",
-  "./vendor/vision_bundle.mjs",
-  "./vendor/three.module.min.js",
-  "./vendor/three.core.min.js",
-  "./meshes/gwen_v3.json", "./meshes/gwen_v3.bin",
-  "./meshes/gohan_ss_v6.json", "./meshes/gohan_ss_v6.bin",
-  "./meshes/bas_v3.json", "./meshes/bas_v3.bin",
-  "./meshes/gpk_bones.json", "./meshes/gpk_bones.bin",
-  "./vendor/wasm/vision_wasm_internal.js",
-  "./vendor/wasm/vision_wasm_internal.wasm",
-  "./vendor/wasm/vision_wasm_nosimd_internal.js",
-  "./vendor/wasm/vision_wasm_nosimd_internal.wasm",
-  "./vendor/wasm/vision_wasm_module_internal.js",
-  "./vendor/wasm/vision_wasm_module_internal.wasm",
+  "./data/force_model.json",
+  "./assets/vendor/vision_bundle.mjs",
+  "./assets/vendor/three.module.min.js",
+  "./assets/vendor/three.core.min.js",
+  "./assets/meshes/gwen_v3.json", "./assets/meshes/gwen_v3.bin",
+  "./assets/meshes/gohan_ss_v6.json", "./assets/meshes/gohan_ss_v6.bin",
+  "./assets/meshes/bas_v3.json", "./assets/meshes/bas_v3.bin",
+  "./assets/meshes/gpk_bones.json", "./assets/meshes/gpk_bones.bin",
+  "./assets/vendor/wasm/vision_wasm_internal.js",
+  "./assets/vendor/wasm/vision_wasm_internal.wasm",
+  "./assets/vendor/wasm/vision_wasm_nosimd_internal.js",
+  "./assets/vendor/wasm/vision_wasm_nosimd_internal.wasm",
+  "./assets/vendor/wasm/vision_wasm_module_internal.js",
+  "./assets/vendor/wasm/vision_wasm_module_internal.wasm",
 ];
 
 // Must classify every HEAVY entry as heavy and every SHELL entry as not.

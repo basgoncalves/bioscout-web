@@ -4,8 +4,8 @@
  *
  * Every clip is built from geometry, not from recorded footage, so what is
  * being tested is the decision rule and not a particular camera. */
-const D = await import('./detect.js');
-const K = await import('./kinematics.js');
+const D = await import('../src/detect.js');
+const K = await import('../src/kinematics.js');
 
 const T = 180;                      // torso length, px
 const FLOOR = 1000;
@@ -335,7 +335,7 @@ console.log('\n--- strides of both feet as reps ---');
  * job is to catch wrong ORDERS of magnitude, not to grade the model. */
 console.log('\n--- stationary running: moments ---');
 {
-  const D = await import('./dynamics.js');
+  const D = await import('../src/dynamics.js');
   const massKg = 75, heightM = 1.81;
   const poses = running({ strides: 5 });
   const res = K.analyse(poses, fps, { heightM, activity: 'run', osimModel: 'gpk' });
@@ -362,8 +362,8 @@ console.log('\n--- stationary running: moments ---');
  * is exactly what "moments for the average step" must not be. */
 console.log('\n--- per-foot mean moments ---');
 {
-  const D = await import('./dynamics.js');
-  const E = await import('./ensemble.js');
+  const D = await import('../src/dynamics.js');
+  const E = await import('../src/ensemble.js');
   const massKg = 75, heightM = 1.81;
   const poses = running({ strides: 6, contactS: 0.20, flightS: 0.11,
                           leftContactS: 0.28 });

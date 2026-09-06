@@ -30,12 +30,12 @@ import path from "node:path";
  *     Commit the file to turn that panel on, or leave it here to keep it off.
  */
 const OPTIONAL = new Set([
-  "moment_arms.json",
+  "data/moment_arms.json",
   // The README says this one may be deleted from a deployment to save 1.1 MB.
   // It is not cached, so ?demo=1 -- the step the README tells people to run
   // before granting camera access -- is the one thing that does not work
   // offline. Add it to SHELL if you want the demo to survive a flaky network.
-  "reference.json",
+  "data/reference.json",
 ]);
 
 const norm = (p) => p.replace(/^\.\//, "").replace(/^\//, "");
@@ -99,7 +99,7 @@ while (queue.length) {
 
 // meshes/${name}.{json,bin} is a template literal and cannot be resolved
 // statically, so take every file that is actually there.
-for (const f of readdirSync("meshes")) assets.add(`meshes/${f}`);
+for (const f of readdirSync("assets/meshes")) assets.add(`assets/meshes/${f}`);
 
 /* ---- 3. the three assertions ------------------------------------------ */
 

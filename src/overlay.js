@@ -24,7 +24,7 @@
  * femoral head -- so expect a couple of centimetres of offset at the pelvis.
  * This is an overlay, not a registration.
  */
-import * as THREE from "./vendor/three.module.min.js";
+import * as THREE from "../assets/vendor/three.module.min.js";
 
 // MediaPipe pose landmark indices.
 const L = {
@@ -145,8 +145,8 @@ export class Overlay {
   async load(name, onProgress) {
     if (this.setName === name) return;
     this.dispose();
-    const idx = await (await fetch(`meshes/${name}.json`)).json();
-    const buf = await (await fetch(`meshes/${name}.bin`)).arrayBuffer();
+    const idx = await (await fetch(`assets/meshes/${name}.json`)).json();
+    const buf = await (await fetch(`assets/meshes/${name}.bin`)).arrayBuffer();
     const mat = new THREE.MeshLambertMaterial({
       vertexColors: true, transparent: true, opacity: 0.92,
       side: THREE.DoubleSide,
