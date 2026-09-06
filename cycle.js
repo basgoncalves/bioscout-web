@@ -202,9 +202,17 @@ export function phaseModel(days) {
   const ovulation = cycle - LUTEAL_DAYS;
   const usable = !provisional && ovulation > period + 1;
 
+  /* The premenstrual stretch is the last few days before the next period is
+   * due. Like the fertile window it is counted back from the end, and like the
+   * fertile window it is arithmetic rather than a measurement -- some people
+   * have nothing there at all. It is drawn so the ring is readable, not
+   * because the app knows how anyone feels. */
+  const pms = usable ? { from: Math.max(period + 2, cycle - 4), to: cycle } : null;
+
   return {
     cycle,
     provisional,
+    pms,
     period: Math.min(period, cycle),
     ovulation: usable ? ovulation : null,
     // Sperm survive a few days; the egg does not. Hence the window sits
@@ -215,6 +223,12 @@ export function phaseModel(days) {
     stats,
     starts,
   };
+}
+
+/** The date of day `n` of the cycle currently running. */
+export function cycleDayKey(starts, n) {
+  if (!starts.length || !(n >= 1)) return null;
+  return shiftDay(starts[starts.length - 1], n - 1);
 }
 
 /**

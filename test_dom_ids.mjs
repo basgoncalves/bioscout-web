@@ -76,7 +76,7 @@ for (const tag of ["div", "section", "dialog"]) {
 }
 
 // Each view must exist and be reachable, or an athlete gets stuck on one.
-for (const v of ["viewLogin", "viewDash", "viewRecord"]) {
+for (const v of ["viewLogin", "viewDash", "viewCycle", "viewRecord"]) {
   if (!declared.has(v)) { bad++; console.error(`FAIL  missing view: ${v}`); }
 }
 
@@ -101,4 +101,4 @@ for (const sel of LAID_OUT) {
 }
 
 if (bad) process.exit(1);
-console.log(`ok    ${used.size} referenced ids, 3 views, ${LAID_OUT.length} laid-out buttons reset`);
+console.log(`ok    ${used.size} referenced ids, 4 views, ${LAID_OUT.length} laid-out buttons reset`);

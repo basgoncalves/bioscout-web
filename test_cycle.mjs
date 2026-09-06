@@ -12,7 +12,8 @@ process.env.TZ = process.env.TZ || "Europe/Vienna";
 
 import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
          dayOfCycle, daysBetween, shiftDay, dayKey, FLOWS,
-         periodLengths, phaseModel, LUTEAL_DAYS, ASSUMED_CYCLE } from "./cycle.js";
+         periodLengths, phaseModel, LUTEAL_DAYS, ASSUMED_CYCLE,
+         cycleDayKey } from "./cycle.js";
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {
@@ -144,6 +145,17 @@ ok(collectCycle(on("2026-01-05")[0] ? [{ at: "2026-01-05T10:00:00.000Z", flow: 3
   ok(m.fertile.from > m.period, "and never overlaps the period itself");
 
   ok(m.provisional === false, "with three lengths the model is the athlete's own");
+  ok(m.pms.to === m.cycle && m.pms.from === m.cycle - 4,
+     "the premenstrual stretch is the last days before the next period is due",
+     `${m.pms.from}-${m.pms.to}`);
+  ok(m.pms.from > m.fertile.to - 1 || m.pms.from > m.period,
+     "and it does not run back into the period");
+
+  // Day n of the current cycle maps to a real date.
+  ok(cycleDayKey(m.starts, 1) === "2026-03-26", "day 1 is the last start", cycleDayKey(m.starts, 1));
+  ok(cycleDayKey(m.starts, 15) === "2026-04-09", "day 15 counts on from it", cycleDayKey(m.starts, 15));
+  ok(cycleDayKey([], 3) === null && cycleDayKey(m.starts, 0) === null,
+     "no start, or no day, is no date");
 
   // One period is enough to draw a ring, and not enough to predict from.
   const one = phaseModel(collectCycle(run("2026-01-01", 5), "A"));

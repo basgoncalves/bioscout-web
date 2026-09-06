@@ -100,6 +100,21 @@
              border-radius:9px; padding:9px; font:inherit; font-size:14px; resize:vertical; }
   img.mealShot { width:44px; height:44px; object-fit:cover; border-radius:7px;
                  vertical-align:middle; margin-right:8px; }
+  /* The day wheel. Filled = logged, hollow = expected; the fill carries the
+     difference between a record and an estimate, and the colour only says
+     which phase the arithmetic puts a day in. */
+  .dotRing { width:100%; max-width:330px; display:block; margin:6px auto 0; }
+  .dot { fill:none; stroke-width:2; cursor:pointer; }
+  .dot.dPeriod { stroke:#c0563f; } .dot.dFertile { stroke:#4d8a5a; }
+  .dot.dOvu { stroke:#2f7f60; } .dot.dPms { stroke:#c09a3c; }
+  .dot.dPlain { stroke:var(--line); }
+  .dot.logged.dPeriod { fill:#c0563f; } .dot.logged.dFertile { fill:#4d8a5a; }
+  .dot.logged.dOvu { fill:#2f7f60; } .dot.logged.dPms { fill:#c09a3c; }
+  .dot.logged.dPlain { fill:var(--muted); }
+  .dot.isToday { stroke:var(--ink); stroke-width:3; }
+  .dot.isSel { stroke:var(--accent); stroke-width:3.5; }
+  .dotLabel { font-size:8.5px; font-weight:600; }
+  .lPeriod { fill:#c0563f; } .lFertile { fill:#4d8a5a; } .lPms { fill:#c09a3c; }
   /* The cycle ring. Solid = logged, dashed = estimated; the two must never
      be mistaken for each other. */
   .ring { width:100%; max-width:230px; display:block; margin:10px auto 4px; }
@@ -337,6 +352,11 @@
     </dialog>
   </section>
 
+  <section id="viewCycle" class="hidden">
+    <button class="ghost" id="cycleBackBtn" data-i18n="backToDashboard">Back to dashboard</button>
+    <div class="card" id="cycleCard"></div>
+  </section>
+
   <section id="viewRecord" class="hidden">
     <button class="ghost" id="backToDashBtn" data-i18n="backToDashboard">Back to dashboard</button>
     <div class="card" id="setup">
@@ -419,7 +439,7 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v37";
+window.BUILD = "v38";
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -451,11 +471,13 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          saveCurves, getCurves, curveIndices }
        from "./profiles.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML, weightFormHTML,
-         cycleFormHTML, dayKey, allSessions, collectDays } from "./dashboard.js";
+         cycleFormHTML, cycleViewHTML, dayKey, allSessions,
+         collectDays } from "./dashboard.js";
 import { probe as probeHelper, fetchClip } from "./fetcher.js";
 import { DEFAULT_TAGS, toggleTag, stepTag } from "./diary.js";
 import { collectWeights, weightOn } from "./weight.js";
-import { DEFAULT_SYMPTOMS } from "./cycle.js";
+import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
+         dayOfCycle } from "./cycle.js";
 import { densityFor, foodNames, describe, mealKcal } from "./foods.js";
 import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./media.js";
 import { Overlay } from "./overlay.js";
@@ -954,6 +976,42 @@ $("linkBtn").onclick = async () => {
   }
 };
 
+/* --- the cycle screen ------------------------------------------------------
+ * Its own view rather than a dialog: the wheel wants the whole width, tapping
+ * a day has to redraw it, and a modal that redraws itself under your finger is
+ * not somewhere to sit and read.
+ */
+let cycleSel = null;                 // which day is being looked at
+
+function openCycle(key = null) {
+  cycleSel = key || cycleSel || dayKey(new Date());
+  cycleDraft = null;
+  showView("viewCycle");
+  renderCycle();
+}
+
+function renderCycle() {
+  const card = $("cycleCard");
+  const days = collectCycle(myCycle());
+  const model = phaseModel(days);
+  const todayKey = dayKey(new Date());
+  const hit = days.get(cycleSel) || null;
+  if (!cycleDraft) cycleDraft = { flow: hit?.flow ?? null, symptoms: hit?.symptoms ?? [] };
+
+  card.innerHTML = cycleViewHTML(model, days, todayKey, cycleSel, mySymptoms(), cycleDraft);
+
+  card.querySelectorAll("circle[data-cday]").forEach((c) => {
+    c.onclick = () => {
+      cycleSel = c.dataset.key;
+      cycleDraft = null;             // a different day is a different answer
+      renderCycle();
+    };
+  });
+  if ($("cycleSave")) wireCycleForm(cycleSel, hit, renderCycle, card);
+}
+
+$("cycleBackBtn").onclick = () => { showView("viewDash"); renderDash(); };
+
 /* --- the Add dialog --------------------------------------------------------
  * One button, four things you can add to the selected day. Splitting it into
  * four buttons on the dashboard would put the least-used one next to the
@@ -985,9 +1043,10 @@ function openAdd(step = null) {
       <button class="ghost" data-step="cycle">${tr("cycle")}</button>`;
     body.querySelectorAll("button[data-step]").forEach((b) => {
       b.onclick = () => {
-        if (b.dataset.step !== "training") return openAdd(b.dataset.step);
-        dlg.close();
-        startTraining();
+        // Training and cycle are places, not forms: they get a screen.
+        if (b.dataset.step === "training") { dlg.close(); startTraining(); return; }
+        if (b.dataset.step === "cycle") { dlg.close(); openCycle(dashView.selected); return; }
+        openAdd(b.dataset.step);
       };
     });
   } else if (step === "meal") {
@@ -999,12 +1058,6 @@ function openAdd(step = null) {
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("diary")}</h2>`
       + diaryFormHTML(key, todayKey, myTags(), draft);
     wireDiaryForm(key);
-  } else if (step === "cycle") {
-    const current = myCycle().find((c) => String(c.at).slice(0, 10) === key) || null;
-    if (!cycleDraft) cycleDraft = { flow: current?.flow ?? null, symptoms: current?.symptoms ?? [] };
-    body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("cycle")}</h2>`
-      + cycleFormHTML(key, current, mySymptoms());
-    wireCycleForm(key, current);
   } else if (step === "weight") {
     const current = weightOn(collectWeights(myWeights()), key);
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("weightKg")}</h2>`
@@ -1035,9 +1088,13 @@ function done() {
   renderDash();
 }
 
-function wireCycleForm(key, current) {
-  const body = $("addDlgBody");
-  const redraw = () => openAdd("cycle");
+/* `root` is passed in because this form has two homes: it was in the Add
+ * dialog, and it now lives on the cycle screen. Querying a hard-coded
+ * container found nothing there, so the chips had no handlers and Save wrote
+ * whatever the draft started as -- a form that looks alive and is not. */
+function wireCycleForm(key, current, after = done, root = $("addDlgBody")) {
+  const body = root;
+  const redraw = () => renderCycle();
   body.querySelectorAll("button.flowBtn").forEach((b) => {
     b.classList.toggle("on", +b.dataset.flow === cycleDraft.flow);
     b.onclick = () => {
@@ -1060,11 +1117,13 @@ function wireCycleForm(key, current) {
     }
     setCycleDay({ profile: currentAthlete(), at: atOnDay(key),
                   flow: cycleDraft.flow, symptoms: cycleDraft.symptoms });
-    done();
+    cycleDraft = null;
+    after();
   };
   if ($("cycleClear")) $("cycleClear").onclick = () => {
     clearCycleDay(current.at, currentAthlete());
-    done();
+    cycleDraft = null;
+    after();
   };
 }
 
@@ -1196,7 +1255,7 @@ $("mealShotFile").onchange = (e) => {
  * gets stored. The login screen writes to it rather than replacing it, so
  * there is still exactly one source of truth for the athlete.
  */
-const VIEWS = ["viewLogin", "viewDash", "viewRecord"];
+const VIEWS = ["viewLogin", "viewDash", "viewCycle", "viewRecord"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -1377,6 +1436,7 @@ function renderDash() {
     b.onclick = () => { deleteDiary(b.dataset.at, currentAthlete()); renderDash(); };
   });
   if ($("addBtn")) $("addBtn").onclick = () => openAdd();
+  if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);
 
 }
 

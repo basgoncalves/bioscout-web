@@ -25,7 +25,7 @@ import { t as tr } from "./i18n.js";
 import { MOODS, collectDiary, moodTrend, tagLevels, LEVEL_MAX } from "./diary.js";
 import { collectWeights, weightOn, weightSeries } from "./weight.js";
 import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
-         dayOfCycle, phaseModel, LUTEAL_DAYS, FLOWS } from "./cycle.js";
+         dayOfCycle, phaseModel, cycleDayKey, LUTEAL_DAYS, FLOWS } from "./cycle.js";
 import { itemKcal, mealKcal, describe } from "./foods.js";
 
 /* Plurals come from the dictionary keys the session card already uses, rather
@@ -462,7 +462,8 @@ function cycleHTML(cycleDays, key, todayKey) {
     <div style="font-weight:600">${esc(tr("cycle"))}</div>
     ${ring}${legend}
     ${dayLine}${histLine}${predLine}
-    <p class="note" style="margin:6px 0 0">${esc(tr("cycleCaveat"))}</p>
+    <button type="button" class="ghost" id="openCycleBtn" style="margin-top:10px">${
+      esc(tr("openCycle"))}</button>
   </div>`;
 }
 
@@ -533,12 +534,110 @@ function ringHTML(model, cycleDays, todayKey) {
   </svg>`;
 }
 
+/* ---- the cycle view ---------------------------------------------------- */
+
+/**
+ * A dot per day of the cycle, coloured by phase.
+ *
+ * Same rule as the ring it replaces: a day that was LOGGED is filled solid,
+ * and a day that is merely expected is hollow. The colours say which phase the
+ * arithmetic puts a day in; the fill says whether anyone actually recorded
+ * anything. Confusing the two is how a calendar of estimates comes to be read
+ * as a calendar of facts.
+ */
+export function cycleDotsHTML(model, cycleDays, todayKey, selected) {
+  const { cycle, period, ovulation, fertile, pms, starts } = model;
+  const today = dayOfCycle(starts, todayKey);
+  const rDot = cycle > 34 ? 5.5 : 6.5;
+
+  const phaseOf = (n) => {
+    if (n <= period) return "dPeriod";
+    if (ovulation && n === ovulation) return "dOvu";
+    if (fertile && n >= fertile.from && n <= fertile.to) return "dFertile";
+    if (pms && n >= pms.from && n <= pms.to) return "dPms";
+    return "dPlain";
+  };
+
+  const dots = [];
+  for (let n = 1; n <= cycle; n++) {
+    const key = cycleDayKey(starts, n);
+    const [x, y] = pt(n, cycle, R + 2);
+    const cls = ["dot", phaseOf(n)];
+    if (cycleDays.has(key)) cls.push("logged");
+    if (n === today) cls.push("isToday");
+    if (key === selected) cls.push("isSel");
+    dots.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${rDot}"
+      class="${cls.join(" ")}" data-cday="${n}" data-key="${key}">
+      <title>${esc(tr("cycleDotLabel", { n, date: shortDay(key) }))}</title></circle>`);
+  }
+
+  const centre = today
+    ? `<tspan x="${CX}" dy="-6" class="ringBig">${today}</tspan>
+       <tspan x="${CX}" dy="18" class="ringSmall">${esc(model.provisional
+         ? tr("ofNAssumed", { n: cycle }) : tr("ofNDays", { n: cycle }))}</tspan>`
+    : `<tspan x="${CX}" dy="4" class="ringSmall">${esc(tr("cycleNoToday"))}</tspan>`;
+
+  // Phase names sit on the ring rather than in a key underneath, so a day and
+  // its label are read together instead of by cross-reference.
+  const label = (from, to, cls, text) => {
+    const mid = (from + to) / 2;
+    const [x, y] = pt(mid, cycle, R - 26);
+    return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="dotLabel ${cls}"
+      text-anchor="middle">${esc(text)}</text>`;
+  };
+
+  return `<svg viewBox="0 0 200 200" class="dotRing" role="img"
+    aria-label="${esc(tr("cycleRingLabel", { day: today ?? "—", n: cycle }))}">
+    ${dots.join("")}
+    ${label(1, period, "lPeriod", tr("phasePeriod"))}
+    ${fertile ? label(fertile.from, fertile.to, "lFertile", tr("phaseFertile")) : ""}
+    ${pms ? label(pms.from, pms.to, "lPms", tr("phasePms")) : ""}
+    <text x="${CX}" y="${CY}" text-anchor="middle" class="ringText">${centre}</text>
+  </svg>`;
+}
+
+/** The whole cycle screen: the wheel, the day being looked at, and its form. */
+export function cycleViewHTML(model, cycleDays, todayKey, selected, symptoms, draft) {
+  if (!model) {
+    return `<p class="sub" style="margin:0 0 10px">${esc(tr("cycleNothingYet"))}</p>
+      ${cycleFormHTML(todayKey, null, symptoms)}`;
+  }
+  const n = dayOfCycle(model.starts, selected);
+  const hit = cycleDays.get(selected);
+  const future = selected > todayKey;
+
+  const stats = lengthStats(cycleLengths(model.starts));
+  const pred = predictNext(model.starts, localeDay(todayKey));
+
+  return `
+    ${cycleDotsHTML(model, cycleDays, todayKey, selected)}
+    <p class="note" style="margin:2px 0 10px;text-align:center">${esc(model.provisional
+      ? tr("phaseNoteProvisional", { n: model.cycle })
+      : tr("phaseNote", { luteal: LUTEAL_DAYS }))}</p>
+    <div class="daybox">
+      <div style="font-weight:600">${esc(localeDay(selected)
+        .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}${
+        n ? ` · ${esc(tr("cycleDayN", { n }))}` : ""}</div>
+      ${future
+        ? `<p class="sub" style="margin:6px 0 0">${esc(tr("cycleFutureDay"))}</p>`
+        : cycleFormHTML(selected, hit || null, symptoms, draft)}
+    </div>
+    ${stats ? `<p class="sub" style="margin:10px 0 0">${esc(tr("cycleHistory", {
+        mean: stats.mean.toFixed(1), n: stats.n, min: stats.min, max: stats.max }))}</p>` : ""}
+    ${pred ? `<p class="sub" style="margin:2px 0 0">${esc(tr("cycleDue", {
+        date: shortDay(pred.due), spread: nDays(pred.spread), n: pred.stats.n }))}</p>` : ""}
+    <p class="note" style="margin:6px 0 0">${esc(tr("cycleCaveat"))}</p>`;
+}
+
 /** The cycle form, for the Add dialog. */
-export function cycleFormHTML(key, current, symptoms) {
+export function cycleFormHTML(key, current, symptoms, draft = null) {
+  const on = draft || { flow: current?.flow ?? null, symptoms: current?.symptoms ?? [] };
   const flows = FLOWS.map((f) =>
-    `<button type="button" class="chip flowBtn" data-flow="${f.v}">${esc(tr(f.key))}</button>`).join("");
+    `<button type="button" class="chip flowBtn${on.flow === f.v ? " on" : ""}"
+       data-flow="${f.v}">${esc(tr(f.key))}</button>`).join("");
   const chips = symptoms.map((s) =>
-    `<button type="button" class="chip symBtn" data-sym="${esc(s)}">${esc(tr(s) || s)}</button>`).join("");
+    `<button type="button" class="chip symBtn${(on.symptoms || []).includes(s) ? " on" : ""}"
+       data-sym="${esc(s)}">${esc(tr(s) || s)}</button>`).join("");
   return `
     <p class="sub" style="margin:0 0 8px">${esc(tr("cycleFormFor", { date: shortDay(key) }))}</p>
     <div class="chips">${flows}</div>
