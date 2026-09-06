@@ -63,6 +63,31 @@ const overnight = [session("2026-08-14T21:00:00.000Z", [
      "an open session already in the archive is not counted twice");
 }
 
+/* ---- scoping to one athlete ------------------------------------------- */
+{
+  const mine = session("2026-08-01T09:00:00.000Z", [set(1, "2026-08-01T09:00:00.000Z", "squat", 5)]);
+  mine.profile = "Bas";
+  const theirs = session("2026-08-02T09:00:00.000Z", [set(1, "2026-08-02T09:00:00.000Z", "squat", 9)]);
+  theirs.profile = "Someone else";
+  const orphan = session("2026-08-03T09:00:00.000Z", [set(1, "2026-08-03T09:00:00.000Z", "squat", 7)]);
+  orphan.profile = null;
+  const all = [mine, theirs, orphan];
+
+  ok(allSessions(all, null, "Bas").length === 1, "a named athlete sees only their own sessions");
+  ok(allSessions(all, null, "Bas")[0].started === mine.started, "and it is the right one");
+  ok(allSessions(all, null, null).length === 3, "with no athlete chosen, nothing is filtered out");
+  // A session recorded before anyone logged in is nobody's, not everybody's.
+  ok(!allSessions(all, null, "Bas").includes(orphan),
+     "a session with no profile does not pad someone else's history");
+
+  const openMine = session("2026-08-04T09:00:00.000Z", [set(1, "2026-08-04T09:00:00.000Z", "cmj", 2)]);
+  openMine.profile = "Bas";
+  ok(allSessions(all, openMine, "Bas").length === 2, "the open session is scoped too");
+  const openTheirs = { ...openMine, profile: "Someone else" };
+  ok(allSessions(all, openTheirs, "Bas").length === 1,
+     "and an open session belonging to someone else stays out");
+}
+
 /* ---- totals ----------------------------------------------------------- */
 {
   const s = [

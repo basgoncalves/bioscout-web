@@ -39,13 +39,23 @@ export function dayKey(iso) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/** Archive plus the session still open, oldest first. */
-export function allSessions(archive, open) {
-  const out = Array.isArray(archive) ? archive.slice() : [];
+/**
+ * Archive plus the session still open, oldest first.
+ *
+ * `profile` scopes the result to one athlete. The archive is device-wide and
+ * always has been, so a shared phone holds everyone's sessions in one list;
+ * once the app asks who is training, the calendar has to answer for that
+ * person alone. Sessions recorded with no profile selected belong to nobody
+ * and are therefore in nobody's history -- they are still on the device, and
+ * still in the export, but they do not silently pad someone else's totals.
+ */
+export function allSessions(archive, open, profile = null) {
+  let out = Array.isArray(archive) ? archive.slice() : [];
   // The open session may already be in the archive if it was imported from
   // another device, and a session with no sets is not training that happened.
   if (open && open.sets && open.sets.length &&
       !out.some((s) => s.started === open.started)) out.push(open);
+  if (profile) out = out.filter((s) => s.profile === profile);
   return out.sort((a, b) => String(a.started).localeCompare(String(b.started)));
 }
 

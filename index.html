@@ -46,6 +46,9 @@
   button:disabled { opacity:.45; cursor:default; }
   button + button { margin-top:8px; }
 
+  /* Athlete buttons on the login screen: full width, comfortable tap target. */
+  button.athlete { margin:0 0 8px; text-align:left; padding:13px 14px; font-size:15px; }
+  #profileList:empty { display:none; }
   /* --- training history ------------------------------------------------ */
   .tiles { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:10px 0 4px; }
   .tile { background:var(--bg); border:1px solid var(--line); border-radius:10px;
@@ -149,8 +152,22 @@
   <p class="sub"><span data-i18n="tagline">Movement analysis in the browser. Video never leaves your phone.</span>
     <span class="note" id="build" style="opacity:.6"></span></p>
 
-  <div class="card" id="setup">
-    <div class="row" style="margin-bottom:11px">
+
+  <!-- Three views, one page. The app opens on who-is-training, because a
+       calendar of somebody else's sessions is worse than no calendar. -->
+  <section id="viewLogin">
+    <div class="card">
+      <h2 style="font-size:17px;margin:0 0 2px" data-i18n="whoIsTraining">Who is training?</h2>
+      <p class="sub" style="margin:0 0 12px" data-i18n="pickAthlete">Pick an athlete, or add one.</p>
+      <div id="profileList"></div>
+      <div class="row" style="margin:12px 0 0">
+        <div style="flex:1">
+          <label for="newProfileName" data-i18n="name">Name</label>
+          <input id="newProfileName" type="text" placeholder="e.g. Bas" autocomplete="off">
+        </div>
+      </div>
+      <button class="ghost" id="createProfileBtn" data-i18n="addAthlete">Add athlete</button>
+    <div class="row hidden" id="athleteRow">
       <div style="flex:1.4">
         <label for="profile" data-i18n="athlete">Athlete</label>
         <select id="profile"><option value="" data-i18n="noProfile">— no profile —</option></select>
@@ -160,6 +177,14 @@
         <input id="profileName" type="text" placeholder="e.g. Bas" autocomplete="off">
       </div>
     </div>
+    </div>
+  </section>
+
+  <section id="viewDash" class="hidden">
+    <div class="card" id="dashboardCard"></div>
+    <button id="newTrainingBtn" data-i18n="newTrainingSession">New training session</button>
+    <button class="ghost" id="settingsBtn" data-i18n="profileSettings">Profile settings</button>
+    <div class="card hidden" id="settingsCard">
     <div class="row" style="margin-bottom:11px">
       <div>
         <label for="height" data-i18n="height">Height (m)</label>
@@ -178,6 +203,25 @@
       and are saved with the profile as you change them. Mass is the one to keep
       current: it scales every joint moment and contact force on the page, so
       the field says how old the stored figure is.</p>
+    <div style="margin-bottom:11px">
+      <label for="avatar" data-i18n="overlay">Skeleton overlay</label>
+      <select id="avatar">
+        <option value="" data-i18n="overlayNone">None — landmarks only</option>
+        <option value="gpk_bones" data-i18n="overlayBones">Skeleton (OpenSim bone geometry) — skull + spine</option>
+        <option value="bas_v3" data-i18n="overlayBas">Bas (v3) — full arms + head</option>
+        <option value="gwen_v3" data-i18n="overlayGwen">Gwen (v3) — full arms + head</option>
+        <option value="gohan_ss_v6" data-i18n="overlayGohan">Gohan (SS v6, Meshy sculpt) — full arms + head</option>
+      </select>
+    </div>
+    <div id="headSizeRow" class="hidden" style="margin-bottom:11px">
+      <label for="headSize"><span data-i18n="headSize">Head size</span> <span id="headSizeVal" class="sub">1.00×</span></label>
+      <input id="headSize" type="range" min="0.5" max="2" step="0.05" value="1"
+             style="width:100%;padding:0;margin:0">
+      <p class="note" style="margin-top:2px" data-i18n-html="noteHeadSize">The head is sized from your ear
+        landmarks, which are the only ones a close-up shot measures honestly.
+        A sculpt with a lot of hair still needs a nudge — set it once and it
+        saves with the profile.</p>
+    </div>
     <div class="row" style="margin-bottom:11px">
       <button class="ghost" id="saveProfileBtn" style="margin:0;padding:9px" data-i18n="saveProfile">Save profile</button>
       <button class="ghost" id="delProfileBtn" style="margin:0;padding:9px" data-i18n="delete">Delete</button>
@@ -185,7 +229,6 @@
     <div class="row" style="margin-bottom:6px">
       <button class="ghost" id="exportProfilesBtn" style="margin:0;padding:9px" data-i18n="exportData">Export my data</button>
       <button class="ghost" id="importProfilesBtn" style="margin:0;padding:9px" data-i18n="import">Import</button>
-    <button class="ghost" id="historyBtn" data-i18n="trainingHistory">Training history</button>
     </div>
     <input id="importProfilesFile" type="file" accept="application/json,.json" class="hidden">
     <p class="note" style="margin:0 0 11px" data-i18n-html="notePrivacy">Profiles and training history live on
@@ -194,7 +237,13 @@
       another phone or laptop, export the file here and import it there. That
       is a manual step, not background sync: without a server there is no
       honest way to make it automatic.</p>
+    </div>
+    <button class="ghost" id="switchUserBtn" data-i18n="switchAthlete">Switch athlete</button>
+  </section>
 
+  <section id="viewRecord" class="hidden">
+    <button class="ghost" id="backToDashBtn" data-i18n="backToDashboard">Back to dashboard</button>
+    <div class="card" id="setup">
     <div class="row" style="margin-bottom:11px">
       <div>
         <label for="activity" data-i18n="movement">Movement</label>
@@ -224,25 +273,6 @@
     <p class="note" style="margin:-4px 0 10px" data-i18n-html="noteLoad">Barbell, vest or belt in
       <b>Added</b>; band or machine offload in <b>Assistance</b>. Both apply at
       once — a loaded bar with a band assist is added minus assist.</p>
-    <div style="margin-bottom:11px">
-      <label for="avatar" data-i18n="overlay">Skeleton overlay</label>
-      <select id="avatar">
-        <option value="" data-i18n="overlayNone">None — landmarks only</option>
-        <option value="gpk_bones" data-i18n="overlayBones">Skeleton (OpenSim bone geometry) — skull + spine</option>
-        <option value="bas_v3" data-i18n="overlayBas">Bas (v3) — full arms + head</option>
-        <option value="gwen_v3" data-i18n="overlayGwen">Gwen (v3) — full arms + head</option>
-        <option value="gohan_ss_v6" data-i18n="overlayGohan">Gohan (SS v6, Meshy sculpt) — full arms + head</option>
-      </select>
-    </div>
-    <div id="headSizeRow" class="hidden" style="margin-bottom:11px">
-      <label for="headSize"><span data-i18n="headSize">Head size</span> <span id="headSizeVal" class="sub">1.00×</span></label>
-      <input id="headSize" type="range" min="0.5" max="2" step="0.05" value="1"
-             style="width:100%;padding:0;margin:0">
-      <p class="note" style="margin-top:2px" data-i18n-html="noteHeadSize">The head is sized from your ear
-        landmarks, which are the only ones a close-up shot measures honestly.
-        A sculpt with a lot of hair still needs a nudge — set it once and it
-        saves with the profile.</p>
-    </div>
     <label style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="saveVideo" style="width:auto;margin:0">
@@ -252,8 +282,7 @@
     <button class="ghost" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
     <input id="fileInput" type="file" accept="video/*" class="hidden">
     <div class="status" id="status" data-i18n="statusStarting">Starting…</div>
-  </div>
-
+    </div>
   <div id="stage">
     <video id="video" playsinline muted></video>
     <canvas class="overlay" id="overlay"></canvas>
@@ -271,8 +300,8 @@
   </div>
 
   <div class="card hidden" id="trainingCard"></div>
-  <div class="card hidden" id="dashboardCard"></div>
   <div class="card hidden" id="results"></div>
+  </section>
 </div>
 
 <script>
@@ -777,6 +806,78 @@ function setChart(points, key) {
     <p class="note" style="margin-top:2px">${tr("noteSetAxis")}</p>`;
 }
 
+/* --- views -----------------------------------------------------------------
+ * Three screens on one page: who is training, their dashboard, and recording.
+ *
+ * $("profile") stays in the DOM, hidden, and remains the single answer to "who
+ * is logged in" -- a dozen places already read it, including every set that
+ * gets stored. The login screen writes to it rather than replacing it, so
+ * there is still exactly one source of truth for the athlete.
+ */
+const VIEWS = ["viewLogin", "viewDash", "viewRecord"];
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function showView(id) {
+  for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
+  window.scrollTo(0, 0);
+}
+
+const currentAthlete = () => $("profile").value || null;
+
+/** The login screen: every saved athlete as a button. */
+function renderLogin() {
+  const { profiles } = listProfiles();
+  const list = $("profileList");
+  list.innerHTML = profiles.length
+    ? profiles.map((p) => `<button class="ghost athlete" data-name="${esc(p.name)}">${esc(p.name)}</button>`).join("")
+    : `<p class="sub" style="margin:0">${esc(tr("noAthletesYet"))}</p>`;
+  list.querySelectorAll("button.athlete").forEach((b) => {
+    b.onclick = () => enterAs(b.dataset.name);
+  });
+}
+
+/** Select an athlete and open their dashboard. */
+function enterAs(name) {
+  refreshProfiles(name);
+  $("profile").value = name;
+  const p = getProfile(name);
+  if (p) applyProfile(p);
+  refreshDerived();
+  dashView = null;                 // their history, not the last person's
+  showView("viewDash");
+  renderDash();
+  renderTraining();
+}
+
+$("createProfileBtn").onclick = () => {
+  const name = $("newProfileName").value.trim();
+  if (!name) { say(tr("nameFirst"), true); return; }
+  if (getProfile(name)) { enterAs(name); return; }
+  // Saved immediately, with just a name: the rest is edited on the dashboard,
+  // and an athlete who exists only in an unsaved form field is one refresh
+  // away from not existing at all.
+  saveProfile({ name });
+  $("newProfileName").value = "";
+  renderLogin();
+  enterAs(name);
+};
+
+$("switchUserBtn").onclick = () => { renderLogin(); showView("viewLogin"); };
+$("settingsBtn").onclick = () => $("settingsCard").classList.toggle("hidden");
+
+$("newTrainingBtn").onclick = () => {
+  // A session with sets in it is training in progress; archive it before
+  // starting the next, exactly as the results card does.
+  const open = getSession();
+  if (open && open.sets && open.sets.length) archiveSession();
+  newSession(currentAthlete());
+  renderTraining();
+  showView("viewRecord");
+};
+
+$("backToDashBtn").onclick = () => { showView("viewDash"); renderDash(); };
+
 /* --- training history ------------------------------------------------------
  * The dashboard owns which month is on screen and which day is selected. It
  * has to: paging to July and tapping a day must survive the re-render that
@@ -785,7 +886,7 @@ function setChart(points, key) {
 let dashView = null;
 
 function dashboardData() {
-  return allSessions(listArchive(), getSession());
+  return allSessions(listArchive(), getSession(), currentAthlete());
 }
 
 /** Open on the most recent day that has training, not blankly on today. */
@@ -799,10 +900,8 @@ function defaultDashView() {
 
 function renderDash() {
   const card = $("dashboardCard");
-  if (card.classList.contains("hidden")) return;
   if (!dashView) dashView = defaultDashView();
-  card.innerHTML = renderDashboard(dashboardData(), dashView) +
-    `<button class="ghost" id="dashCloseBtn" style="margin-top:12px">${tr("closeDashboard")}</button>`;
+  card.innerHTML = renderDashboard(dashboardData(), dashView);
 
   const step = (n) => {
     const d = new Date(dashView.year, dashView.month + n, 1);
@@ -814,20 +913,7 @@ function renderDash() {
   card.querySelectorAll("button.day[data-day]").forEach((b) => {
     b.onclick = () => { dashView = { ...dashView, selected: b.dataset.day }; renderDash(); };
   });
-  $("dashCloseBtn").onclick = () => card.classList.add("hidden");
 }
-
-$("historyBtn").onclick = () => {
-  const card = $("dashboardCard");
-  const opening = card.classList.contains("hidden");
-  card.classList.toggle("hidden", !opening);
-  if (!opening) return;
-  // Reopening should land on what is current, not on wherever the last visit
-  // left off half an hour and two sets ago.
-  dashView = defaultDashView();
-  renderDash();
-  card.scrollIntoView({ behavior: "smooth", block: "start" });
-};
 
 function renderTraining() {
   const card = $("trainingCard");
@@ -882,7 +968,7 @@ function renderTraining() {
       kept: tr(kept === 1 ? "nPastSession" : "nPastSessions", { n: kept }) }));
   };
   $("summaryBtn").onclick = () => renderSummary();
-  renderDash();          // no-op while the history card is closed
+  renderDash();          // keeps the dashboard current behind the record view
   const pv = $("peakVar");
   if (pv) pv.onchange = () => {
     peakVar = pv.value;
@@ -1082,6 +1168,8 @@ refreshProfiles(lastUsedProfile()?.name || "");
 queueMicrotask(refreshDerived);
 if (lastUsedProfile()) applyProfile(lastUsedProfile());
 renderTraining();
+renderLogin();
+showView("viewLogin");
 
 
 
