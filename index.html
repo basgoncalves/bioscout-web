@@ -373,7 +373,7 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v30";
+window.BUILD = "v31";
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -399,7 +399,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          newSession, getSession, clearSession, addSet, summariseSession,
          listMeals, addMeal, deleteMeal,
          listDiary, addDiary, deleteDiary, profileTags, saveProfileTags,
-         listWeights, addWeight,
+         listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices }
        from "./profiles.js";
@@ -408,6 +408,7 @@ import { renderDashboard, mealFormHTML, diaryFormHTML, weightFormHTML,
 import { probe as probeHelper, fetchClip } from "./fetcher.js";
 import { DEFAULT_TAGS, toggleTag } from "./diary.js";
 import { collectWeights, weightOn } from "./weight.js";
+import { DEFAULT_SYMPTOMS } from "./cycle.js";
 import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./media.js";
 import { Overlay } from "./overlay.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
@@ -915,6 +916,7 @@ $("linkBtn").onclick = async () => {
  * by the re-render that showed the last one.
  */
 let draft = { mood: null, tags: [] };
+let cycleDraft = null;
 let mealShot = null;                 // a File waiting to be attached
 
 function openAdd(step = null) {
@@ -930,7 +932,8 @@ function openAdd(step = null) {
       <button class="ghost" data-step="training">${tr("newTrainingSession")}</button>
       <button class="ghost" data-step="meal">${tr("meal")}</button>
       <button class="ghost" data-step="diary">${tr("diary")}</button>
-      <button class="ghost" data-step="weight">${tr("weightKg")}</button>`;
+      <button class="ghost" data-step="weight">${tr("weightKg")}</button>
+      <button class="ghost" data-step="cycle">${tr("cycle")}</button>`;
     body.querySelectorAll("button[data-step]").forEach((b) => {
       b.onclick = () => {
         if (b.dataset.step !== "training") return openAdd(b.dataset.step);
@@ -946,6 +949,12 @@ function openAdd(step = null) {
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("diary")}</h2>`
       + diaryFormHTML(key, todayKey, myTags());
     wireDiaryForm(key);
+  } else if (step === "cycle") {
+    const current = myCycle().find((c) => String(c.at).slice(0, 10) === key) || null;
+    if (!cycleDraft) cycleDraft = { flow: current?.flow ?? null, symptoms: current?.symptoms ?? [] };
+    body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("cycle")}</h2>`
+      + cycleFormHTML(key, current, mySymptoms());
+    wireCycleForm(key, current);
   } else if (step === "weight") {
     const current = weightOn(collectWeights(myWeights()), key);
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("weightKg")}</h2>`
@@ -970,8 +979,42 @@ const shortDate = (key) => {
 function done() {
   $("addDlg").close();
   draft = { mood: null, tags: [] };
+  cycleDraft = null;
   mealShot = null;
   renderDash();
+}
+
+function wireCycleForm(key, current) {
+  const body = $("addDlgBody");
+  const redraw = () => openAdd("cycle");
+  body.querySelectorAll("button.flowBtn").forEach((b) => {
+    b.classList.toggle("on", +b.dataset.flow === cycleDraft.flow);
+    b.onclick = () => {
+      // Tapping the chosen level again clears it, so a day can be logged with
+      // symptoms and no flow -- which is most of a cycle.
+      cycleDraft.flow = cycleDraft.flow === +b.dataset.flow ? null : +b.dataset.flow;
+      redraw();
+    };
+  });
+  body.querySelectorAll("button.symBtn").forEach((b) => {
+    b.classList.toggle("on", cycleDraft.symptoms.includes(b.dataset.sym));
+    b.onclick = () => {
+      cycleDraft.symptoms = toggleTag(cycleDraft.symptoms, b.dataset.sym);
+      redraw();
+    };
+  });
+  $("cycleSave").onclick = () => {
+    if (cycleDraft.flow === null && !cycleDraft.symptoms.length) {
+      say(tr("cycleNeedsSomething"), true); return;
+    }
+    setCycleDay({ profile: currentAthlete(), at: atOnDay(key),
+                  flow: cycleDraft.flow, symptoms: cycleDraft.symptoms });
+    done();
+  };
+  if ($("cycleClear")) $("cycleClear").onclick = () => {
+    clearCycleDay(current.at, currentAthlete());
+    done();
+  };
 }
 
 function wireMealForm(key, todayKey) {
@@ -1144,6 +1187,16 @@ function myWeights() {
   return listWeights().filter((w) => w.profile === who);
 }
 
+function myCycle() {
+  const who = currentAthlete();
+  return listCycle().filter((c) => c.profile === who);
+}
+
+/** The athlete's own symptom list, on the profile like their diary tags. */
+function mySymptoms() {
+  return getProfile(currentAthlete())?.symptoms || DEFAULT_SYMPTOMS;
+}
+
 const monthLabel = (v) =>
   new Date(v.year, v.month, 1).toLocaleDateString([], { month: "long", year: "numeric" });
 
@@ -1170,7 +1223,7 @@ function renderDash() {
   const card = $("dashboardCard");
   if (!dashView) dashView = defaultDashView();
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
-                                   myWeights(), dashView);
+                                   myWeights(), myCycle(), dashView);
   $("whoName").textContent = currentAthlete() || tr("noProfile");
   $("whoSince").textContent = tr("dashboardSub", { first: monthLabel(dashView) });
 
