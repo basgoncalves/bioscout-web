@@ -11,6 +11,38 @@ of vendored pose engine here has no business in a `pip install`. What the two
 share is the analysis core, and that link is enforced rather than assumed — see
 *Verification*.
 
+## Analysing a video from a link (optional)
+
+The page cannot download a video itself. The bytes are not served with
+permissive CORS headers, an embedded player's pixels cannot be read from
+script, and deriving a stream URL means running code the site changes every
+few weeks. That is the platform working as designed, not a gap here.
+
+`tools/bioscout_fetch.py` does it on your own device instead:
+
+```
+pip install yt-dlp
+python tools/bioscout_fetch.py
+```
+
+Reload the app and a link box appears on the recording page. It is only there
+while the helper is running -- a control that cannot work is worse than no
+control, because the person learns the app is broken rather than that a helper
+is not started.
+
+It binds `127.0.0.1` and nothing else. Browsers exempt loopback from
+mixed-content blocking, so an HTTPS page may call it; nothing on the network
+can. On a phone, run it in Termux and helper and browser are the same device.
+The page sends an 11-character video id, never a URL, so it cannot talk the
+helper into fetching an arbitrary address.
+
+This does not change what the app uploads, which is still nothing. It does
+mean your device requests a video from YouTube, which is a network request the
+app does not otherwise make. Downloading from YouTube is against their terms
+of service; that call is yours to make for your own footage, Creative Commons
+material, or anything you hold the rights to. It lives in `tools/` as
+something you start deliberately, rather than inside the app.
+
 ## Why this exists and not an APK
 
 The Kivy app in `../android_app` cannot currently be built into an APK:
