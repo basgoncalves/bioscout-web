@@ -133,6 +133,75 @@ export function predictNext(starts, today = new Date()) {
 }
 
 /**
+ * How long each period ran, in days.
+ *
+ * Counted as logged days within a run rather than first-to-last, so the single
+ * unlogged day that cycleStarts() tolerates does not inflate the figure.
+ */
+export function periodLengths(days) {
+  const keys = [...days.keys()].sort();
+  const runs = [];
+  let n = 0, prev = null;
+  for (const k of keys) {
+    if (prev !== null && daysBetween(prev, k) > 2) { runs.push(n); n = 0; }
+    n++; prev = k;
+  }
+  if (n) runs.push(n);
+  return runs;
+}
+
+/* The luteal phase -- ovulation to the next period -- is the stable part of a
+ * cycle, near enough 14 days in most people whatever the total length. The
+ * follicular phase is what varies. So ovulation is estimated backwards from
+ * the NEXT period rather than forwards from the last one, which is the
+ * standard convention and the less wrong of the two.
+ *
+ * It is still an estimate from counting, not a measurement. Without
+ * temperature or an LH test this is arithmetic, and it can be several days
+ * out in a cycle that behaves normally. The UI says so; nothing here should
+ * be read as a fertile-window guarantee in either direction. */
+export const LUTEAL_DAYS = 14;
+
+/**
+ * The shape of a typical cycle for this athlete, or null.
+ *
+ * Null below three observed lengths, for the same reason predictNext() is:
+ * a ring drawn from two cycles looks exactly as authoritative as one drawn
+ * from twenty.
+ */
+export function phaseModel(days) {
+  const starts = cycleStarts(days);
+  const lengths = cycleLengths(starts);
+  const stats = lengthStats(lengths);
+  if (!stats || stats.n < 3) return null;
+
+  const cycle = Math.round(stats.mean);
+  const periods = periodLengths(days);
+  const period = periods.length
+    ? Math.max(1, Math.round(periods.reduce((a, b) => a + b, 0) / periods.length))
+    : 5;
+
+  // A very short cycle would put ovulation on or before the period itself,
+  // which is not a thing to draw. Below that, the phase split is not
+  // meaningful and only the period is shown.
+  const ovulation = cycle - LUTEAL_DAYS;
+  const usable = ovulation > period + 1;
+
+  return {
+    cycle,
+    period: Math.min(period, cycle),
+    ovulation: usable ? ovulation : null,
+    // Sperm survive a few days; the egg does not. Hence the window sits
+    // mostly before ovulation rather than around it.
+    fertile: usable
+      ? { from: Math.max(period + 1, ovulation - 5), to: Math.min(cycle, ovulation + 1) }
+      : null,
+    stats,
+    starts,
+  };
+}
+
+/**
  * Which day of the cycle `key` falls on, counting the first logged day as 1.
  *
  * Null before the first record and after a gap long enough that the count
