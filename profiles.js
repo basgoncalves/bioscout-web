@@ -19,6 +19,7 @@ const CKEY = "bioscout.curves.v1";
 const MKEY = "bioscout.meals.v1";
 const DKEY = "bioscout.diary.v1";
 const WKEY = "bioscout.weights.v1";
+const CYKEY = "bioscout.cycle.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
  * one; curves are not, so only the most recent sets keep those.
@@ -238,6 +239,43 @@ export function deleteWeight(at, profile = null) {
   return kept.length;
 }
 
+// --- cycle -----------------------------------------------------------------
+/* One record per logged day, keyed on the day itself rather than the instant:
+ * logging the same day twice is a correction, not a second period. Cycles are
+ * derived from these days in cycle.js -- nothing here declares one. */
+const CYCLE_MAX = 2000;
+
+export function listCycle() {
+  const c = read(CYKEY, []);
+  return Array.isArray(c) ? c : [];
+}
+
+export function setCycleDay({ profile = null, at, flow = null, symptoms = [] }) {
+  if (!at) return null;
+  const f = Number(flow);
+  const entry = {
+    at,
+    profile,
+    flow: Number.isInteger(f) && f >= 1 && f <= 4 ? f : null,
+    symptoms: [...new Set((symptoms || []).map((s) => String(s).slice(0, 40)))].slice(0, 40),
+  };
+  const day = String(at).slice(0, 10);
+  const all = listCycle().filter(
+    (x) => !(x.profile === entry.profile && String(x.at).slice(0, 10) === day));
+  all.push(entry);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(CYKEY, all.slice(-CYCLE_MAX));
+  return entry;
+}
+
+export function clearCycleDay(at, profile = null) {
+  const day = String(at).slice(0, 10);
+  const kept = listCycle().filter(
+    (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
+  write(CYKEY, kept);
+  return kept.length;
+}
+
 // --- stored waveforms ------------------------------------------------------
 const r3 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(3) : 0));
 const r2 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(2) : 0));
@@ -315,6 +353,7 @@ export function exportAll() {
     meals: listMeals(),
     diary: listDiary(),
     weights: listWeights(),
+    cycle: listCycle(),
   };
 }
 
@@ -335,7 +374,7 @@ export function importAll(data) {
   }
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
                    sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
-                   weightsAdded: 0 };
+                   weightsAdded: 0, cycleAdded: 0 };
 
   const store = listProfiles();
   for (const p of (data.profiles && data.profiles.profiles) || []) {
@@ -399,6 +438,15 @@ export function importAll(data) {
   }
   wts.sort((x, y) => String(x.at).localeCompare(String(y.at)));
   write(WKEY, wts.slice(-WEIGHTS_MAX));
+
+  const cyc = listCycle();
+  const seenC = new Set(cyc.map((c) => `${c.profile}|${String(c.at).slice(0, 10)}`));
+  for (const c of data.cycle || []) {
+    if (!c || !c.at || seenC.has(`${c.profile}|${String(c.at).slice(0, 10)}`)) continue;
+    cyc.push(c); seenC.add(`${c.profile}|${String(c.at).slice(0, 10)}`); report.cycleAdded++;
+  }
+  cyc.sort((x, y) => String(x.at).localeCompare(String(y.at)));
+  write(CYKEY, cyc.slice(-CYCLE_MAX));
 
   // Photos are not in the export. They live in IndexedDB and would multiply
   // the file size by an order of magnitude in base64 -- an export you cannot

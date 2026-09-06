@@ -24,12 +24,15 @@
 import { t as tr } from "./i18n.js";
 import { MOODS, collectDiary, moodTrend } from "./diary.js";
 import { collectWeights, weightOn, weightSeries } from "./weight.js";
+import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
+         dayOfCycle, FLOWS } from "./cycle.js";
 
 /* Plurals come from the dictionary keys the session card already uses, rather
  * than from new ones. "3 reps in 1 sets" is the kind of thing that makes an
  * app look machine-made, and English is the easy case -- German needs it too. */
 const nSets = (n) => tr(n === 1 ? "nSet" : "nSets", { n });
 const nReps = (n) => tr(n === 1 ? "nRep" : "nRepsCount", { n });
+const nDays = (n) => tr(n === 1 ? "nDay" : "nDays", { n });
 
 /* ---- days ------------------------------------------------------------- */
 
@@ -218,7 +221,8 @@ function level(reps, max) {
  * logged on a food day. Calories would be the obvious alternative, but they
  * are optional per meal, so a day of untyped meals would read as an empty one. */
 const weightOf = (mode) => (d) =>
-  mode === "meals" ? d.meals.length
+  mode === "cycle" ? (d.flow || 1)          // a logged day with no flow still shows
+  : mode === "meals" ? d.meals.length
   : mode === "diary" ? (d.rated ? d.mood : 0.5)   // an unrated day still shows faintly
   : d.reps;
 
@@ -244,6 +248,9 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
     if (c.key === todayKey) cls.push("today");
     if (c.key === selected) cls.push("sel");
     const label = !hit ? c.key
+      : mode === "cycle"
+        ? tr("dayCellCycle", { date: c.key, flow: hit.flow
+            ? tr(FLOWS.find((f) => f.v === hit.flow).key) : tr("logged") })
       : mode === "diary"
         ? tr("dayCellDiary", { date: c.key, mood: hit.rated ? hit.mood.toFixed(1) : "—" })
       : mode === "meals"
@@ -265,6 +272,7 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
         <option value="training"${mode === "meals" ? "" : " selected"}>${esc(tr("modeTraining"))}</option>
         <option value="meals"${mode === "meals" ? " selected" : ""}>${esc(tr("modeMeals"))}</option>
         <option value="diary"${mode === "diary" ? " selected" : ""}>${esc(tr("modeDiary"))}</option>
+        <option value="cycle"${mode === "cycle" ? " selected" : ""}>${esc(tr("modeCycle"))}</option>
       </select>
     </div>
     <div class="calnav">
@@ -395,6 +403,65 @@ function mealsHTML(day, key, todayKey) {
   </div>`;
 }
 
+/**
+ * The cycle section: where today sits, what the history says, and what is
+ * predicted -- with the evidence attached to every number.
+ */
+function cycleHTML(cycleDays, key, todayKey) {
+  const starts = cycleStarts(cycleDays);
+  if (!starts.length) return "";              // nothing logged: no section at all
+
+  const stats = lengthStats(cycleLengths(starts));
+  const pred = predictNext(starts, localeDay(todayKey));
+  const hit = cycleDays.get(key);
+  const n = dayOfCycle(starts, key);
+
+  const flow = hit && hit.flow ? tr(FLOWS.find((f) => f.v === hit.flow).key) : null;
+  const dayLine = n
+    ? `<p class="sub" style="margin:2px 0 0">${esc(tr("cycleDayN", { n }))}${
+        flow ? " · " + esc(flow) : ""}${
+        hit && hit.symptoms.length ? " · " + hit.symptoms.map((s) => esc(tr(s) || s)).join(", ") : ""}</p>`
+    : "";
+
+  /* Every figure says what it rests on. "28 days" from three cycles and
+   * "28 days" from thirty look identical otherwise, and the first is a guess
+   * wearing the second's clothes. */
+  const histLine = stats
+    ? `<p class="sub" style="margin:2px 0 0">${esc(tr("cycleHistory", {
+        mean: stats.mean.toFixed(1), n: stats.n, min: stats.min, max: stats.max }))}</p>`
+    : `<p class="sub" style="margin:2px 0 0">${esc(tr("cycleNotEnough", { n: starts.length }))}</p>`;
+
+  const predLine = pred
+    ? `<p class="sub" style="margin:2px 0 0">${esc(tr("cycleDue", {
+        date: shortDay(pred.due), spread: nDays(pred.spread), n: pred.stats.n }))}</p>`
+    : "";
+
+  return `<div class="daybox">
+    <div style="font-weight:600">${esc(tr("cycle"))}</div>
+    ${dayLine}${histLine}${predLine}
+    <p class="note" style="margin:6px 0 0">${esc(tr("cycleCaveat"))}</p>
+  </div>`;
+}
+
+/** The cycle form, for the Add dialog. */
+export function cycleFormHTML(key, current, symptoms) {
+  const flows = FLOWS.map((f) =>
+    `<button type="button" class="chip flowBtn" data-flow="${f.v}">${esc(tr(f.key))}</button>`).join("");
+  const chips = symptoms.map((s) =>
+    `<button type="button" class="chip symBtn" data-sym="${esc(s)}">${esc(tr(s) || s)}</button>`).join("");
+  return `
+    <p class="sub" style="margin:0 0 8px">${esc(tr("cycleFormFor", { date: shortDay(key) }))}</p>
+    <div class="chips">${flows}</div>
+    <div class="chips" style="margin-top:8px">${chips}</div>
+    <div class="row" style="margin-top:10px">
+      <button type="button" class="ghost" id="cycleSave" style="margin:0;padding:9px">${
+        esc(tr("saveToDay", { date: shortDay(key) }))}</button>
+      ${current ? `<button type="button" class="ghost" id="cycleClear" style="margin:0;padding:9px">${
+        esc(tr("clearDay"))}</button>` : ""}
+    </div>
+    <p class="note" style="margin:8px 0 0">${esc(tr("cycleCaveat"))}</p>`;
+}
+
 /** The meal form on its own, for the Add dialog. */
 export function mealFormHTML(key, todayKey) {
   return `
@@ -481,7 +548,7 @@ export function diaryFormHTML(key, todayKey, tags) {
 export function weightFormHTML(key, todayKey, current) {
   return `
     <p class="sub" style="margin:0 0 8px">${esc(current
-      ? tr("weightCarried", { kg: current.kg.toFixed(1), n: current.stale })
+      ? tr("weightCarried", { kg: current.kg.toFixed(1), n: nDays(current.stale) })
       : tr("noWeightYet"))}</p>
     <label for="weightKg">${esc(tr("weightKg"))}</label>
     <input id="weightKg" type="number" step="0.1" min="20" max="500" inputmode="decimal"
@@ -499,25 +566,27 @@ export function weightFormHTML(key, todayKey, current) {
  * does not lose the selected day, and re-rendering after a new set does not
  * throw the athlete back to today.
  */
-export function renderDashboard(sessions, meals, diary, weights, view, today = new Date()) {
+export function renderDashboard(sessions, meals, diary, weights, cycle, view, today = new Date()) {
   const days = collectDays(sessions);
   const mealDays = collectMeals(meals);
   const diaryDays = collectDiary(diary);
   const wts = collectWeights(weights);
+  const cycleDays = collectCycle(cycle);
   const o = overall(days, today);
   const todayKey = dayKey(today);
-  const mode = ["meals", "diary"].includes(view.mode) ? view.mode : "training";
+  const mode = ["meals", "diary", "cycle"].includes(view.mode) ? view.mode : "training";
 
   // An athlete with no training but a week of meals still has a dashboard.
-  if (!o.days && !mealDays.size && !diaryDays.size) {
+  if (!o.days && !mealDays.size && !diaryDays.size && !cycleDays.size) {
     return `<p class="sub" style="margin:0 0 10px">${esc(tr("dashboardEmpty"))}</p>
       ${calendarHTML(days, view.year, view.month, view.selected, todayKey, "training")}
       <button class="ghost" id="addBtn" style="margin-top:10px">${esc(tr("addEntry"))}</button>`;
   }
 
   return `
+    <div style="font-weight:600;margin:0 0 2px">${esc(tr("monthlySummary"))}</div>
     ${intakeHTML(mealDays, wts, view.year, view.month)}
-    ${calendarHTML({ meals: mealDays, diary: diaryDays }[mode] || days,
+    ${calendarHTML({ meals: mealDays, diary: diaryDays, cycle: cycleDays }[mode] || days,
                    view.year, view.month, view.selected, todayKey, mode)}
     <div id="dayHead">
       <div style="font-weight:600">${esc(localeDay(view.selected)
@@ -525,7 +594,7 @@ export function renderDashboard(sessions, meals, diary, weights, view, today = n
       ${(() => { const w = weightOn(wts, view.selected); return w
         ? `<p class="sub" style="margin:2px 0 0">${esc(w.stale === 0
             ? tr("weightMeasured", { kg: w.kg.toFixed(1) })
-            : tr("weightCarried", { kg: w.kg.toFixed(1), n: w.stale }))}</p>`
+            : tr("weightCarried", { kg: w.kg.toFixed(1), n: nDays(w.stale) }))}</p>`
         : ""; })()}
     </div>
     <button class="ghost" id="addBtn" style="margin-top:10px">${esc(tr("addEntry"))}</button>
@@ -533,6 +602,7 @@ export function renderDashboard(sessions, meals, diary, weights, view, today = n
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey)}
     ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey,
                 moodTrend(diaryDays, 30, today))}
+    ${cycleHTML(cycleDays, view.selected, todayKey)}
     ${volumeHTML(days, today)}
     <p class="sub" style="margin:12px 0 0">${esc(tr("dashboardCap"))}</p>`;
 }
