@@ -1,6 +1,7 @@
 {
   "name": "bioscout-web",
   "private": true,
+  "type": "module",
   "description": "Browser front end for BioScout. Nothing is installed from here; this file exists so the tests have one entry point.",
   "scripts": {
     "test": "node tools/run_tests.mjs"
