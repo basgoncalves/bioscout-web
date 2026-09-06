@@ -439,11 +439,18 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v39";
+// The public name and the build counter are separate strings on purpose. The
+// name is what a user reads; the counter is what tells "the fix is not
+// deployed yet" apart from "this tab predates the deploy", which is a question
+// that comes up on every single release.
+window.RELEASE = "beta V1";
+window.BUILD = 39;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
-try { document.getElementById("build").textContent = "build " + window.BUILD; } catch (e) {}
+try {
+  document.getElementById("build").textContent = window.RELEASE + " \u00b7 build " + window.BUILD;
+} catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;

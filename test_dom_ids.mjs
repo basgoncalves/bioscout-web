@@ -100,5 +100,13 @@ for (const sel of LAID_OUT) {
   }
 }
 
+/* The release name and the build counter must stay separate. The name is for
+ * readers; the counter is the only thing that distinguishes "not deployed" from
+ * "stale tab", and a name that never changes cannot do that job. */
+const rel = html.match(/window\.RELEASE\s*=\s*"([^"]*)"/);
+const bld = html.match(/window\.BUILD\s*=\s*(\d+)/);
+if (!rel) { bad++; console.error("FAIL  no window.RELEASE"); }
+if (!bld) { bad++; console.error("FAIL  window.BUILD is not a number -- it has to increment"); }
+
 if (bad) process.exit(1);
 console.log(`ok    ${used.size} referenced ids, 4 views, ${LAID_OUT.length} laid-out buttons reset`);
