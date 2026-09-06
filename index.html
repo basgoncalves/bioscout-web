@@ -46,9 +46,10 @@
   button:disabled { opacity:.45; cursor:default; }
   button + button { margin-top:8px; }
 
-  .whoRow { display:flex; align-items:center; gap:10px; margin:0 0 10px; }
+  .whoRow { margin:0 0 10px; }
   .whoName { font-size:19px; font-weight:600; line-height:1.15; }
-  .whoRow button { margin:0; width:auto; padding:9px 13px; flex:none; font-size:13px; }
+  .whoBtns { display:flex; gap:8px; margin-top:8px; }
+  .whoBtns button { margin:0; flex:1; padding:10px 8px; font-size:13px; }
   dialog { border:1px solid var(--line); border-radius:14px; background:var(--card);
            color:var(--ink); padding:16px; width:min(92vw,420px); }
   dialog::backdrop { background:rgba(0,0,0,.55); }
@@ -261,17 +262,20 @@
 
   <section id="viewDash" class="hidden">
     <div class="whoRow">
-      <div>
-        <div id="whoName" class="whoName"></div>
-        <div class="sub" id="whoSince"></div>
+      <div id="whoName" class="whoName"></div>
+      <div class="sub" id="whoSince"></div>
+      <div class="whoBtns">
+        <button class="ghost" id="settingsBtn" data-i18n="editProfile">Edit profile</button>
+        <button class="ghost" id="switchUserBtn" data-i18n="switchAthlete">Switch athlete</button>
       </div>
-      <button class="ghost" id="settingsBtn" data-i18n="editProfile">Edit profile</button>
     </div>
     <!-- capture= asks for the camera directly; without a file is fine too. -->
     <input id="mealShotFile" type="file" accept="image/*" capture="environment" class="hidden">
     <div class="card" id="dashboardCard"></div>
     <button id="newTrainingBtn" data-i18n="newTrainingSession">New training session</button>
-    <div class="card hidden" id="settingsCard">
+    <dialog id="settingsDlg">
+      <h2 style="font-size:16px;margin:0 0 10px" data-i18n="profileSettings">Profile settings</h2>
+
     <div class="row" style="margin-bottom:11px">
       <div>
         <label for="height" data-i18n="height">Height (m)</label>
@@ -324,8 +328,9 @@
       another phone or laptop, export the file here and import it there. That
       is a manual step, not background sync: without a server there is no
       honest way to make it automatic.</p>
-    </div>
-    <button class="ghost" id="switchUserBtn" data-i18n="switchAthlete">Switch athlete</button>
+    
+      <button class="ghost" id="settingsClose" data-i18n="close">Close</button>
+    </dialog>
     <dialog id="addDlg">
       <div id="addDlgBody"></div>
       <button class="ghost" id="addDlgClose" data-i18n="close">Close</button>
@@ -414,7 +419,7 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v36";
+window.BUILD = "v37";
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1241,7 +1246,14 @@ $("createProfileBtn").onclick = () => {
 };
 
 $("switchUserBtn").onclick = () => { renderLogin(); showView("viewLogin"); };
-$("settingsBtn").onclick = () => $("settingsCard").classList.toggle("hidden");
+/* A modal, not a panel further down the page. As a card it sat below the
+ * whole dashboard and the New session button, so tapping Edit profile
+ * changed something a screen and a half away and read as a dead button. */
+$("settingsBtn").onclick = () => $("settingsDlg").showModal();
+$("settingsClose").onclick = () => {
+  $("settingsDlg").close();
+  renderDash();                      // a renamed athlete, or a new mass
+};
 
 function startTraining() {
   // A session with sets in it is training in progress; archive it before
