@@ -162,20 +162,35 @@ export function periodLengths(days) {
  * be read as a fertile-window guarantee in either direction. */
 export const LUTEAL_DAYS = 14;
 
+/* Until there is a real average, the ring has to be drawn against something.
+ * 28 is the textbook figure and roughly the population median, and it is only
+ * ever used as a placeholder that says it is one -- a provisional model draws
+ * no fertile window and no ovulation, because those would be arithmetic on a
+ * number this athlete never supplied. */
+export const ASSUMED_CYCLE = 28;
+
 /**
- * The shape of a typical cycle for this athlete, or null.
+ * The shape of a typical cycle for this athlete, or null if nothing is logged.
  *
- * Null below three observed lengths, for the same reason predictNext() is:
- * a ring drawn from two cycles looks exactly as authoritative as one drawn
- * from twenty.
+ * Below three observed lengths the model is `provisional`: the ring is drawn
+ * against an assumed 28 days so there is something to see from the first
+ * period onward, but no fertile window and no ovulation are computed, because
+ * those would be arithmetic on a cycle length this athlete has not yet shown.
+ * The caller says which kind it has.
+ *
+ * Three is still the bar for anything predictive. What changes here is that
+ * "not enough data" is drawn as an honest placeholder rather than as nothing
+ * at all -- a cycle app that shows a blank for three months is no use, and
+ * the athlete already knows what day they are on.
  */
 export function phaseModel(days) {
   const starts = cycleStarts(days);
+  if (!starts.length) return null;
+
   const lengths = cycleLengths(starts);
   const stats = lengthStats(lengths);
-  if (!stats || stats.n < 3) return null;
-
-  const cycle = Math.round(stats.mean);
+  const provisional = !stats || stats.n < 3;
+  const cycle = provisional ? ASSUMED_CYCLE : Math.round(stats.mean);
   const periods = periodLengths(days);
   const period = periods.length
     ? Math.max(1, Math.round(periods.reduce((a, b) => a + b, 0) / periods.length))
@@ -185,10 +200,11 @@ export function phaseModel(days) {
   // which is not a thing to draw. Below that, the phase split is not
   // meaningful and only the period is shown.
   const ovulation = cycle - LUTEAL_DAYS;
-  const usable = ovulation > period + 1;
+  const usable = !provisional && ovulation > period + 1;
 
   return {
     cycle,
+    provisional,
     period: Math.min(period, cycle),
     ovulation: usable ? ovulation : null,
     // Sperm survive a few days; the egg does not. Hence the window sits

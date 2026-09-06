@@ -60,6 +60,21 @@ if (dupes.length) {
   for (const d of new Set(dupes)) console.error("  - " + d);
 }
 
+/* Container tags balance in the static markup.
+ *
+ * Moving a block between views means slicing HTML, and slicing to the wrong
+ * closing tag leaves the page still parsing -- browsers are forgiving -- with
+ * controls silently reparented somewhere they are never shown. Both times I
+ * did this, every id still existed and every test still passed. */
+for (const tag of ["div", "section", "dialog"]) {
+  const open = (markup.match(new RegExp(`<${tag}\\b[^>]*>`, "g")) || []).length;
+  const close = (markup.match(new RegExp(`</${tag}>`, "g")) || []).length;
+  if (open !== close) {
+    bad++;
+    console.error(`FAIL  <${tag}> is unbalanced in the markup: ${open} open, ${close} close`);
+  }
+}
+
 // Each view must exist and be reachable, or an athlete gets stuck on one.
 for (const v of ["viewLogin", "viewDash", "viewRecord"]) {
   if (!declared.has(v)) { bad++; console.error(`FAIL  missing view: ${v}`); }
@@ -71,7 +86,7 @@ for (const v of ["viewLogin", "viewDash", "viewRecord"]) {
  * last row overflows its container and lands on the text below. It looks fine
  * until the month has six rows. Any such button must reset its margin. */
 const LAID_OUT = ["button.day", "button.moodBtn", "button.calbtn", ".chip",
-                  ".whoRow button", ".tabs button", "button.stepBtn"];
+                  ".whoBtns button", ".tabs button", "button.stepBtn"];
 // Comments stripped first: a comment explaining why a margin reset matters
 // contains the word "margin", and would satisfy the check it exists to make.
 const style = ((html.match(/<style[^>]*>([\s\S]*?)<\/style>/) || [, ""])[1])

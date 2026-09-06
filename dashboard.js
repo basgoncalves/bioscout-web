@@ -438,7 +438,8 @@ function cycleHTML(cycleDays, key, todayKey) {
   const histLine = stats
     ? `<p class="sub" style="margin:2px 0 0">${esc(tr("cycleHistory", {
         mean: stats.mean.toFixed(1), n: stats.n, min: stats.min, max: stats.max }))}</p>`
-    : `<p class="sub" style="margin:2px 0 0">${esc(tr("cycleNotEnough", { n: starts.length }))}</p>`;
+    : `<p class="sub" style="margin:2px 0 0">${esc(tr("cycleNotEnough", {
+        n: tr(starts.length === 1 ? "nPeriod" : "nPeriods", { n: starts.length }) }))}</p>`;
 
   const predLine = pred
     ? `<p class="sub" style="margin:2px 0 0">${esc(tr("cycleDue", {
@@ -447,13 +448,15 @@ function cycleHTML(cycleDays, key, todayKey) {
 
   const model = phaseModel(cycleDays);
   const ring = model ? ringHTML(model, cycleDays, todayKey) : "";
-  const legend = model ? `<div class="ringKey">
+  const legend = !model ? "" : `<div class="ringKey">
       <span><i class="kPeriod"></i>${esc(tr("phasePeriod"))}</span>
       ${model.fertile ? `<span><i class="kFertile"></i>${esc(tr("phaseFertile"))}</span>` : ""}
       ${model.ovulation ? `<span><i class="kOvu"></i>${esc(tr("phaseOvulation"))}</span>` : ""}
       <span><i class="kLogged"></i>${esc(tr("phaseLogged"))}</span>
     </div>
-    <p class="note" style="margin:6px 0 0">${esc(tr("phaseNote", { luteal: LUTEAL_DAYS }))}</p>` : "";
+    <p class="note" style="margin:6px 0 0">${esc(model.provisional
+      ? tr("phaseNoteProvisional", { n: model.cycle })
+      : tr("phaseNote", { luteal: LUTEAL_DAYS }))}</p>`;
 
   return `<div class="daybox">
     <div style="font-weight:600">${esc(tr("cycle"))}</div>
@@ -513,9 +516,10 @@ function ringHTML(model, cycleDays, todayKey) {
     return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6" class="ringToday"/>`;
   })() : "";
 
+  const ofLine = model.provisional ? tr("ofNAssumed", { n: cycle }) : tr("ofNDays", { n: cycle });
   const centre = day
     ? `<tspan x="${CX}" dy="-4" class="ringBig">${day}</tspan>
-       <tspan x="${CX}" dy="17" class="ringSmall">${esc(tr("ofNDays", { n: cycle }))}</tspan>`
+       <tspan x="${CX}" dy="17" class="ringSmall">${esc(ofLine)}</tspan>`
     : `<tspan x="${CX}" dy="4" class="ringSmall">${esc(tr("cycleNoToday"))}</tspan>`;
 
   return `<svg viewBox="0 0 200 200" class="ring" role="img"
