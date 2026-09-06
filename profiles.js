@@ -16,6 +16,7 @@ const PKEY = "bioscout.profiles.v1";
 const SKEY = "bioscout.session.v1";
 const AKEY = "bioscout.archive.v1";
 const CKEY = "bioscout.curves.v1";
+const MKEY = "bioscout.meals.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
  * one; curves are not, so only the most recent sets keep those.
@@ -115,6 +116,46 @@ export function archiveSession() {
   return trimmed.length;
 }
 
+// --- meals -----------------------------------------------------------------
+/* A meal is a time, a description and, if the person felt like typing it, a
+ * calorie figure. That is the whole record on purpose: this is a log, not a
+ * budget. There are no targets, no remaining-for-today, and nothing that
+ * scores a day, because the app has no idea what anyone's intake should be and
+ * inventing one would be worse than useless.
+ *
+ * `at` is the identity, as `started` is for sessions: it makes import
+ * idempotent and gives deletion something to name. */
+const MEALS_MAX = 2000;
+
+export function listMeals() {
+  const m = read(MKEY, []);
+  return Array.isArray(m) ? m : [];
+}
+
+/** Add a meal. `at` defaults to now; pass one to log against another day. */
+export function addMeal({ profile = null, text = "", kcal = null, at = null }) {
+  const entry = {
+    at: at || new Date().toISOString(),
+    profile,
+    text: String(text).slice(0, 200),
+    kcal: Number.isFinite(+kcal) && +kcal > 0 ? Math.round(+kcal) : null,
+  };
+  if (!entry.text.trim()) return null;
+  const all = listMeals();
+  // Two meals in the same millisecond is a double tap, not two meals.
+  if (all.some((m) => m.at === entry.at && m.profile === entry.profile)) return null;
+  all.push(entry);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(MKEY, all.slice(-MEALS_MAX));
+  return entry;
+}
+
+export function deleteMeal(at, profile = null) {
+  const kept = listMeals().filter((m) => !(m.at === at && m.profile === profile));
+  write(MKEY, kept);
+  return kept.length;
+}
+
 // --- stored waveforms ------------------------------------------------------
 const r3 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(3) : 0));
 const r2 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(2) : 0));
@@ -189,6 +230,7 @@ export function exportAll() {
     profiles: listProfiles(),
     session: getSession(),
     archive: listArchive(),
+    meals: listMeals(),
   };
 }
 
@@ -207,7 +249,8 @@ export function importAll(data) {
   if (!(data.version <= EXPORT_VERSION)) {
     throw new Error(`file is from a newer version (${data.version}) than this app understands`);
   }
-  const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0, sessionAdopted: false };
+  const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
+                   sessionAdopted: false, mealsAdded: 0 };
 
   const store = listProfiles();
   for (const p of (data.profiles && data.profiles.profiles) || []) {
@@ -243,6 +286,16 @@ export function importAll(data) {
   }
   a.sort((x, y) => String(x.started).localeCompare(String(y.started)));
   write(AKEY, a.slice(-ARCHIVE_MAX));
+
+  // Meals merge on (at, profile), so re-importing the same file adds nothing.
+  const meals = listMeals();
+  const have = new Set(meals.map((m) => `${m.profile}|${m.at}`));
+  for (const m of data.meals || []) {
+    if (!m || !m.at || have.has(`${m.profile}|${m.at}`)) continue;
+    meals.push(m); have.add(`${m.profile}|${m.at}`); report.mealsAdded++;
+  }
+  meals.sort((x, y) => String(x.at).localeCompare(String(y.at)));
+  write(MKEY, meals.slice(-MEALS_MAX));
   return report;
 }
 

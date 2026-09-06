@@ -16,8 +16,8 @@ globalThis.localStorage = { getItem: () => null, setItem: () => {} };
 Object.defineProperty(globalThis, "navigator",
   { value: { languages: ["en"] }, configurable: true });
 
-const { dayKey, allSessions, collectDays, streak, overall, monthMatrix, weeklyVolume } =
-  await import("./dashboard.js");
+const { dayKey, allSessions, collectDays, collectMeals, streak, overall,
+        monthMatrix, weeklyVolume } = await import("./dashboard.js");
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {
@@ -116,6 +116,35 @@ const overnight = [session("2026-08-14T21:00:00.000Z", [
   ok(streak(mk("2026-08-17"), today) === 0,
      "a gap of two days ends the streak");
   ok(streak(new Map(), today) === 0, "no training is no streak");
+}
+
+/* ---- meals ------------------------------------------------------------- */
+{
+  const meal = (at, text, kcal, profile = "Bas") => ({ at, text, kcal, profile });
+  const all = [
+    meal("2026-08-14T21:30:00.000Z", "late snack", 200),      // 23:30 local, the 14th
+    meal("2026-08-14T22:30:00.000Z", "later snack", null),    // 00:30 local, the 15th
+    meal("2026-08-15T07:00:00.000Z", "oats", 450),
+    meal("2026-08-15T11:00:00.000Z", "someone else's lunch", 700, "Other"),
+  ];
+
+  const mine = collectMeals(all, "Bas");
+  ok(mine.size === 2, "meals bucket into local days like sets do", `${mine.size}`);
+  ok(mine.get("2026-08-14").meals.length === 1,
+     "a late-evening meal stays on the day it was eaten, locally");
+
+  const d15 = mine.get("2026-08-15");
+  ok(d15.meals.length === 2, "the after-midnight snack lands on the next day");
+  // The untyped snack must not be counted as zero: a total is only over the
+  // meals that carry a figure, and the day says how many that was.
+  ok(d15.kcal === 450 && d15.counted === 1 && d15.meals.length === 2,
+     "calories total only the meals that have them",
+     `${d15.kcal} kcal from ${d15.counted}/${d15.meals.length}`);
+
+  ok(!collectMeals(all, "Bas").get("2026-08-15").meals.some((m) => m.profile === "Other"),
+     "one athlete's log does not contain another's");
+  ok(collectMeals(all).size === 2, "with no athlete given, nothing is filtered");
+  ok(collectMeals(null).size === 0, "no meals at all is an empty map, not a throw");
 }
 
 /* ---- month grid ------------------------------------------------------- */
