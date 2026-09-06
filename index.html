@@ -46,6 +46,10 @@
   button:disabled { opacity:.45; cursor:default; }
   button + button { margin-top:8px; }
 
+  .calmode { margin:14px 0 0; }
+  .calmode select { margin:0; padding:7px 9px; font-size:13px; }
+  button.linky { background:none; border:0; color:var(--muted); font-size:18px;
+                 line-height:1; padding:2px 6px; margin:0; width:auto; }
   /* Athlete buttons on the login screen: full width, comfortable tap target. */
   button.athlete { margin:0 0 8px; text-align:left; padding:13px 14px; font-size:15px; }
   #profileList:empty { display:none; }
@@ -347,6 +351,7 @@ import { inverseDynamics } from "./dynamics.js";
 import { classify, MIN_CONFIDENCE } from "./detect.js";
 import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          newSession, getSession, clearSession, addSet, summariseSession,
+         listMeals, addMeal, deleteMeal,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices }
        from "./profiles.js";
@@ -932,19 +937,34 @@ function dashboardData() {
   return allSessions(listArchive(), getSession(), currentAthlete());
 }
 
+/** This athlete's meals. Same rule as sessions: a shared phone holds
+ *  everyone's, and a log is only useful if it is one person's. */
+function myMeals() {
+  const who = currentAthlete();
+  return listMeals().filter((m) => m.profile === who);
+}
+
+/** Noon local on the selected day, so a meal logged against another date
+ *  lands squarely on it whatever the timezone does at midnight. */
+function atOnDay(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0).toISOString();
+}
+
 /** Open on the most recent day that has training, not blankly on today. */
 function defaultDashView() {
-  const days = collectDays(dashboardData());
-  const keys = [...days.keys()].sort();
-  const pick = keys.length ? keys[keys.length - 1] : dayKey(new Date());
+  // Today, not the last training day. Meals are logged daily and training is
+  // not, so opening on an old session would put the meal form on the wrong
+  // date more often than not.
+  const pick = dayKey(new Date());
   const [y, m] = pick.split("-").map(Number);
-  return { year: y, month: m - 1, selected: pick };
+  return { year: y, month: m - 1, selected: pick, mode: "training" };
 }
 
 function renderDash() {
   const card = $("dashboardCard");
   if (!dashView) dashView = defaultDashView();
-  card.innerHTML = renderDashboard(dashboardData(), dashView);
+  card.innerHTML = renderDashboard(dashboardData(), myMeals(), dashView);
 
   const step = (n) => {
     const d = new Date(dashView.year, dashView.month + n, 1);
@@ -955,6 +975,23 @@ function renderDash() {
   if ($("dashNext")) $("dashNext").onclick = () => step(1);
   card.querySelectorAll("button.day[data-day]").forEach((b) => {
     b.onclick = () => { dashView = { ...dashView, selected: b.dataset.day }; renderDash(); };
+  });
+
+  if ($("dashMode")) $("dashMode").onchange = (e) => {
+    dashView = { ...dashView, mode: e.target.value };
+    renderDash();
+  };
+
+  const logMeal = (at) => {
+    const text = $("mealText").value.trim();
+    if (!text) { say(tr("mealNeedsText"), true); return; }
+    addMeal({ profile: currentAthlete(), text, kcal: $("mealKcal").value, at });
+    renderDash();
+  };
+  if ($("mealAddDay")) $("mealAddDay").onclick = () => logMeal(atOnDay(dashView.selected));
+  if ($("mealAddNow")) $("mealAddNow").onclick = () => logMeal(null);
+  card.querySelectorAll("button.mealDel").forEach((b) => {
+    b.onclick = () => { deleteMeal(b.dataset.at, currentAthlete()); renderDash(); };
   });
 }
 

@@ -59,6 +59,25 @@ export function allSessions(archive, open, profile = null) {
   return out.sort((a, b) => String(a.started).localeCompare(String(b.started)));
 }
 
+/** Meals for one athlete, grouped into local calendar days. */
+export function collectMeals(meals, profile = null) {
+  const days = new Map();
+  for (const m of meals || []) {
+    if (profile && m.profile !== profile) continue;
+    const key = dayKey(m.at);
+    if (!key) continue;
+    if (!days.has(key)) days.set(key, { key, meals: [], kcal: 0, counted: 0 });
+    const d = days.get(key);
+    d.meals.push(m);
+    // Calories are optional, so a day's total is only over the meals that
+    // carry one. `counted` says how many that was, because "1400 kcal" from
+    // two of five meals is a different claim from "1400 kcal" from all five.
+    if (Number.isFinite(m.kcal)) { d.kcal += m.kcal; d.counted++; }
+  }
+  for (const d of days.values()) d.meals.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  return days;
+}
+
 /**
  * Group sets into local calendar days.
  *
@@ -193,10 +212,16 @@ function level(reps, max) {
   return Math.min(4, 1 + Math.floor((3 * reps) / max));
 }
 
-function calendarHTML(days, year, month, selected, todayKey) {
+/* What the shading means depends on the mode: reps on a training day, meals
+ * logged on a food day. Calories would be the obvious alternative, but they
+ * are optional per meal, so a day of untyped meals would read as an empty one. */
+const weightOf = (mode) => (d) => (mode === "meals" ? d.meals.length : d.reps);
+
+function calendarHTML(days, year, month, selected, todayKey, mode) {
   const weeks = monthMatrix(year, month);
+  const w = weightOf(mode);
   const inView = weeks.flat().filter((c) => c.inMonth).map((c) => days.get(c.key)).filter(Boolean);
-  const max = Math.max(0, ...inView.map((d) => d.reps));
+  const max = Math.max(0, ...inView.map(w));
 
   // Weekday initials from the locale rather than hardcoded: a German user
   // should not get M T W T F S S.
@@ -210,12 +235,13 @@ function calendarHTML(days, year, month, selected, todayKey) {
     const hit = days.get(c.key);
     const cls = ["day"];
     if (!c.inMonth) cls.push("out");
-    if (hit) cls.push("has", "l" + level(hit.reps, max));
+    if (hit) cls.push("has", "l" + level(w(hit), max));
     if (c.key === todayKey) cls.push("today");
     if (c.key === selected) cls.push("sel");
-    const label = hit
-      ? tr("dayCellLabel", { date: c.key, reps: nReps(hit.reps), sets: nSets(hit.sets.length) })
-      : c.key;
+    const label = !hit ? c.key
+      : mode === "meals"
+        ? tr("dayCellMeals", { date: c.key, n: hit.meals.length })
+        : tr("dayCellLabel", { date: c.key, reps: nReps(hit.reps), sets: nSets(hit.sets.length) });
     return `<button type="button" class="${cls.join(" ")}" data-day="${c.key}"
       ${hit ? "" : "disabled"} title="${esc(label)}" aria-label="${esc(label)}">
       <span>${c.date.getDate()}</span></button>`;
@@ -225,6 +251,12 @@ function calendarHTML(days, year, month, selected, todayKey) {
     .toLocaleDateString([], { month: "long", year: "numeric" });
 
   return `
+    <div class="calmode">
+      <select id="dashMode" aria-label="${esc(tr("calendarShows"))}">
+        <option value="training"${mode === "meals" ? "" : " selected"}>${esc(tr("modeTraining"))}</option>
+        <option value="meals"${mode === "meals" ? " selected" : ""}>${esc(tr("modeMeals"))}</option>
+      </select>
+    </div>
     <div class="calnav">
       <button type="button" class="ghost calbtn" id="dashPrev" aria-label="${esc(tr("prevMonth"))}">‹</button>
       <div class="calmonth">${esc(title)}</div>
@@ -273,6 +305,52 @@ function dayHTML(day, key) {
       <tbody>${rows}</tbody></table></div>`;
 }
 
+/** The selected day's meals, and the form to add one to it. */
+function mealsHTML(day, key, todayKey) {
+  const rows = (day?.meals || []).map((m) => {
+    const t = new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return `<tr><td>${esc(t)}</td><td>${esc(m.text)}</td>
+      <td style="text-align:right">${m.kcal ?? "—"}</td>
+      <td style="width:1%"><button type="button" class="linky mealDel"
+        data-at="${esc(m.at)}" aria-label="${esc(tr("delete"))}">×</button></td></tr>`;
+  }).join("");
+
+  // Only over the meals that carry a figure, and it says so. A total that
+  // quietly ignores three untyped meals is a wrong number, not a partial one.
+  const sum = day && day.counted
+    ? `<p class="sub" style="margin:6px 0 0">${esc(tr("kcalFromN", {
+        kcal: day.kcal, n: day.counted, total: day.meals.length }))}</p>`
+    : "";
+
+  return `<div class="daybox">
+    <div style="font-weight:600">${esc(tr("meals"))}</div>
+    ${rows
+      ? `<table><thead><tr><th>${esc(tr("time"))}</th><th>${esc(tr("meal"))}</th>
+           <th style="text-align:right">${esc(tr("kcal"))}</th><th></th></tr></thead>
+         <tbody>${rows}</tbody></table>${sum}`
+      : `<p class="sub" style="margin:6px 0 0">${esc(tr("noMealsThatDay"))}</p>`}
+    <div class="row" style="margin-top:10px">
+      <div style="flex:2.2">
+        <label for="mealText">${esc(tr("meal"))}</label>
+        <input id="mealText" type="text" autocomplete="off" placeholder="${esc(tr("mealPlaceholder"))}">
+      </div>
+      <div style="flex:1">
+        <label for="mealKcal">${esc(tr("kcalOptional"))}</label>
+        <input id="mealKcal" type="number" min="0" step="10" inputmode="numeric">
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button type="button" class="ghost" id="mealAddDay" style="margin:0;padding:9px">${
+        esc(key === todayKey ? tr("addMealToday") : tr("addMealToDay", { date: shortDay(key) }))}</button>
+      ${key === todayKey ? "" :
+        `<button type="button" class="ghost" id="mealAddNow" style="margin:0;padding:9px">${esc(tr("logNow"))}</button>`}
+    </div>
+  </div>`;
+}
+
+const shortDay = (key) =>
+  localeDay(key).toLocaleDateString([], { day: "numeric", month: "short" });
+
 /**
  * The whole dashboard as one HTML string.
  *
@@ -280,12 +358,15 @@ function dayHTML(day, key) {
  * does not lose the selected day, and re-rendering after a new set does not
  * throw the athlete back to today.
  */
-export function renderDashboard(sessions, view, today = new Date()) {
+export function renderDashboard(sessions, meals, view, today = new Date()) {
   const days = collectDays(sessions);
+  const mealDays = collectMeals(meals);
   const o = overall(days, today);
   const todayKey = dayKey(today);
+  const mode = view.mode === "meals" ? "meals" : "training";
 
-  if (!o.days) {
+  // An athlete with no training but a week of meals still has a dashboard.
+  if (!o.days && !mealDays.size) {
     return `<h1 style="font-size:17px;margin:0 0 2px">${esc(tr("dashboardTitle"))}</h1>
       <p class="sub" style="margin:0">${esc(tr("dashboardEmpty"))}</p>`;
   }
@@ -304,8 +385,10 @@ export function renderDashboard(sessions, view, today = new Date()) {
       ${tile(o.reps, tr("tileReps"))}
       ${tile(o.streak, tr("tileStreak"))}
     </div>
-    ${calendarHTML(days, view.year, view.month, view.selected, todayKey)}
+    ${calendarHTML(mode === "meals" ? mealDays : days,
+                   view.year, view.month, view.selected, todayKey, mode)}
     ${dayHTML(days.get(view.selected), view.selected)}
+    ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey)}
     ${volumeHTML(days, today)}
     <p class="sub" style="margin:12px 0 0">${esc(tr("dashboardCap"))}</p>`;
 }
