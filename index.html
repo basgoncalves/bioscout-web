@@ -280,6 +280,17 @@
     </label>
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
+    <div id="linkRow" class="hidden" style="margin-top:11px">
+      <label for="linkUrl" data-i18n="videoLink">Video link</label>
+      <input id="linkUrl" type="url" placeholder="https://youtube.com/shorts/…" autocomplete="off" inputmode="url">
+      <label for="linkRange" style="margin-top:8px"><span data-i18n="clipRange">Clip (optional)</span></label>
+      <input id="linkRange" type="text" placeholder="0:12-0:19" autocomplete="off">
+      <button class="ghost" id="linkBtn" data-i18n="fetchAndAnalyse">Fetch and analyse</button>
+      <p class="note" style="margin:6px 0 0" data-i18n-html="noteFetchHelper">Fetched by the helper running on
+        <b>this device</b> and analysed here — the video still never leaves your
+        phone. Trim to the reps: tracking runs frame by frame, so four minutes
+        of video is four minutes of work to reach six seconds of squat.</p>
+    </div>
     <input id="fileInput" type="file" accept="video/*" class="hidden">
     <div class="status" id="status" data-i18n="statusStarting">Starting…</div>
     </div>
@@ -341,6 +352,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
        from "./profiles.js";
 import { renderDashboard, dayKey, allSessions, collectDays }
        from "./dashboard.js";
+import { probe as probeHelper, fetchClip } from "./fetcher.js";
 import { Overlay } from "./overlay.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
 // array of times, and a translated string inside either of them would have
@@ -805,6 +817,37 @@ function setChart(points, key) {
       <span>${tr("whisker")}</span><span>${spec.unit}</span></div>
     <p class="note" style="margin-top:2px">${tr("noteSetAxis")}</p>`;
 }
+
+/* --- optional local fetch helper -------------------------------------------
+ * The link box only exists if tools/bioscout_fetch.py is running on this
+ * device. Showing a control that cannot work is worse than not having it: the
+ * person tries it, it fails, and they learn the app is broken rather than that
+ * a helper is not running.
+ */
+probeHelper().then((info) => {
+  if (!info) return;
+  $("linkRow").classList.remove("hidden");
+  if (info.ytdlp === false) say(tr("sayNoYtdlp"), true);
+});
+
+$("linkBtn").onclick = async () => {
+  const url = $("linkUrl").value.trim();
+  if (!url) return;
+  $("linkBtn").disabled = true;
+  try {
+    say(tr("sayFetchingClip"));
+    const blob = await fetchClip({ url, range: $("linkRange").value });
+    await analyseVideoBlob(blob);
+  } catch (err) {
+    // The helper's own words where it has them -- "video is private" and
+    // "yt-dlp is not installed" call for different actions.
+    const known = { badUrl: "sayBadLink", badRange: "sayBadRange",
+                    tooLong: "sayClipTooLong", empty: "sayEmptyClip" }[err.message];
+    say(known ? tr(known) : tr("sayFetchFailed", { err: err.message }), true);
+  } finally {
+    $("linkBtn").disabled = false;
+  }
+};
 
 /* --- views -----------------------------------------------------------------
  * Three screens on one page: who is training, their dashboard, and recording.
@@ -1343,7 +1386,11 @@ $("recBtn").onclick = () => {
 $("fileBtn").onclick = () => $("fileInput").click();
 $("fileInput").onchange = async (e) => {
   const file = e.target.files[0];
-  if (!file) return;
+  if (file) await analyseVideoBlob(file);
+};
+
+/** Track a video from anywhere: the file picker, or the local fetch helper. */
+async function analyseVideoBlob(file) {
   say(tr("sayReadingVideo"));
   const v = document.createElement("video");
   v.src = URL.createObjectURL(file); v.muted = true; v.playsInline = true;
@@ -1364,7 +1411,7 @@ $("fileInput").onchange = async (e) => {
   }
   off.close();
   finish();
-};
+}
 
 // --- analysis --------------------------------------------------------------
 async function finish() {
