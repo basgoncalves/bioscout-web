@@ -298,10 +298,8 @@ function volumeHTML(days, today) {
 }
 
 function dayHTML(day, key) {
-  const date = localeDay(key).toLocaleDateString([],
-    { weekday: "long", day: "numeric", month: "long" });
   if (!day) {
-    return `<div class="daybox"><div class="sub" style="margin:0">${esc(date)}</div>
+    return `<div class="daybox"><div style="font-weight:600">${esc(tr("modeTraining"))}</div>
       <p class="sub" style="margin:6px 0 0">${esc(tr("noTrainingThatDay"))}</p></div>`;
   }
   const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -313,7 +311,7 @@ function dayHTML(day, key) {
   }).join("");
   const acts = [...day.activities].map((a) => esc(tr(a))).join(", ");
   return `<div class="daybox">
-    <div style="font-weight:600">${esc(date)}</div>
+    <div style="font-weight:600">${esc(tr("modeTraining"))}</div>
     <p class="sub" style="margin:2px 0 8px">${esc(tr("daySub", {
       sets: nSets(day.sets.length), reps: nReps(day.reps),
     }))}${day.sessions.size > 1 ? " · " + esc(tr("nSessionsOnDay", { n: day.sessions.size })) : ""

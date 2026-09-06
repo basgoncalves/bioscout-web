@@ -95,12 +95,16 @@
   .tile span { display:block; font-size:11px; color:var(--muted); }
   .calnav { display:flex; align-items:center; gap:8px; margin:14px 0 6px; }
   .calmonth { flex:1; text-align:center; font-weight:600; }
-  button.calbtn { width:38px; flex:none; padding:6px 0; font-size:18px; line-height:1; }
+  button.calbtn { width:38px; flex:none; margin:0; padding:6px 0; font-size:18px; line-height:1; }
   .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
   .dow { text-align:center; font-size:11px; color:var(--muted); padding-bottom:2px; }
   /* Square cells without a fixed pixel size, so the grid survives a 320px
      phone and a tablet without a media query for each. */
-  button.day { width:100%; aspect-ratio:1; padding:0; font-size:13px; font-weight:500;
+  /* margin:0 matters more than it looks: the global `button + button` rule
+     adds 8px above every button that follows another, which in a grid pushes
+     each cell down inside its own row until the last row spills out of the
+     container and lands on the text below it. */
+  button.day { width:100%; aspect-ratio:1; margin:0; padding:0; font-size:13px; font-weight:500;
                border-radius:8px; background:var(--bg); color:var(--ink);
                border:1px solid transparent; display:flex; align-items:center;
                justify-content:center; }
@@ -373,7 +377,7 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v31";
+window.BUILD = "v32";
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
