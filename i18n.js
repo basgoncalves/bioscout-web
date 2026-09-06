@@ -357,7 +357,7 @@ const EN = {
   "viewLabel": "{view} view",
   "motSignedFor": ".mot signed for {model}",
   "view_unknown": "unknown",
-  "tagline": "Movement analysis in the browser. Video never leaves your phone.",
+  "tagline": "A physics-informed, AI-powered bio tracker. Video never leaves your phone.",
   // --- notes and messages that used to be English only -------------------
   "noteAthleteFields": "These three belong to the athlete and are saved with the profile as you change them. Mass is the one to keep current: it scales every joint moment and contact force on the page, so the field says how old the stored figure is.",
   "notePrivacy": "Profiles and training history live on <b>this device only</b> \u2014 there is no account and nothing is uploaded, so nobody else can see your sessions and neither can I. To carry them to another phone or laptop, export the file here and import it there. That is a manual step, not background sync: without a server there is no honest way to make it automatic.",
@@ -847,7 +847,7 @@ const PT = {
   "viewLabel": "vista {view}",
   "motSignedFor": ".mot com os sinais de {model}",
   "view_unknown": "desconhecida",
-  "tagline": "An\u00e1lise do movimento no navegador. O v\u00eddeo nunca sai do seu telem\u00f3vel.",
+  "tagline": "Um monitor biol\u00f3gico com base na f\u00edsica e em IA. O v\u00eddeo nunca sai do seu telem\u00f3vel.",
   // --- notas e mensagens antes s\u00f3 em ingl\u00eas ------------------------------
   "noteAthleteFields": "Estes tr\u00eas pertencem ao atleta e s\u00e3o guardados com o perfil \u00e0 medida que os altera. A massa \u00e9 a que conv\u00e9m manter atualizada: escala todos os momentos articulares e for\u00e7as de contacto da p\u00e1gina, por isso o campo indica h\u00e1 quanto tempo o valor guardado foi registado.",
   "notePrivacy": "Os perfis e o hist\u00f3rico de treino ficam <b>apenas neste dispositivo</b> \u2014 n\u00e3o h\u00e1 conta e nada \u00e9 enviado, por isso mais ningu\u00e9m v\u00ea as suas sess\u00f5es, nem eu. Para as levar para outro telem\u00f3vel ou port\u00e1til, exporte o ficheiro aqui e importe-o l\u00e1. \u00c9 um passo manual, n\u00e3o sincroniza\u00e7\u00e3o em segundo plano: sem servidor n\u00e3o h\u00e1 forma honesta de o tornar autom\u00e1tico.",
@@ -1336,7 +1336,7 @@ const DE = {
   "viewLabel": "{view} Ansicht",
   "motSignedFor": ".mot mit den Vorzeichen von {model}",
   "view_unknown": "unbekannte",
-  "tagline": "Bewegungsanalyse im Browser. Das Video verl\u00e4sst Ihr Ger\u00e4t nicht.",
+  "tagline": "Ein physikbasierter, KI-gest\u00fctzter Bio-Tracker. Das Video verl\u00e4sst Ihr Ger\u00e4t nicht.",
   // --- Hinweise und Meldungen, fr\u00fcher nur Englisch ---------------------
   "noteAthleteFields": "Diese drei geh\u00f6ren zum Athleten und werden beim \u00c4ndern mit dem Profil gespeichert. Die Masse ist die, die aktuell bleiben muss: sie skaliert jedes Gelenkmoment und jede Kontaktkraft auf dieser Seite, deshalb zeigt das Feld an, wie alt der gespeicherte Wert ist.",
   "notePrivacy": "Profile und Trainingsverlauf bleiben <b>nur auf diesem Ger\u00e4t</b> \u2014 es gibt kein Konto und es wird nichts hochgeladen, also sieht niemand sonst Ihre Sitzungen, ich auch nicht. Um sie auf ein anderes Telefon oder einen Laptop mitzunehmen, exportieren Sie die Datei hier und importieren Sie sie dort. Das ist ein manueller Schritt, keine Hintergrund-Synchronisation: ohne Server gibt es keinen ehrlichen Weg, das zu automatisieren.",
