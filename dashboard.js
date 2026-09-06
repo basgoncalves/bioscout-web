@@ -22,6 +22,7 @@
  * the bucketing -- which is the part with edge cases -- without a DOM.
  */
 import { t as tr } from "./i18n.js";
+import { MOODS, collectDiary, moodTrend } from "./diary.js";
 
 /* Plurals come from the dictionary keys the session card already uses, rather
  * than from new ones. "3 reps in 1 sets" is the kind of thing that makes an
@@ -215,7 +216,10 @@ function level(reps, max) {
 /* What the shading means depends on the mode: reps on a training day, meals
  * logged on a food day. Calories would be the obvious alternative, but they
  * are optional per meal, so a day of untyped meals would read as an empty one. */
-const weightOf = (mode) => (d) => (mode === "meals" ? d.meals.length : d.reps);
+const weightOf = (mode) => (d) =>
+  mode === "meals" ? d.meals.length
+  : mode === "diary" ? (d.rated ? d.mood : 0.5)   // an unrated day still shows faintly
+  : d.reps;
 
 function calendarHTML(days, year, month, selected, todayKey, mode) {
   const weeks = monthMatrix(year, month);
@@ -239,6 +243,8 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
     if (c.key === todayKey) cls.push("today");
     if (c.key === selected) cls.push("sel");
     const label = !hit ? c.key
+      : mode === "diary"
+        ? tr("dayCellDiary", { date: c.key, mood: hit.rated ? hit.mood.toFixed(1) : "—" })
       : mode === "meals"
         ? tr("dayCellMeals", { date: c.key, n: hit.meals.length })
         : tr("dayCellLabel", { date: c.key, reps: nReps(hit.reps), sets: nSets(hit.sets.length) });
@@ -255,6 +261,7 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
       <select id="dashMode" aria-label="${esc(tr("calendarShows"))}">
         <option value="training"${mode === "meals" ? "" : " selected"}>${esc(tr("modeTraining"))}</option>
         <option value="meals"${mode === "meals" ? " selected" : ""}>${esc(tr("modeMeals"))}</option>
+        <option value="diary"${mode === "diary" ? " selected" : ""}>${esc(tr("modeDiary"))}</option>
       </select>
     </div>
     <div class="calnav">
@@ -309,7 +316,10 @@ function dayHTML(day, key) {
 function mealsHTML(day, key, todayKey) {
   const rows = (day?.meals || []).map((m) => {
     const t = new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    return `<tr><td>${esc(t)}</td><td>${esc(m.text)}</td>
+    const shot = m.photo
+      ? `<img class="mealShot" data-at="${esc(m.at)}" alt="" width="44" height="44">`
+      : "";
+    return `<tr><td>${esc(t)}</td><td>${shot}${esc(m.text)}</td>
       <td style="text-align:right">${m.kcal ?? "—"}</td>
       <td style="width:1%"><button type="button" class="linky mealDel"
         data-at="${esc(m.at)}" aria-label="${esc(tr("delete"))}">×</button></td></tr>`;
@@ -340,6 +350,11 @@ function mealsHTML(day, key, todayKey) {
       </div>
     </div>
     <div class="row" style="margin-top:8px">
+      <button type="button" class="ghost" id="mealShotBtn" style="margin:0;padding:9px">${
+        esc(tr("addPhoto"))}</button>
+      <span class="sub" id="mealShotName"></span>
+    </div>
+    <div class="row" style="margin-top:8px">
       <button type="button" class="ghost" id="mealAddDay" style="margin:0;padding:9px">${
         esc(key === todayKey ? tr("addMealToday") : tr("addMealToDay", { date: shortDay(key) }))}</button>
       ${key === todayKey ? "" :
@@ -351,6 +366,56 @@ function mealsHTML(day, key, todayKey) {
 const shortDay = (key) =>
   localeDay(key).toLocaleDateString([], { day: "numeric", month: "short" });
 
+/** The selected day's diary, and the form to write one. */
+function diaryHTML(day, key, todayKey, tags, trend) {
+  const rows = (day?.entries || []).map((e) => {
+    const t = new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const m = MOODS.find((x) => x.v === e.mood);
+    const chips = (e.tags || []).map((x) => `<span class="chip on">${esc(tr(x) || x)}</span>`).join("");
+    return `<div class="entry">
+      <div class="erow"><b>${esc(t)}</b>
+        <span class="mood m${e.mood || 0}">${m ? m.glyph : "·"}</span>
+        <span style="flex:1"></span>
+        <button type="button" class="linky diaryDel" data-at="${esc(e.at)}"
+          aria-label="${esc(tr("delete"))}">×</button></div>
+      ${chips ? `<div class="chips">${chips}</div>` : ""}
+      ${e.note ? `<p class="sub" style="margin:4px 0 0;white-space:pre-wrap">${esc(e.note)}</p>` : ""}
+    </div>`;
+  }).join("");
+
+  const picker = MOODS.map((m) =>
+    `<button type="button" class="moodBtn m${m.v}" data-mood="${m.v}"
+       title="${esc(tr(m.key))}" aria-label="${esc(tr(m.key))}">${m.glyph}</button>`).join("");
+
+  const chips = tags.map((t) =>
+    `<button type="button" class="chip tagBtn" data-tag="${esc(t)}">${esc(tr(t) || t)}</button>`).join("");
+
+  /* Said only when there is something to say it from. "3.8 over 12 days" is a
+   * claim about twelve days; a bare 3.8 would be read as a claim about the
+   * month, and most months have blanks in them. */
+  const trendLine = trend
+    ? `<p class="sub" style="margin:2px 0 0">${esc(tr("moodOverDays", {
+        mean: trend.mean.toFixed(1), n: trend.days }))}</p>`
+    : "";
+
+  return `<div class="daybox">
+    <div style="font-weight:600">${esc(tr("diary"))}</div>
+    ${trendLine}
+    ${rows || `<p class="sub" style="margin:6px 0 0">${esc(tr("noDiaryThatDay"))}</p>`}
+    <div class="moods" style="margin-top:10px">${picker}</div>
+    <div class="chips" style="margin-top:8px">${chips}
+      <button type="button" class="chip addTag" id="tagAdd">+</button></div>
+    <label for="diaryNote" style="margin-top:8px">${esc(tr("note"))}</label>
+    <textarea id="diaryNote" rows="2" placeholder="${esc(tr("notePlaceholder"))}"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button type="button" class="ghost" id="diaryAddDay" style="margin:0;padding:9px">${
+        esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
+      ${key === todayKey ? "" :
+        `<button type="button" class="ghost" id="diaryAddNow" style="margin:0;padding:9px">${esc(tr("logNow"))}</button>`}
+    </div>
+  </div>`;
+}
+
 /**
  * The whole dashboard as one HTML string.
  *
@@ -358,15 +423,16 @@ const shortDay = (key) =>
  * does not lose the selected day, and re-rendering after a new set does not
  * throw the athlete back to today.
  */
-export function renderDashboard(sessions, meals, view, today = new Date()) {
+export function renderDashboard(sessions, meals, diary, tags, view, today = new Date()) {
   const days = collectDays(sessions);
   const mealDays = collectMeals(meals);
+  const diaryDays = collectDiary(diary);
   const o = overall(days, today);
   const todayKey = dayKey(today);
-  const mode = view.mode === "meals" ? "meals" : "training";
+  const mode = ["meals", "diary"].includes(view.mode) ? view.mode : "training";
 
   // An athlete with no training but a week of meals still has a dashboard.
-  if (!o.days && !mealDays.size) {
+  if (!o.days && !mealDays.size && !diaryDays.size) {
     return `<h1 style="font-size:17px;margin:0 0 2px">${esc(tr("dashboardTitle"))}</h1>
       <p class="sub" style="margin:0">${esc(tr("dashboardEmpty"))}</p>`;
   }
@@ -385,10 +451,12 @@ export function renderDashboard(sessions, meals, view, today = new Date()) {
       ${tile(o.reps, tr("tileReps"))}
       ${tile(o.streak, tr("tileStreak"))}
     </div>
-    ${calendarHTML(mode === "meals" ? mealDays : days,
+    ${calendarHTML({ meals: mealDays, diary: diaryDays }[mode] || days,
                    view.year, view.month, view.selected, todayKey, mode)}
     ${dayHTML(days.get(view.selected), view.selected)}
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey)}
+    ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey, tags,
+                moodTrend(diaryDays, 30, today))}
     ${volumeHTML(days, today)}
     <p class="sub" style="margin:12px 0 0">${esc(tr("dashboardCap"))}</p>`;
 }
