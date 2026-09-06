@@ -72,6 +72,12 @@
   button.moodBtn.m3.on { background:#7a7a7a; } button.moodBtn.m4.on { background:#4d8a5a; }
   button.moodBtn.m5.on { background:#3f8f6f; }
   .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .itemRow { display:flex; align-items:center; gap:5px; margin-bottom:6px; }
+  .itemRow input.itemName { flex:1; min-width:0; margin:0; padding:9px; font-size:13.5px; }
+  .itemRow input.itemGrams { width:56px; flex:none; margin:0; padding:9px 4px; text-align:center;
+                             font-size:13.5px; }
+  .itemKcal { width:42px; text-align:right; font-size:12.5px; color:var(--muted);
+              font-variant-numeric:tabular-nums; }
   .steps { margin-top:8px; }
   .stepRow { display:flex; align-items:center; gap:8px; padding:5px 0; }
   .stepName { flex:1; font-size:13.5px; }
@@ -390,7 +396,7 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v33";
+window.BUILD = "v34";
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -417,6 +423,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listMeals, addMeal, deleteMeal,
          listDiary, addDiary, deleteDiary, profileTags, saveProfileTags,
          listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
+         profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices }
        from "./profiles.js";
@@ -426,6 +433,7 @@ import { probe as probeHelper, fetchClip } from "./fetcher.js";
 import { DEFAULT_TAGS, toggleTag, stepTag } from "./diary.js";
 import { collectWeights, weightOn } from "./weight.js";
 import { DEFAULT_SYMPTOMS } from "./cycle.js";
+import { densityFor, foodNames, describe, mealKcal } from "./foods.js";
 import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./media.js";
 import { Overlay } from "./overlay.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
@@ -935,6 +943,7 @@ $("linkBtn").onclick = async () => {
 let draft = { mood: null, tags: [], levels: {} };
 let cycleDraft = null;
 let mealShot = null;                 // a File waiting to be attached
+let mealDraft = { items: [] };
 
 function openAdd(step = null) {
   const dlg = $("addDlg");
@@ -959,8 +968,9 @@ function openAdd(step = null) {
       };
     });
   } else if (step === "meal") {
+    if (!mealDraft.items.length) mealDraft.items.push({ name: "", grams: null, kcal100: null });
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("meal")}</h2>`
-      + mealFormHTML(key, todayKey);
+      + mealFormHTML(key, todayKey, mealDraft, foodNames(profileFoods(currentAthlete())));
     wireMealForm(key, todayKey);
   } else if (step === "diary") {
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("diary")}</h2>`
@@ -998,6 +1008,7 @@ function done() {
   draft = { mood: null, tags: [], levels: {} };
   cycleDraft = null;
   mealShot = null;
+  mealDraft = { items: [] };
   renderDash();
 }
 
@@ -1035,13 +1046,56 @@ function wireCycleForm(key, current) {
 }
 
 function wireMealForm(key, todayKey) {
+  const body = $("addDlgBody");
+  const custom = () => profileFoods(currentAthlete());
+  /* The name and grams inputs are re-rendered on every change, so their values
+   * are read back into the draft before anything redraws -- otherwise typing a
+   * name and then tapping + would lose the name. */
+  const sync = () => {
+    body.querySelectorAll("input.itemName").forEach((el) => {
+      const it = mealDraft.items[+el.dataset.i];
+      if (!it) return;
+      it.name = el.value;
+      // Look the density up on every sync: someone typing "oat" then "oats"
+      // should get a number the moment the name matches something.
+      it.kcal100 = densityFor(el.value, custom());
+    });
+    body.querySelectorAll("input.itemGrams").forEach((el) => {
+      const it = mealDraft.items[+el.dataset.i];
+      if (it) it.grams = el.value === "" ? null : +el.value;
+    });
+  };
+  const redraw = () => { sync(); openAdd("meal"); };
+
+  body.querySelectorAll("input.itemName").forEach((el) => { el.onchange = redraw; });
+  body.querySelectorAll("input.itemGrams").forEach((el) => { el.onchange = redraw; });
+  body.querySelectorAll("button.gramStep").forEach((b) => {
+    b.onclick = () => {
+      sync();
+      const it = mealDraft.items[+b.dataset.i];
+      it.grams = Math.max(0, (it.grams || 0) + +b.dataset.d);
+      openAdd("meal");
+    };
+  });
+  body.querySelectorAll("button.itemDel").forEach((b) => {
+    b.onclick = () => { sync(); mealDraft.items.splice(+b.dataset.i, 1); openAdd("meal"); };
+  });
+  $("itemAdd").onclick = () => {
+    sync();
+    mealDraft.items.push({ name: "", grams: null, kcal100: null });
+    openAdd("meal");
+  };
+
   $("mealShotBtn").onclick = () => $("mealShotFile").click();
   if (mealShot) $("mealShotName").textContent = tr("photoReady");
+
   const logMeal = async (at) => {
-    const text = $("mealText").value.trim();
-    if (!text) { say(tr("mealNeedsText"), true); return; }
-    const meal = addMeal({ profile: currentAthlete(), text, kcal: $("mealKcal").value,
-                           at, photo: !!mealShot });
+    sync();
+    const items = mealDraft.items.filter((i) => String(i.name).trim());
+    if (!items.length) { say(tr("mealNeedsText"), true); return; }
+    const sum = mealKcal(items);
+    const meal = addMeal({ profile: currentAthlete(), items,
+                           text: describe(items), kcal: sum.kcal, at, photo: !!mealShot });
     if (meal && mealShot) {
       try {
         await putPhoto(photoId(meal.at, currentAthlete()), await shrink(mealShot));
@@ -1271,23 +1325,6 @@ function renderDash() {
     renderDash();
   };
 
-  const logMeal = async (at) => {
-    const text = $("mealText").value.trim();
-    if (!text) { say(tr("mealNeedsText"), true); return; }
-    const meal = addMeal({ profile: currentAthlete(), text, kcal: $("mealKcal").value,
-                           at, photo: !!mealShot });
-    if (meal && mealShot) {
-      try {
-        await putPhoto(photoId(meal.at, currentAthlete()), await shrink(mealShot));
-      } catch (err) {
-        say(tr("sayPhotoFailed", { err: err.message }), true);
-      }
-      mealShot = null;
-    }
-    renderDash();
-  };
-  if ($("mealAddDay")) $("mealAddDay").onclick = () => logMeal(atOnDay(dashView.selected));
-  if ($("mealAddNow")) $("mealAddNow").onclick = () => logMeal(null);
   card.querySelectorAll("button.mealDel").forEach((b) => {
     b.onclick = async () => {
       // The photo goes with the meal. An orphan in IndexedDB is invisible and

@@ -136,10 +136,22 @@ export function listMeals() {
 }
 
 /** Add a meal. `at` defaults to now; pass one to log against another day. */
-export function addMeal({ profile = null, text = "", kcal = null, at = null, photo = false }) {
+export function addMeal({ profile = null, text = "", kcal = null, at = null,
+                          photo = false, items = [] }) {
+  // Items are the record; text and kcal are what a meal logged before items
+  // existed had, and what the list shows. Keeping all three means old entries
+  // still read correctly and new ones can be edited back into their parts.
+  const parts = (items || [])
+    .map((i) => ({
+      name: String(i.name || "").slice(0, 80),
+      grams: Number.isFinite(+i.grams) && +i.grams > 0 ? Math.round(+i.grams) : null,
+      kcal100: Number.isFinite(+i.kcal100) && +i.kcal100 >= 0 ? +i.kcal100 : null,
+    }))
+    .filter((i) => i.name);
   const entry = {
     at: at || new Date().toISOString(),
     profile,
+    items: parts,
     text: String(text).slice(0, 200),
     kcal: Number.isFinite(+kcal) && +kcal > 0 ? Math.round(+kcal) : null,
     // A flag, not the image. The photo itself is in IndexedDB under a key
@@ -147,7 +159,7 @@ export function addMeal({ profile = null, text = "", kcal = null, at = null, pho
     // of base64 in localStorage takes the whole store down with it.
     photo: !!photo,
   };
-  if (!entry.text.trim()) return null;
+  if (!entry.text.trim() && !parts.length) return null;
   const all = listMeals();
   // Two meals in the same millisecond is a double tap, not two meals.
   if (all.some((m) => m.at === entry.at && m.profile === entry.profile)) return null;
@@ -206,6 +218,20 @@ export function deleteDiary(at, profile = null) {
   const kept = listDiary().filter((d) => !(d.at === at && d.profile === profile));
   write(DKEY, kept);
   return kept.length;
+}
+
+/** Foods the athlete added, as name -> kcal per 100 g, on the profile. */
+export function profileFoods(name) {
+  return getProfile(name)?.foods || {};
+}
+
+export function saveProfileFood(name, food, kcal100) {
+  const p = getProfile(name);
+  if (!p) return false;
+  const v = Number(kcal100);
+  if (!String(food).trim() || !Number.isFinite(v) || v < 0 || v > 1000) return false;
+  p.foods = { ...(p.foods || {}), [String(food).trim().slice(0, 80)]: Math.round(v) };
+  return saveProfile(p);
 }
 
 /** The athlete's own tag list, kept on the profile so it travels with them. */
