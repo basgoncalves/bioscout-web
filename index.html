@@ -53,6 +53,10 @@
   dialog { border:1px solid var(--line); border-radius:14px; background:var(--card);
            color:var(--ink); padding:16px; width:min(92vw,420px); }
   dialog::backdrop { background:rgba(0,0,0,.55); }
+  .health { display:flex; align-items:center; gap:12px; margin:6px 0 10px; }
+  .dial { width:78px; height:78px; flex:none; }
+  .dialText { font-size:22px; font-weight:700; }
+  .healthText { min-width:0; }
   .intake { display:flex; align-items:flex-end; gap:2px; height:64px; position:relative;
             margin-bottom:4px; }
   .ibar { flex:1; height:100%; display:flex; align-items:flex-end; }
@@ -295,7 +299,6 @@
     <!-- capture= asks for the camera directly; without a file is fine too. -->
     <input id="mealShotFile" type="file" accept="image/*" capture="environment" class="hidden">
     <div class="card" id="dashboardCard"></div>
-    <button id="newTrainingBtn" data-i18n="newTrainingSession">New training session</button>
     <dialog id="settingsDlg">
       <h2 style="font-size:16px;margin:0 0 10px" data-i18n="profileSettings">Profile settings</h2>
 
@@ -450,7 +453,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 42;
+window.BUILD = 43;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1392,7 +1395,7 @@ function startTraining() {
   renderTraining();
   showView("viewRecord");
 }
-$("newTrainingBtn").onclick = startTraining;
+
 
 
 /* --- training history ------------------------------------------------------
@@ -1466,8 +1469,10 @@ function defaultDashView() {
 function renderDash() {
   const card = $("dashboardCard");
   if (!dashView) dashView = defaultDashView();
+  // Height comes from the profile; weight comes from the log, carried forward.
+  const view = { ...dashView, heightM: getProfile(currentAthlete())?.heightM ?? null };
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
-                                   myWeights(), myCycle(), mySleep(), dashView);
+                                   myWeights(), myCycle(), mySleep(), view);
   $("whoName").textContent = currentAthlete() || tr("noProfile");
   $("whoSince").textContent = tr("dashboardSub", { first: monthLabel(dashView) });
 
@@ -1510,6 +1515,7 @@ function renderDash() {
   });
   if ($("addBtn")) $("addBtn").onclick = () => openAdd();
   if ($("shareBtn")) $("shareBtn").onclick = shareMonth;
+  if ($("newTrainingBtn")) $("newTrainingBtn").onclick = () => openAdd("weight");
   if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);
   if ($("sleepSave")) $("sleepSave").onclick = () => {
     if (!setSleep({ profile: currentAthlete(), at: atOnDay(dashView.selected),

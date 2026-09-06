@@ -28,6 +28,7 @@ import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
          dayOfCycle, phaseModel, cycleDayKey, LUTEAL_DAYS, FLOWS } from "./cycle.js";
 import { itemKcal, mealKcal, describe } from "./foods.js";
 import { collectSleep, meanSleep, duration as sleepMins, fmt as fmtSleep } from "./sleep.js";
+import { rate, scoreColour } from "./health.js";
 
 /* Plurals come from the dictionary keys the session card already uses, rather
  * than from new ones. "3 reps in 1 sets" is the kind of thing that makes an
@@ -306,7 +307,8 @@ function volumeHTML(days, today) {
 function dayHTML(day, key) {
   if (!day) {
     return `<div class="daybox"><div style="font-weight:600">${esc(tr("modeTraining"))}</div>
-      <p class="sub" style="margin:6px 0 0">${esc(tr("noTrainingThatDay"))}</p></div>`;
+      <p class="sub" style="margin:6px 0 0">${esc(tr("noTrainingThatDay"))}</p>
+      <button id="newTrainingBtn" style="margin-top:10px">${esc(tr("newTrainingSession"))}</button></div>`;
   }
   const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const rows = day.sets.map((s) => {
@@ -324,7 +326,8 @@ function dayHTML(day, key) {
     }${acts ? " · " + acts : ""}</p>
     <table><thead><tr><th>${esc(tr("time"))}</th><th>${esc(tr("movement"))}</th>
       <th>${esc(tr("reps"))}</th><th>${esc(tr("load"))}</th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`;
+      <tbody>${rows}</tbody></table>
+    <button id="newTrainingBtn" style="margin-top:10px">${esc(tr("newTrainingSession"))}</button></div>`;
 }
 
 /**
@@ -375,6 +378,46 @@ function intakeHTML(mealDays, weights, year, month) {
         title="${esc(b.kcal ? tr("kcalOnDay", { kcal: b.kcal, date: b.key }) : tr("noneLogged", { date: b.key }))}">
         <i style="height:${b.kcal ? Math.round((100 * b.kcal) / max) : 0}%"></i></div>`).join("")}
     </div>`;
+}
+
+/**
+ * The health dial: one arc, coloured by score, with the metrics under it.
+ *
+ * The arc is the score and the number in the middle is the score, so the two
+ * cannot disagree. Each metric that fed it is named with its own value, so a
+ * rating is never a number with no visible source -- and the caveat rides
+ * along, because a dial is exactly the sort of thing that gets believed.
+ */
+function healthHTML(ctx) {
+  const r = rate(ctx);
+  const pct = r.score === null ? 0 : Math.round(r.score * 100);
+  const colour = scoreColour(r.score);
+  const C = 2 * Math.PI * 34;
+
+  const detail = r.contributions.map((c) =>
+    `<span>${esc(tr(c.label))} ${esc(c.text)}</span>`).join(" · ");
+  const want = r.missing.length
+    ? `<p class="sub" style="margin:2px 0 0">${esc(tr("healthNeeds", {
+        what: r.missing.map((m) => esc(tr(m.label))).join(", ") }))}</p>` : "";
+  const caveat = r.contributions.find((c) => c.caveat);
+
+  return `<div class="health">
+    <svg viewBox="0 0 80 80" class="dial" role="img"
+      aria-label="${esc(tr("healthLabel", { pct }))}">
+      <circle cx="40" cy="40" r="34" fill="none" stroke="var(--bg)" stroke-width="9"/>
+      ${r.score === null ? "" : `<circle cx="40" cy="40" r="34" fill="none" stroke="${colour}"
+        stroke-width="9" stroke-linecap="round" stroke-dasharray="${(C * r.score).toFixed(1)} ${C.toFixed(1)}"
+        transform="rotate(-90 40 40)"/>`}
+      <text x="40" y="44" text-anchor="middle" class="dialText"
+        fill="${colour}">${r.score === null ? "\u2014" : pct}</text>
+    </svg>
+    <div class="healthText">
+      <div style="font-weight:600">${esc(tr("healthRating"))}</div>
+      ${detail ? `<p class="sub" style="margin:2px 0 0">${detail}</p>` : ""}
+      ${want}
+      ${caveat ? `<p class="note" style="margin:4px 0 0">${esc(tr(caveat.caveat))}</p>` : ""}
+    </div>
+  </div>`;
 }
 
 /** The selected day's meals, and the form to add one to it. */
@@ -847,8 +890,19 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
    * and the old shortcut rendered a calendar and an Add button ONLY, which
    * meant the first thing anybody wanted to log could not be logged until
    * something else existed. */
+  const monthSessions = new Set();
+  for (const [key, d0] of days) {
+    if (key.startsWith(`${view.year}-${String(view.month + 1).padStart(2, "0")}`)) {
+      for (const s of d0.sessions) monthSessions.add(s);
+    }
+  }
+  const nowW = weightOn(wts, todayKey);
+
   return `
     <div style="font-weight:600;margin:0 0 2px">${esc(tr("monthlySummary"))}</div>
+    <p class="sub" style="margin:0 0 6px">${esc(tr("monthSessions", {
+      n: monthSessions.size, days: o.days }))}</p>
+    ${healthHTML({ heightM: view.heightM, weightKg: nowW ? nowW.kg : null })}
     ${intakeHTML(mealDays, wts, view.year, view.month)}
     <div id="dayHead">
       <div style="font-weight:600">${esc(localeDay(view.selected)
