@@ -18,6 +18,7 @@ const AKEY = "bioscout.archive.v1";
 const CKEY = "bioscout.curves.v1";
 const MKEY = "bioscout.meals.v1";
 const DKEY = "bioscout.diary.v1";
+const WKEY = "bioscout.weights.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
  * one; curves are not, so only the most recent sets keep those.
@@ -209,6 +210,34 @@ export function saveProfileTags(name, tags) {
   return saveProfile(p);
 }
 
+// --- weight ----------------------------------------------------------------
+/* Dated measurements, not a single number on the profile. Mass scales every
+ * moment and contact force the app reports, so "83 kg" is only meaningful with
+ * a date attached -- see weight.js for how a value carries forward. */
+const WEIGHTS_MAX = 2000;
+
+export function listWeights() {
+  const w = read(WKEY, []);
+  return Array.isArray(w) ? w : [];
+}
+
+export function addWeight({ profile = null, kg, at = null }) {
+  const v = +kg;
+  if (!Number.isFinite(v) || v <= 0 || v > 500) return null;
+  const entry = { at: at || new Date().toISOString(), profile, kg: Math.round(v * 10) / 10 };
+  const all = listWeights().filter((x) => !(x.at === entry.at && x.profile === entry.profile));
+  all.push(entry);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(WKEY, all.slice(-WEIGHTS_MAX));
+  return entry;
+}
+
+export function deleteWeight(at, profile = null) {
+  const kept = listWeights().filter((w) => !(w.at === at && w.profile === profile));
+  write(WKEY, kept);
+  return kept.length;
+}
+
 // --- stored waveforms ------------------------------------------------------
 const r3 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(3) : 0));
 const r2 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(2) : 0));
@@ -285,6 +314,7 @@ export function exportAll() {
     archive: listArchive(),
     meals: listMeals(),
     diary: listDiary(),
+    weights: listWeights(),
   };
 }
 
@@ -304,7 +334,8 @@ export function importAll(data) {
     throw new Error(`file is from a newer version (${data.version}) than this app understands`);
   }
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
-                   sessionAdopted: false, mealsAdded: 0, diaryAdded: 0 };
+                   sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
+                   weightsAdded: 0 };
 
   const store = listProfiles();
   for (const p of (data.profiles && data.profiles.profiles) || []) {
@@ -359,6 +390,15 @@ export function importAll(data) {
   }
   diary.sort((x, y) => String(x.at).localeCompare(String(y.at)));
   write(DKEY, diary.slice(-DIARY_MAX));
+
+  const wts = listWeights();
+  const seenW = new Set(wts.map((w) => `${w.profile}|${w.at}`));
+  for (const w of data.weights || []) {
+    if (!w || !w.at || seenW.has(`${w.profile}|${w.at}`)) continue;
+    wts.push(w); seenW.add(`${w.profile}|${w.at}`); report.weightsAdded++;
+  }
+  wts.sort((x, y) => String(x.at).localeCompare(String(y.at)));
+  write(WKEY, wts.slice(-WEIGHTS_MAX));
 
   // Photos are not in the export. They live in IndexedDB and would multiply
   // the file size by an order of magnitude in base64 -- an export you cannot

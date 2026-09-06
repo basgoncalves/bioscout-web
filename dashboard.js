@@ -23,6 +23,7 @@
  */
 import { t as tr } from "./i18n.js";
 import { MOODS, collectDiary, moodTrend } from "./diary.js";
+import { collectWeights, weightOn, weightSeries } from "./weight.js";
 
 /* Plurals come from the dictionary keys the session card already uses, rather
  * than from new ones. "3 reps in 1 sets" is the kind of thing that makes an
@@ -248,8 +249,10 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
       : mode === "meals"
         ? tr("dayCellMeals", { date: c.key, n: hit.meals.length })
         : tr("dayCellLabel", { date: c.key, reps: nReps(hit.reps), sets: nSets(hit.sets.length) });
+    // Every day is selectable, empty ones included: the dashboard is where
+    // things get added, and you cannot add to a day you cannot select.
     return `<button type="button" class="${cls.join(" ")}" data-day="${c.key}"
-      ${hit ? "" : "disabled"} title="${esc(label)}" aria-label="${esc(label)}">
+      title="${esc(label)}" aria-label="${esc(label)}">
       <span>${c.date.getDate()}</span></button>`;
   }).join("");
 
@@ -312,6 +315,56 @@ function dayHTML(day, key) {
       <tbody>${rows}</tbody></table></div>`;
 }
 
+/**
+ * Calories per day across the month on show.
+ *
+ * The mean is over days that actually have a figure, and the caption says how
+ * many those were. Averaging over all thirty would divide by days nobody
+ * logged and report a number far below anything eaten -- an average that
+ * flatters by accident is worse than no average.
+ *
+ * There is no target line. The app has no basis for one.
+ */
+function intakeHTML(mealDays, weights, year, month) {
+  const p = (n) => String(n).padStart(2, "0");
+  const last = new Date(year, month + 1, 0).getDate();
+  const bars = [];
+  let sum = 0, logged = 0;
+  for (let i = 1; i <= last; i++) {
+    const key = `${year}-${p(month + 1)}-${p(i)}`;
+    const day = mealDays.get(key);
+    const kcal = day && day.counted ? day.kcal : null;
+    if (kcal) { sum += kcal; logged++; }
+    bars.push({ key, kcal, day: i });
+  }
+  const mean = logged ? Math.round(sum / logged) : null;
+  const max = Math.max(1, ...bars.map((b) => b.kcal || 0));
+
+  const wSeries = weightSeries(weights, year, month);
+  const known = wSeries.filter((w) => w.kg !== null);
+  const wLine = known.length
+    ? `<span> · ${esc(tr("weightRange", {
+        lo: Math.min(...known.map((w) => w.kg)).toFixed(1),
+        hi: Math.max(...known.map((w) => w.kg)).toFixed(1) }))}</span>`
+    : "";
+
+  if (!logged) {
+    return `<p class="sub" style="margin:2px 0 0">${esc(tr("noIntakeThisMonth"))}${wLine}</p>`;
+  }
+
+  // The mean is drawn as a rule across the bars so a day reads against it at a
+  // glance, which is the comparison asked for -- not against a goal.
+  const meanPct = Math.round((100 * mean) / max);
+  return `
+    <p class="sub" style="margin:2px 0 8px">${esc(tr("intakeMean", { kcal: mean, n: logged }))}${wLine}</p>
+    <div class="intake">
+      <div class="meanline" style="bottom:${meanPct}%"><span>${mean}</span></div>
+      ${bars.map((b) => `<div class="ibar${b.kcal ? "" : " none"}"
+        title="${esc(b.kcal ? tr("kcalOnDay", { kcal: b.kcal, date: b.key }) : tr("noneLogged", { date: b.key }))}">
+        <i style="height:${b.kcal ? Math.round((100 * b.kcal) / max) : 0}%"></i></div>`).join("")}
+    </div>`;
+}
+
 /** The selected day's meals, and the form to add one to it. */
 function mealsHTML(day, key, todayKey) {
   const rows = (day?.meals || []).map((m) => {
@@ -339,6 +392,12 @@ function mealsHTML(day, key, todayKey) {
            <th style="text-align:right">${esc(tr("kcal"))}</th><th></th></tr></thead>
          <tbody>${rows}</tbody></table>${sum}`
       : `<p class="sub" style="margin:6px 0 0">${esc(tr("noMealsThatDay"))}</p>`}
+  </div>`;
+}
+
+/** The meal form on its own, for the Add dialog. */
+export function mealFormHTML(key, todayKey) {
+  return `
     <div class="row" style="margin-top:10px">
       <div style="flex:2.2">
         <label for="mealText">${esc(tr("meal"))}</label>
@@ -359,15 +418,14 @@ function mealsHTML(day, key, todayKey) {
         esc(key === todayKey ? tr("addMealToday") : tr("addMealToDay", { date: shortDay(key) }))}</button>
       ${key === todayKey ? "" :
         `<button type="button" class="ghost" id="mealAddNow" style="margin:0;padding:9px">${esc(tr("logNow"))}</button>`}
-    </div>
-  </div>`;
+    </div>`;
 }
 
 const shortDay = (key) =>
   localeDay(key).toLocaleDateString([], { day: "numeric", month: "short" });
 
 /** The selected day's diary, and the form to write one. */
-function diaryHTML(day, key, todayKey, tags, trend) {
+function diaryHTML(day, key, todayKey, trend) {
   const rows = (day?.entries || []).map((e) => {
     const t = new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const m = MOODS.find((x) => x.v === e.mood);
@@ -383,13 +441,6 @@ function diaryHTML(day, key, todayKey, tags, trend) {
     </div>`;
   }).join("");
 
-  const picker = MOODS.map((m) =>
-    `<button type="button" class="moodBtn m${m.v}" data-mood="${m.v}"
-       title="${esc(tr(m.key))}" aria-label="${esc(tr(m.key))}">${m.glyph}</button>`).join("");
-
-  const chips = tags.map((t) =>
-    `<button type="button" class="chip tagBtn" data-tag="${esc(t)}">${esc(tr(t) || t)}</button>`).join("");
-
   /* Said only when there is something to say it from. "3.8 over 12 days" is a
    * claim about twelve days; a bare 3.8 would be read as a claim about the
    * month, and most months have blanks in them. */
@@ -402,6 +453,17 @@ function diaryHTML(day, key, todayKey, tags, trend) {
     <div style="font-weight:600">${esc(tr("diary"))}</div>
     ${trendLine}
     ${rows || `<p class="sub" style="margin:6px 0 0">${esc(tr("noDiaryThatDay"))}</p>`}
+  </div>`;
+}
+
+/** The diary form on its own, for the Add dialog. */
+export function diaryFormHTML(key, todayKey, tags) {
+  const picker = MOODS.map((m) =>
+    `<button type="button" class="moodBtn m${m.v}" data-mood="${m.v}"
+       title="${esc(tr(m.key))}" aria-label="${esc(tr(m.key))}">${m.glyph}</button>`).join("");
+  const chips = tags.map((t) =>
+    `<button type="button" class="chip tagBtn" data-tag="${esc(t)}">${esc(tr(t) || t)}</button>`).join("");
+  return `
     <div class="moods" style="margin-top:10px">${picker}</div>
     <div class="chips" style="margin-top:8px">${chips}
       <button type="button" class="chip addTag" id="tagAdd">+</button></div>
@@ -412,8 +474,22 @@ function diaryHTML(day, key, todayKey, tags, trend) {
         esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
       ${key === todayKey ? "" :
         `<button type="button" class="ghost" id="diaryAddNow" style="margin:0;padding:9px">${esc(tr("logNow"))}</button>`}
-    </div>
-  </div>`;
+    </div>`;
+}
+
+/** The weight form, for the Add dialog. */
+export function weightFormHTML(key, todayKey, current) {
+  return `
+    <p class="sub" style="margin:0 0 8px">${esc(current
+      ? tr("weightCarried", { kg: current.kg.toFixed(1), n: current.stale })
+      : tr("noWeightYet"))}</p>
+    <label for="weightKg">${esc(tr("weightKg"))}</label>
+    <input id="weightKg" type="number" step="0.1" min="20" max="500" inputmode="decimal"
+           value="${current ? current.kg.toFixed(1) : ""}">
+    <div class="row" style="margin-top:8px">
+      <button type="button" class="ghost" id="weightAddDay" style="margin:0;padding:9px">${
+        esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
+    </div>`;
 }
 
 /**
@@ -423,39 +499,39 @@ function diaryHTML(day, key, todayKey, tags, trend) {
  * does not lose the selected day, and re-rendering after a new set does not
  * throw the athlete back to today.
  */
-export function renderDashboard(sessions, meals, diary, tags, view, today = new Date()) {
+export function renderDashboard(sessions, meals, diary, weights, view, today = new Date()) {
   const days = collectDays(sessions);
   const mealDays = collectMeals(meals);
   const diaryDays = collectDiary(diary);
+  const wts = collectWeights(weights);
   const o = overall(days, today);
   const todayKey = dayKey(today);
   const mode = ["meals", "diary"].includes(view.mode) ? view.mode : "training";
 
   // An athlete with no training but a week of meals still has a dashboard.
   if (!o.days && !mealDays.size && !diaryDays.size) {
-    return `<h1 style="font-size:17px;margin:0 0 2px">${esc(tr("dashboardTitle"))}</h1>
-      <p class="sub" style="margin:0">${esc(tr("dashboardEmpty"))}</p>`;
+    return `<p class="sub" style="margin:0 0 10px">${esc(tr("dashboardEmpty"))}</p>
+      ${calendarHTML(days, view.year, view.month, view.selected, todayKey, "training")}
+      <button class="ghost" id="addBtn" style="margin-top:10px">${esc(tr("addEntry"))}</button>`;
   }
 
-  const tile = (v, label) =>
-    `<div class="tile"><b>${v}</b><span>${esc(label)}</span></div>`;
-
   return `
-    <h1 style="font-size:17px;margin:0 0 2px">${esc(tr("dashboardTitle"))}</h1>
-    <p class="sub" style="margin:0 0 10px">${esc(tr("dashboardSub", {
-      first: localeDay(o.first).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }),
-    }))}</p>
-    <div class="tiles">
-      ${tile(o.days, tr("tileDays"))}
-      ${tile(o.sessions, tr("tileSessions"))}
-      ${tile(o.reps, tr("tileReps"))}
-      ${tile(o.streak, tr("tileStreak"))}
-    </div>
+    ${intakeHTML(mealDays, wts, view.year, view.month)}
     ${calendarHTML({ meals: mealDays, diary: diaryDays }[mode] || days,
                    view.year, view.month, view.selected, todayKey, mode)}
+    <div id="dayHead">
+      <div style="font-weight:600">${esc(localeDay(view.selected)
+        .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>
+      ${(() => { const w = weightOn(wts, view.selected); return w
+        ? `<p class="sub" style="margin:2px 0 0">${esc(w.stale === 0
+            ? tr("weightMeasured", { kg: w.kg.toFixed(1) })
+            : tr("weightCarried", { kg: w.kg.toFixed(1), n: w.stale }))}</p>`
+        : ""; })()}
+    </div>
+    <button class="ghost" id="addBtn" style="margin-top:10px">${esc(tr("addEntry"))}</button>
     ${dayHTML(days.get(view.selected), view.selected)}
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey)}
-    ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey, tags,
+    ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey,
                 moodTrend(diaryDays, 30, today))}
     ${volumeHTML(days, today)}
     <p class="sub" style="margin:12px 0 0">${esc(tr("dashboardCap"))}</p>`;
