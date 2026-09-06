@@ -46,6 +46,25 @@
   button:disabled { opacity:.45; cursor:default; }
   button + button { margin-top:8px; }
 
+  .moods { display:flex; gap:6px; }
+  button.moodBtn { flex:1; margin:0; padding:9px 0; font-size:17px; line-height:1;
+                   background:var(--bg); color:var(--muted); border:1px solid var(--line); }
+  button.moodBtn.on { color:#fff; border-color:transparent; }
+  button.moodBtn.m1.on { background:#b4523f; } button.moodBtn.m2.on { background:#b07b3c; }
+  button.moodBtn.m3.on { background:#7a7a7a; } button.moodBtn.m4.on { background:#4d8a5a; }
+  button.moodBtn.m5.on { background:#3f8f6f; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { display:inline-block; margin:0; width:auto; padding:6px 11px; font-size:12.5px;
+          border-radius:999px; background:var(--bg); color:var(--muted);
+          border:1px solid var(--line); }
+  .chip.on { background:var(--accent); color:#fff; border-color:transparent; }
+  .entry { border-top:1px solid var(--line); padding:9px 0 0; margin-top:9px; }
+  .erow { display:flex; align-items:center; gap:8px; }
+  .mood { font-size:15px; color:var(--muted); }
+  textarea { width:100%; background:var(--bg); color:var(--ink); border:1px solid var(--line);
+             border-radius:9px; padding:9px; font:inherit; font-size:14px; resize:vertical; }
+  img.mealShot { width:44px; height:44px; object-fit:cover; border-radius:7px;
+                 vertical-align:middle; margin-right:8px; }
   .calmode { margin:14px 0 0; }
   .calmode select { margin:0; padding:7px 9px; font-size:13px; }
   button.linky { background:none; border:0; color:var(--muted); font-size:18px;
@@ -185,6 +204,8 @@
   </section>
 
   <section id="viewDash" class="hidden">
+    <!-- capture= asks for the camera directly; without a file is fine too. -->
+    <input id="mealShotFile" type="file" accept="image/*" capture="environment" class="hidden">
     <div class="card" id="dashboardCard"></div>
     <button id="newTrainingBtn" data-i18n="newTrainingSession">New training session</button>
     <button class="ghost" id="settingsBtn" data-i18n="profileSettings">Profile settings</button>
@@ -352,12 +373,15 @@ import { classify, MIN_CONFIDENCE } from "./detect.js";
 import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          newSession, getSession, clearSession, addSet, summariseSession,
          listMeals, addMeal, deleteMeal,
+         listDiary, addDiary, deleteDiary, profileTags, saveProfileTags,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices }
        from "./profiles.js";
 import { renderDashboard, dayKey, allSessions, collectDays }
        from "./dashboard.js";
 import { probe as probeHelper, fetchClip } from "./fetcher.js";
+import { DEFAULT_TAGS, toggleTag } from "./diary.js";
+import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./media.js";
 import { Overlay } from "./overlay.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
 // array of times, and a translated string inside either of them would have
@@ -914,6 +938,12 @@ $("createProfileBtn").onclick = () => {
 $("switchUserBtn").onclick = () => { renderLogin(); showView("viewLogin"); };
 $("settingsBtn").onclick = () => $("settingsCard").classList.toggle("hidden");
 
+$("mealShotFile").onchange = (e) => {
+  mealShot = e.target.files[0] || null;
+  e.target.value = "";               // same photo twice in a row must still fire
+  renderDash();
+};
+
 $("newTrainingBtn").onclick = () => {
   // A session with sets in it is training in progress; archive it before
   // starting the next, exactly as the results card does.
@@ -946,6 +976,22 @@ function myMeals() {
 
 /** Noon local on the selected day, so a meal logged against another date
  *  lands squarely on it whatever the timezone does at midnight. */
+function myDiary() {
+  const who = currentAthlete();
+  return listDiary().filter((d) => d.profile === who);
+}
+
+/** The athlete's own tag list, falling back to the starter set. */
+function myTags() {
+  return profileTags(currentAthlete()) || DEFAULT_TAGS;
+}
+
+/* Draft state for the diary form. It lives out here because renderDash()
+ * replaces the card's innerHTML on every change -- a mood picked and three
+ * tags tapped would be wiped by the re-render that shows them. */
+let draft = { mood: null, tags: [] };
+let mealShot = null;                 // a File waiting to be attached
+
 function atOnDay(key) {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d, 12, 0, 0).toISOString();
@@ -964,7 +1010,8 @@ function defaultDashView() {
 function renderDash() {
   const card = $("dashboardCard");
   if (!dashView) dashView = defaultDashView();
-  card.innerHTML = renderDashboard(dashboardData(), myMeals(), dashView);
+  card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
+                                   myTags(), dashView);
 
   const step = (n) => {
     const d = new Date(dashView.year, dashView.month + n, 1);
@@ -982,17 +1029,78 @@ function renderDash() {
     renderDash();
   };
 
-  const logMeal = (at) => {
+  const logMeal = async (at) => {
     const text = $("mealText").value.trim();
     if (!text) { say(tr("mealNeedsText"), true); return; }
-    addMeal({ profile: currentAthlete(), text, kcal: $("mealKcal").value, at });
+    const meal = addMeal({ profile: currentAthlete(), text, kcal: $("mealKcal").value,
+                           at, photo: !!mealShot });
+    if (meal && mealShot) {
+      try {
+        await putPhoto(photoId(meal.at, currentAthlete()), await shrink(mealShot));
+      } catch (err) {
+        say(tr("sayPhotoFailed", { err: err.message }), true);
+      }
+      mealShot = null;
+    }
     renderDash();
   };
   if ($("mealAddDay")) $("mealAddDay").onclick = () => logMeal(atOnDay(dashView.selected));
   if ($("mealAddNow")) $("mealAddNow").onclick = () => logMeal(null);
   card.querySelectorAll("button.mealDel").forEach((b) => {
-    b.onclick = () => { deleteMeal(b.dataset.at, currentAthlete()); renderDash(); };
+    b.onclick = async () => {
+      // The photo goes with the meal. An orphan in IndexedDB is invisible and
+      // stays there for good.
+      try { await delPhoto(photoId(b.dataset.at, currentAthlete())); } catch { /* none */ }
+      deleteMeal(b.dataset.at, currentAthlete());
+      renderDash();
+    };
   });
+
+  /* --- meals: photo ---------------------------------------------------- */
+  card.querySelectorAll("img.mealShot").forEach(async (img) => {
+    try {
+      const blob = await getPhoto(photoId(img.dataset.at, currentAthlete()));
+      if (blob) img.src = URL.createObjectURL(blob);
+      else img.remove();             // flag says photo, store says no: say nothing
+    } catch { img.remove(); }
+  });
+  if ($("mealShotBtn")) $("mealShotBtn").onclick = () => $("mealShotFile").click();
+  if ($("mealShotName") && mealShot) $("mealShotName").textContent = tr("photoReady");
+
+  /* --- diary ------------------------------------------------------------ */
+  card.querySelectorAll("button.moodBtn").forEach((b) => {
+    b.classList.toggle("on", +b.dataset.mood === draft.mood);
+    b.onclick = () => {
+      // Tapping the chosen mood again clears it: a diary you cannot un-answer
+      // is one people stop being honest in.
+      draft.mood = draft.mood === +b.dataset.mood ? null : +b.dataset.mood;
+      renderDash();
+    };
+  });
+  card.querySelectorAll("button.tagBtn").forEach((b) => {
+    b.classList.toggle("on", draft.tags.includes(b.dataset.tag));
+    b.onclick = () => { draft.tags = toggleTag(draft.tags, b.dataset.tag); renderDash(); };
+  });
+  if ($("tagAdd")) $("tagAdd").onclick = () => {
+    const t = prompt(tr("newTagPrompt"));
+    if (!t || !t.trim()) return;
+    saveProfileTags(currentAthlete(), [...myTags(), t.trim()]);
+    draft.tags = toggleTag(draft.tags, t.trim());
+    renderDash();
+  };
+  const saveDiary = (at) => {
+    const written = addDiary({ profile: currentAthlete(), mood: draft.mood,
+                               tags: draft.tags, note: $("diaryNote").value, at });
+    if (!written) { say(tr("diaryNeedsSomething"), true); return; }
+    draft = { mood: null, tags: [] };
+    renderDash();
+  };
+  if ($("diaryAddDay")) $("diaryAddDay").onclick = () => saveDiary(atOnDay(dashView.selected));
+  if ($("diaryAddNow")) $("diaryAddNow").onclick = () => saveDiary(null);
+  card.querySelectorAll("button.diaryDel").forEach((b) => {
+    b.onclick = () => { deleteDiary(b.dataset.at, currentAthlete()); renderDash(); };
+  });
+
 }
 
 function renderTraining() {

@@ -17,6 +17,7 @@ const SKEY = "bioscout.session.v1";
 const AKEY = "bioscout.archive.v1";
 const CKEY = "bioscout.curves.v1";
 const MKEY = "bioscout.meals.v1";
+const DKEY = "bioscout.diary.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
  * one; curves are not, so only the most recent sets keep those.
@@ -133,12 +134,16 @@ export function listMeals() {
 }
 
 /** Add a meal. `at` defaults to now; pass one to log against another day. */
-export function addMeal({ profile = null, text = "", kcal = null, at = null }) {
+export function addMeal({ profile = null, text = "", kcal = null, at = null, photo = false }) {
   const entry = {
     at: at || new Date().toISOString(),
     profile,
     text: String(text).slice(0, 200),
     kcal: Number.isFinite(+kcal) && +kcal > 0 ? Math.round(+kcal) : null,
+    // A flag, not the image. The photo itself is in IndexedDB under a key
+    // derived from (at, profile) -- see media.js -- because a few hundred kB
+    // of base64 in localStorage takes the whole store down with it.
+    photo: !!photo,
   };
   if (!entry.text.trim()) return null;
   const all = listMeals();
@@ -154,6 +159,54 @@ export function deleteMeal(at, profile = null) {
   const kept = listMeals().filter((m) => !(m.at === at && m.profile === profile));
   write(MKEY, kept);
   return kept.length;
+}
+
+// --- diary -----------------------------------------------------------------
+/* One athlete can write more than once a day, so entries are a flat list keyed
+ * on `at`, exactly as meals are. Tags are free strings: the useful set is the
+ * one the person keeps using, not one this file can predict. */
+const DIARY_MAX = 3000;
+const TAGS_MAX = 40;
+
+export function listDiary() {
+  const d = read(DKEY, []);
+  return Array.isArray(d) ? d : [];
+}
+
+export function addDiary({ profile = null, mood = null, tags = [], note = "", at = null }) {
+  const m = Number(mood);
+  const entry = {
+    at: at || new Date().toISOString(),
+    profile,
+    mood: Number.isInteger(m) && m >= 1 && m <= 5 ? m : null,
+    tags: [...new Set((tags || []).map((t) => String(t).slice(0, 40)))].slice(0, TAGS_MAX),
+    note: String(note).slice(0, 1000),
+  };
+  // An entry with no mood, no tags and no note is a mis-tap.
+  if (entry.mood === null && !entry.tags.length && !entry.note.trim()) return null;
+  const all = listDiary().filter((x) => !(x.at === entry.at && x.profile === entry.profile));
+  all.push(entry);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(DKEY, all.slice(-DIARY_MAX));
+  return entry;
+}
+
+export function deleteDiary(at, profile = null) {
+  const kept = listDiary().filter((d) => !(d.at === at && d.profile === profile));
+  write(DKEY, kept);
+  return kept.length;
+}
+
+/** The athlete's own tag list, kept on the profile so it travels with them. */
+export function profileTags(name) {
+  return getProfile(name)?.tags || null;
+}
+
+export function saveProfileTags(name, tags) {
+  const p = getProfile(name);
+  if (!p) return false;
+  p.tags = [...new Set(tags.map((t) => String(t).slice(0, 40)))].slice(0, TAGS_MAX);
+  return saveProfile(p);
 }
 
 // --- stored waveforms ------------------------------------------------------
@@ -231,6 +284,7 @@ export function exportAll() {
     session: getSession(),
     archive: listArchive(),
     meals: listMeals(),
+    diary: listDiary(),
   };
 }
 
@@ -250,7 +304,7 @@ export function importAll(data) {
     throw new Error(`file is from a newer version (${data.version}) than this app understands`);
   }
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
-                   sessionAdopted: false, mealsAdded: 0 };
+                   sessionAdopted: false, mealsAdded: 0, diaryAdded: 0 };
 
   const store = listProfiles();
   for (const p of (data.profiles && data.profiles.profiles) || []) {
@@ -296,6 +350,20 @@ export function importAll(data) {
   }
   meals.sort((x, y) => String(x.at).localeCompare(String(y.at)));
   write(MKEY, meals.slice(-MEALS_MAX));
+
+  const diary = listDiary();
+  const seenD = new Set(diary.map((d) => `${d.profile}|${d.at}`));
+  for (const d of data.diary || []) {
+    if (!d || !d.at || seenD.has(`${d.profile}|${d.at}`)) continue;
+    diary.push(d); seenD.add(`${d.profile}|${d.at}`); report.diaryAdded++;
+  }
+  diary.sort((x, y) => String(x.at).localeCompare(String(y.at)));
+  write(DKEY, diary.slice(-DIARY_MAX));
+
+  // Photos are not in the export. They live in IndexedDB and would multiply
+  // the file size by an order of magnitude in base64 -- an export you cannot
+  // send yourself is not a backup. Meals still carry their `photo` flag, so
+  // an imported meal knows a picture existed on the other device.
   return report;
 }
 
