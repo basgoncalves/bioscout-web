@@ -71,7 +71,7 @@ for (const v of ["viewLogin", "viewDash", "viewRecord"]) {
  * last row overflows its container and lands on the text below. It looks fine
  * until the month has six rows. Any such button must reset its margin. */
 const LAID_OUT = ["button.day", "button.moodBtn", "button.calbtn", ".chip",
-                  ".whoRow button", ".tabs button"];
+                  ".whoRow button", ".tabs button", "button.stepBtn"];
 // Comments stripped first: a comment explaining why a margin reset matters
 // contains the word "margin", and would satisfy the check it exists to make.
 const style = ((html.match(/<style[^>]*>([\s\S]*?)<\/style>/) || [, ""])[1])

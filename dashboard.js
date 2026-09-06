@@ -22,7 +22,7 @@
  * the bucketing -- which is the part with edge cases -- without a DOM.
  */
 import { t as tr } from "./i18n.js";
-import { MOODS, collectDiary, moodTrend } from "./diary.js";
+import { MOODS, collectDiary, moodTrend, tagLevels, LEVEL_MAX } from "./diary.js";
 import { collectWeights, weightOn, weightSeries } from "./weight.js";
 import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
          dayOfCycle, FLOWS } from "./cycle.js";
@@ -494,10 +494,11 @@ function diaryHTML(day, key, todayKey, trend) {
   const rows = (day?.entries || []).map((e) => {
     const t = new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const m = MOODS.find((x) => x.v === e.mood);
-    const chips = (e.tags || []).map((x) => `<span class="chip on">${esc(tr(x) || x)}</span>`).join("");
+    const chips = tagLevels(e).map(({ tag, n }) =>
+      `<span class="chip on">${esc(tr(tag) || tag)}${n > 1 ? " " + n : ""}</span>`).join("");
     return `<div class="entry">
       <div class="erow"><b>${esc(t)}</b>
-        <span class="mood m${e.mood || 0}">${m ? m.glyph : "·"}</span>
+        <span class="mood m${e.mood || 0}">${m ? esc(tr(m.key)) : "·"}</span>
         <span style="flex:1"></span>
         <button type="button" class="linky diaryDel" data-at="${esc(e.at)}"
           aria-label="${esc(tr("delete"))}">×</button></div>
@@ -522,16 +523,36 @@ function diaryHTML(day, key, todayKey, trend) {
 }
 
 /** The diary form on its own, for the Add dialog. */
-export function diaryFormHTML(key, todayKey, tags) {
+export function diaryFormHTML(key, todayKey, tags, draft = { tags: [], levels: {} }) {
   const picker = MOODS.map((m) =>
     `<button type="button" class="moodBtn m${m.v}" data-mood="${m.v}"
-       title="${esc(tr(m.key))}" aria-label="${esc(tr(m.key))}">${m.glyph}</button>`).join("");
-  const chips = tags.map((t) =>
+       aria-label="${esc(tr(m.key))}">${esc(tr(m.key))}</button>`).join("");
+
+  // Unchosen tags stay chips. Chosen ones get a stepper, on their own row
+  // where the − and + are big enough to hit and the number is readable --
+  // both crammed into a chip is a 24px target on a phone.
+  const chosen = draft.tags || [];
+  const chips = tags.filter((t) => !chosen.includes(t)).map((t) =>
     `<button type="button" class="chip tagBtn" data-tag="${esc(t)}">${esc(tr(t) || t)}</button>`).join("");
+  const steppers = chosen.map((t) => {
+    const n = Number.isFinite(draft.levels?.[t]) ? draft.levels[t] : 1;
+    return `<div class="stepRow">
+      <span class="stepName">${esc(tr(t) || t)}</span>
+      <button type="button" class="stepBtn" data-step-tag="${esc(t)}" data-d="-1"
+        aria-label="−">−</button>
+      <span class="stepN">${n}</span>
+      <button type="button" class="stepBtn" data-step-tag="${esc(t)}" data-d="1"
+        aria-label="+" ${n >= LEVEL_MAX ? "disabled" : ""}>+</button>
+    </div>`;
+  }).join("");
+
   return `
-    <div class="moods" style="margin-top:10px">${picker}</div>
+    <label style="margin-top:10px">${esc(tr("overall"))}</label>
+    <div class="moods">${picker}</div>
+    ${steppers ? `<div class="steps">${steppers}</div>` : ""}
     <div class="chips" style="margin-top:8px">${chips}
       <button type="button" class="chip addTag" id="tagAdd">+</button></div>
+    <p class="note" style="margin:6px 0 0">${esc(tr("levelHint", { max: LEVEL_MAX }))}</p>
     <label for="diaryNote" style="margin-top:8px">${esc(tr("note"))}</label>
     <textarea id="diaryNote" rows="2" placeholder="${esc(tr("notePlaceholder"))}"></textarea>
     <div class="row" style="margin-top:8px">

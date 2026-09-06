@@ -175,13 +175,22 @@ export function listDiary() {
   return Array.isArray(d) ? d : [];
 }
 
-export function addDiary({ profile = null, mood = null, tags = [], note = "", at = null }) {
+export function addDiary({ profile = null, mood = null, tags = [], levels = {},
+                           note = "", at = null }) {
   const m = Number(mood);
+  const keep = [...new Set((tags || []).map((t) => String(t).slice(0, 40)))].slice(0, TAGS_MAX);
+  const lv = {};
+  for (const t of keep) {
+    const n = Math.round(Number(levels?.[t]));
+    // A level outside 1-10 is not a level; the tag stays, unquantified.
+    if (Number.isFinite(n) && n >= 1 && n <= 10) lv[t] = n;
+  }
   const entry = {
     at: at || new Date().toISOString(),
     profile,
     mood: Number.isInteger(m) && m >= 1 && m <= 5 ? m : null,
-    tags: [...new Set((tags || []).map((t) => String(t).slice(0, 40)))].slice(0, TAGS_MAX),
+    tags: keep,
+    levels: lv,
     note: String(note).slice(0, 1000),
   };
   // An entry with no mood, no tags and no note is a mis-tap.
