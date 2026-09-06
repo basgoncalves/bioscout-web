@@ -237,6 +237,10 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="nav hidden" id="navBar">
+    <button class="ghost" id="navBack" aria-label="Back">‹</button>
+    <button class="ghost" id="navHome" data-i18n="home">Home</button>
+  </div>
   <div class="brand">
     <img src="logo.png" alt="" width="34" height="34">
     <h1>BioScout Web</h1>
@@ -353,12 +357,10 @@
   </section>
 
   <section id="viewCycle" class="hidden">
-    <button class="ghost" id="cycleBackBtn" data-i18n="backToDashboard">Back to dashboard</button>
     <div class="card" id="cycleCard"></div>
   </section>
 
   <section id="viewRecord" class="hidden">
-    <button class="ghost" id="backToDashBtn" data-i18n="backToDashboard">Back to dashboard</button>
     <div class="card" id="setup">
     <div class="row" style="margin-bottom:11px">
       <div>
@@ -444,7 +446,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 39;
+window.BUILD = 40;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -486,6 +488,8 @@ import { collectWeights, weightOn } from "./weight.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
          dayOfCycle } from "./cycle.js";
 import { densityFor, foodNames, describe, mealKcal } from "./foods.js";
+import { CARD, cardStats, drawCard, shareCard } from "./share.js";
+import { collectMeals } from "./dashboard.js";
 import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./media.js";
 import { Overlay } from "./overlay.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
@@ -983,6 +987,39 @@ $("linkBtn").onclick = async () => {
   }
 };
 
+/* --- the share card --------------------------------------------------------
+ * Training and intake only. A share sheet is one tap from a public post and
+ * the cost of a mistake is not symmetric: volume in the wrong place is a
+ * shrug, a cycle in the wrong place is not. See share.js.
+ */
+async function shareMonth() {
+  const btn = $("shareBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const s = cardStats({
+      name: currentAthlete() || tr("noProfile"),
+      year: dashView.year, month: dashView.month,
+      days: collectDays(dashboardData()),
+      mealDays: collectMeals(myMeals()),
+      weights: collectWeights(myWeights()),
+    });
+    if (s.empty) { say(tr("shareNothing"), true); return; }
+
+    const c = document.createElement("canvas");
+    c.width = CARD.w; c.height = CARD.h;
+    drawCard(c.getContext("2d"), s, window.RELEASE);
+    const blob = await new Promise((r) => c.toBlob(r, "image/png"));
+    if (!blob) { say(tr("shareFailed"), true); return; }
+
+    const what = await shareCard(blob, `bioscout-${s.stamp}.png`, tr("shareTitle"));
+    if (what === "downloaded") say(tr("shareSaved"));
+  } catch (err) {
+    say(tr("shareFailed") + " " + err.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 /* --- the cycle screen ------------------------------------------------------
  * Its own view rather than a dialog: the wheel wants the whole width, tapping
  * a day has to redraw it, and a modal that redraws itself under your finger is
@@ -1017,7 +1054,6 @@ function renderCycle() {
   if ($("cycleSave")) wireCycleForm(cycleSel, hit, renderCycle, card);
 }
 
-$("cycleBackBtn").onclick = () => { showView("viewDash"); renderDash(); };
 
 /* --- the Add dialog --------------------------------------------------------
  * One button, four things you can add to the selected day. Splitting it into
@@ -1266,10 +1302,28 @@ const VIEWS = ["viewLogin", "viewDash", "viewCycle", "viewRecord"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-function showView(id) {
+/* Every view change is a history entry, so the phone's back button moves
+ * between screens instead of leaving the app. Without this, back from the
+ * recorder closes BioScout, which is the single most annoying thing a web app
+ * can do on Android. `push` is false when we are REACTING to a back, or the
+ * two would fight. */
+function showView(id, push = true) {
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
+  $("navBar").classList.toggle("hidden", id === "viewLogin" || id === "viewDash");
+  if (push && history.state?.view !== id) history.pushState({ view: id }, "", "#" + id);
   window.scrollTo(0, 0);
 }
+
+window.addEventListener("popstate", (e) => {
+  const id = e.state?.view || "viewDash";
+  if (id === "viewLogin") { renderLogin(); showView("viewLogin", false); return; }
+  showView(id, false);
+  if (id === "viewDash") renderDash();
+  if (id === "viewCycle") renderCycle();
+});
+
+$("navBack").onclick = () => history.back();
+$("navHome").onclick = () => { showView("viewDash"); renderDash(); };
 
 const currentAthlete = () => $("profile").value || null;
 
@@ -1332,7 +1386,6 @@ function startTraining() {
 }
 $("newTrainingBtn").onclick = startTraining;
 
-$("backToDashBtn").onclick = () => { showView("viewDash"); renderDash(); };
 
 /* --- training history ------------------------------------------------------
  * The dashboard owns which month is on screen and which day is selected. It
@@ -1443,6 +1496,7 @@ function renderDash() {
     b.onclick = () => { deleteDiary(b.dataset.at, currentAthlete()); renderDash(); };
   });
   if ($("addBtn")) $("addBtn").onclick = () => openAdd();
+  if ($("shareBtn")) $("shareBtn").onclick = shareMonth;
   if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);
 
 }

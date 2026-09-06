@@ -18,7 +18,31 @@ for (const lang of m.ALL_LANGS) {
   const missing = m.missingKeys(lang), stale = m.staleKeys(lang);
   const ok = !missing.length && !stale.length;
   if (!ok) bad++;
-  console.log(`  [${ok ? "OK  " : "FAIL"}] ${lang}  missing ${missing.length}, stale ${stale.length}`
+  
+/* No duplicate keys.
+ *
+ * A repeated key in an object literal is legal and silent: the later one wins.
+ * Three had crept in, and while all three happened to carry the same text, the
+ * failure mode when they do not is a string that changes for no visible reason
+ * and cannot be found by searching for the value you can see.
+ */
+{
+  const src = readFileSync("i18n.js", "utf8");
+  for (const name of ["EN", "PT", "DE"]) {
+    const start = src.indexOf(`const ${name} =`);
+    const end = src.indexOf("\n};", start);
+    const keys = [...src.slice(start, end).matchAll(/^  "([^"]+)":/gm)].map((m) => m[1]);
+    const dupes = [...new Set(keys.filter((k, i) => keys.indexOf(k) !== i))];
+    if (dupes.length) {
+      bad += dupes.length;
+      console.log(`  [FAIL] ${name} has duplicate keys: ${dupes.join(", ")}`);
+    } else {
+      console.log(`  [OK  ] ${name} ${keys.length} keys, none repeated`);
+    }
+  }
+}
+
+console.log(`  [${ok ? "OK  " : "FAIL"}] ${lang}  missing ${missing.length}, stale ${stale.length}`
     + (missing.length ? `\n         missing: ${missing.join(", ")}` : "")
     + (stale.length ? `\n         stale:   ${stale.join(", ")}` : ""));
 }

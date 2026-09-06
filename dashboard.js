@@ -819,7 +819,10 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, view, to
             ? tr("weightMeasured", { kg: w.kg.toFixed(1) })
             : tr("weightCarried", { kg: w.kg.toFixed(1), n: nDays(w.stale) }))}</p>`
         : ""; })()}
-      <button class="ghost" id="addBtn" style="margin-top:8px">${esc(tr("addEntry"))}</button>
+      <div class="row" style="margin-top:8px">
+        <button class="ghost" id="addBtn" style="margin:0;padding:10px">${esc(tr("addEntry"))}</button>
+        <button class="ghost" id="shareBtn" style="margin:0;padding:10px">${esc(tr("shareMonth"))}</button>
+      </div>
     </div>
     ${calendarHTML({ meals: mealDays, diary: diaryDays, cycle: cycleDays }[mode] || days,
                    view.year, view.month, view.selected, todayKey, mode)}
