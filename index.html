@@ -61,14 +61,33 @@
   .meanline { position:absolute; left:0; right:0; border-top:1px dashed var(--muted);
               pointer-events:none; }
   .meanline span { position:absolute; right:0; top:-15px; font-size:10.5px; color:var(--muted); }
-  .moods { display:flex; gap:6px; }
-  button.moodBtn { flex:1; margin:0; padding:9px 0; font-size:17px; line-height:1;
+  .moods { display:grid; grid-template-columns:repeat(5,1fr); gap:5px; }
+  /* Labels, not glyphs: the bar characters rendered as empty boxes on Android.
+     11px is small but these are five words on a 360px screen, and a word you
+     can read beats a symbol you cannot. */
+  button.moodBtn { margin:0; padding:9px 2px; font-size:11px; line-height:1.2;
                    background:var(--bg); color:var(--muted); border:1px solid var(--line); }
   button.moodBtn.on { color:#fff; border-color:transparent; }
   button.moodBtn.m1.on { background:#b4523f; } button.moodBtn.m2.on { background:#b07b3c; }
   button.moodBtn.m3.on { background:#7a7a7a; } button.moodBtn.m4.on { background:#4d8a5a; }
   button.moodBtn.m5.on { background:#3f8f6f; }
   .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .itemRow { display:flex; align-items:center; gap:5px; margin-bottom:6px; }
+  .itemRow input.itemName { flex:1; min-width:0; margin:0; padding:9px; font-size:13.5px; }
+  .itemRow input.itemGrams { width:56px; flex:none; margin:0; padding:9px 4px; text-align:center;
+                             font-size:13.5px; }
+  .itemKcal { width:42px; text-align:right; font-size:12.5px; color:var(--muted);
+              font-variant-numeric:tabular-nums; }
+  .steps { margin-top:8px; }
+  .stepRow { display:flex; align-items:center; gap:8px; padding:5px 0; }
+  .stepName { flex:1; font-size:13.5px; }
+  /* 40px targets: a − and a + squeezed into a chip is a 24px hit area, which
+     on a phone means half the taps land on the wrong one. */
+  button.stepBtn { width:40px; flex:none; margin:0; padding:8px 0; font-size:17px;
+                   line-height:1; background:var(--bg); color:var(--ink);
+                   border:1px solid var(--line); }
+  button.stepBtn:disabled { opacity:.35; }
+  .stepN { width:26px; text-align:center; font-variant-numeric:tabular-nums; }
   .chip { display:inline-block; margin:0; width:auto; padding:6px 11px; font-size:12.5px;
           border-radius:999px; background:var(--bg); color:var(--muted);
           border:1px solid var(--line); }
@@ -95,12 +114,16 @@
   .tile span { display:block; font-size:11px; color:var(--muted); }
   .calnav { display:flex; align-items:center; gap:8px; margin:14px 0 6px; }
   .calmonth { flex:1; text-align:center; font-weight:600; }
-  button.calbtn { width:38px; flex:none; padding:6px 0; font-size:18px; line-height:1; }
+  button.calbtn { width:38px; flex:none; margin:0; padding:6px 0; font-size:18px; line-height:1; }
   .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
   .dow { text-align:center; font-size:11px; color:var(--muted); padding-bottom:2px; }
   /* Square cells without a fixed pixel size, so the grid survives a 320px
      phone and a tablet without a media query for each. */
-  button.day { width:100%; aspect-ratio:1; padding:0; font-size:13px; font-weight:500;
+  /* margin:0 matters more than it looks: the global `button + button` rule
+     adds 8px above every button that follows another, which in a grid pushes
+     each cell down inside its own row until the last row spills out of the
+     container and lands on the text below it. */
+  button.day { width:100%; aspect-ratio:1; margin:0; padding:0; font-size:13px; font-weight:500;
                border-radius:8px; background:var(--bg); color:var(--ink);
                border:1px solid transparent; display:flex; align-items:center;
                justify-content:center; }
@@ -373,7 +396,7 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v31";
+window.BUILD = "v35";
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -400,15 +423,17 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listMeals, addMeal, deleteMeal,
          listDiary, addDiary, deleteDiary, profileTags, saveProfileTags,
          listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
+         profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices }
        from "./profiles.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML, weightFormHTML,
-         dayKey, allSessions, collectDays } from "./dashboard.js";
+         cycleFormHTML, dayKey, allSessions, collectDays } from "./dashboard.js";
 import { probe as probeHelper, fetchClip } from "./fetcher.js";
-import { DEFAULT_TAGS, toggleTag } from "./diary.js";
+import { DEFAULT_TAGS, toggleTag, stepTag } from "./diary.js";
 import { collectWeights, weightOn } from "./weight.js";
 import { DEFAULT_SYMPTOMS } from "./cycle.js";
+import { densityFor, foodNames, describe, mealKcal } from "./foods.js";
 import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./media.js";
 import { Overlay } from "./overlay.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
@@ -915,9 +940,10 @@ $("linkBtn").onclick = async () => {
  * replaces the whole card on every change -- a half-typed meal would be wiped
  * by the re-render that showed the last one.
  */
-let draft = { mood: null, tags: [] };
+let draft = { mood: null, tags: [], levels: {} };
 let cycleDraft = null;
 let mealShot = null;                 // a File waiting to be attached
+let mealDraft = { items: [] };
 
 function openAdd(step = null) {
   const dlg = $("addDlg");
@@ -942,12 +968,13 @@ function openAdd(step = null) {
       };
     });
   } else if (step === "meal") {
+    if (!mealDraft.items.length) mealDraft.items.push({ name: "", grams: null, kcal100: null });
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("meal")}</h2>`
-      + mealFormHTML(key, todayKey);
+      + mealFormHTML(key, todayKey, mealDraft, foodNames(profileFoods(currentAthlete())));
     wireMealForm(key, todayKey);
   } else if (step === "diary") {
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("diary")}</h2>`
-      + diaryFormHTML(key, todayKey, myTags());
+      + diaryFormHTML(key, todayKey, myTags(), draft);
     wireDiaryForm(key);
   } else if (step === "cycle") {
     const current = myCycle().find((c) => String(c.at).slice(0, 10) === key) || null;
@@ -978,9 +1005,10 @@ const shortDate = (key) => {
 /** Close, re-render, and forget the draft. */
 function done() {
   $("addDlg").close();
-  draft = { mood: null, tags: [] };
+  draft = { mood: null, tags: [], levels: {} };
   cycleDraft = null;
   mealShot = null;
+  mealDraft = { items: [] };
   renderDash();
 }
 
@@ -1018,13 +1046,56 @@ function wireCycleForm(key, current) {
 }
 
 function wireMealForm(key, todayKey) {
+  const body = $("addDlgBody");
+  const custom = () => profileFoods(currentAthlete());
+  /* The name and grams inputs are re-rendered on every change, so their values
+   * are read back into the draft before anything redraws -- otherwise typing a
+   * name and then tapping + would lose the name. */
+  const sync = () => {
+    body.querySelectorAll("input.itemName").forEach((el) => {
+      const it = mealDraft.items[+el.dataset.i];
+      if (!it) return;
+      it.name = el.value;
+      // Look the density up on every sync: someone typing "oat" then "oats"
+      // should get a number the moment the name matches something.
+      it.kcal100 = densityFor(el.value, custom());
+    });
+    body.querySelectorAll("input.itemGrams").forEach((el) => {
+      const it = mealDraft.items[+el.dataset.i];
+      if (it) it.grams = el.value === "" ? null : +el.value;
+    });
+  };
+  const redraw = () => { sync(); openAdd("meal"); };
+
+  body.querySelectorAll("input.itemName").forEach((el) => { el.onchange = redraw; });
+  body.querySelectorAll("input.itemGrams").forEach((el) => { el.onchange = redraw; });
+  body.querySelectorAll("button.gramStep").forEach((b) => {
+    b.onclick = () => {
+      sync();
+      const it = mealDraft.items[+b.dataset.i];
+      it.grams = Math.max(0, (it.grams || 0) + +b.dataset.d);
+      openAdd("meal");
+    };
+  });
+  body.querySelectorAll("button.itemDel").forEach((b) => {
+    b.onclick = () => { sync(); mealDraft.items.splice(+b.dataset.i, 1); openAdd("meal"); };
+  });
+  $("itemAdd").onclick = () => {
+    sync();
+    mealDraft.items.push({ name: "", grams: null, kcal100: null });
+    openAdd("meal");
+  };
+
   $("mealShotBtn").onclick = () => $("mealShotFile").click();
   if (mealShot) $("mealShotName").textContent = tr("photoReady");
+
   const logMeal = async (at) => {
-    const text = $("mealText").value.trim();
-    if (!text) { say(tr("mealNeedsText"), true); return; }
-    const meal = addMeal({ profile: currentAthlete(), text, kcal: $("mealKcal").value,
-                           at, photo: !!mealShot });
+    sync();
+    const items = mealDraft.items.filter((i) => String(i.name).trim());
+    if (!items.length) { say(tr("mealNeedsText"), true); return; }
+    const sum = mealKcal(items);
+    const meal = addMeal({ profile: currentAthlete(), items,
+                           text: describe(items), kcal: sum.kcal, at, photo: !!mealShot });
     if (meal && mealShot) {
       try {
         await putPhoto(photoId(meal.at, currentAthlete()), await shrink(mealShot));
@@ -1038,36 +1109,47 @@ function wireMealForm(key, todayKey) {
 
 function wireDiaryForm(key) {
   const body = $("addDlgBody");
+  // The note is the one field the re-render would lose, so it is carried by
+  // hand. Everything else lives in `draft`.
+  const redraw = () => {
+    const note = $("diaryNote").value;
+    openAdd("diary");
+    $("diaryNote").value = note;
+  };
   body.querySelectorAll("button.moodBtn").forEach((b) => {
     b.classList.toggle("on", +b.dataset.mood === draft.mood);
     b.onclick = () => {
-      // Tapping the chosen mood again clears it: a diary you cannot un-answer
+      // Tapping the chosen level again clears it: a diary you cannot un-answer
       // is one people stop being honest in.
       draft.mood = draft.mood === +b.dataset.mood ? null : +b.dataset.mood;
-      const note = $("diaryNote").value;
-      openAdd("diary");
-      $("diaryNote").value = note;
+      redraw();
     };
   });
   body.querySelectorAll("button.tagBtn").forEach((b) => {
-    b.classList.toggle("on", draft.tags.includes(b.dataset.tag));
     b.onclick = () => {
-      draft.tags = toggleTag(draft.tags, b.dataset.tag);
-      const note = $("diaryNote").value;
-      openAdd("diary");
-      $("diaryNote").value = note;
+      const next = stepTag(draft.tags, draft.levels, b.dataset.tag, 1);
+      draft.tags = next.tags; draft.levels = next.levels;
+      redraw();
+    };
+  });
+  body.querySelectorAll("button.stepBtn").forEach((b) => {
+    b.onclick = () => {
+      const next = stepTag(draft.tags, draft.levels, b.dataset.stepTag, +b.dataset.d);
+      draft.tags = next.tags; draft.levels = next.levels;
+      redraw();
     };
   });
   $("tagAdd").onclick = () => {
     const t = prompt(tr("newTagPrompt"));
     if (!t || !t.trim()) return;
     saveProfileTags(currentAthlete(), [...myTags(), t.trim()]);
-    draft.tags = toggleTag(draft.tags, t.trim());
-    openAdd("diary");
+    const next = stepTag(draft.tags, draft.levels, t.trim(), 1);
+    draft.tags = next.tags; draft.levels = next.levels;
+    redraw();
   };
   const save = (at) => {
     if (!addDiary({ profile: currentAthlete(), mood: draft.mood, tags: draft.tags,
-                    note: $("diaryNote").value, at })) {
+                    levels: draft.levels, note: $("diaryNote").value, at })) {
       say(tr("diaryNeedsSomething"), true); return;
     }
     done();
@@ -1243,23 +1325,6 @@ function renderDash() {
     renderDash();
   };
 
-  const logMeal = async (at) => {
-    const text = $("mealText").value.trim();
-    if (!text) { say(tr("mealNeedsText"), true); return; }
-    const meal = addMeal({ profile: currentAthlete(), text, kcal: $("mealKcal").value,
-                           at, photo: !!mealShot });
-    if (meal && mealShot) {
-      try {
-        await putPhoto(photoId(meal.at, currentAthlete()), await shrink(mealShot));
-      } catch (err) {
-        say(tr("sayPhotoFailed", { err: err.message }), true);
-      }
-      mealShot = null;
-    }
-    renderDash();
-  };
-  if ($("mealAddDay")) $("mealAddDay").onclick = () => logMeal(atOnDay(dashView.selected));
-  if ($("mealAddNow")) $("mealAddNow").onclick = () => logMeal(null);
   card.querySelectorAll("button.mealDel").forEach((b) => {
     b.onclick = async () => {
       // The photo goes with the meal. An orphan in IndexedDB is invisible and

@@ -22,10 +22,11 @@
  * the bucketing -- which is the part with edge cases -- without a DOM.
  */
 import { t as tr } from "./i18n.js";
-import { MOODS, collectDiary, moodTrend } from "./diary.js";
+import { MOODS, collectDiary, moodTrend, tagLevels, LEVEL_MAX } from "./diary.js";
 import { collectWeights, weightOn, weightSeries } from "./weight.js";
 import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
          dayOfCycle, FLOWS } from "./cycle.js";
+import { itemKcal, mealKcal, describe } from "./foods.js";
 
 /* Plurals come from the dictionary keys the session card already uses, rather
  * than from new ones. "3 reps in 1 sets" is the kind of thing that makes an
@@ -203,6 +204,10 @@ export function weeklyVolume(days, n = 12, today = new Date()) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+/** "6 Sep", for buttons and captions that name a day other than today. */
+const shortDay = (key) =>
+  localeDay(key).toLocaleDateString([], { day: "numeric", month: "short" });
+
 const localeDay = (key) => {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d);
@@ -298,10 +303,8 @@ function volumeHTML(days, today) {
 }
 
 function dayHTML(day, key) {
-  const date = localeDay(key).toLocaleDateString([],
-    { weekday: "long", day: "numeric", month: "long" });
   if (!day) {
-    return `<div class="daybox"><div class="sub" style="margin:0">${esc(date)}</div>
+    return `<div class="daybox"><div style="font-weight:600">${esc(tr("modeTraining"))}</div>
       <p class="sub" style="margin:6px 0 0">${esc(tr("noTrainingThatDay"))}</p></div>`;
   }
   const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -313,7 +316,7 @@ function dayHTML(day, key) {
   }).join("");
   const acts = [...day.activities].map((a) => esc(tr(a))).join(", ");
   return `<div class="daybox">
-    <div style="font-weight:600">${esc(date)}</div>
+    <div style="font-weight:600">${esc(tr("modeTraining"))}</div>
     <p class="sub" style="margin:2px 0 8px">${esc(tr("daySub", {
       sets: nSets(day.sets.length), reps: nReps(day.reps),
     }))}${day.sessions.size > 1 ? " · " + esc(tr("nSessionsOnDay", { n: day.sessions.size })) : ""
@@ -380,8 +383,14 @@ function mealsHTML(day, key, todayKey) {
     const shot = m.photo
       ? `<img class="mealShot" data-at="${esc(m.at)}" alt="" width="44" height="44">`
       : "";
-    return `<tr><td>${esc(t)}</td><td>${shot}${esc(m.text)}</td>
-      <td style="text-align:right">${m.kcal ?? "—"}</td>
+    const what = m.items && m.items.length ? describe(m.items) : m.text;
+    const sum = m.items && m.items.length ? mealKcal(m.items) : null;
+    const kcal = sum ? sum.kcal : m.kcal;
+    // A total that could not cover every item is marked, not rounded up into
+    // a claim about the whole meal.
+    const mark = sum && sum.kcal !== null && !sum.complete ? "+" : "";
+    return `<tr><td>${esc(t)}</td><td>${shot}${esc(what)}</td>
+      <td style="text-align:right">${kcal ?? "—"}${mark}</td>
       <td style="width:1%"><button type="button" class="linky mealDel"
         data-at="${esc(m.at)}" aria-label="${esc(tr("delete"))}">×</button></td></tr>`;
   }).join("");
@@ -463,19 +472,37 @@ export function cycleFormHTML(key, current, symptoms) {
 }
 
 /** The meal form on its own, for the Add dialog. */
-export function mealFormHTML(key, todayKey) {
+export function mealFormHTML(key, todayKey, draft = { items: [] }, names = []) {
+  const rows = (draft.items || []).map((it, i) => {
+    const k = itemKcal(it);
+    return `<div class="itemRow">
+      <input class="itemName" data-i="${i}" list="foodList" value="${esc(it.name || "")}"
+             placeholder="${esc(tr("foodName"))}" autocomplete="off">
+      <button type="button" class="stepBtn gramStep" data-i="${i}" data-d="-10">−</button>
+      <input class="itemGrams" data-i="${i}" type="number" inputmode="numeric" min="0" step="5"
+             value="${it.grams ?? ""}" aria-label="${esc(tr("grams"))}">
+      <button type="button" class="stepBtn gramStep" data-i="${i}" data-d="10">+</button>
+      <span class="itemKcal">${k === null ? "—" : k}</span>
+      <button type="button" class="linky itemDel" data-i="${i}"
+              aria-label="${esc(tr("delete"))}">×</button>
+    </div>`;
+  }).join("");
+
+  const sum = mealKcal(draft.items);
+  const totalLine = sum.kcal === null
+    ? `<p class="sub" style="margin:6px 0 0">${esc(tr("noKcalYet"))}</p>`
+    : `<p class="sub" style="margin:6px 0 0">${esc(sum.complete
+        ? tr("mealTotal", { kcal: sum.kcal })
+        : tr("mealTotalPartial", { kcal: sum.kcal, n: sum.counted, total: sum.items }))}</p>`;
+
   return `
+    <datalist id="foodList">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
+    <div class="items">${rows}</div>
+    <button type="button" class="ghost" id="itemAdd" style="margin-top:8px;padding:9px">${
+      esc(tr("addItem"))}</button>
+    ${totalLine}
+    <p class="note" style="margin:4px 0 0">${esc(tr("foodsApproximate"))}</p>
     <div class="row" style="margin-top:10px">
-      <div style="flex:2.2">
-        <label for="mealText">${esc(tr("meal"))}</label>
-        <input id="mealText" type="text" autocomplete="off" placeholder="${esc(tr("mealPlaceholder"))}">
-      </div>
-      <div style="flex:1">
-        <label for="mealKcal">${esc(tr("kcalOptional"))}</label>
-        <input id="mealKcal" type="number" min="0" step="10" inputmode="numeric">
-      </div>
-    </div>
-    <div class="row" style="margin-top:8px">
       <button type="button" class="ghost" id="mealShotBtn" style="margin:0;padding:9px">${
         esc(tr("addPhoto"))}</button>
       <span class="sub" id="mealShotName"></span>
@@ -488,18 +515,17 @@ export function mealFormHTML(key, todayKey) {
     </div>`;
 }
 
-const shortDay = (key) =>
-  localeDay(key).toLocaleDateString([], { day: "numeric", month: "short" });
-
+/** The diary form on its own, for the Add dialog. */
 /** The selected day's diary, and the form to write one. */
 function diaryHTML(day, key, todayKey, trend) {
   const rows = (day?.entries || []).map((e) => {
     const t = new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const m = MOODS.find((x) => x.v === e.mood);
-    const chips = (e.tags || []).map((x) => `<span class="chip on">${esc(tr(x) || x)}</span>`).join("");
+    const chips = tagLevels(e).map(({ tag, n }) =>
+      `<span class="chip on">${esc(tr(tag) || tag)}${n > 1 ? " " + n : ""}</span>`).join("");
     return `<div class="entry">
       <div class="erow"><b>${esc(t)}</b>
-        <span class="mood m${e.mood || 0}">${m ? m.glyph : "·"}</span>
+        <span class="mood m${e.mood || 0}">${m ? esc(tr(m.key)) : "·"}</span>
         <span style="flex:1"></span>
         <button type="button" class="linky diaryDel" data-at="${esc(e.at)}"
           aria-label="${esc(tr("delete"))}">×</button></div>
@@ -523,17 +549,36 @@ function diaryHTML(day, key, todayKey, trend) {
   </div>`;
 }
 
-/** The diary form on its own, for the Add dialog. */
-export function diaryFormHTML(key, todayKey, tags) {
+export function diaryFormHTML(key, todayKey, tags, draft = { tags: [], levels: {} }) {
   const picker = MOODS.map((m) =>
     `<button type="button" class="moodBtn m${m.v}" data-mood="${m.v}"
-       title="${esc(tr(m.key))}" aria-label="${esc(tr(m.key))}">${m.glyph}</button>`).join("");
-  const chips = tags.map((t) =>
+       aria-label="${esc(tr(m.key))}">${esc(tr(m.key))}</button>`).join("");
+
+  // Unchosen tags stay chips. Chosen ones get a stepper, on their own row
+  // where the − and + are big enough to hit and the number is readable --
+  // both crammed into a chip is a 24px target on a phone.
+  const chosen = draft.tags || [];
+  const chips = tags.filter((t) => !chosen.includes(t)).map((t) =>
     `<button type="button" class="chip tagBtn" data-tag="${esc(t)}">${esc(tr(t) || t)}</button>`).join("");
+  const steppers = chosen.map((t) => {
+    const n = Number.isFinite(draft.levels?.[t]) ? draft.levels[t] : 1;
+    return `<div class="stepRow">
+      <span class="stepName">${esc(tr(t) || t)}</span>
+      <button type="button" class="stepBtn" data-step-tag="${esc(t)}" data-d="-1"
+        aria-label="−">−</button>
+      <span class="stepN">${n}</span>
+      <button type="button" class="stepBtn" data-step-tag="${esc(t)}" data-d="1"
+        aria-label="+" ${n >= LEVEL_MAX ? "disabled" : ""}>+</button>
+    </div>`;
+  }).join("");
+
   return `
-    <div class="moods" style="margin-top:10px">${picker}</div>
+    <label style="margin-top:10px">${esc(tr("overall"))}</label>
+    <div class="moods">${picker}</div>
+    ${steppers ? `<div class="steps">${steppers}</div>` : ""}
     <div class="chips" style="margin-top:8px">${chips}
       <button type="button" class="chip addTag" id="tagAdd">+</button></div>
+    <p class="note" style="margin:6px 0 0">${esc(tr("levelHint", { max: LEVEL_MAX }))}</p>
     <label for="diaryNote" style="margin-top:8px">${esc(tr("note"))}</label>
     <textarea id="diaryNote" rows="2" placeholder="${esc(tr("notePlaceholder"))}"></textarea>
     <div class="row" style="margin-top:8px">
@@ -586,8 +631,6 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, view, to
   return `
     <div style="font-weight:600;margin:0 0 2px">${esc(tr("monthlySummary"))}</div>
     ${intakeHTML(mealDays, wts, view.year, view.month)}
-    ${calendarHTML({ meals: mealDays, diary: diaryDays, cycle: cycleDays }[mode] || days,
-                   view.year, view.month, view.selected, todayKey, mode)}
     <div id="dayHead">
       <div style="font-weight:600">${esc(localeDay(view.selected)
         .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>
@@ -596,8 +639,10 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, view, to
             ? tr("weightMeasured", { kg: w.kg.toFixed(1) })
             : tr("weightCarried", { kg: w.kg.toFixed(1), n: nDays(w.stale) }))}</p>`
         : ""; })()}
+      <button class="ghost" id="addBtn" style="margin-top:8px">${esc(tr("addEntry"))}</button>
     </div>
-    <button class="ghost" id="addBtn" style="margin-top:10px">${esc(tr("addEntry"))}</button>
+    ${calendarHTML({ meals: mealDays, diary: diaryDays, cycle: cycleDays }[mode] || days,
+                   view.year, view.month, view.selected, todayKey, mode)}
     ${dayHTML(days.get(view.selected), view.selected)}
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey)}
     ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey,

@@ -10,8 +10,8 @@
  */
 process.env.TZ = process.env.TZ || "Europe/Vienna";
 
-import { collectDiary, tagCounts, moodTrend, toggleTag, isMood, MOODS, dayKey }
-  from "./diary.js";
+import { collectDiary, tagCounts, moodTrend, toggleTag, stepTag, tagLevels,
+         isMood, MOODS, LEVEL_MAX, dayKey } from "./diary.js";
 import { photoId, targetDims } from "./media.js";
 import { collectWeights, weightOn, latestWeight, weightSeries, daysBetween }
   from "./weight.js";
@@ -44,7 +44,7 @@ ok(dayKey("2026-08-14T22:30:00.000Z") === "2026-08-15",
   const d14 = days.get("2026-08-14");
   ok(d14.entries.length === 2, "a day can hold a morning and an evening");
   ok(d14.mood === 3, "the day's mood is the mean of its entries", String(d14.mood));
-  ok([...d14.tags].sort().join(",") === "sleptWell,sore,stressed",
+  ok([...d14.tags.keys()].sort().join(",") === "sleptWell,sore,stressed",
      "tags across the day are pooled");
 }
 
@@ -78,6 +78,41 @@ ok(collectDiary(null).size === 0, "no entries is an empty map, not a throw");
   ok(toggleTag(["a", "b"], "b").join(",") === "a", "toggling off removes");
   ok(toggleTag(["a"], "b").sort().join(",") === "a,b", "toggling on adds");
   ok(toggleTag(undefined, "a").join(",") === "a", "toggling on nothing still works");
+}
+
+/* ---- tag levels -------------------------------------------------------- */
+{
+  // Entries written before levels existed have no `levels` at all. They must
+  // read as present-but-unquantified, not as zero and not as maximum.
+  const old = { tags: ["sore", "stressed"] };
+  ok(tagLevels(old).every((x) => x.n === 1),
+     "a tag with no level reads as 1, not 0 and not 10",
+     JSON.stringify(tagLevels(old)));
+
+  const now = { tags: ["sore"], levels: { sore: 7 } };
+  ok(tagLevels(now)[0].n === 7, "a levelled tag keeps its level");
+
+  let s = stepTag([], {}, "stressed", 1);
+  ok(s.tags.join() === "stressed" && s.levels.stressed === 1, "stepping up from nothing adds at 1");
+  s = stepTag(s.tags, s.levels, "stressed", 5);
+  ok(s.levels.stressed === 6, "and adds from there", String(s.levels.stressed));
+  s = stepTag(s.tags, s.levels, "stressed", 99);
+  ok(s.levels.stressed === LEVEL_MAX, "clamped at the top", String(s.levels.stressed));
+  s = stepTag(s.tags, s.levels, "stressed", -LEVEL_MAX);
+  ok(!s.tags.includes("stressed") && s.levels.stressed === undefined,
+     "stepping down to zero removes the tag and its level together",
+     JSON.stringify(s));
+  // The two must never disagree: a level for a tag that is not on the entry
+  // would show a number nobody can see the source of.
+  ok(Object.keys(stepTag(["a"], { a: 3 }, "a", -3).levels).length === 0,
+     "no orphan level is left behind");
+
+  const day = collectDiary([
+    { at: "2026-08-14T07:00:00.000Z", mood: 3, tags: ["stressed"], levels: { stressed: 2 }, profile: "A" },
+    { at: "2026-08-14T19:00:00.000Z", mood: 2, tags: ["stressed"], levels: { stressed: 8 }, profile: "A" },
+  ], "A").get("2026-08-14");
+  ok(day.tags.get("stressed") === 8,
+     "a day takes the highest level anything reached", String(day.tags.get("stressed")));
 }
 
 /* ---- mood trend -------------------------------------------------------- */

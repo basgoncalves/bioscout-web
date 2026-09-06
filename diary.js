@@ -19,13 +19,34 @@
 
 /** 1 is worst, 5 is best. The key names a translation string; the number is
  *  what gets stored and averaged. */
+/* Labelled, not drawn. The bar glyphs this used to carry rendered as empty
+ * boxes on Android, and a five-point scale you cannot read is not a scale. The
+ * words also fix the direction: nobody has to work out which end is good. */
 export const MOODS = [
-  { v: 1, key: "moodAwful", glyph: "▁" },
-  { v: 2, key: "moodBad", glyph: "▃" },
-  { v: 3, key: "moodOk", glyph: "▅" },
-  { v: 4, key: "moodGood", glyph: "▆" },
-  { v: 5, key: "moodGreat", glyph: "█" },
+  { v: 1, key: "moodAwful" },
+  { v: 2, key: "moodBad" },
+  { v: 3, key: "moodOk" },
+  { v: 4, key: "moodGood" },
+  { v: 5, key: "moodGreat" },
 ];
+
+/** Tag levels run 0-10. 0 means the tag is not on the entry at all. */
+export const LEVEL_MAX = 10;
+
+/**
+ * The level a tag was recorded at, as {tag, n} pairs.
+ *
+ * Entries written before levels existed carry a bare tag list, and those read
+ * as 1 -- present, unquantified. Treating them as 0 would erase them and
+ * treating them as 10 would invent an intensity nobody typed.
+ */
+export function tagLevels(entry) {
+  const levels = entry?.levels || {};
+  return (entry?.tags || []).map((t) => ({
+    tag: t,
+    n: Number.isFinite(levels[t]) ? levels[t] : 1,
+  }));
+}
 
 /** A starting set, meant to be edited. Chosen to be things that plausibly
  *  move a training day, not a lifestyle checklist. */
@@ -58,10 +79,14 @@ export function collectDiary(entries, profile = null) {
     if (profile && e.profile !== profile) continue;
     const key = dayKey(e.at);
     if (!key) continue;
-    if (!days.has(key)) days.set(key, { key, entries: [], tags: new Set(), mood: null, rated: 0 });
+    if (!days.has(key)) days.set(key, { key, entries: [], tags: new Map(), mood: null, rated: 0 });
     const d = days.get(key);
     d.entries.push(e);
-    for (const t of e.tags || []) d.tags.add(t);
+    for (const { tag, n } of tagLevels(e)) {
+      // A day shows the highest level anything reached: two entries of
+      // "stressed 2" and "stressed 8" is an 8 sort of day.
+      d.tags.set(tag, Math.max(d.tags.get(tag) ?? 0, n));
+    }
     if (isMood(e.mood)) {
       d.mood = (d.mood ?? 0) + e.mood;
       d.rated++;
@@ -84,7 +109,7 @@ export function tagCounts(entries, profile = null) {
   const counts = new Map();
   for (const e of entries || []) {
     if (profile && e.profile !== profile) continue;
-    for (const t of e.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
+    for (const { tag } of tagLevels(e)) counts.set(tag, (counts.get(tag) || 0) + 1);
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
@@ -112,4 +137,20 @@ export function toggleTag(tags, tag) {
   const set = new Set(tags || []);
   if (set.has(tag)) set.delete(tag); else set.add(tag);
   return [...set];
+}
+
+/**
+ * Nudge a tag's level, clamped to 0..10, where 0 removes it.
+ *
+ * Returns {tags, levels} so a caller holding a draft can replace both at once
+ * and never end up with a level for a tag that is not on the entry.
+ */
+export function stepTag(tags, levels, tag, delta) {
+  const cur = Number.isFinite(levels?.[tag]) ? levels[tag] : (tags || []).includes(tag) ? 1 : 0;
+  const n = Math.max(0, Math.min(LEVEL_MAX, cur + delta));
+  const nextTags = new Set(tags || []);
+  const nextLevels = { ...(levels || {}) };
+  if (n === 0) { nextTags.delete(tag); delete nextLevels[tag]; }
+  else { nextTags.add(tag); nextLevels[tag] = n; }
+  return { tags: [...nextTags], levels: nextLevels };
 }

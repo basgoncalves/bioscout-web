@@ -65,5 +65,25 @@ for (const v of ["viewLogin", "viewDash", "viewRecord"]) {
   if (!declared.has(v)) { bad++; console.error(`FAIL  missing view: ${v}`); }
 }
 
+/* The page has a global `button + button { margin-top: 8px }`, which is right
+ * for buttons stacked down a card and wrong for every button laid out by grid
+ * or flex: there the margin pushes each one down inside its own cell until the
+ * last row overflows its container and lands on the text below. It looks fine
+ * until the month has six rows. Any such button must reset its margin. */
+const LAID_OUT = ["button.day", "button.moodBtn", "button.calbtn", ".chip",
+                  ".whoRow button", ".tabs button", "button.stepBtn"];
+// Comments stripped first: a comment explaining why a margin reset matters
+// contains the word "margin", and would satisfy the check it exists to make.
+const style = ((html.match(/<style[^>]*>([\s\S]*?)<\/style>/) || [, ""])[1])
+  .replace(/\/\*[\s\S]*?\*\//g, "");
+for (const sel of LAID_OUT) {
+  const rule = style.split("}").find((b) => b.includes(sel + " {") || b.trim().startsWith(sel + " "));
+  if (!rule) { bad++; console.error(`FAIL  no rule for ${sel}`); continue; }
+  if (!/margin\s*:/.test(rule)) {
+    bad++;
+    console.error(`FAIL  ${sel} is laid out by grid or flex but never resets margin`);
+  }
+}
+
 if (bad) process.exit(1);
-console.log(`ok    ${used.size} referenced ids, all present; 3 views wired`);
+console.log(`ok    ${used.size} referenced ids, 3 views, ${LAID_OUT.length} laid-out buttons reset`);
