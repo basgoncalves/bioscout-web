@@ -1,8 +1,13 @@
 # BioScout Web
 
-Pull-up and squat kinematics from a phone camera, computed entirely in the
-browser. No app store, no APK, no server. Open a URL, press record, get reps,
-joint angles and an OpenSim `.mot` file.
+**[Open the app → basgoncalves.github.io/bioscout-web](https://basgoncalves.github.io/bioscout-web/)**
+
+A physics-informed, AI-powered bio tracker. Pose estimation from a phone
+camera, inverse dynamics on the joint angles, and a log of what you did around
+it — training, meals, weight, mood and cycle — all computed in the browser. No
+app store, no APK, no server, and the video never leaves the device.
+
+Open the link, press record, get reps, joint angles and an OpenSim `.mot` file.
 
 The browser front end of [BioScout](https://github.com/basgoncalves/bioscout).
 It is a **separate repository on purpose**: this deploys as a static site on
@@ -10,6 +15,38 @@ every push, while `bioscout` is a Python package released to PyPI, and the 45 MB
 of vendored pose engine here has no business in a `pip install`. What the two
 share is the analysis core, and that link is enforced rather than assumed — see
 *Verification*.
+
+## Analysing a video from a link (optional)
+
+The page cannot download a video itself. The bytes are not served with
+permissive CORS headers, an embedded player's pixels cannot be read from
+script, and deriving a stream URL means running code the site changes every
+few weeks. That is the platform working as designed, not a gap here.
+
+`tools/bioscout_fetch.py` does it on your own device instead:
+
+```
+pip install yt-dlp
+python tools/bioscout_fetch.py
+```
+
+Reload the app and a link box appears on the recording page. It is only there
+while the helper is running -- a control that cannot work is worse than no
+control, because the person learns the app is broken rather than that a helper
+is not started.
+
+It binds `127.0.0.1` and nothing else. Browsers exempt loopback from
+mixed-content blocking, so an HTTPS page may call it; nothing on the network
+can. On a phone, run it in Termux and helper and browser are the same device.
+The page sends an 11-character video id, never a URL, so it cannot talk the
+helper into fetching an arbitrary address.
+
+This does not change what the app uploads, which is still nothing. It does
+mean your device requests a video from YouTube, which is a network request the
+app does not otherwise make. Downloading from YouTube is against their terms
+of service; that call is yours to make for your own footage, Creative Commons
+material, or anything you hold the rights to. It lives in `tools/` as
+something you start deliberately, rather than inside the app.
 
 ## Why this exists and not an APK
 
@@ -142,7 +179,7 @@ lats, biceps and trapezius that do the work are not in the output vector. It is
 shown for squats, where the muscle list is right and the inputs are recoverable.
 
 The model it replaced predicted 113,250 N on a trial from its own training set;
-`node test_force_model.mjs` is the regression test that would have caught that,
+`node tests/test_force_model.mjs` is the regression test that would have caught that,
 and it now runs against the browser's own forward pass. See
 `../android_app/models/MODEL_CARD.md`. Joint kinematics and joint moments never
 pass through this model and are unaffected.
@@ -154,15 +191,15 @@ camera is invisible to it.
 
 ## Verification
 
-`kinematics.js` is a deliberate line-by-line port of `bioscout.movement_detector.markerless`,
+`src/kinematics.js` is a deliberate line-by-line port of `bioscout.movement_detector.markerless`,
 including numpy's exact semantics for percentile interpolation, `convolve`
 `'same'` offset and NaN handling. It is checked, not assumed.
 
 `reference.json` is the fixture both sides are held to:
 
 ```bash
-node test_port.mjs             # JS     == reference.json
-python tools/check_reference.py  # Python == reference.json
+node tests/test_port.mjs       # JS     == data/reference.json
+python tools/check_reference.py  # Python == data/reference.json
 ```
 
 The second half is the one that is easy to leave out, and leaving it out is
@@ -188,21 +225,45 @@ Current status: every rep boundary, timestamp and exported coordinate agrees
 exactly on a real pull-up clip (2 reps) and a synthetic squat (3 reps, both
 model families), across 121 checks.
 
-## Files
+## Layout
 
 ```
-index.html                 the whole app (UI, camera, analysis, export)
-kinematics.js               ported analysis core - shared with the node test
+index.html                 the app: UI, camera, dashboard, export
 sw.js                      service worker, for offline use
-vendor/                    MediaPipe tasks-vision, vendored (not a CDN)
-pose_landmarker_full.task  the pose model
-reference.json             the fixture both implementations are pinned to
-test_port.mjs              asserts the JS matches the fixture
-tools/check_reference.py   asserts the Python matches the fixture
-tools/dump_reference.py    regenerates the fixture after an intended change
+
+src/                       ES modules, loaded directly by index.html
+  kinematics.js            analysis core - shared with the Python package
+  dynamics.js forces.js    inverse dynamics and joint loads
+  detect.js ensemble.js    movement detection and rep segmentation
+  overlay.js               skeleton overlay (three.js)
+  profiles.js              athletes, sessions, meals, diary, weight, cycle
+  dashboard.js             the dashboard and its forms
+  diary.js weight.js       per-domain logic, each with its own test
+  cycle.js foods.js
+  media.js share.js        photos in IndexedDB, the shareable month card
+  fetcher.js               the optional local clip helper
+  i18n.js zip.js           translations, and the session archive
+
+tests/                     node tests/test_*.mjs, or npm test for all of them
+data/                      fixtures and tables the app fetches at runtime
+  reference.json           the fixture both implementations are pinned to
+  norms.json               reference ranges
+  force_model.json         the trained force model
+assets/                    large, vendored, and not to be edited by hand
+  vendor/                  MediaPipe tasks-vision (not a CDN)
+  pose_landmarker_full.task
+  meshes/                  character geometry for the overlay
+tools/                     scripts you run, not code the app loads
+  bioscout_fetch.py        the optional local clip helper
+  check_reference.py       asserts the Python matches the fixture
+  dump_reference.py        regenerates the fixture after an intended change
+  run_tests.mjs            runs every test in tests/
+push.py                    apply a patch and ship it, from a phone
 logo.png, icon-*.png       BioScout mark: page header, PWA and home screen
-tools/make_icons.py        regenerates those from bioscout/utils/logo.png
 ```
 
-`reference.json` is 1.1 MB and only used by the test and demo mode. Delete it
+Everything the browser loads is a plain ES module — no build step, no bundler,
+no `node_modules`. `npm test` needs nothing installed.
+
+`data/reference.json` is 1.1 MB and only used by the test and demo mode. Delete it
 from a deployment if you want a smaller repo; `?demo` stops working if you do.

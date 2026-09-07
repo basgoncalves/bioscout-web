@@ -16,6 +16,11 @@ const PKEY = "bioscout.profiles.v1";
 const SKEY = "bioscout.session.v1";
 const AKEY = "bioscout.archive.v1";
 const CKEY = "bioscout.curves.v1";
+const MKEY = "bioscout.meals.v1";
+const DKEY = "bioscout.diary.v1";
+const WKEY = "bioscout.weights.v1";
+const CYKEY = "bioscout.cycle.v1";
+const SLKEY = "bioscout.sleep.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
  * one; curves are not, so only the most recent sets keep those.
@@ -115,6 +120,229 @@ export function archiveSession() {
   return trimmed.length;
 }
 
+// --- meals -----------------------------------------------------------------
+/* A meal is a time, a description and, if the person felt like typing it, a
+ * calorie figure. That is the whole record on purpose: this is a log, not a
+ * budget. There are no targets, no remaining-for-today, and nothing that
+ * scores a day, because the app has no idea what anyone's intake should be and
+ * inventing one would be worse than useless.
+ *
+ * `at` is the identity, as `started` is for sessions: it makes import
+ * idempotent and gives deletion something to name. */
+const MEALS_MAX = 2000;
+
+export function listMeals() {
+  const m = read(MKEY, []);
+  return Array.isArray(m) ? m : [];
+}
+
+/** Add a meal. `at` defaults to now; pass one to log against another day. */
+export function addMeal({ profile = null, text = "", kcal = null, at = null,
+                          photo = false, items = [] }) {
+  // Items are the record; text and kcal are what a meal logged before items
+  // existed had, and what the list shows. Keeping all three means old entries
+  // still read correctly and new ones can be edited back into their parts.
+  const parts = (items || [])
+    .map((i) => ({
+      name: String(i.name || "").slice(0, 80),
+      grams: Number.isFinite(+i.grams) && +i.grams > 0 ? Math.round(+i.grams) : null,
+      kcal100: Number.isFinite(+i.kcal100) && +i.kcal100 >= 0 ? +i.kcal100 : null,
+    }))
+    .filter((i) => i.name);
+  const entry = {
+    at: at || new Date().toISOString(),
+    profile,
+    items: parts,
+    text: String(text).slice(0, 200),
+    kcal: Number.isFinite(+kcal) && +kcal > 0 ? Math.round(+kcal) : null,
+    // A flag, not the image. The photo itself is in IndexedDB under a key
+    // derived from (at, profile) -- see media.js -- because a few hundred kB
+    // of base64 in localStorage takes the whole store down with it.
+    photo: !!photo,
+  };
+  if (!entry.text.trim() && !parts.length) return null;
+  const all = listMeals();
+  // Two meals in the same millisecond is a double tap, not two meals.
+  if (all.some((m) => m.at === entry.at && m.profile === entry.profile)) return null;
+  all.push(entry);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(MKEY, all.slice(-MEALS_MAX));
+  return entry;
+}
+
+export function deleteMeal(at, profile = null) {
+  const kept = listMeals().filter((m) => !(m.at === at && m.profile === profile));
+  write(MKEY, kept);
+  return kept.length;
+}
+
+// --- diary -----------------------------------------------------------------
+/* One athlete can write more than once a day, so entries are a flat list keyed
+ * on `at`, exactly as meals are. Tags are free strings: the useful set is the
+ * one the person keeps using, not one this file can predict. */
+const DIARY_MAX = 3000;
+const TAGS_MAX = 40;
+
+export function listDiary() {
+  const d = read(DKEY, []);
+  return Array.isArray(d) ? d : [];
+}
+
+export function addDiary({ profile = null, mood = null, tags = [], levels = {},
+                           note = "", at = null }) {
+  const m = Number(mood);
+  const keep = [...new Set((tags || []).map((t) => String(t).slice(0, 40)))].slice(0, TAGS_MAX);
+  const lv = {};
+  for (const t of keep) {
+    const n = Math.round(Number(levels?.[t]));
+    // A level outside 1-10 is not a level; the tag stays, unquantified.
+    if (Number.isFinite(n) && n >= 1 && n <= 10) lv[t] = n;
+  }
+  const entry = {
+    at: at || new Date().toISOString(),
+    profile,
+    mood: Number.isInteger(m) && m >= 1 && m <= 5 ? m : null,
+    tags: keep,
+    levels: lv,
+    note: String(note).slice(0, 1000),
+  };
+  // An entry with no mood, no tags and no note is a mis-tap.
+  if (entry.mood === null && !entry.tags.length && !entry.note.trim()) return null;
+  const all = listDiary().filter((x) => !(x.at === entry.at && x.profile === entry.profile));
+  all.push(entry);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(DKEY, all.slice(-DIARY_MAX));
+  return entry;
+}
+
+export function deleteDiary(at, profile = null) {
+  const kept = listDiary().filter((d) => !(d.at === at && d.profile === profile));
+  write(DKEY, kept);
+  return kept.length;
+}
+
+/** Foods the athlete added, as name -> kcal per 100 g, on the profile. */
+export function profileFoods(name) {
+  return getProfile(name)?.foods || {};
+}
+
+export function saveProfileFood(name, food, kcal100) {
+  const p = getProfile(name);
+  if (!p) return false;
+  const v = Number(kcal100);
+  if (!String(food).trim() || !Number.isFinite(v) || v < 0 || v > 1000) return false;
+  p.foods = { ...(p.foods || {}), [String(food).trim().slice(0, 80)]: Math.round(v) };
+  return saveProfile(p);
+}
+
+/** The athlete's own tag list, kept on the profile so it travels with them. */
+export function profileTags(name) {
+  return getProfile(name)?.tags || null;
+}
+
+export function saveProfileTags(name, tags) {
+  const p = getProfile(name);
+  if (!p) return false;
+  p.tags = [...new Set(tags.map((t) => String(t).slice(0, 40)))].slice(0, TAGS_MAX);
+  return saveProfile(p);
+}
+
+// --- weight ----------------------------------------------------------------
+/* Dated measurements, not a single number on the profile. Mass scales every
+ * moment and contact force the app reports, so "83 kg" is only meaningful with
+ * a date attached -- see weight.js for how a value carries forward. */
+const WEIGHTS_MAX = 2000;
+
+export function listWeights() {
+  const w = read(WKEY, []);
+  return Array.isArray(w) ? w : [];
+}
+
+export function addWeight({ profile = null, kg, at = null }) {
+  const v = +kg;
+  if (!Number.isFinite(v) || v <= 0 || v > 500) return null;
+  const entry = { at: at || new Date().toISOString(), profile, kg: Math.round(v * 10) / 10 };
+  const all = listWeights().filter((x) => !(x.at === entry.at && x.profile === entry.profile));
+  all.push(entry);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(WKEY, all.slice(-WEIGHTS_MAX));
+  return entry;
+}
+
+export function deleteWeight(at, profile = null) {
+  const kept = listWeights().filter((w) => !(w.at === at && w.profile === profile));
+  write(WKEY, kept);
+  return kept.length;
+}
+
+// --- cycle -----------------------------------------------------------------
+/* One record per logged day, keyed on the day itself rather than the instant:
+ * logging the same day twice is a correction, not a second period. Cycles are
+ * derived from these days in cycle.js -- nothing here declares one. */
+const CYCLE_MAX = 2000;
+
+export function listCycle() {
+  const c = read(CYKEY, []);
+  return Array.isArray(c) ? c : [];
+}
+
+export function setCycleDay({ profile = null, at, flow = null, symptoms = [] }) {
+  if (!at) return null;
+  const f = Number(flow);
+  const entry = {
+    at,
+    profile,
+    flow: Number.isInteger(f) && f >= 1 && f <= 4 ? f : null,
+    symptoms: [...new Set((symptoms || []).map((s) => String(s).slice(0, 40)))].slice(0, 40),
+  };
+  const day = String(at).slice(0, 10);
+  const all = listCycle().filter(
+    (x) => !(x.profile === entry.profile && String(x.at).slice(0, 10) === day));
+  all.push(entry);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(CYKEY, all.slice(-CYCLE_MAX));
+  return entry;
+}
+
+export function clearCycleDay(at, profile = null) {
+  const day = String(at).slice(0, 10);
+  const kept = listCycle().filter(
+    (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
+  write(CYKEY, kept);
+  return kept.length;
+}
+
+// --- sleep -----------------------------------------------------------------
+/* One record per night, keyed on the morning it ended -- see sleep.js for why.
+ * Logging the same night twice is a correction, not a second night. */
+const SLEEP_MAX = 2000;
+
+export function listSleep() {
+  const s = read(SLKEY, []);
+  return Array.isArray(s) ? s : [];
+}
+
+export function setSleep({ profile = null, at, bed = "", wake = "" }) {
+  if (!at) return null;
+  const entry = { at, profile, bed: String(bed).slice(0, 5), wake: String(wake).slice(0, 5) };
+  if (!entry.bed || !entry.wake) return null;
+  const day = String(at).slice(0, 10);
+  const all = listSleep().filter(
+    (x) => !(x.profile === entry.profile && String(x.at).slice(0, 10) === day));
+  all.push(entry);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(SLKEY, all.slice(-SLEEP_MAX));
+  return entry;
+}
+
+export function clearSleep(at, profile = null) {
+  const day = String(at).slice(0, 10);
+  const kept = listSleep().filter(
+    (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
+  write(SLKEY, kept);
+  return kept.length;
+}
+
 // --- stored waveforms ------------------------------------------------------
 const r3 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(3) : 0));
 const r2 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(2) : 0));
@@ -189,6 +417,11 @@ export function exportAll() {
     profiles: listProfiles(),
     session: getSession(),
     archive: listArchive(),
+    meals: listMeals(),
+    diary: listDiary(),
+    weights: listWeights(),
+    cycle: listCycle(),
+    sleep: listSleep(),
   };
 }
 
@@ -207,7 +440,9 @@ export function importAll(data) {
   if (!(data.version <= EXPORT_VERSION)) {
     throw new Error(`file is from a newer version (${data.version}) than this app understands`);
   }
-  const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0, sessionAdopted: false };
+  const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
+                   sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
+                   weightsAdded: 0, cycleAdded: 0, sleepAdded: 0 };
 
   const store = listProfiles();
   for (const p of (data.profiles && data.profiles.profiles) || []) {
@@ -243,6 +478,57 @@ export function importAll(data) {
   }
   a.sort((x, y) => String(x.started).localeCompare(String(y.started)));
   write(AKEY, a.slice(-ARCHIVE_MAX));
+
+  // Meals merge on (at, profile), so re-importing the same file adds nothing.
+  const meals = listMeals();
+  const have = new Set(meals.map((m) => `${m.profile}|${m.at}`));
+  for (const m of data.meals || []) {
+    if (!m || !m.at || have.has(`${m.profile}|${m.at}`)) continue;
+    meals.push(m); have.add(`${m.profile}|${m.at}`); report.mealsAdded++;
+  }
+  meals.sort((x, y) => String(x.at).localeCompare(String(y.at)));
+  write(MKEY, meals.slice(-MEALS_MAX));
+
+  const diary = listDiary();
+  const seenD = new Set(diary.map((d) => `${d.profile}|${d.at}`));
+  for (const d of data.diary || []) {
+    if (!d || !d.at || seenD.has(`${d.profile}|${d.at}`)) continue;
+    diary.push(d); seenD.add(`${d.profile}|${d.at}`); report.diaryAdded++;
+  }
+  diary.sort((x, y) => String(x.at).localeCompare(String(y.at)));
+  write(DKEY, diary.slice(-DIARY_MAX));
+
+  const wts = listWeights();
+  const seenW = new Set(wts.map((w) => `${w.profile}|${w.at}`));
+  for (const w of data.weights || []) {
+    if (!w || !w.at || seenW.has(`${w.profile}|${w.at}`)) continue;
+    wts.push(w); seenW.add(`${w.profile}|${w.at}`); report.weightsAdded++;
+  }
+  wts.sort((x, y) => String(x.at).localeCompare(String(y.at)));
+  write(WKEY, wts.slice(-WEIGHTS_MAX));
+
+  const cyc = listCycle();
+  const seenC = new Set(cyc.map((c) => `${c.profile}|${String(c.at).slice(0, 10)}`));
+  for (const c of data.cycle || []) {
+    if (!c || !c.at || seenC.has(`${c.profile}|${String(c.at).slice(0, 10)}`)) continue;
+    cyc.push(c); seenC.add(`${c.profile}|${String(c.at).slice(0, 10)}`); report.cycleAdded++;
+  }
+  cyc.sort((x, y) => String(x.at).localeCompare(String(y.at)));
+  write(CYKEY, cyc.slice(-CYCLE_MAX));
+
+  const slp = listSleep();
+  const seenS = new Set(slp.map((x) => `${x.profile}|${String(x.at).slice(0, 10)}`));
+  for (const x of data.sleep || []) {
+    if (!x || !x.at || seenS.has(`${x.profile}|${String(x.at).slice(0, 10)}`)) continue;
+    slp.push(x); seenS.add(`${x.profile}|${String(x.at).slice(0, 10)}`); report.sleepAdded++;
+  }
+  slp.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(SLKEY, slp.slice(-SLEEP_MAX));
+
+  // Photos are not in the export. They live in IndexedDB and would multiply
+  // the file size by an order of magnitude in base64 -- an export you cannot
+  // send yourself is not a backup. Meals still carry their `photo` flag, so
+  // an imported meal knows a picture existed on the other device.
   return report;
 }
 

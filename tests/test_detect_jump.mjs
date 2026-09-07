@@ -1,5 +1,5 @@
-const K = await import('./kinematics.js');
-const D = await import('./detect.js');
+const K = await import('../src/kinematics.js');
+const D = await import('../src/detect.js');
 const G = 9.80665;
 function clip({fps=60,jumpH=0,cmv=0.25,pxPerM=500,shank=0.42,armOverhead=false}) {
   const H=[],FOOT=[]; const stand=0.95, dip=stand-cmv;

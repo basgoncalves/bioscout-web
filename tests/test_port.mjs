@@ -9,8 +9,8 @@
  * The browser and the desktop must not disagree about how many reps you did.
  */
 import fs from "node:fs";
-import { analyse, buildSquatFeatures, computePxPerM, jointPositionsM } from "./kinematics.js";
-import { inverseDynamics } from "./dynamics.js";
+import { analyse, buildSquatFeatures, computePxPerM, jointPositionsM } from "../src/kinematics.js";
+import { inverseDynamics } from "../src/dynamics.js";
 
 const TOL = 1e-9;
 const failures = [];
@@ -28,7 +28,7 @@ function check(label, a, b, tol = TOL) {
   console.log(`  [${ok ? "OK  " : "FAIL"}] ${label.padEnd(30)} max|diff| = ${d.toExponential(3)}`);
 }
 
-const ref = JSON.parse(fs.readFileSync("reference.json", "utf8"));
+const ref = JSON.parse(fs.readFileSync("data/reference.json", "utf8"));
 
 for (const caseName of Object.keys(ref.cases)) {
   const c = ref.cases[caseName];

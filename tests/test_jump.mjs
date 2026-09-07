@@ -1,5 +1,5 @@
 // Synthetic jumps with a known truth, at several frame rates and heights.
-const K = await import('./kinematics.js');
+const K = await import('../src/kinematics.js');
 const G = 9.80665;
 
 function clip({ fps, jumpH, cmv, pxPerM = 500, shank = 0.42, thigh = 0.42 }) {
@@ -195,7 +195,7 @@ for (const drift of [0.08, 0.12, 0.20]) {
   const poses = squatWithFootDrift({ drift });
   const asJump = K.analyse(poses, 48, { heightM: 1.81, activity: 'sj', osimModel: 'gpk' });
   const asSquat = K.analyse(poses, 48, { heightM: 1.81, activity: 'squat', osimModel: 'gpk' });
-  const D = await import('./detect.js');
+  const D = await import('../src/detect.js');
   const c = D.classify(poses);
   console.log(`squat, foot drifts ${(drift*100).toFixed(0)}cm -> analysed as jump: ${asJump.reps.length} jump(s)`
     + `  | as squat: ${asSquat.reps.length} rep(s)  | auto-detect: ${c.activity} (${c.confidence.toFixed(2)})`

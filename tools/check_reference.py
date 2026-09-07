@@ -29,7 +29,7 @@ from bioscout.movement_detector.markerless.squat import (
     build_squat_features, joint_positions_m)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REFERENCE = os.path.join(os.path.dirname(HERE), "reference.json")
+REFERENCE = os.path.join(os.path.dirname(HERE), "data", "reference.json")
 
 # The JS port agrees with Python to ~5e-12; anything looser would let a real
 # change hide inside the tolerance.

@@ -16,9 +16,9 @@
 import { readFileSync, existsSync } from "node:fs";
 
 globalThis.fetch = async (u) => ({ json: async () => JSON.parse(readFileSync(u, "utf8")) });
-const { loadForceModel, predictForces, selfTest, peakJRF } = await import("./forces.js");
+const { loadForceModel, predictForces, selfTest, peakJRF } = await import("../src/forces.js");
 
-const m = await loadForceModel("force_model.json");
+const m = await loadForceModel("data/force_model.json");
 let failed = 0;
 const check = (ok, msg) => { console.log(`${ok ? "ok  " : "FAIL"}  ${msg}`); if (!ok) failed++; };
 
@@ -58,8 +58,8 @@ for (const coord of ["knee_angle_r", "hip_flexion_r", "ankle_angle_r"]) {
 }
 
 // Python parity, if a reference is present.
-if (existsSync("ref.json")) {
-  const ref = JSON.parse(readFileSync("ref.json", "utf8"));
+if (existsSync("data/ref.json")) {
+  const ref = JSON.parse(readFileSync("data/ref.json", "utf8"));
   const out = predictForces(m, ref.coords, ref.times.length,
     { massKg: ref.mass, heightM: ref.height, times: ref.times });
   let worst = 0;

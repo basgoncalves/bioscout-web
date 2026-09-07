@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1c4a48">
-<title>BioScout Web</title>
+<title>BioScout Web — a physics-informed, AI-powered bio tracker</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -45,6 +45,146 @@
                  font-weight:500; }
   button:disabled { opacity:.45; cursor:default; }
   button + button { margin-top:8px; }
+
+  .whoRow { margin:0 0 10px; }
+  .whoName { font-size:19px; font-weight:600; line-height:1.15; }
+  .whoBtns { display:flex; gap:8px; margin-top:8px; }
+  .whoBtns button { margin:0; flex:1; padding:10px 8px; font-size:13px; }
+  dialog { border:1px solid var(--line); border-radius:14px; background:var(--card);
+           color:var(--ink); padding:16px; width:min(92vw,420px); }
+  dialog::backdrop { background:rgba(0,0,0,.55); }
+  .health { display:flex; align-items:center; gap:12px; margin:6px 0 10px; }
+  .dial { width:78px; height:78px; flex:none; }
+  .dialText { font-size:22px; font-weight:700; }
+  .healthText { min-width:0; }
+  .intake { display:flex; align-items:flex-end; gap:2px; height:64px; position:relative;
+            margin-bottom:4px; }
+  .ibar { flex:1; height:100%; display:flex; align-items:flex-end; }
+  .ibar i { display:block; width:100%; border-radius:2px 2px 0 0; background:var(--accent);
+            opacity:.8; }
+  .ibar.none i { min-height:2px; background:var(--line); opacity:1; }
+  .meanline { position:absolute; left:0; right:0; border-top:1px dashed var(--muted);
+              pointer-events:none; }
+  .meanline span { position:absolute; right:0; top:-15px; font-size:10.5px; color:var(--muted); }
+  .moods { display:grid; grid-template-columns:repeat(5,1fr); gap:5px; }
+  /* Labels, not glyphs: the bar characters rendered as empty boxes on Android.
+     11px is small but these are five words on a 360px screen, and a word you
+     can read beats a symbol you cannot. */
+  button.moodBtn { margin:0; padding:9px 2px; font-size:11px; line-height:1.2;
+                   background:var(--bg); color:var(--muted); border:1px solid var(--line); }
+  button.moodBtn.on { color:#fff; border-color:transparent; }
+  button.moodBtn.m1.on { background:#b4523f; } button.moodBtn.m2.on { background:#b07b3c; }
+  button.moodBtn.m3.on { background:#7a7a7a; } button.moodBtn.m4.on { background:#4d8a5a; }
+  button.moodBtn.m5.on { background:#3f8f6f; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .itemRow { display:flex; align-items:center; gap:5px; margin-bottom:6px; }
+  .itemRow input.itemName { flex:1; min-width:0; margin:0; padding:9px; font-size:13.5px; }
+  .itemRow input.itemGrams { width:56px; flex:none; margin:0; padding:9px 4px; text-align:center;
+                             font-size:13.5px; }
+  .itemKcal { width:42px; text-align:right; font-size:12.5px; color:var(--muted);
+              font-variant-numeric:tabular-nums; }
+  .steps { margin-top:8px; }
+  .stepRow { display:flex; align-items:center; gap:8px; padding:5px 0; }
+  .stepName { flex:1; font-size:13.5px; }
+  /* 40px targets: a − and a + squeezed into a chip is a 24px hit area, which
+     on a phone means half the taps land on the wrong one. */
+  button.stepBtn { width:40px; flex:none; margin:0; padding:8px 0; font-size:17px;
+                   line-height:1; background:var(--bg); color:var(--ink);
+                   border:1px solid var(--line); }
+  button.stepBtn:disabled { opacity:.35; }
+  .stepN { width:26px; text-align:center; font-variant-numeric:tabular-nums; }
+  .chip { display:inline-block; margin:0; width:auto; padding:6px 11px; font-size:12.5px;
+          border-radius:999px; background:var(--bg); color:var(--muted);
+          border:1px solid var(--line); }
+  .chip.on { background:var(--accent); color:#fff; border-color:transparent; }
+  .entry { border-top:1px solid var(--line); padding:9px 0 0; margin-top:9px; }
+  .erow { display:flex; align-items:center; gap:8px; }
+  .mood { font-size:15px; color:var(--muted); }
+  textarea { width:100%; background:var(--bg); color:var(--ink); border:1px solid var(--line);
+             border-radius:9px; padding:9px; font:inherit; font-size:14px; resize:vertical; }
+  img.mealShot { width:44px; height:44px; object-fit:cover; border-radius:7px;
+                 vertical-align:middle; margin-right:8px; }
+  /* The day wheel. Filled = logged, hollow = expected; the fill carries the
+     difference between a record and an estimate, and the colour only says
+     which phase the arithmetic puts a day in. */
+  /* Cycle reads as part of the diary, not a peer of it. */
+  .daybox.cycleSub { border-top:0; margin-top:6px; padding-top:0; padding-left:12px;
+                     border-left:2px solid var(--line); }
+  input[type="time"] { width:100%; }
+  .dotRing { width:100%; max-width:330px; display:block; margin:6px auto 0; }
+  .dot { fill:none; stroke-width:2; cursor:pointer; }
+  .dot.dPeriod { stroke:#c0563f; } .dot.dFertile { stroke:#4d8a5a; }
+  .dot.dOvu { stroke:#2f7f60; } .dot.dPms { stroke:#c09a3c; }
+  .dot.dPlain { stroke:var(--line); }
+  .dot.logged.dPeriod { fill:#c0563f; } .dot.logged.dFertile { fill:#4d8a5a; }
+  .dot.logged.dOvu { fill:#2f7f60; } .dot.logged.dPms { fill:#c09a3c; }
+  .dot.logged.dPlain { fill:var(--muted); }
+  .dot.isToday { stroke:var(--ink); stroke-width:3; }
+  .dot.isSel { stroke:var(--accent); stroke-width:3.5; }
+  .dotLabel { font-size:8.5px; font-weight:600; }
+  .lPeriod { fill:#c0563f; } .lFertile { fill:#4d8a5a; } .lPms { fill:#c09a3c; }
+  /* The cycle ring. Solid = logged, dashed = estimated; the two must never
+     be mistaken for each other. */
+  .ring { width:100%; max-width:230px; display:block; margin:10px auto 4px; }
+  .ringBase { stroke:var(--bg); }
+  .ringPeriod { stroke:#b4523f; stroke-dasharray:3 4; opacity:.85; }
+  .ringFertile { stroke:#4d8a5a; stroke-dasharray:3 4; opacity:.8; }
+  .ringOvu { stroke:#3f8f6f; stroke-dasharray:3 4; }
+  .ringLogged { stroke:#c9603f; }
+  .ringToday { fill:var(--ink); }
+  .ringText { fill:var(--ink); font-weight:600; }
+  .ringBig { font-size:30px; }
+  .ringSmall { font-size:11px; fill:var(--muted); font-weight:500; }
+  .ringKey { display:flex; flex-wrap:wrap; gap:10px; justify-content:center;
+             font-size:11.5px; color:var(--muted); }
+  .ringKey i { display:inline-block; width:9px; height:9px; border-radius:2px;
+               margin-right:4px; vertical-align:-1px; }
+  .kPeriod { background:#b4523f; } .kFertile { background:#4d8a5a; }
+  .kOvu { background:#3f8f6f; } .kLogged { background:#c9603f; }
+  .calmode { margin:14px 0 0; }
+  .calmode select { margin:0; padding:7px 9px; font-size:13px; }
+  button.linky { background:none; border:0; color:var(--muted); font-size:18px;
+                 line-height:1; padding:2px 6px; margin:0; width:auto; }
+  /* Athlete buttons on the login screen: full width, comfortable tap target. */
+  button.athlete { margin:0 0 8px; text-align:left; padding:13px 14px; font-size:15px; }
+  #profileList:empty { display:none; }
+  /* --- training history ------------------------------------------------ */
+  .tiles { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:10px 0 4px; }
+  .tile { background:var(--bg); border:1px solid var(--line); border-radius:10px;
+          padding:8px 6px; text-align:center; min-width:0; }
+  .tile b { display:block; font-size:19px; line-height:1.15; }
+  .tile span { display:block; font-size:11px; color:var(--muted); }
+  .calnav { display:flex; align-items:center; gap:8px; margin:14px 0 6px; }
+  .calmonth { flex:1; text-align:center; font-weight:600; }
+  button.calbtn { width:38px; flex:none; margin:0; padding:6px 0; font-size:18px; line-height:1; }
+  .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
+  .dow { text-align:center; font-size:11px; color:var(--muted); padding-bottom:2px; }
+  /* Square cells without a fixed pixel size, so the grid survives a 320px
+     phone and a tablet without a media query for each. */
+  /* margin:0 matters more than it looks: the global `button + button` rule
+     adds 8px above every button that follows another, which in a grid pushes
+     each cell down inside its own row until the last row spills out of the
+     container and lands on the text below it. */
+  button.day { width:100%; aspect-ratio:1; margin:0; padding:0; font-size:13px; font-weight:500;
+               border-radius:8px; background:var(--bg); color:var(--ink);
+               border:1px solid transparent; display:flex; align-items:center;
+               justify-content:center; }
+  button.day.out { opacity:.32; }
+  button.day:disabled { opacity:.5; cursor:default; }
+  button.day.out:disabled { opacity:.22; }
+  /* Four steps of the accent colour. Text flips to white only on the two
+     darkest, where the contrast actually needs it. */
+  button.day.l1 { background:color-mix(in srgb, var(--accent) 22%, var(--bg)); }
+  button.day.l2 { background:color-mix(in srgb, var(--accent) 45%, var(--bg)); }
+  button.day.l3 { background:color-mix(in srgb, var(--accent) 70%, var(--bg)); color:#fff; }
+  button.day.l4 { background:var(--accent); color:#fff; }
+  button.day.today { border-color:var(--ink); }
+  button.day.sel { outline:2px solid var(--accent); outline-offset:1px; }
+  .daybox { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
+  .vbars { display:flex; align-items:flex-end; gap:3px; height:56px; }
+  .vbar { flex:1; height:100%; display:flex; align-items:flex-end; }
+  .vbar i { display:block; width:100%; min-height:2px; border-radius:3px 3px 0 0;
+            background:var(--accent); opacity:.75; }
   #stage { position:relative; border-radius:12px; overflow:hidden;
            background:#000; aspect-ratio:3/4; display:none; }
   #stage.on { display:block; }
@@ -105,6 +245,10 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="nav hidden" id="navBar">
+    <button class="ghost" id="navBack" aria-label="Back">‹</button>
+    <button class="ghost" id="navHome" data-i18n="home">Home</button>
+  </div>
   <div class="brand">
     <img src="logo.png" alt="" width="34" height="34">
     <h1>BioScout Web</h1>
@@ -112,11 +256,25 @@
   <div style="display:flex;justify-content:flex-end;margin:-6px 0 4px">
     <select id="lang" style="width:auto;padding:5px 8px;font-size:12.5px;margin:0"></select>
   </div>
-  <p class="sub"><span data-i18n="tagline">Movement analysis in the browser. Video never leaves your phone.</span>
+  <p class="sub"><span data-i18n="tagline">A physics-informed, AI-powered bio tracker. Video never leaves your phone.</span>
     <span class="note" id="build" style="opacity:.6"></span></p>
 
-  <div class="card" id="setup">
-    <div class="row" style="margin-bottom:11px">
+
+  <!-- Three views, one page. The app opens on who-is-training, because a
+       calendar of somebody else's sessions is worse than no calendar. -->
+  <section id="viewLogin">
+    <div class="card">
+      <h2 style="font-size:17px;margin:0 0 2px" data-i18n="whoIsTraining">Who is training?</h2>
+      <p class="sub" style="margin:0 0 12px" data-i18n="pickAthlete">Pick an athlete, or add one.</p>
+      <div id="profileList"></div>
+      <div class="row" style="margin:12px 0 0">
+        <div style="flex:1">
+          <label for="newProfileName" data-i18n="name">Name</label>
+          <input id="newProfileName" type="text" placeholder="e.g. Bas" autocomplete="off">
+        </div>
+      </div>
+      <button class="ghost" id="createProfileBtn" data-i18n="addAthlete">Add athlete</button>
+    <div class="row hidden" id="athleteRow">
       <div style="flex:1.4">
         <label for="profile" data-i18n="athlete">Athlete</label>
         <select id="profile"><option value="" data-i18n="noProfile">— no profile —</option></select>
@@ -126,6 +284,24 @@
         <input id="profileName" type="text" placeholder="e.g. Bas" autocomplete="off">
       </div>
     </div>
+    </div>
+  </section>
+
+  <section id="viewDash" class="hidden">
+    <div class="whoRow">
+      <div id="whoName" class="whoName"></div>
+      <div class="sub" id="whoSince"></div>
+      <div class="whoBtns">
+        <button class="ghost" id="settingsBtn" data-i18n="editProfile">Edit profile</button>
+        <button class="ghost" id="switchUserBtn" data-i18n="switchAthlete">Switch athlete</button>
+      </div>
+    </div>
+    <!-- capture= asks for the camera directly; without a file is fine too. -->
+    <input id="mealShotFile" type="file" accept="image/*" capture="environment" class="hidden">
+    <div class="card" id="dashboardCard"></div>
+    <dialog id="settingsDlg">
+      <h2 style="font-size:16px;margin:0 0 10px" data-i18n="profileSettings">Profile settings</h2>
+
     <div class="row" style="margin-bottom:11px">
       <div>
         <label for="height" data-i18n="height">Height (m)</label>
@@ -136,6 +312,15 @@
         <input id="dob" type="date" value="">
       </div>
       <div>
+        <label for="sex" data-i18n="sex">Sex</label>
+        <select id="sex">
+          <option value="" data-i18n="sexUnset">—</option>
+          <option value="F" data-i18n="sexF">Female</option>
+          <option value="M" data-i18n="sexM">Male</option>
+          <option value="NB" data-i18n="sexNB">Non-binary</option>
+        </select>
+      </div>
+      <div>
         <label for="mass"><span data-i18n="mass">Mass (kg)</span> <span class="sub" id="massAge"></span></label>
         <input id="mass" type="number" step="0.5" value="83" inputmode="decimal">
       </div>
@@ -144,6 +329,25 @@
       and are saved with the profile as you change them. Mass is the one to keep
       current: it scales every joint moment and contact force on the page, so
       the field says how old the stored figure is.</p>
+    <div style="margin-bottom:11px">
+      <label for="avatar" data-i18n="overlay">Skeleton overlay</label>
+      <select id="avatar">
+        <option value="" data-i18n="overlayNone">None — landmarks only</option>
+        <option value="gpk_bones" data-i18n="overlayBones">Skeleton (OpenSim bone geometry) — skull + spine</option>
+        <option value="bas_v3" data-i18n="overlayBas">Bas (v3) — full arms + head</option>
+        <option value="gwen_v3" data-i18n="overlayGwen">Gwen (v3) — full arms + head</option>
+        <option value="gohan_ss_v6" data-i18n="overlayGohan">Gohan (SS v6, Meshy sculpt) — full arms + head</option>
+      </select>
+    </div>
+    <div id="headSizeRow" class="hidden" style="margin-bottom:11px">
+      <label for="headSize"><span data-i18n="headSize">Head size</span> <span id="headSizeVal" class="sub">1.00×</span></label>
+      <input id="headSize" type="range" min="0.5" max="2" step="0.05" value="1"
+             style="width:100%;padding:0;margin:0">
+      <p class="note" style="margin-top:2px" data-i18n-html="noteHeadSize">The head is sized from your ear
+        landmarks, which are the only ones a close-up shot measures honestly.
+        A sculpt with a lot of hair still needs a nudge — set it once and it
+        saves with the profile.</p>
+    </div>
     <div class="row" style="margin-bottom:11px">
       <button class="ghost" id="saveProfileBtn" style="margin:0;padding:9px" data-i18n="saveProfile">Save profile</button>
       <button class="ghost" id="delProfileBtn" style="margin:0;padding:9px" data-i18n="delete">Delete</button>
@@ -159,7 +363,21 @@
       another phone or laptop, export the file here and import it there. That
       is a manual step, not background sync: without a server there is no
       honest way to make it automatic.</p>
+    
+      <button class="ghost" id="settingsClose" data-i18n="close">Close</button>
+    </dialog>
+    <dialog id="addDlg">
+      <div id="addDlgBody"></div>
+      <button class="ghost" id="addDlgClose" data-i18n="close">Close</button>
+    </dialog>
+  </section>
 
+  <section id="viewCycle" class="hidden">
+    <div class="card" id="cycleCard"></div>
+  </section>
+
+  <section id="viewRecord" class="hidden">
+    <div class="card" id="setup">
     <div class="row" style="margin-bottom:11px">
       <div>
         <label for="activity" data-i18n="movement">Movement</label>
@@ -189,25 +407,6 @@
     <p class="note" style="margin:-4px 0 10px" data-i18n-html="noteLoad">Barbell, vest or belt in
       <b>Added</b>; band or machine offload in <b>Assistance</b>. Both apply at
       once — a loaded bar with a band assist is added minus assist.</p>
-    <div style="margin-bottom:11px">
-      <label for="avatar" data-i18n="overlay">Skeleton overlay</label>
-      <select id="avatar">
-        <option value="" data-i18n="overlayNone">None — landmarks only</option>
-        <option value="gpk_bones" data-i18n="overlayBones">Skeleton (OpenSim bone geometry) — skull + spine</option>
-        <option value="bas_v3" data-i18n="overlayBas">Bas (v3) — full arms + head</option>
-        <option value="gwen_v3" data-i18n="overlayGwen">Gwen (v3) — full arms + head</option>
-        <option value="gohan_ss_v6" data-i18n="overlayGohan">Gohan (SS v6, Meshy sculpt) — full arms + head</option>
-      </select>
-    </div>
-    <div id="headSizeRow" class="hidden" style="margin-bottom:11px">
-      <label for="headSize"><span data-i18n="headSize">Head size</span> <span id="headSizeVal" class="sub">1.00×</span></label>
-      <input id="headSize" type="range" min="0.5" max="2" step="0.05" value="1"
-             style="width:100%;padding:0;margin:0">
-      <p class="note" style="margin-top:2px" data-i18n-html="noteHeadSize">The head is sized from your ear
-        landmarks, which are the only ones a close-up shot measures honestly.
-        A sculpt with a lot of hair still needs a nudge — set it once and it
-        saves with the profile.</p>
-    </div>
     <label style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="saveVideo" style="width:auto;margin:0">
@@ -215,10 +414,20 @@
     </label>
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
+    <div id="linkRow" class="hidden" style="margin-top:11px">
+      <label for="linkUrl" data-i18n="videoLink">Video link</label>
+      <input id="linkUrl" type="url" placeholder="https://youtube.com/shorts/…" autocomplete="off" inputmode="url">
+      <label for="linkRange" style="margin-top:8px"><span data-i18n="clipRange">Clip (optional)</span></label>
+      <input id="linkRange" type="text" placeholder="0:12-0:19" autocomplete="off">
+      <button class="ghost" id="linkBtn" data-i18n="fetchAndAnalyse">Fetch and analyse</button>
+      <p class="note" style="margin:6px 0 0" data-i18n-html="noteFetchHelper">Fetched by the helper running on
+        <b>this device</b> and analysed here — the video still never leaves your
+        phone. Trim to the reps: tracking runs frame by frame, so four minutes
+        of video is four minutes of work to reach six seconds of squat.</p>
+    </div>
     <input id="fileInput" type="file" accept="video/*" class="hidden">
     <div class="status" id="status" data-i18n="statusStarting">Starting…</div>
-  </div>
-
+    </div>
   <div id="stage">
     <video id="video" playsinline muted></video>
     <canvas class="overlay" id="overlay"></canvas>
@@ -237,6 +446,7 @@
 
   <div class="card hidden" id="trainingCard"></div>
   <div class="card hidden" id="results"></div>
+  </section>
 </div>
 
 <script>
@@ -247,11 +457,18 @@
 // Stamped here, in the non-module script, so the version is on screen
 // before the 45 MB engine load -- it is what tells "the fix is not
 // deployed" apart from "this tab predates the deploy".
-window.BUILD = "v28";
+// The public name and the build counter are separate strings on purpose. The
+// name is what a user reads; the counter is what tells "the fix is not
+// deployed yet" apart from "this tab predates the deploy", which is a question
+// that comes up on every single release.
+window.RELEASE = "beta V1";
+window.BUILD = 44;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
-try { document.getElementById("build").textContent = "build " + window.BUILD; } catch (e) {}
+try {
+  document.getElementById("build").textContent = window.RELEASE + " \u00b7 build " + window.BUILD;
+} catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
   if (window.__mlBooted) return;
@@ -266,24 +483,41 @@ setTimeout(function () {
 <script type="module">
 import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          buildSquatFeatures, buildJumpFeatures, computePxPerM,
-         jointPositionsM } from "./kinematics.js";
-import { inverseDynamics } from "./dynamics.js";
-import { classify, MIN_CONFIDENCE } from "./detect.js";
+         jointPositionsM } from "./src/kinematics.js";
+import { inverseDynamics } from "./src/dynamics.js";
+import { classify, MIN_CONFIDENCE } from "./src/detect.js";
 import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          newSession, getSession, clearSession, addSet, summariseSession,
+         listMeals, addMeal, deleteMeal,
+         listDiary, addDiary, deleteDiary, profileTags, saveProfileTags,
+         listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
+         listSleep, setSleep, clearSleep,
+         profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices }
-       from "./profiles.js";
-import { Overlay } from "./overlay.js";
+       from "./src/profiles.js";
+import { renderDashboard, mealFormHTML, diaryFormHTML, weightFormHTML,
+         cycleFormHTML, cycleViewHTML, dayKey, allSessions,
+         collectDays } from "./src/dashboard.js";
+import { probe as probeHelper, fetchClip } from "./src/fetcher.js";
+import { DEFAULT_TAGS, toggleTag, stepTag } from "./src/diary.js";
+import { collectWeights, weightOn } from "./src/weight.js";
+import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
+         dayOfCycle } from "./src/cycle.js";
+import { densityFor, foodNames, describe, mealKcal } from "./src/foods.js";
+import { CARD, cardStats, drawCard, shareCard } from "./src/share.js";
+import { collectMeals } from "./src/dashboard.js";
+import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
+import { Overlay } from "./src/overlay.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
 // array of times, and a translated string inside either of them would have
 // called the array.
-import { t as tr, getLang, setLang, LANGUAGES } from "./i18n.js";
-import { ensembleRep } from "./ensemble.js";
-import { makeZip, svgToPng, blobBytes } from "./zip.js";
+import { t as tr, getLang, setLang, LANGUAGES } from "./src/i18n.js";
+import { ensembleRep } from "./src/ensemble.js";
+import { makeZip, svgToPng, blobBytes } from "./src/zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
          peakJRF, selfTest as forceSelfTest,
-         MAX_PLAUSIBLE_FORCE_N } from "./forces.js";
+         MAX_PLAUSIBLE_FORCE_N } from "./src/forces.js";
 
 // MediaPipe is vendored into vendor/ rather than pulled from a CDN: the app
 // then works offline, loads faster on a second visit, and cannot be broken by
@@ -305,7 +539,7 @@ async function loadMediaPipe() {
 async function makeLandmarker() {
   const fileset = await FilesetResolver.forVisionTasks("./vendor/wasm");
   return PoseLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: "pose_landmarker_full.task", delegate: "GPU" },
+    baseOptions: { modelAssetPath: "assets/pose_landmarker_full.task", delegate: "GPU" },
     runningMode: "VIDEO", numPoses: 1,
     minPoseDetectionConfidence: 0.3, minPosePresenceConfidence: 0.3,
     minTrackingConfidence: 0.3,
@@ -417,6 +651,10 @@ function currentSettings() {
     name: ($("profileName").value || "").trim(),
     heightM: parseFloat($("height").value) || 1.75,
     dob: $("dob").value || null,
+    // Recorded because some metrics need it, not because the app sorts people
+    // by it. Blank stays blank: an unset field must not silently become a
+    // default, and a metric that needs it says so instead of guessing.
+    sex: $("sex").value || null,
     ageY: ageFromDob($("dob").value),
     massKg: parseFloat($("mass").value) || null,
     massUpdated: massTouched || (getProfile(($("profileName").value || "").trim()) || {}).massUpdated
@@ -434,6 +672,7 @@ function applyProfile(p) {
   $("profileName").value = p.name || "";
   if (p.heightM) $("height").value = p.heightM;
   $("dob").value = p.dob || "";
+  $("sex").value = p.sex || "";
   if (p.massKg) $("mass").value = p.massKg;
   // Body mass is deliberately NOT restored from the profile. Height is a
   // property of the person; mass is a property of the day, and it scales every
@@ -739,6 +978,575 @@ function setChart(points, key) {
     <p class="note" style="margin-top:2px">${tr("noteSetAxis")}</p>`;
 }
 
+/* --- optional local fetch helper -------------------------------------------
+ * The link box only exists if tools/bioscout_fetch.py is running on this
+ * device. Showing a control that cannot work is worse than not having it: the
+ * person tries it, it fails, and they learn the app is broken rather than that
+ * a helper is not running.
+ */
+probeHelper().then((info) => {
+  if (!info) return;
+  $("linkRow").classList.remove("hidden");
+  if (info.ytdlp === false) say(tr("sayNoYtdlp"), true);
+});
+
+$("linkBtn").onclick = async () => {
+  const url = $("linkUrl").value.trim();
+  if (!url) return;
+  $("linkBtn").disabled = true;
+  try {
+    say(tr("sayFetchingClip"));
+    const blob = await fetchClip({ url, range: $("linkRange").value });
+    await analyseVideoBlob(blob);
+  } catch (err) {
+    // The helper's own words where it has them -- "video is private" and
+    // "yt-dlp is not installed" call for different actions.
+    const known = { badUrl: "sayBadLink", badRange: "sayBadRange",
+                    tooLong: "sayClipTooLong", empty: "sayEmptyClip" }[err.message];
+    say(known ? tr(known) : tr("sayFetchFailed", { err: err.message }), true);
+  } finally {
+    $("linkBtn").disabled = false;
+  }
+};
+
+/* --- the share card --------------------------------------------------------
+ * Training and intake only. A share sheet is one tap from a public post and
+ * the cost of a mistake is not symmetric: volume in the wrong place is a
+ * shrug, a cycle in the wrong place is not. See share.js.
+ */
+async function shareMonth() {
+  const btn = $("shareBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const s = cardStats({
+      name: currentAthlete() || tr("noProfile"),
+      year: dashView.year, month: dashView.month,
+      days: collectDays(dashboardData()),
+      mealDays: collectMeals(myMeals()),
+      weights: collectWeights(myWeights()),
+    });
+    if (s.empty) { say(tr("shareNothing"), true); return; }
+
+    const c = document.createElement("canvas");
+    c.width = CARD.w; c.height = CARD.h;
+    drawCard(c.getContext("2d"), s, window.RELEASE);
+    const blob = await new Promise((r) => c.toBlob(r, "image/png"));
+    if (!blob) { say(tr("shareFailed"), true); return; }
+
+    const what = await shareCard(blob, `bioscout-${s.stamp}.png`, tr("shareTitle"));
+    if (what === "downloaded") say(tr("shareSaved"));
+  } catch (err) {
+    say(tr("shareFailed") + " " + err.message, true);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/* --- the cycle screen ------------------------------------------------------
+ * Its own view rather than a dialog: the wheel wants the whole width, tapping
+ * a day has to redraw it, and a modal that redraws itself under your finger is
+ * not somewhere to sit and read.
+ */
+let cycleSel = null;                 // which day is being looked at
+
+function openCycle(key = null) {
+  cycleSel = key || cycleSel || dayKey(new Date());
+  cycleDraft = null;
+  showView("viewCycle");
+  renderCycle();
+}
+
+function renderCycle() {
+  const card = $("cycleCard");
+  const days = collectCycle(myCycle());
+  const model = phaseModel(days);
+  const todayKey = dayKey(new Date());
+  const hit = days.get(cycleSel) || null;
+  if (!cycleDraft) cycleDraft = { flow: hit?.flow ?? null, symptoms: hit?.symptoms ?? [] };
+
+  card.innerHTML = cycleViewHTML(model, days, todayKey, cycleSel, mySymptoms(), cycleDraft);
+
+  card.querySelectorAll("circle[data-cday]").forEach((c) => {
+    c.onclick = () => {
+      cycleSel = c.dataset.key;
+      cycleDraft = null;             // a different day is a different answer
+      renderCycle();
+    };
+  });
+  if ($("cycleSave")) wireCycleForm(cycleSel, hit, renderCycle, card);
+}
+
+
+/* --- the Add dialog --------------------------------------------------------
+ * One button, four things you can add to the selected day. Splitting it into
+ * four buttons on the dashboard would put the least-used one next to the
+ * most-used one forever; a chooser keeps the day itself readable.
+ *
+ * The forms live here rather than in the day panels because renderDash()
+ * replaces the whole card on every change -- a half-typed meal would be wiped
+ * by the re-render that showed the last one.
+ */
+let draft = { mood: null, tags: [], levels: {} };
+let cycleDraft = null;
+let mealShot = null;                 // a File waiting to be attached
+let mealDraft = { items: [] };
+
+function openAdd(step = null) {
+  const dlg = $("addDlg");
+  const body = $("addDlgBody");
+  const key = dashView.selected;
+  const todayKey = dayKey(new Date());
+  const when = key === todayKey ? tr("today") : shortDate(key);
+
+  if (!step) {
+    body.innerHTML = `
+      <h2 style="font-size:16px;margin:0 0 10px">${tr("addTo", { date: when })}</h2>
+      <button class="ghost" data-step="training">${tr("newTrainingSession")}</button>
+      <button class="ghost" data-step="meal">${tr("meal")}</button>
+      <button class="ghost" data-step="diary">${tr("diary")}</button>`;
+    body.querySelectorAll("button[data-step]").forEach((b) => {
+      b.onclick = () => {
+        // Training and cycle are places, not forms: they get a screen.
+        // Training asks for today's weight first if it does not have one --
+        // mass scales every joint moment the session will report, so this is
+        // the one moment where the number actually matters.
+        if (b.dataset.step === "training") return openAdd("weight");
+        openAdd(b.dataset.step);
+      };
+    });
+  } else if (step === "meal") {
+    if (!mealDraft.items.length) mealDraft.items.push({ name: "", grams: null, kcal100: null });
+    body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("meal")}</h2>`
+      + mealFormHTML(key, todayKey, mealDraft, foodNames(profileFoods(currentAthlete())));
+    wireMealForm(key, todayKey);
+  } else if (step === "diary") {
+    body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("diary")}</h2>`
+      + diaryFormHTML(key, todayKey, myTags(), draft);
+    wireDiaryForm(key);
+  } else if (step === "weight") {
+    const current = weightOn(collectWeights(myWeights()), key);
+    body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("weightBeforeSession")}</h2>`
+      + weightFormHTML(key, todayKey, current)
+      + `<button class="ghost" id="weightSkip" style="margin-top:8px">${tr("skipToSession")}</button>`;
+    const go = () => { dlg.close(); startTraining(); };
+    $("weightAddDay").onclick = () => {
+      const kg = $("weightKg").value;
+      if (!addWeight({ profile: currentAthlete(), kg, at: atOnDay(key) })) {
+        say(tr("weightNeedsNumber"), true); return;
+      }
+      go();
+    };
+    $("weightSkip").onclick = go;
+  }
+  if (!dlg.open) dlg.showModal();
+}
+
+const shortDate = (key) => {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString([], { day: "numeric", month: "short" });
+};
+
+/** Close, re-render, and forget the draft. */
+function done() {
+  $("addDlg").close();
+  draft = { mood: null, tags: [], levels: {} };
+  cycleDraft = null;
+  mealShot = null;
+  mealDraft = { items: [] };
+  renderDash();
+}
+
+/* `root` is passed in because this form has two homes: it was in the Add
+ * dialog, and it now lives on the cycle screen. Querying a hard-coded
+ * container found nothing there, so the chips had no handlers and Save wrote
+ * whatever the draft started as -- a form that looks alive and is not. */
+function wireCycleForm(key, current, after = done, root = $("addDlgBody")) {
+  const body = root;
+  const redraw = () => renderCycle();
+  body.querySelectorAll("button.flowBtn").forEach((b) => {
+    b.classList.toggle("on", +b.dataset.flow === cycleDraft.flow);
+    b.onclick = () => {
+      // Tapping the chosen level again clears it, so a day can be logged with
+      // symptoms and no flow -- which is most of a cycle.
+      cycleDraft.flow = cycleDraft.flow === +b.dataset.flow ? null : +b.dataset.flow;
+      redraw();
+    };
+  });
+  body.querySelectorAll("button.symBtn").forEach((b) => {
+    b.classList.toggle("on", cycleDraft.symptoms.includes(b.dataset.sym));
+    b.onclick = () => {
+      cycleDraft.symptoms = toggleTag(cycleDraft.symptoms, b.dataset.sym);
+      redraw();
+    };
+  });
+  $("cycleSave").onclick = () => {
+    if (cycleDraft.flow === null && !cycleDraft.symptoms.length) {
+      say(tr("cycleNeedsSomething"), true); return;
+    }
+    setCycleDay({ profile: currentAthlete(), at: atOnDay(key),
+                  flow: cycleDraft.flow, symptoms: cycleDraft.symptoms });
+    cycleDraft = null;
+    after();
+  };
+  if ($("cycleClear")) $("cycleClear").onclick = () => {
+    clearCycleDay(current.at, currentAthlete());
+    cycleDraft = null;
+    after();
+  };
+}
+
+function wireMealForm(key, todayKey) {
+  const body = $("addDlgBody");
+  const custom = () => profileFoods(currentAthlete());
+  /* The name and grams inputs are re-rendered on every change, so their values
+   * are read back into the draft before anything redraws -- otherwise typing a
+   * name and then tapping + would lose the name. */
+  const sync = () => {
+    body.querySelectorAll("input.itemName").forEach((el) => {
+      const it = mealDraft.items[+el.dataset.i];
+      if (!it) return;
+      it.name = el.value;
+      // Look the density up on every sync: someone typing "oat" then "oats"
+      // should get a number the moment the name matches something.
+      it.kcal100 = densityFor(el.value, custom());
+    });
+    body.querySelectorAll("input.itemGrams").forEach((el) => {
+      const it = mealDraft.items[+el.dataset.i];
+      if (it) it.grams = el.value === "" ? null : +el.value;
+    });
+  };
+  const redraw = () => { sync(); openAdd("meal"); };
+
+  body.querySelectorAll("input.itemName").forEach((el) => { el.onchange = redraw; });
+  body.querySelectorAll("input.itemGrams").forEach((el) => { el.onchange = redraw; });
+  body.querySelectorAll("button.gramStep").forEach((b) => {
+    b.onclick = () => {
+      sync();
+      const it = mealDraft.items[+b.dataset.i];
+      it.grams = Math.max(0, (it.grams || 0) + +b.dataset.d);
+      openAdd("meal");
+    };
+  });
+  body.querySelectorAll("button.itemDel").forEach((b) => {
+    b.onclick = () => { sync(); mealDraft.items.splice(+b.dataset.i, 1); openAdd("meal"); };
+  });
+  $("itemAdd").onclick = () => {
+    sync();
+    mealDraft.items.push({ name: "", grams: null, kcal100: null });
+    openAdd("meal");
+  };
+
+  $("mealShotBtn").onclick = () => $("mealShotFile").click();
+  if (mealShot) $("mealShotName").textContent = tr("photoReady");
+
+  const logMeal = async (at) => {
+    sync();
+    const items = mealDraft.items.filter((i) => String(i.name).trim());
+    if (!items.length) { say(tr("mealNeedsText"), true); return; }
+    const sum = mealKcal(items);
+    const meal = addMeal({ profile: currentAthlete(), items,
+                           text: describe(items), kcal: sum.kcal, at, photo: !!mealShot });
+    if (meal && mealShot) {
+      try {
+        await putPhoto(photoId(meal.at, currentAthlete()), await shrink(mealShot));
+      } catch (err) { say(tr("sayPhotoFailed", { err: err.message }), true); }
+    }
+    done();
+  };
+  $("mealAddDay").onclick = () => logMeal(atOnDay(key));
+  if ($("mealAddNow")) $("mealAddNow").onclick = () => logMeal(null);
+}
+
+function wireDiaryForm(key) {
+  const body = $("addDlgBody");
+  // The note is the one field the re-render would lose, so it is carried by
+  // hand. Everything else lives in `draft`.
+  const redraw = () => {
+    const note = $("diaryNote").value;
+    openAdd("diary");
+    $("diaryNote").value = note;
+  };
+  body.querySelectorAll("button.moodBtn").forEach((b) => {
+    b.classList.toggle("on", +b.dataset.mood === draft.mood);
+    b.onclick = () => {
+      // Tapping the chosen level again clears it: a diary you cannot un-answer
+      // is one people stop being honest in.
+      draft.mood = draft.mood === +b.dataset.mood ? null : +b.dataset.mood;
+      redraw();
+    };
+  });
+  body.querySelectorAll("button.tagBtn").forEach((b) => {
+    b.onclick = () => {
+      const next = stepTag(draft.tags, draft.levels, b.dataset.tag, 1);
+      draft.tags = next.tags; draft.levels = next.levels;
+      redraw();
+    };
+  });
+  body.querySelectorAll("button.stepBtn").forEach((b) => {
+    b.onclick = () => {
+      const next = stepTag(draft.tags, draft.levels, b.dataset.stepTag, +b.dataset.d);
+      draft.tags = next.tags; draft.levels = next.levels;
+      redraw();
+    };
+  });
+  $("tagAdd").onclick = () => {
+    const t = prompt(tr("newTagPrompt"));
+    if (!t || !t.trim()) return;
+    saveProfileTags(currentAthlete(), [...myTags(), t.trim()]);
+    const next = stepTag(draft.tags, draft.levels, t.trim(), 1);
+    draft.tags = next.tags; draft.levels = next.levels;
+    redraw();
+  };
+  const save = (at) => {
+    if (!addDiary({ profile: currentAthlete(), mood: draft.mood, tags: draft.tags,
+                    levels: draft.levels, note: $("diaryNote").value, at })) {
+      say(tr("diaryNeedsSomething"), true); return;
+    }
+    done();
+  };
+  $("diaryAddDay").onclick = () => save(atOnDay(key));
+  if ($("diaryAddNow")) $("diaryAddNow").onclick = () => save(null);
+}
+
+$("addDlgClose").onclick = () => $("addDlg").close();
+$("mealShotFile").onchange = (e) => {
+  mealShot = e.target.files[0] || null;
+  e.target.value = "";               // same photo twice in a row must still fire
+  if ($("mealShotName")) $("mealShotName").textContent = mealShot ? tr("photoReady") : "";
+};
+
+/* --- views -----------------------------------------------------------------
+ * Three screens on one page: who is training, their dashboard, and recording.
+ *
+ * $("profile") stays in the DOM, hidden, and remains the single answer to "who
+ * is logged in" -- a dozen places already read it, including every set that
+ * gets stored. The login screen writes to it rather than replacing it, so
+ * there is still exactly one source of truth for the athlete.
+ */
+const VIEWS = ["viewLogin", "viewDash", "viewCycle", "viewRecord"];
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* Every view change is a history entry, so the phone's back button moves
+ * between screens instead of leaving the app. Without this, back from the
+ * recorder closes BioScout, which is the single most annoying thing a web app
+ * can do on Android. `push` is false when we are REACTING to a back, or the
+ * two would fight. */
+function showView(id, push = true) {
+  for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
+  $("navBar").classList.toggle("hidden", id === "viewLogin" || id === "viewDash");
+  if (push && history.state?.view !== id) history.pushState({ view: id }, "", "#" + id);
+  window.scrollTo(0, 0);
+}
+
+window.addEventListener("popstate", (e) => {
+  const id = e.state?.view || "viewDash";
+  if (id === "viewLogin") { renderLogin(); showView("viewLogin", false); return; }
+  showView(id, false);
+  if (id === "viewDash") renderDash();
+  if (id === "viewCycle") renderCycle();
+});
+
+$("navBack").onclick = () => history.back();
+$("navHome").onclick = () => { showView("viewDash"); renderDash(); };
+
+const currentAthlete = () => $("profile").value || null;
+
+/** The login screen: every saved athlete as a button. */
+function renderLogin() {
+  const { profiles } = listProfiles();
+  const list = $("profileList");
+  list.innerHTML = profiles.length
+    ? profiles.map((p) => `<button class="ghost athlete" data-name="${esc(p.name)}">${esc(p.name)}</button>`).join("")
+    : `<p class="sub" style="margin:0">${esc(tr("noAthletesYet"))}</p>`;
+  list.querySelectorAll("button.athlete").forEach((b) => {
+    b.onclick = () => enterAs(b.dataset.name);
+  });
+}
+
+/** Select an athlete and open their dashboard. */
+function enterAs(name) {
+  refreshProfiles(name);
+  $("profile").value = name;
+  const p = getProfile(name);
+  if (p) applyProfile(p);
+  refreshDerived();
+  dashView = null;                 // their history, not the last person's
+  showView("viewDash");
+  renderDash();
+  renderTraining();
+}
+
+$("createProfileBtn").onclick = () => {
+  const name = $("newProfileName").value.trim();
+  if (!name) { say(tr("nameFirst"), true); return; }
+  if (getProfile(name)) { enterAs(name); return; }
+  // Saved immediately, with just a name: the rest is edited on the dashboard,
+  // and an athlete who exists only in an unsaved form field is one refresh
+  // away from not existing at all.
+  saveProfile({ name });
+  $("newProfileName").value = "";
+  renderLogin();
+  enterAs(name);
+};
+
+$("switchUserBtn").onclick = () => { renderLogin(); showView("viewLogin"); };
+/* A modal, not a panel further down the page. As a card it sat below the
+ * whole dashboard and the New session button, so tapping Edit profile
+ * changed something a screen and a half away and read as a dead button. */
+$("settingsBtn").onclick = () => $("settingsDlg").showModal();
+$("settingsClose").onclick = () => {
+  $("settingsDlg").close();
+  renderDash();                      // a renamed athlete, or a new mass
+};
+
+function startTraining() {
+  // A session with sets in it is training in progress; archive it before
+  // starting the next, exactly as the results card does.
+  const open = getSession();
+  if (open && open.sets && open.sets.length) archiveSession();
+  newSession(currentAthlete());
+  renderTraining();
+  showView("viewRecord");
+}
+
+
+
+/* --- training history ------------------------------------------------------
+ * The dashboard owns which month is on screen and which day is selected. It
+ * has to: paging to July and tapping a day must survive the re-render that
+ * follows, and recording a set must not throw the view back to today.
+ */
+let dashView = null;
+
+function dashboardData() {
+  return allSessions(listArchive(), getSession(), currentAthlete());
+}
+
+/** This athlete's meals. Same rule as sessions: a shared phone holds
+ *  everyone's, and a log is only useful if it is one person's. */
+function myMeals() {
+  const who = currentAthlete();
+  return listMeals().filter((m) => m.profile === who);
+}
+
+/** Noon local on the selected day, so a meal logged against another date
+ *  lands squarely on it whatever the timezone does at midnight. */
+function myDiary() {
+  const who = currentAthlete();
+  return listDiary().filter((d) => d.profile === who);
+}
+
+/** The athlete's own tag list, falling back to the starter set. */
+function myWeights() {
+  const who = currentAthlete();
+  return listWeights().filter((w) => w.profile === who);
+}
+
+function mySleep() {
+  const who = currentAthlete();
+  return listSleep().filter((s) => s.profile === who);
+}
+
+function myCycle() {
+  const who = currentAthlete();
+  return listCycle().filter((c) => c.profile === who);
+}
+
+/** The athlete's own symptom list, on the profile like their diary tags. */
+function mySymptoms() {
+  return getProfile(currentAthlete())?.symptoms || DEFAULT_SYMPTOMS;
+}
+
+const monthLabel = (v) =>
+  new Date(v.year, v.month, 1).toLocaleDateString([], { month: "long", year: "numeric" });
+
+function myTags() {
+  return profileTags(currentAthlete()) || DEFAULT_TAGS;
+}
+
+function atOnDay(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0).toISOString();
+}
+
+/** Open on the most recent day that has training, not blankly on today. */
+function defaultDashView() {
+  // Today, not the last training day. Meals are logged daily and training is
+  // not, so opening on an old session would put the meal form on the wrong
+  // date more often than not.
+  const pick = dayKey(new Date());
+  const [y, m] = pick.split("-").map(Number);
+  return { year: y, month: m - 1, selected: pick, mode: "training" };
+}
+
+function renderDash() {
+  const card = $("dashboardCard");
+  if (!dashView) dashView = defaultDashView();
+  // Height comes from the profile; weight comes from the log, carried forward.
+  const prof = getProfile(currentAthlete());
+  const view = { ...dashView, heightM: prof?.heightM ?? null, sex: prof?.sex ?? null,
+                 ageY: prof?.ageY ?? null };
+  card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
+                                   myWeights(), myCycle(), mySleep(), view);
+  $("whoName").textContent = currentAthlete() || tr("noProfile");
+  $("whoSince").textContent = tr("dashboardSub", { first: monthLabel(dashView) });
+
+  const step = (n) => {
+    const d = new Date(dashView.year, dashView.month + n, 1);
+    dashView = { ...dashView, year: d.getFullYear(), month: d.getMonth() };
+    renderDash();
+  };
+  if ($("dashPrev")) $("dashPrev").onclick = () => step(-1);
+  if ($("dashNext")) $("dashNext").onclick = () => step(1);
+  card.querySelectorAll("button.day[data-day]").forEach((b) => {
+    b.onclick = () => { dashView = { ...dashView, selected: b.dataset.day }; renderDash(); };
+  });
+
+  if ($("dashMode")) $("dashMode").onchange = (e) => {
+    dashView = { ...dashView, mode: e.target.value };
+    renderDash();
+  };
+
+  card.querySelectorAll("button.mealDel").forEach((b) => {
+    b.onclick = async () => {
+      // The photo goes with the meal. An orphan in IndexedDB is invisible and
+      // stays there for good.
+      try { await delPhoto(photoId(b.dataset.at, currentAthlete())); } catch { /* none */ }
+      deleteMeal(b.dataset.at, currentAthlete());
+      renderDash();
+    };
+  });
+
+  /* --- thumbnails and deletions on the day panels ---------------------- */
+  card.querySelectorAll("img.mealShot").forEach(async (img) => {
+    try {
+      const blob = await getPhoto(photoId(img.dataset.at, currentAthlete()));
+      if (blob) img.src = URL.createObjectURL(blob);
+      else img.remove();             // flag says photo, store says no: say nothing
+    } catch { img.remove(); }
+  });
+  card.querySelectorAll("button.diaryDel").forEach((b) => {
+    b.onclick = () => { deleteDiary(b.dataset.at, currentAthlete()); renderDash(); };
+  });
+  if ($("addBtn")) $("addBtn").onclick = () => openAdd();
+  if ($("shareBtn")) $("shareBtn").onclick = shareMonth;
+  if ($("newTrainingBtn")) $("newTrainingBtn").onclick = () => openAdd("weight");
+  if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);
+  if ($("sleepSave")) $("sleepSave").onclick = () => {
+    if (!setSleep({ profile: currentAthlete(), at: atOnDay(dashView.selected),
+                    bed: $("sleepBed").value, wake: $("sleepWake").value })) {
+      say(tr("sleepNeedsBoth"), true); return;
+    }
+    renderDash();
+  };
+  if ($("sleepClear")) $("sleepClear").onclick = () => {
+    clearSleep(atOnDay(dashView.selected), currentAthlete());
+    renderDash();
+  };
+
+}
+
 function renderTraining() {
   const card = $("trainingCard");
   const sess = getSession();
@@ -792,6 +1600,7 @@ function renderTraining() {
       kept: tr(kept === 1 ? "nPastSession" : "nPastSessions", { n: kept }) }));
   };
   $("summaryBtn").onclick = () => renderSummary();
+  renderDash();          // keeps the dashboard current behind the record view
   const pv = $("peakVar");
   if (pv) pv.onchange = () => {
     peakVar = pv.value;
@@ -991,6 +1800,8 @@ refreshProfiles(lastUsedProfile()?.name || "");
 queueMicrotask(refreshDerived);
 if (lastUsedProfile()) applyProfile(lastUsedProfile());
 renderTraining();
+renderLogin();
+showView("viewLogin");
 
 
 
@@ -1164,7 +1975,11 @@ $("recBtn").onclick = () => {
 $("fileBtn").onclick = () => $("fileInput").click();
 $("fileInput").onchange = async (e) => {
   const file = e.target.files[0];
-  if (!file) return;
+  if (file) await analyseVideoBlob(file);
+};
+
+/** Track a video from anywhere: the file picker, or the local fetch helper. */
+async function analyseVideoBlob(file) {
   say(tr("sayReadingVideo"));
   const v = document.createElement("video");
   v.src = URL.createObjectURL(file); v.muted = true; v.playsInline = true;
@@ -1185,7 +2000,7 @@ $("fileInput").onchange = async (e) => {
   }
   off.close();
   finish();
-};
+}
 
 // --- analysis --------------------------------------------------------------
 async function finish() {
@@ -1322,7 +2137,7 @@ async function enrich(res, poses, fps, heightM, activity) {
     if (!st.plausible) throw new Error(
       `force model self-test failed: ${st.peakMuscleBW.toFixed(1)} BW at the training mean`);
     if (!muscleJoints) {
-      try { muscleJoints = await (await fetch("muscle_joints.json")).json(); }
+      try { muscleJoints = await (await fetch("data/muscle_joints.json")).json(); }
       catch { muscleJoints = null; }
     }
     for (const r of res.reps) {
@@ -1613,7 +2428,7 @@ async function loadNorms() {
   if (normsTried) return norms;
   normsTried = true;
   try {
-    const r = await fetch("norms.json");
+    const r = await fetch("data/norms.json");
     if (r.ok) norms = await r.json();
   } catch { norms = null; }
   return norms;
@@ -1719,7 +2534,7 @@ async function loadMomentArms() {
   if (momentArmsTried) return momentArms;
   momentArmsTried = true;
   try {
-    const r = await fetch("moment_arms.json");
+    const r = await fetch("data/moment_arms.json");
     if (r.ok) momentArms = await r.json();
   } catch { momentArms = null; }
   return momentArms;
@@ -2623,7 +3438,7 @@ if (DEMO) {
   try {
     const c = (DEMO === "cmj" || DEMO === "sj")
       ? syntheticJump(DEMO)
-      : (await (await fetch("reference.json")).json())
+      : (await (await fetch("data/reference.json")).json())
           .cases[DEMO === "squat" ? "squat_synthetic" : "pullup_P01"];
     $("activity").value = c.activity;
     const demoRes = analyse(c.poses, c.fps,

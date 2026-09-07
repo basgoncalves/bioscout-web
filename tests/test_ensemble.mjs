@@ -6,7 +6,7 @@
  * The check is the between-rep SD: once the events line up, identical shapes
  * agree everywhere and the SD collapses.
  */
-const { ensembleRep } = await import('./ensemble.js');
+const { ensembleRep } = await import('../src/ensemble.js');
 
 // A smooth, physiological-looking rep: rises to the turnaround, falls to
 // touch-down, settles. Identical shape in every rep; only the phase DURATIONS
