@@ -902,7 +902,8 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     <div style="font-weight:600;margin:0 0 2px">${esc(tr("monthlySummary"))}</div>
     <p class="sub" style="margin:0 0 6px">${esc(tr("monthSessions", {
       n: monthSessions.size, days: o.days }))}</p>
-    ${healthHTML({ heightM: view.heightM, weightKg: nowW ? nowW.kg : null })}
+    ${healthHTML({ heightM: view.heightM, weightKg: nowW ? nowW.kg : null,
+                   sex: view.sex, ageY: view.ageY })}
     ${intakeHTML(mealDays, wts, view.year, view.month)}
     <div id="dayHead">
       <div style="font-weight:600">${esc(localeDay(view.selected)

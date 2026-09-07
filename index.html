@@ -312,6 +312,15 @@
         <input id="dob" type="date" value="">
       </div>
       <div>
+        <label for="sex" data-i18n="sex">Sex</label>
+        <select id="sex">
+          <option value="" data-i18n="sexUnset">—</option>
+          <option value="F" data-i18n="sexF">Female</option>
+          <option value="M" data-i18n="sexM">Male</option>
+          <option value="NB" data-i18n="sexNB">Non-binary</option>
+        </select>
+      </div>
+      <div>
         <label for="mass"><span data-i18n="mass">Mass (kg)</span> <span class="sub" id="massAge"></span></label>
         <input id="mass" type="number" step="0.5" value="83" inputmode="decimal">
       </div>
@@ -453,7 +462,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 43;
+window.BUILD = 44;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -642,6 +651,10 @@ function currentSettings() {
     name: ($("profileName").value || "").trim(),
     heightM: parseFloat($("height").value) || 1.75,
     dob: $("dob").value || null,
+    // Recorded because some metrics need it, not because the app sorts people
+    // by it. Blank stays blank: an unset field must not silently become a
+    // default, and a metric that needs it says so instead of guessing.
+    sex: $("sex").value || null,
     ageY: ageFromDob($("dob").value),
     massKg: parseFloat($("mass").value) || null,
     massUpdated: massTouched || (getProfile(($("profileName").value || "").trim()) || {}).massUpdated
@@ -659,6 +672,7 @@ function applyProfile(p) {
   $("profileName").value = p.name || "";
   if (p.heightM) $("height").value = p.heightM;
   $("dob").value = p.dob || "";
+  $("sex").value = p.sex || "";
   if (p.massKg) $("mass").value = p.massKg;
   // Body mass is deliberately NOT restored from the profile. Height is a
   // property of the person; mass is a property of the day, and it scales every
@@ -1470,7 +1484,9 @@ function renderDash() {
   const card = $("dashboardCard");
   if (!dashView) dashView = defaultDashView();
   // Height comes from the profile; weight comes from the log, carried forward.
-  const view = { ...dashView, heightM: getProfile(currentAthlete())?.heightM ?? null };
+  const prof = getProfile(currentAthlete());
+  const view = { ...dashView, heightM: prof?.heightM ?? null, sex: prof?.sex ?? null,
+                 ageY: prof?.ageY ?? null };
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
                                    myWeights(), myCycle(), mySleep(), view);
   $("whoName").textContent = currentAthlete() || tr("noProfile");
