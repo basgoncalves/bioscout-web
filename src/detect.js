@@ -249,6 +249,19 @@ export function score(f) {
       clamp01(f.knee_asymmetry_deg / 25),
       clamp01(1 - f.lateral_travel / 1.0),
     ]),
+    /* Walking is running with the flight taken out, and that absence is what
+     * identifies it: the feet alternate, one is always down, and the body
+     * never leaves the floor. Flight is a veto rather than a term -- one
+     * airborne bout and this is not a walk -- which keeps walk and run nearly
+     * disjoint instead of splitting the score of a clip that is clearly one
+     * of them. */
+    walk: (1 - clamp01(f.flight_bouts / 2)) * clamp01(f.alternating_frac / 0.6)
+        * mean([
+      clamp01(1 - f.hands_overhead_frac / 0.3),
+      clamp01(f.feet_move / 0.35),
+      clamp01(1 - f.lateral_travel / 1.0),
+      clamp01(1 - f.countermovement_frac / 0.25),
+    ]),
     // Running: repeated flight, single support between flights, low hip rise.
     // Two multiplying terms, because a run without either is not a run: several
     // separate flights, and one foot down at a time when there is contact.
@@ -326,6 +339,8 @@ export function classify(poses) {
           knee: f.knee_rom.toFixed(0) },
     slsquat: { pct: pc(f.one_foot_up_frac), asym: f.knee_asymmetry_deg.toFixed(0),
                knee: f.knee_rom.toFixed(0) },
+    walk: { bouts: f.flight_bouts, alt: pc(f.alternating_frac),
+            feet: f.feet_move.toFixed(1) },
     run: { bouts: f.flight_bouts, alt: pc(f.alternating_frac),
            knee: f.knee_rom.toFixed(0) },
     sidestep: { lat: f.lateral_travel.toFixed(1), feet: f.feet_move.toFixed(1),
@@ -353,6 +368,9 @@ export function classify(poses) {
            + `the other planted, the two knees differing by `
            + `${f.knee_asymmetry_deg.toFixed(0)}°, knee range `
            + `${f.knee_rom.toFixed(0)}°`,
+    walk: `the feet alternated (${pc(f.alternating_frac)}% single support) and `
+        + `moved ${f.feet_move.toFixed(1)} torso lengths, with no flight phase `
+        + `at all -- one foot was always on the floor`,
     run: `${f.flight_bouts} separate flight phases with one foot down between `
        + `them (${pc(f.alternating_frac)}% single support), knee range `
        + `${f.knee_rom.toFixed(0)}°`,

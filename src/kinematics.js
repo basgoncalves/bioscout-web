@@ -1185,6 +1185,28 @@ export function findRunReps(F, cfg = DEFAULT_RUN_CFG) {
            otherContacts: side === "l" ? cr : cl };
 }
 
+/* Walking is the same measurement as running with one thing taken away: the
+ * flight phase. Nothing in findRunReps needs flight -- a stride there is one
+ * foot's contact to that same foot's next contact, which is exactly the unit
+ * the walk test asks for -- so walking reuses it rather than getting a second
+ * stride finder that could disagree with the first.
+ *
+ * What does change is the clock. A walking stride is slower than a running one
+ * and a slow walk slower still, so the stride window opens up; and both feet
+ * are down together for a fifth of the cycle, which makes the swing foot's
+ * dip past the stance foot less pronounced, so the contact band stays where it
+ * is rather than being tightened for a task that never leaves the floor.
+ */
+export const DEFAULT_WALK_CFG = {
+  ...DEFAULT_RUN_CFG,
+  // 1.6 s at 60 fps is a slow but ordinary walking stride; the running ceiling
+  // of 90 frames would throw those away as "too long to be a stride".
+  maxStrideFrames: 150,
+  // Walking down a corridor covers ground, and the kinetics warning that
+  // follows from travelling is the same one running gets.
+  stationaryM: 0.35,
+};
+
 export const DEFAULT_SIDESTEP_CFG = {
   // A side step is judged by how far the hips travel sideways, in shank
   // lengths. 0.5 is about a third of a metre on an adult -- below that it is
@@ -1406,8 +1428,19 @@ export const ACTIVITIES = {
     coords: perLegRepCoordinates, reference: squatReferencePositions,
     phases: ["eccentric_s", "concentric_s"],
   },
+  /* Walking and running share every function here. They are separate entries
+   * because the athlete was asked for one of them: an assessment that says
+   * "walk" and reports "running" is telling them their test was misread, and
+   * the refusal text has to talk about the task they actually performed. */
+  walk: {
+    label: "walking", perLeg: true, travels: true, cyclic: true, gait: true,
+    columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_WALK_CFG,
+    features: buildSquatFeatures, findReps: findRunReps,
+    coords: perLegRepCoordinates, reference: squatReferencePositions,
+    phases: ["contact_phase_s", "swing_phase_s"],
+  },
   run: {
-    label: "running", perLeg: true, travels: true, cyclic: true,
+    label: "running", perLeg: true, travels: true, cyclic: true, gait: true,
     columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_RUN_CFG,
     features: buildSquatFeatures, findReps: findRunReps,
     coords: perLegRepCoordinates, reference: squatReferencePositions,
@@ -1493,7 +1526,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
           Math.max(...coords["knee_angle_" + st].map(Math.abs));
         s.stance_hip_flex_max_deg = Math.max(...coords["hip_flexion_" + st]);
       }
-      if (activity === "run") {
+      if (spec.gait) {
         // Which foot this stride belongs to decides what "the other foot" means
         // when flight is worked out, so it has to be this rep's side and not
         // the clip's dominant one.
@@ -1520,9 +1553,9 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   return { activity, fps, pxPerM, scaleDetail: detail, view, osimModel,
            coverage: F._coverage, reps, columns: spec.columns,
            refused: found.refused || null,
-           runSummary: activity === "run" ? runSummary(F, found, fps) : null,
+           runSummary: spec.gait ? runSummary(F, found, fps) : null,
            // Whether the athlete held station. Only running asks -- it is the
            // one task whose kinetics are refused for travel alone.
-           travel: activity === "run" ? runTravel(F, pxPerM, conf) : null,
+           travel: spec.gait ? runTravel(F, pxPerM, conf) : null,
            footCoverage: F._footCoverage ?? null };
 }

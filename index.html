@@ -429,6 +429,7 @@
           <option value="cmj" data-i18n="cmj">Countermovement jump</option>
           <option value="sj" data-i18n="sj">Squat jump</option>
           <option value="slsquat" data-i18n="slsquat">Single-leg squat</option>
+          <option value="walk" data-i18n="walk">Walking</option>
           <option value="run" data-i18n="run">Running</option>
           <option value="sidestep" data-i18n="sidestep">Side step</option>
           <option value="neck" data-i18n="neck">Neck (close-up)</option>
@@ -503,7 +504,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 50;
+window.BUILD = 51;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2634,7 +2635,7 @@ async function enrich(res, poses, fps, heightM, activity) {
   const spec = ACTIVITIES[activity];
   const canDoDynamics = (activity === "squat" || spec.jump
                          || activity === "slsquat"
-                         || (activity === "run" && res.travel?.stationary))
+                         || (ACTIVITIES[activity]?.gait && res.travel?.stationary))
                         && (!spec.travels || res.travel?.stationary);
   if (canDoDynamics && res.reps.length) {
     try {
@@ -2711,7 +2712,7 @@ function viewNote(res) {
   const bits = [];
   const spec = ACTIVITIES[res.activity] || {};
   const sagittal = res.activity === "squat" || spec.jump || res.activity === "slsquat"
-                   || res.activity === "run";
+                   || spec.gait;
   if (sagittal && (v.view === "frontal" || v.view === "oblique")) {
     bits.push(tr("viewNotSagittal", { view: tr("view_" + v.view),
                                       frontality: v.frontality }));
@@ -2724,11 +2725,11 @@ function viewNote(res) {
     bits.push(tr("ankleNotMeasurable"));
   }
   if (spec.travels) {
-    bits.push(res.activity !== "run" ? tr("sidestepNoKinetics")
+    bits.push(!spec.gait ? tr("sidestepNoKinetics")
               : res.travel?.stationary ? tr("runStationaryKinetics")
               : tr("runNoKinetics"));
   }
-  if (res.activity === "run" && res.reps.some((r) => r.walking)) {
+  if (res.activity === "run" && res.reps.some((r) => r.walking)) {   // not for walk: that is the task
     const w = res.reps.filter((r) => r.walking).length;
     bits.push(tr("looksLikeWalking", { n: w, total: res.reps.length }));
   }
@@ -3584,7 +3585,8 @@ function render(res, fps) {
     el.innerHTML = `<h1 style="font-size:17px">${tr("noRepsFound", { activity: tr(res.activity) })}</h1>
       ${res.refused === "feet" ? `<p class="note banner">${
         tr("feetNotInFrame", { pct: ((res.footCoverage ?? 0) * 100).toFixed(0) })}</p>`
-      : res.refused === "noStrides" ? `<p class="note banner">${tr("noStrides")}</p>`
+      : res.refused === "noStrides" ? `<p class="note banner">${
+          tr(res.activity === "walk" ? "noStridesWalk" : "noStrides")}</p>`
       : `<p class="note">${tr("noteCoverage", {
           pct: (res.coverage * 100).toFixed(0) })}</p>`}`;
     return;
@@ -3679,7 +3681,7 @@ function render(res, fps) {
    * code below this point, and a separate early return for each task would have
    * duplicated the markup while duplicating none of that. */
   const isSL = res.activity === "slsquat";
-  const isRun = res.activity === "run";
+  const isRun = res.activity === "run" || res.activity === "walk";
   const isSide = res.activity === "sidestep";
   const nn = (v, d = 2) => (v == null ? "—" : v.toFixed(d));
   const sideName = (sd) => (sd === "l" ? tr("left") : sd === "r" ? tr("right") : "—");

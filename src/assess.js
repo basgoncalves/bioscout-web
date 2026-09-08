@@ -26,7 +26,7 @@ const KEY = "bioscout.assess.v1";
 /* The protocol. `minReps` is a refusal threshold, not a target: a gait test
  * with four strides is not a short assessment, it is not an assessment. */
 export const ASSESS_TESTS = [
-  { id: "gait",  activity: "run",   minReps: 10, seconds: 30 },
+  { id: "gait",  activity: "walk",  minReps: 10, seconds: 30 },
   { id: "squat", activity: "squat", minReps: 3,  seconds: 0 },
   { id: "cmj",   activity: "cmj",   minReps: 2,  seconds: 0 },
 ];

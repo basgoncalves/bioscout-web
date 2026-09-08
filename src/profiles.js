@@ -718,7 +718,7 @@ function summariseRep(r, activity) {
     o.depth_m = r.depth_m != null ? +r.depth_m.toFixed(3) : null;
     o.down_s = +r.eccentric_s?.toFixed(2);
     o.up_s = +r.concentric_s?.toFixed(2);
-  } else if (activity === "run") {
+  } else if (activity === "run" || activity === "walk") {
     // Which foot the stride belongs to. Without it a gait recording cannot be
     // split left from right, which is most of what the assessment reads.
     o.stance_side = r.stance_side ?? null;
@@ -795,7 +795,7 @@ export function summariseSession(session) {
                 trend("depth_m", "Depth", "m", true),
                 trend("knee_asymmetry_deg", "Left\u2013right knee difference", "°", false),
                 trend("down_s", "Eccentric time", "s", false));
-  } else if (activity === "run") {
+  } else if (activity === "run" || activity === "walk") {
     // Contact time lengthening and cadence dropping is what fatigue looks like
     // in a run, the same way depth falling is in a squat.
     trends.push(trend("cadence_spm", "Cadence", "steps/min", true),
