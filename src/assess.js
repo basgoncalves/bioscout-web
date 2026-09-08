@@ -293,6 +293,34 @@ const readHistory = () => {
   try { return JSON.parse(localStorage.getItem(HKEY) || "[]"); } catch { return []; }
 };
 
+/**
+ * Merge filed assessments in from an export, without duplicating them.
+ *
+ * Identity is the athlete plus the moment it was filed: re-importing the same
+ * file must add nothing, because people re-import the same file constantly --
+ * it is how they move data between a phone and a laptop, and a run of
+ * duplicated assessment records would be worse than not importing at all.
+ */
+export function importAssessments(list) {
+  if (!Array.isArray(list) || !list.length) return 0;
+  const all = readHistory();
+  const seen = new Set(all.map((a) => `${a.profile}|${a.finished}`));
+  let added = 0;
+  for (const a of list) {
+    if (!a || !a.finished) continue;
+    const id = `${a.profile ?? null}|${a.finished}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    all.push(a);
+    added++;
+  }
+  if (!added) return 0;
+  all.sort((x, y) => String(x.finished).localeCompare(String(y.finished)));
+  try { localStorage.setItem(HKEY, JSON.stringify(all.slice(-HISTORY_MAX))); }
+  catch { /* private window, or full */ }
+  return added;
+}
+
 export function listAssessments(profile = null) {
   const all = readHistory();
   return profile == null ? all : all.filter((a) => a.profile === profile);

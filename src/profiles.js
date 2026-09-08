@@ -13,6 +13,7 @@
  * whatever sets are still in memory in full, and older ones as summaries.
  */
 import { UNITS } from "./foods.js";
+import { listAssessments, importAssessments } from "./assess.js";
 
 const PKEY = "bioscout.profiles.v1";
 const SKEY = "bioscout.session.v1";
@@ -527,6 +528,13 @@ export function exportAll() {
     sleep: listSleep(),
     vitals: listVitals(),
     cardio: listCardio(),
+    /* Filed assessments travel with everything else.
+     *
+     * They were missing, which made the export a backup of everything EXCEPT
+     * the dated records of a person turning up and being tested -- the part
+     * hardest to reproduce and most worth keeping. Old files simply lack the
+     * field, so no version bump: an absent key imports as nothing. */
+    assessments: listAssessments(),
   };
 }
 
@@ -547,7 +555,9 @@ export function importAll(data) {
   }
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
                    sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
-                   weightsAdded: 0, cycleAdded: 0, sleepAdded: 0, vitalsAdded: 0, cardioAdded: 0 };
+                   weightsAdded: 0, cycleAdded: 0, sleepAdded: 0, vitalsAdded: 0,
+                   cardioAdded: 0, assessmentsAdded: 0 };
+  report.assessmentsAdded = importAssessments(data.assessments);
 
   const store = listProfiles();
   for (const p of (data.profiles && data.profiles.profiles) || []) {

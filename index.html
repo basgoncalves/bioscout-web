@@ -525,7 +525,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 64;
+window.BUILD = 65;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2549,7 +2549,12 @@ const video = $("video"), overlay = $("overlay"), ctx = overlay.getContext("2d")
 let lensId = null;                       // the deviceId the athlete picked
 
 function videoConstraints() {
-  const v = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+  /* 720p, not 1080p. The pose model downsamples to its own input size before
+   * it looks at anything, so the extra pixels are decoded, copied and thrown
+   * away every single frame -- paid for in heat, with no more landmarks for
+   * the money. I raised this to 1080 while working on the lens and it was a
+   * straight regression. */
+  const v = { width: { ideal: 1280 }, height: { ideal: 720 } };
   if (lensId) v.deviceId = { exact: lensId };
   else v.facingMode = facing;
   return v;
@@ -2637,13 +2642,29 @@ function stopCamera() {
   say(tr("sayCameraClosed"));
 }
 
-let lastTs = -1;
+/* How often the pose model actually runs.
+ *
+ * It was running on every animation frame -- 60 to 120 times a second on a
+ * modern phone -- for the whole time the camera was open. Most of that time
+ * nobody is performing: they are reading the instructions, walking to their
+ * mark, or have simply left the screen up. Inference at display rate is what
+ * makes a phone hot, and idle inference is the half of it that buys nothing.
+ *
+ * While RECORDING the rate is left alone. Flight time is counted in frames, so
+ * throttling there would cost jump height real accuracy -- one frame either
+ * side of a 0.4 s flight is about a centimetre. Idle, twelve a second keeps
+ * the skeleton and the framing warning honest for a fifth of the work.
+ */
+const IDLE_MS = 1000 / 12;
+let lastTs = -1, lastDetect = -1;
 function loop() {
   if (!running) return;
   if (video.readyState >= 2) {
     const ts = performance.now();
-    if (ts !== lastTs) {
+    const due = recording || lastDetect < 0 || (ts - lastDetect) >= IDLE_MS;
+    if (ts !== lastTs && due) {
       lastTs = ts;
+      lastDetect = ts;
       const res = landmarker.detectForVideo(video, ts);
       draw(res);
       if (avatar && avatar.setName) {
@@ -2750,6 +2771,15 @@ $("headSize").oninput = (e) => {
   $("headSizeVal").textContent = k.toFixed(2) + "×";
   if (avatar) avatar.setHeadScale(k);
 };
+/* A camera left running behind another tab, or in a pocket, is heat and
+ * battery spent on frames nobody can see. requestAnimationFrame already
+ * throttles hard when a page is hidden, but the loop and the model stay live;
+ * this stops it outright and picks it up again on return. */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { running = false; return; }
+  if (stream && !running) { running = true; requestAnimationFrame(loop); }
+});
+
 $("stopBtn").onclick = stopCamera;
 $("switchBtn").onclick = async () => {
   facing = facing === "user" ? "environment" : "user";
