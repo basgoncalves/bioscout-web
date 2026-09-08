@@ -81,8 +81,16 @@ ok(html.includes("<svg"), "the panel draws the six weeks");
 ok(/contested/i.test(html), "and says the ratio's injury claims are contested");
 ok(!/\bg\b.*readiness|ready for \d\s*g/i.test(html),
    "the panel makes no claim about g tolerance");
-for (const g of NECK_GLOAD.lateral) {
-  ok(!html.includes(String(g.rollNm)), `no roll moment from the model leaks in (${g.g} g)`);
+/* The g-load reference is unpublished thesis data and ships empty in the
+ * public build, so this runs in full only where the real numbers are present.
+ * Both states are worth asserting: with the data, none of it may leak into the
+ * training-load panel; without it, the panel must still work. */
+if (NECK_GLOAD) {
+  for (const g of NECK_GLOAD.lateral) {
+    ok(!html.includes(String(g.rollNm)), `no roll moment from the model leaks in (${g.g} g)`);
+  }
+} else {
+  ok(html.includes("<svg"), "the load panel works without the g-load reference at all");
 }
 ok(N.neckLoadHTML([], NOW) === "", "no neck work, no panel");
 

@@ -512,7 +512,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 58;
+window.BUILD = 59;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -4179,8 +4179,15 @@ if (DEMO) {
   try {
     const c = (DEMO === "cmj" || DEMO === "sj")
       ? syntheticJump(DEMO)
-      : (await (await fetch("data/reference.json")).json())
-          .cases[DEMO === "squat" ? "squat_synthetic" : "pullup_P01"];
+      : await (async () => {
+          // The fixture is a local-only asset and is absent from the public
+          // build, so say that rather than throwing an unexplained error at
+          // somebody who followed the README's ?demo=1 link.
+          const r = await fetch("data/reference.json").catch(() => null);
+          if (!r || !r.ok) throw new Error(tr("demoNoFixture"));
+          return (await r.json())
+            .cases[DEMO === "squat" ? "squat_synthetic" : "pullup_P01"];
+        })();
     $("activity").value = c.activity;
     const demoRes = analyse(c.poses, c.fps,
       { heightM: c.height_m, activity: c.activity, osimModel: OSIM_MODEL });

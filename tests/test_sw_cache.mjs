@@ -31,11 +31,13 @@ import path from "node:path";
  */
 const OPTIONAL = new Set([
   "data/moment_arms.json",
-  // The README says this one may be deleted from a deployment to save 1.1 MB.
-  // It is not cached, so ?demo=1 -- the step the README tells people to run
-  // before granting camera access -- is the one thing that does not work
-  // offline. Add it to SHELL if you want the demo to survive a flaky network.
+  /* These two do not ship with the public build at all -- they are gitignored
+   * local assets (see .gitignore for why). The app is written to degrade
+   * without them: ?demo=1 says the fixture is absent, and the muscle-force
+   * panel is skipped rather than drawn from nothing. Listing them here records
+   * that as a decision rather than leaving them looking like an oversight. */
   "data/reference.json",
+  "data/force_model.json",
 ]);
 
 const norm = (p) => p.replace(/^\.\//, "").replace(/^\//, "");

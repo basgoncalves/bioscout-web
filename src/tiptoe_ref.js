@@ -2,9 +2,9 @@
  * tiptoe_ref.js -- what the literature actually says about tip-toe capacity
  * and running distance.
  *
- * Source: B. Gonçalves, "Is there a minimum tip-toe capacity required before
- * running 5 / 10 / 20 km?", mini-review, 8 Sep 2026
- * (data/review/2026_Sep_MiniReview_TipToe_test_and_running_capacity).
+ * These values are collated from published return-to-running frameworks and
+ * normative work; the internal review that assembled them is unpublished and
+ * does not ship with this build, so nothing here cites it.
  *
  * The review's finding is a NEGATIVE one, and this file exists to keep it that
  * way in the app. No peer-reviewed study establishes a tip-toe threshold -- in
@@ -26,7 +26,7 @@
  */
 
 export const TIPTOE_SOURCE =
-  "Gonçalves B., mini-review, Sep 2026 — no validated threshold exists; these are consensus values";
+  "Collated from published return-to-running consensus and normative work — no validated threshold exists";
 
 export const DISTANCES = ["5 km", "10 km", "20 km"];
 

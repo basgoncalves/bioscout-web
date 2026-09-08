@@ -36,7 +36,7 @@
  * and the heavy version moves only when a vendored asset actually changes,
  * which is rarely. A shell bump can no longer cost anybody a 20 MB download.
  */
-const SHELL_CACHE = "bioscout-shell-v46";
+const SHELL_CACHE = "bioscout-shell-v47";
 const HEAVY_CACHE = "bioscout-heavy-v1";
 const KEEP = [SHELL_CACHE, HEAVY_CACHE];
 
@@ -47,10 +47,6 @@ const SHELL = ["./", "./index.html", "./src/kinematics.js", "./src/dynamics.js",
                "./assets/icons/apple-touch-icon.png", "./assets/icons/favicon.ico"];
 const HEAVY = [
   "./assets/pose_landmarker_full.task",
-  // The force model is 1.4 MB and only changes when it is retrained, which
-  // already requires a CACHE bump for the pose model beside it. Network-first
-  // meant paying for it on every single load.
-  "./data/force_model.json",
   "./assets/vendor/vision_bundle.mjs",
   "./assets/vendor/three.module.min.js",
   "./assets/vendor/three.core.min.js",

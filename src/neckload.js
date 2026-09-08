@@ -45,6 +45,11 @@ export function neckLoadSVG(rows, { width = 420, height = 170 } = {}) {
 }
 
 export function neckLoadHTML(kase = "lateral") {
+  /* No data, no panel. The reference numbers are unpublished thesis results
+   * that do not ship with the public build (see neck_gload.js), and a chart
+   * drawn from an empty table is worse than no chart: it says a comparison was
+   * made. */
+  if (!NECK_GLOAD) return "";
   const rows = NECK_GLOAD[kase] || NECK_GLOAD.lateral;
   const muscles = Object.keys(NECK_MUSCLE_LABEL);
   const head = muscles.map((m) => `<th style="text-align:right">${esc(NECK_MUSCLE_LABEL[m])}</th>`).join("");

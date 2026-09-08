@@ -1,0 +1,45 @@
+Copyright (c) 2026 Basilio Goncalves. All rights reserved.
+
+This repository and the site it deploys are published so that people can USE
+BioScout Web and read how it works. They are not published for reuse.
+
+Permission is granted to:
+
+  * use the deployed application;
+  * read, quote and cite this source, with attribution;
+  * fork it for personal, non-commercial study.
+
+Permission is NOT granted, without prior written permission from the copyright
+holder, to:
+
+  * redistribute this work or a derivative of it, in whole or in substantial
+    part, as your own product or service;
+  * use it, or any model, normative dataset or derived value contained in it,
+    for commercial purposes;
+  * re-host the deployed site.
+
+WHAT IS AND IS NOT IN THIS REPOSITORY
+
+Anything a browser can fetch from the deployed site is downloadable by anyone
+who opens it. That is a property of static hosting and no licence changes it.
+The material judged too costly or too sensitive to hand out that way is
+therefore not here at all -- it is kept locally and listed in .gitignore, and
+the application is written to degrade deliberately when it is absent rather
+than to pretend it is present.
+
+THIRD-PARTY AND UNPUBLISHED WORK
+
+Some references in this project derive from work that is not the copyright
+holder's to license, including unpublished student research. Those values do
+not ship with the public build. Do not reintroduce them into a public
+deployment without the permission of the person whose work they are.
+
+Vendored dependencies under assets/vendor/ carry their own licences and are
+governed by them, not by this file.
+
+THE USUAL DISCLAIMER, WHICH HERE IS NOT BOILERPLATE
+
+This software is provided "as is", without warranty of any kind. It estimates
+biomechanical quantities from a phone camera. It is not a medical device, it
+diagnoses nothing, and the copyright holder accepts no liability for any
+decision taken on the basis of a number it produced.

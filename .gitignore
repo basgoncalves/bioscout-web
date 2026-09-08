@@ -2,3 +2,18 @@ node_modules/
 .DS_Store
 _patch/
 _to_delete/
+
+# Not published, and not only mine to publish.
+#
+# _private/ holds the things that must not reach a public GitHub Pages site:
+# the trained force model, the reference fixture, and unpublished reviews --
+# including a student's thesis results, which are his to publish first. The app
+# degrades deliberately when they are absent (see loadForceModel, ?demo=1) so
+# that a checkout without them still runs.
+#
+# Anything the browser can fetch from the deployed site is public, whatever
+# this file says: that is a property of static hosting, not of the repo.
+_private/
+data/review/
+data/reference.json
+data/force_model.json
