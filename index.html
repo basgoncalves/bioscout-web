@@ -533,7 +533,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 69;
+window.BUILD = 70;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2888,8 +2888,6 @@ async function startCameraQuiet() {
   await video.play();
 }
 
-let framingOverride = false;      // they were warned and pressed again
-
 let leadDone = false;          // the countdown for this take has already run
 
 $("recBtn").onclick = () => {
@@ -2906,31 +2904,25 @@ $("recBtn").onclick = () => {
       assessLeadIn(at);
       return;
     }
-    /* Refuse a take that cannot produce anything, once.
+    /* Framing is a warning, never a refusal.
      *
-     * Every one of these tests is measured from the feet, and a camera framed
-     * on the torso gives a recording that can only end in a refusal -- after
-     * the athlete has walked, jumped or raised for thirty seconds. Better to
-     * spend that argument before the take than after it. Pressing again goes
-     * ahead regardless: the check can be wrong, and it is not the athlete's
-     * job to argue with it twice. */
-    /* Close-up tests are exempt. The neck test is filmed from the chest up on
-     * purpose, so the feet are out of shot by design and the framing check has
-     * nothing true to say about it -- it refused every first press, and the
-     * athlete learned to press twice, which is the check teaching people to
-     * ignore it. */
-    const closeUp = assessStep
-      && ASSESS_TESTS.find((x) => x.id === assessStep)?.closeUp;
-    if (assessStep && !closeUp && !framingOverride) {
+     * It used to swallow the first press and make the athlete press again.
+     * That is the worst of both: the button feels broken, and the warning
+     * becomes the thing standing between them and recording rather than
+     * information -- so it gets pressed through without being read, which is
+     * exactly what a warning must not train people to do. And it was often
+     * simply wrong: the neck test is filmed from the chest up on purpose, so
+     * the feet are out of shot by design, and it refused every single press.
+     *
+     * The check still runs and still says its piece, and the HUD says it live
+     * the whole time the camera is open. But Start test starts the test. */
+    if (assessStep) {
+      const closeUp = ASSESS_TESTS.find((x) => x.id === assessStep)?.closeUp;
       const bad = framing.shown;
-      if (!framing.sawBody || bad) {
-        clearInterval(assessLeadTimer);
-        framingOverride = true;
+      if (!closeUp && (!framing.sawBody || bad)) {
         say(tr(!framing.sawBody ? "assessNoBodyYet" : "assessBadFraming_" + bad), true);
-        return;
       }
     }
-    framingOverride = false;
     frames = []; recording = true;
     leadDone = false;
     framing.reset();
