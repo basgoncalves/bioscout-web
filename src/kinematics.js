@@ -1755,8 +1755,27 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
     return s;
   });
 
+  /* The whole clip as one curve, for gait.
+   *
+   * Every other panel is one stride cut out of the run, which is the right unit
+   * for comparing strides and the wrong one for seeing the run: a limp that
+   * builds over eight strides, or one stride that is not like the others, is
+   * invisible when each stride is drawn on its own axis at its own scale. This
+   * is the same coordinate set over the whole recording, uncut, so the video
+   * and the curve can be read against each other end to end. */
+  let whole = null;
+  if (spec.gait && F._n > 2) {
+    try {
+      const wb = [0, Math.floor((F._n - 1) / 2), F._n - 1];
+      const w = spec.coords(F, wb, fps, pxPerM, refA, refB,
+                            { model: osimModel, ankleValid: view.ankle_usable });
+      whole = { rep: "all", wholeTrial: true, times: w.times, coords: w.coords,
+                bounds: wb };
+    } catch { whole = null; }
+  }
+
   return { activity, fps, pxPerM, scaleDetail: detail, view, osimModel,
-           coverage: F._coverage, reps, columns: spec.columns,
+           coverage: F._coverage, reps, whole, columns: spec.columns,
            refused: found.refused || null,
            runSummary: spec.gait ? runSummary(F, found, fps) : null,
            // Whether the athlete held station. Only running asks -- it is the

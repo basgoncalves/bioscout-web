@@ -267,3 +267,50 @@ export function ensembleRep(reps) {
   out.rep = "mean";        // scalarKeys must not overwrite the label
   return out;
 }
+
+/* Left and right on ONE cycle ------------------------------------------------
+ *
+ * A stride is a cycle of one foot, so a run of six strides gave six panels --
+ * three of the left foot and three of the right, each with both legs drawn but
+ * each on a different foot's clock. Reading a left-right difference off two
+ * charts side by side is not reading it at all.
+ *
+ * Each side is normalised to ITS OWN stride cycle first (that is what
+ * ensembleRep does on the way to averaging), and only then are the two put on
+ * the same axis. That is the convention every gait paper uses: 0-100% is one
+ * cycle of that limb, so contact falls at the same place on both curves and
+ * the two are comparable at every percent. Concatenating the raw windows
+ * instead would line up the clock and nothing else.
+ *
+ * The moment is NOT split by side and must not be drawn as though it were: it
+ * comes from body-centre landmarks and whole-body COM acceleration, so there
+ * is one sagittal estimate, and what the two curves here show is that estimate
+ * over each limb's own cycle. `dyn` is the left cycle's, `dynRight` the
+ * right's, and the caller labels them that way.
+ */
+export function mergeSides(left, right) {
+  if (!left && !right) return null;
+  const pick = (o, suffix) => Object.fromEntries(
+    Object.entries((o && o.coords) || {}).filter(([k]) => k.endsWith(suffix)));
+  const coords = { ...pick(left, "_l"), ...pick(right, "_r") };
+  if (!Object.keys(coords).length) return null;
+  const sd = {
+    coords: { ...pick(left && left.sd ? { coords: left.sd.coords } : null, "_l"),
+              ...pick(right && right.sd ? { coords: right.sd.coords } : null, "_r") },
+  };
+  const base = left || right;
+  const out = {
+    rep: "sides", isMean: true, sideMerged: true,
+    nLeft: left ? left.nReps : 0, nRight: right ? right.nReps : 0,
+    nReps: Math.max(left ? left.nReps : 0, right ? right.nReps : 0),
+    soloRep: (left ? left.nReps : 1) === 1 && (right ? right.nReps : 1) === 1,
+    times: base.times, timeUnit: base.timeUnit,
+    coords, bounds: base.bounds,
+    topPct: base.topPct, landPct: base.landPct,
+    eventAligned: !!base.eventAligned,
+  };
+  if (Object.values(sd.coords).some(Boolean)) out.sd = sd;
+  if (left && left.dyn) out.dyn = left.dyn;
+  if (right && right.dyn) out.dynRight = right.dyn;
+  return out;
+}

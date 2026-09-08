@@ -477,11 +477,40 @@ export function saveCurves(sessionStarted, index, result) {
         }
       }
       for (const [k, v] of Object.entries(rp)) {
-        if (typeof v === "number" || typeof v === "boolean") o[k] = v;
+        /* Strings as well as numbers.
+         *
+         * `stance_side` is the only string a rep carries, and dropping it made
+         * a restored run a set of strides that belong to no foot: the panels
+         * are built by pairing each left cycle with its right, so a reloaded
+         * running set came back with no curves at all. Coordinate and moment
+         * arrays are handled above; everything else scalar is small. */
+        if (typeof v === "number" || typeof v === "boolean"
+            || (typeof v === "string" && v.length <= 40)) o[k] = v;
       }
       return o;
     }),
   };
+  /* The whole-trial curve, if the analysis made one.
+   *
+   * It is the same size as all the reps put together, so it roughly doubles
+   * what a set costs to store -- and the quota walk below already drops the
+   * oldest set rather than losing the write, so the cost falls on old history
+   * and not on this recording. A restored set without it would simply be
+   * missing its last panel, with no way to tell that from a set that never
+   * had one. */
+  if (result.whole) {
+    const w = result.whole;
+    const o = { rep: "all", wholeTrial: true, bounds: w.bounds,
+                times: r3(w.times), coords: {} };
+    for (const [k, v] of Object.entries(w.coords || {})) o.coords[k] = r3(v);
+    if (w.dyn) {
+      o.dyn = {};
+      for (const [k, v] of Object.entries(w.dyn)) {
+        o.dyn[k] = Array.isArray(v) || ArrayBuffer.isView(v) ? r2(v) : v;
+      }
+    }
+    store[key].whole = o;
+  }
   // Newest first, then trim. If the quota still refuses, drop the oldest and
   // try again rather than losing the write outright.
   let keys = Object.keys(store).sort((a, b) => store[b].at.localeCompare(store[a].at));

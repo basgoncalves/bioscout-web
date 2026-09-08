@@ -269,6 +269,34 @@ for (const [label, raw] of files) {
   }
 }
 
+
+/* --- index.html's module body must parse --------------------------------- *
+ *
+ * Everything in this file checks what the code MEANS; this checks that it is
+ * code at all. A stray brace or a variable left behind by an edit turns the
+ * whole inline module into a syntax error, and the browser's only symptom is a
+ * login screen with no athletes on it -- the same silent death a temporal-dead
+ * -zone error caused once already. One `node --check` catches it here instead.
+ */
+{
+  const { execFileSync } = await import("node:child_process");
+  const { writeFileSync, unlinkSync } = await import("node:fs");
+  const whole = readFileSync("index.html", "utf8");
+  const m = whole.match(/<script type="module">([\s\S]*?)<\/script>/);
+  if (!m) fail("index.html: no inline module to check");
+  else {
+    const tmp = `/tmp/bioscout_module_check_${process.pid}.mjs`;
+    writeFileSync(tmp, m[1]);
+    try {
+      execFileSync(process.execPath, ["--check", tmp], { stdio: "pipe" });
+      console.log("ok    index.html's inline module parses");
+    } catch (e) {
+      fail(`index.html's inline module does not parse:\n${
+        String(e.stderr || e.message).split("\n").slice(0, 4).join("\n")}`);
+    } finally { try { unlinkSync(tmp); } catch { /* already gone */ } }
+  }
+}
+
 if (bad) {
   console.error(`\nFAIL  ${bad} wiring problem(s)`);
   process.exit(1);

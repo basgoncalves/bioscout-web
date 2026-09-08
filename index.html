@@ -539,7 +539,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 73;
+window.BUILD = 74;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -593,7 +593,7 @@ import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 // array of times, and a translated string inside either of them would have
 // called the array.
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
-import { ensembleRep } from "./src/ensemble.js";
+import { ensembleRep, mergeSides } from "./src/ensemble.js";
 import { neckLoadHTML } from "./src/neckload.js";
 import { framingWatcher } from "./src/framing.js";
 import { gestureWatcher } from "./src/gesture.js";
@@ -3197,7 +3197,10 @@ async function enrich(res, poses, fps, heightM, activity) {
     try {
       const F = spec.jump ? buildJumpFeatures(poses) : buildSquatFeatures(poses);
       const { pxPerM } = computePxPerM(poses, heightM);
-      for (const r of res.reps) {
+      // The whole-trial curve is one more window over the same clip, so it gets
+      // the same treatment: without this its panel would show angles and then
+      // an empty space where every other panel has moments.
+      for (const r of [...res.reps, ...(res.whole ? [res.whole] : [])]) {
         r.dyn = inverseDynamics(
           jointPositionsM(F, r.bounds, pxPerM, F._floorY), massKg, fps,
           { barMassKg: res.externalKg });
@@ -3228,7 +3231,7 @@ async function enrich(res, poses, fps, heightM, activity) {
       try { muscleJoints = await (await fetch("data/muscle_joints.json")).json(); }
       catch { muscleJoints = null; }
     }
-    for (const r of res.reps) {
+    for (const r of [...res.reps, ...(res.whole ? [res.whole] : [])]) {
       // The surrogate was trained on RAJAGOPAL signs (its knee_angle_r training
       // mean is +56.9 deg). A GPK-signed knee would silently invert that input.
       const mc = { ...r.coords };
@@ -3314,7 +3317,19 @@ function chart(rep, activity, res) {
    * of them would hide the entire point of measuring the task. Same colour per
    * structure, dashed for the left -- the convention used everywhere else in
    * the app. */
-  const keys = aspec.perLeg
+  /* On gait, colour means SIDE. Everywhere else in the app colour means the
+   * structure and the left is dashed, which is right when the two legs are
+   * doing the same thing at the same time. In a stride they are not: the
+   * question the chart exists to answer is "do my legs match", and the eye
+   * answers that from colour long before it reads a legend about dash
+   * patterns. Green left, red right; solid knee, dashed hip. */
+  const gaitSides = aspec.gait;
+  const keys = gaitSides
+    ? [[tr("kneeFlexion") + " " + tr("leftLeg"), "knee_angle_l", { color: SIDE_L }],
+       [tr("kneeFlexion") + " " + tr("rightLeg"), "knee_angle_r", { color: SIDE_R }],
+       [tr("hipFlexion") + " " + tr("leftLeg"), "hip_flexion_l", { color: SIDE_L, dash: true }],
+       [tr("hipFlexion") + " " + tr("rightLeg"), "hip_flexion_r", { color: SIDE_R, dash: true }]]
+    : aspec.perLeg
     ? [[tr("kneeFlexion") + " " + tr("rightShort"), "knee_angle_r"],
        [tr("kneeFlexion") + " " + tr("leftShort"), "knee_angle_l"],
        [tr("hipFlexion") + " " + tr("rightShort"), "hip_flexion_r"],
@@ -3324,7 +3339,10 @@ function chart(rep, activity, res) {
        [tr("ankleDorsi"), "ankle_angle_r"]]
     : [[tr("elbowFlexion"), "elbow_flex_r"], [tr("shoulderFlexion"), "arm_flex_r"],
        [tr("hipFlexion"), "hip_flexion_r"]];
-  const series = keys.map(([n, k]) => [n, rep.coords[k]]);
+  // A key whose curve is not in this item is dropped, not drawn as a gap: one
+  // foot alone must not produce a flat line where the other leg would be.
+  const series = keys.map(([n, k, o]) => [n, rep.coords[k], o])
+                     .filter(([, v]) => Array.isArray(v) && v.length);
   // Reference angles, on the mean rep only: over a single rep they would be
   // three more lines competing with the measurement for attention.
   const refCond = rep.isMean && activity === "squat" ? normCondition(res || {}) : null;
@@ -3346,7 +3364,10 @@ function chart(rep, activity, res) {
   // On the mean rep, the between-rep SD is drawn as a band. It is the point of
   // an ensemble average: a mean with a wide band is three different squats.
   const sdc = rep.sd && rep.sd.coords;
-  const bands = sdc ? keys.map(([, k]) => sdc[k] || null) : null;
+  const bands = sdc ? series.map(([n]) => {
+    const k = (keys.find(([nm]) => nm === n) || [])[1];
+    return (k && sdc[k]) || null;
+  }) : null;
   const allSeries = series.concat(refs);
   const allBands = bands ? bands.concat(refs.map(() => null)) : null;
 
@@ -3391,7 +3412,11 @@ function chart(rep, activity, res) {
     allSeries.forEach(([, vals], i) => {
       const b = allBands[i];
       if (!b) return;
-      g += bandPath(t, vals, b, sx, sy, COLORS[i % COLORS.length]);
+      // The band belongs to its line, so it takes the line's colour when the
+      // line was given one. Reaching for the palette by index instead put a
+      // green line inside a blue cloud on the gait charts.
+      const o = allSeries[i][2];
+      g += bandPath(t, vals, b, sx, sy, (o && o.color) || COLORS[i % COLORS.length]);
     });
   }
   allSeries.forEach(([, vals, o], i) => {
@@ -3561,6 +3586,9 @@ function refBand(n) {
 }
 
 const REF_COLOR = "#9aa4b8";
+/* Left green, right red -- the two most-used side colours in gait figures, and
+ * far enough apart to survive both themes and a phone screen in daylight. */
+const SIDE_L = "#2f9e5f", SIDE_R = "#d1493f";
 
 /* Left and right are the SAME structure, so they get the same colour and are
  * told apart by line style. Spending a colour on the side means six colours
@@ -3686,7 +3714,9 @@ function jointSubplot(rep, res, j) {
   const d = rep.dyn;
   const moment = d[j.series];
   const top = topMusclesForJoint(rep, j.key);
-  const pk = Math.max(...moment.map(Math.abs));
+  const pk = Math.max(...moment.map(Math.abs),
+                      ...(rep.dynRight && rep.dynRight[j.series]
+                          ? rep.dynRight[j.series].map(Math.abs) : []));
   const sel = selectedMuscle[j.key];
   const sdd = rep.sd && rep.sd.dyn;
 
@@ -3721,8 +3751,21 @@ function jointSubplot(rep, res, j) {
   const refCond = rep.isMean && res.activity === "squat" ? normCondition(res) : null;
   const refM = refCond ? refCurve(refCond, "joint_moment", j.key) : null;
 
+  /* The right cycle's copy of the same estimate, where there is one.
+   *
+   * This is NOT a right-leg moment and is not drawn as one: the inverse
+   * dynamics reads body-centre landmarks and whole-body acceleration, so there
+   * is a single sagittal moment, and what these two curves separate is the
+   * cycle, not the limb. The note under the plot says so, because a green and
+   * a red curve on a gait chart will otherwise be read as left and right leg
+   * -- which is exactly what the angle chart above it does mean. */
+  const momentR = rep.dynRight && rep.dynRight[j.series];
+
   const seenBase = new Set();
-  const series = [[tr("netMomentOf", { joint: tr(j.label) }), moment],
+  const series = [[tr("netMomentOf", { joint: tr(j.label) }),
+                   moment, momentR ? { color: SIDE_L } : undefined],
+    ...(momentR ? [[tr("netMomentOf", { joint: tr(j.label) }) + " " + tr("rightLeg"),
+                    momentR, { color: SIDE_R }]] : []),
     ...contrib.map(([nm, vals]) => {
       const b = baseName(nm), first = !seenBase.has(b);
       seenBase.add(b);
@@ -3733,7 +3776,8 @@ function jointSubplot(rep, res, j) {
                          { dash: true, color: REF_COLOR }]);
   const pal = ["#8892a6", ...MCOLORS];
   const bands = sdd && sdd[j.series]
-    ? [sdd[j.series], ...contrib.map(() => null), ...(refM ? [refBand(refM)] : [])]
+    ? [sdd[j.series], ...(momentR ? [null] : []),
+       ...contrib.map(() => null), ...(refM ? [refBand(refM)] : [])]
     : null;
   const momentChart = lineChart(rep.times, series, "N·m", pal, bands)
     + (refM ? refNote(refCond) : "");
@@ -3752,6 +3796,7 @@ function jointSubplot(rep, res, j) {
       <h2>${tr(j.label)} <span class="pk">${tr("peakWord")} ${pk.toFixed(0)} N·m
         (${(pk / res.massKg).toFixed(2)} N·m/kg)</span></h2>
       ${momentChart}
+      ${momentR ? `<p class="note" style="margin-top:2px">${tr("noteMomentOneSide")}</p>` : ""}
       <p class="note" style="margin-top:2px">${contrib.length
         ? (sel ? tr("isolatedMuscle", { name: sel.name, n: top.length })
                : tr("contribHint"))
@@ -3995,7 +4040,18 @@ async function exportZip(res, fps) {
           : [];
         const slug = (labels.slice(0, 3).join("_") || `chart${++k}`)
           .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
-        const who = shownItems[i] && shownItems[i].isMean ? "mean" : `rep${res.reps[i].rep}`;
+        /* Named from the ITEM on screen, not from res.reps[i].
+         *
+         * On gait the panels are no longer one per rep -- they are one per
+         * stride cycle, plus a mean and the whole run -- so indexing back into
+         * res.reps read past the end and threw mid-export, after the analysis
+         * had already been written into the zip. */
+        const it = shownItems[i];
+        const who = !it ? `rep${i + 1}`
+          : it.wholeTrial ? "whole_trial"
+          : it.cycle ? `stride${it.cycle}`
+          : it.isMean ? "mean"
+          : `rep${it.rep ?? i + 1}`;
         files.push({ name: `plots/${who}_${String(++k).padStart(2, "0")}_${slug}.png`,
                      data: await blobBytes(png) });
       }
@@ -4336,12 +4392,35 @@ function render(res, fps) {
    * disappears into a mean. Every other task has one mean because its reps are
    * one thing. */
   const meanRep = isRun ? null : ensembleRep(res.reps);
-  const runMeans = !isRun ? [] : ["l", "r"].map((sd) => {
-    const m = ensembleRep(res.reps.filter((r) => r.stance_side === sd));
-    if (m) m.stance_side = sd;
-    return m;
-  }).filter(Boolean);
-  const items = isRun ? [...res.reps, ...runMeans]
+  /* Gait panels: one per CYCLE, not one per foot-strike.
+   *
+   * Six strides used to be six panels -- three of the left foot, three of the
+   * right, each with both legs drawn but each on a different foot's clock.
+   * Nobody reads a left-right difference off two charts side by side. Each
+   * side is normalised to its own stride cycle and the two are laid on one
+   * axis, so 0-100% means one cycle of that limb on both curves and contact
+   * falls at the same place. Stride k pairs the athlete's k-th left cycle with
+   * their k-th right; a foot with more strides than the other keeps its extra
+   * ones out of the pairing rather than pairing them with nothing.
+   *
+   * Then the mean of all cycles, and last the whole run uncut -- the panel
+   * that shows what the strides cannot: drift across the bout, and the one
+   * stride that was not like the others. */
+  const lefts = !isRun ? [] : res.reps.filter((r) => r.stance_side === "l");
+  const rights = !isRun ? [] : res.reps.filter((r) => r.stance_side === "r");
+  const cycles = [];
+  if (isRun) {
+    const pairs = Math.max(lefts.length, rights.length);
+    for (let k = 0; k < pairs; k++) {
+      const m = mergeSides(lefts[k] ? ensembleRep([lefts[k]]) : null,
+                           rights[k] ? ensembleRep([rights[k]]) : null);
+      if (m) { m.cycle = k + 1; cycles.push(m); }
+    }
+    const mean = mergeSides(ensembleRep(lefts), ensembleRep(rights));
+    if (mean && (lefts.length > 1 || rights.length > 1)) cycles.push(mean);
+    if (res.whole) cycles.push(res.whole);
+  }
+  const items = isRun ? cycles
                       : meanRep ? [...res.reps, meanRep] : res.reps;
   shownItems = items;
   // Mean +- SD across the reps, on the same row shape as the reps above it.
@@ -4354,18 +4433,10 @@ function render(res, fps) {
          <td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
          <td>${ms("stance_knee_flex_max_deg", 0)}°</td>
          <td>${ms("knee_asymmetry_deg", 0)}°</td></tr>`
-    : isRun
-    ? runMeans.map((m) => {
-        const q = (k, d = 2) => {
-          const st = m.stats[k];
-          return st ? `${st.mean.toFixed(d)}<span class="sub"> ±${st.sd.toFixed(d)}</span>`
-                    : "—";
-        };
-        return `<tr class="meanrow"><td>${tr("mean")}</td>
-          <td>${sideName(m.stance_side)}</td><td>${q("stride_s", 3)}</td>
-          <td>${q("contact_s", 3)}</td><td>${q("flight_s", 3)}</td>
-          <td>${q("duty_factor", 2)}</td><td>${q("cadence_spm", 0)}</td></tr>`;
-      }).join("")
+    // Gait has no mean row here: its per-foot means are their own table above,
+    // where a left row and a right row can be read against each other. This
+    // branch was already unreachable (meanRep is null for gait) and referred to
+    // a list that no longer exists.
     : isSide
     ? `<tr class="meanrow"><td>${tr("mean")}</td><td>—</td>
          <td>${ms("out_s")}</td><td>${ms("back_s")}</td>
@@ -4427,7 +4498,13 @@ function render(res, fps) {
   const tabs = $("repTabs");
   items.forEach((r, i) => {
     const b = document.createElement("button");
-    b.textContent = r.isMean
+    b.textContent = r.wholeTrial
+      ? tr("wholeTrialTab")
+      : r.cycle
+      ? tr("cycleTab", { n: r.cycle })
+      : r.sideMerged
+      ? tr("cycleMeanTab", { l: r.nLeft, r: r.nRight })
+      : r.isMean
       ? (r.soloRep
           ? (r.stance_side ? tr("soloRepSideTab", { side: sideName(r.stance_side) })
                            : tr("soloRepTab"))
@@ -4445,10 +4522,17 @@ function render(res, fps) {
   function select(i) {
     [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
     $("chartBox").innerHTML = chart(items[i], res.activity, res)
-      + (items[i].isMean ? `<p class="note">${items[i].soloRep
-           ? tr("noteSoloRep")
-           : tr(items[i].eventAligned ? "noteMeanEventAligned" : "noteMeanStretched",
-                { n: items[i].nReps }) + tr("noteMeanBand")}</p>` : "");
+      + (items[i].wholeTrial
+           ? `<p class="note">${tr("noteWholeTrial")}</p>`
+           : items[i].sideMerged
+           ? `<p class="note">${tr("noteSideCycles")}${
+               items[i].soloRep ? "" : tr("noteMeanBand")}</p>`
+           : items[i].isMean
+           ? `<p class="note">${items[i].soloRep
+               ? tr("noteSoloRep")
+               : tr(items[i].eventAligned ? "noteMeanEventAligned" : "noteMeanStretched",
+                    { n: items[i].nReps }) + tr("noteMeanBand")}</p>`
+           : "");
     $("dynBox").innerHTML = momentPanel(items[i], res);
     $("dynBox").querySelectorAll("button.muscle").forEach((b) => {
       b.onclick = () => {

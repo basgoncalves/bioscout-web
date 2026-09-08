@@ -38,3 +38,39 @@ report('three jumps, push and landing also varying:',
        [rep(14, 24, 20), rep(20, 30, 28), rep(26, 36, 34)]);
 report('three squats, different tempos:',
        [rep(30, 4, 30), rep(45, 4, 40), rep(38, 4, 52)]);
+
+/* --- left and right on one cycle ------------------------------------------ */
+{
+  const { mergeSides } = await import('../src/ensemble.js');
+  let bad2 = 0;
+  const ok2 = (c, m) => { console.log(`  [${c ? "OK  " : "FAIL"}] ${m}`); if (!c) bad2++; };
+  const side = (n, kl, kr, sdv) => ({
+    nReps: n, times: [0, 50, 100], timeUnit: "%", bounds: [0, 5, 10],
+    topPct: 30, landPct: 60, eventAligned: true,
+    coords: { knee_angle_l: kl, knee_angle_r: kr,
+              hip_flexion_l: kl, hip_flexion_r: kr },
+    sd: { coords: { knee_angle_l: sdv, knee_angle_r: sdv,
+                    hip_flexion_l: sdv, hip_flexion_r: sdv } },
+    dyn: { knee_moment: kl },
+  });
+  const L = side(3, [1, 2, 3], [9, 9, 9], [0.1, 0.1, 0.1]);
+  const R = side(3, [8, 8, 8], [4, 5, 6], [0.2, 0.2, 0.2]);
+  const m = mergeSides(L, R);
+  ok2(JSON.stringify(m.coords.knee_angle_l) === JSON.stringify([1, 2, 3]),
+      "the left curve comes from the left ensemble");
+  ok2(JSON.stringify(m.coords.knee_angle_r) === JSON.stringify([4, 5, 6]),
+      "and the right curve from the right ensemble, not the left's own _r");
+  ok2(m.sd.coords.knee_angle_l[0] === 0.1 && m.sd.coords.knee_angle_r[0] === 0.2,
+      "each side keeps its own band");
+  ok2(m.nLeft === 3 && m.nRight === 3, "both counts are carried for the label");
+  ok2(JSON.stringify(m.dyn.knee_moment) === JSON.stringify([1, 2, 3]),
+      "the left cycle's moment is kept as dyn");
+  ok2(m.dynRight && JSON.stringify(m.dynRight.knee_moment) === JSON.stringify([8, 8, 8]),
+      "and the right cycle's moment as dynRight");
+  ok2(mergeSides(L, null).coords.knee_angle_r === undefined,
+      "one foot alone yields one side, not a fabricated other");
+  ok2(mergeSides(null, null) === null, "nothing in, nothing out");
+  const solo = mergeSides(side(1, [1], [2], null), side(1, [3], [4], null));
+  ok2(solo.soloRep === true, "one stride per foot is a solo pair, so no band is claimed");
+  if (bad2) { console.error(`\nFAIL ${bad2}`); process.exit(1); }
+}
