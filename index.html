@@ -518,7 +518,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 61;
+window.BUILD = 62;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -614,7 +614,14 @@ async function makeLandmarker() {
 
 const $ = (id) => document.getElementById(id);
 const statusEl = $("status");
-const say = (t, warn) => { statusEl.textContent = t; statusEl.classList.toggle("warn", !!warn); };
+const say = (t, warn) => {
+  // Drop the data-i18n binding: applyStaticI18n rewrites every element that
+  // still carries one, so a status message set before it runs was being
+  // silently replaced by the placeholder "Starting..." it had at load.
+  statusEl.removeAttribute("data-i18n");
+  statusEl.textContent = t;
+  statusEl.classList.toggle("warn", !!warn);
+};
 
 let landmarker = null, stream = null, running = false, recording = false;
 let muscleJoints = null;   // { muscleJoints: {name:[joints]}, byJoint: {joint:[names]} }
@@ -1955,6 +1962,23 @@ function beginAssessTest(t) {
 let assessToneFor = 0;
 let assessTimer = null;
 let assessHudText = "";       // what the frame loop should show during a test
+let engineReady = false;      // the pose engine has finished loading
+
+/* The assessment's own start button, brought into line with the engine.
+ *
+ * The banner is painted once, when the test is opened. Open a test while the
+ * engine is still downloading and the button is correctly drawn as "Loading
+ * the pose engine..." -- and then stays that way after the engine is ready,
+ * because nothing repaints it. The athlete sees a permanently dead button on
+ * an app that is in fact ready to record. So the load path calls this when it
+ * finishes, rather than only flipping the disabled attribute and leaving the
+ * label behind to contradict it. */
+function syncAssessStartBtn() {
+  const b = $("assessStartBtn");
+  if (!b || b.classList.contains("hidden")) return;
+  b.disabled = !engineReady;
+  b.textContent = engineReady ? tr("assessStartTest") : tr("startCameraLoading");
+}
 let assessLeadTimer = null;
 
 /* Count the athlete in, then start recording. They have to walk to their mark
@@ -2072,8 +2096,8 @@ function enterAssessMode(t) {
       <div id="assessCountSub" class="sub" style="margin-top:2px"></div>
     </div>
     <button type="button" id="assessStartBtn" style="margin:0"${
-      $("startBtn").disabled ? " disabled" : ""}>${esc($("startBtn").disabled
-      ? tr("startCameraLoading") : tr("assessStartTest"))}</button>
+      engineReady ? "" : " disabled"}>${esc(engineReady
+      ? tr("assessStartTest") : tr("startCameraLoading"))}</button>
     <button type="button" class="ghost" id="assessCancel" style="margin-top:8px">${
       esc(tr("assessLeave"))}</button>`;
   $("assessBanner").classList.remove("hidden");
@@ -2444,7 +2468,8 @@ if (await loadMediaPipe()) {
     if (!DEMO) say(tr("ready"));
     $("startBtn").textContent = startLabel;
     $("startBtn").disabled = false;
-    if (assessStep) $("assessStartBtn")?.removeAttribute("disabled");
+    engineReady = true;
+    syncAssessStartBtn();
   } catch (err) {
     $("startBtn").textContent = tr("startCameraFailed");
     if (!DEMO) say(tr("sayModelFailed", { err: err.message }), true);
