@@ -522,6 +522,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
          listSleep, setSleep, clearSleep,
          listVitals, setVitals, clearVitals,
+         listCardio, mergeCardio, latestCardioAt,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices }
@@ -530,6 +531,8 @@ import { renderDashboard, mealFormHTML, diaryFormHTML, weightFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
          collectDays } from "./src/dashboard.js";
 import { probe as probeHelper, fetchClip } from "./src/fetcher.js";
+import { probe as probeStrava, authorise as authoriseStrava,
+         fetchActivities, toCardioAll } from "./src/strava.js";
 import { DEFAULT_TAGS, toggleTag, stepTag } from "./src/diary.js";
 import { collectWeights, weightOn } from "./src/weight.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
@@ -538,7 +541,6 @@ import { densityFor, foodNames, describe, mealKcal, toGrams, unitStep } from "./
 import { CARD, cardStats, drawCard, shareCard } from "./src/share.js";
 import { collectMeals } from "./src/dashboard.js";
 import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
-import { Overlay } from "./src/overlay.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
 // array of times, and a translated string inside either of them would have
 // called the array.
@@ -605,7 +607,14 @@ async function setAvatar(name) {
   if (avatarBusy) return;
   avatarBusy = true;
   try {
-    if (!avatar) avatar = new Overlay(cv);
+    if (!avatar) {
+      // Loaded here rather than at the top of the page: overlay.js pulls in
+      // three.js, which is ~750 kB of JavaScript to parse, and every load
+      // that never opens a 3D model was paying for it. The avatar is opt-in,
+      // so the engine behind it should be too.
+      const { Overlay } = await import("./src/overlay.js");
+      avatar = new Overlay(cv);
+    }
     avatar.setHeadScale(parseFloat($("headSize").value) || 1);
     say(tr("sayLoadingOverlay", { name }));
     await avatar.load(name);
@@ -1026,6 +1035,8 @@ function setChart(points, key) {
  * person tries it, it fails, and they learn the app is broken rather than that
  * a helper is not running.
  */
+refreshStrava();
+
 probeHelper().then((info) => {
   if (!info) return;
   $("linkRow").classList.remove("hidden");
@@ -1501,6 +1512,11 @@ function myVitals() {
   return listVitals().filter((v) => v.profile === who);
 }
 
+function myCardio() {
+  const who = currentAthlete();
+  return listCardio().filter((c) => c.profile === who);
+}
+
 function myCycle() {
   const who = currentAthlete();
   return listCycle().filter((c) => c.profile === who);
@@ -1533,6 +1549,82 @@ function defaultDashView() {
   return { year: y, month: m - 1, selected: pick, mode: "training" };
 }
 
+/* --- Strava, through the local helper -------------------------------------
+ *
+ * Same self-declaring rule as the YouTube link box: probe once, and offer a
+ * control only if the helper answered. The health is cached for the life of
+ * the page because renderDash runs on every save, and a probe per render
+ * would mean a loopback request every time somebody logs a meal.
+ *
+ * Note what is NOT here: any token, any credential, any call to strava.com.
+ * The page asks the helper for activities and that is the whole of its
+ * access -- see src/strava.js for why that boundary is deliberate.
+ */
+let stravaHealth = null;
+
+async function refreshStrava() {
+  stravaHealth = await probeStrava();
+  paintStrava();
+}
+
+function paintStrava() {
+  const note = $("stravaNote"), connect = $("stravaConnect"), imp = $("stravaImport");
+  if (!note || !connect || !imp) return;        // dashboard not on screen
+  connect.hidden = imp.hidden = true;
+
+  const h = stravaHealth;
+  // No helper: leave the standing note, which already says that importing
+  // from another app is not something the page can do by itself.
+  if (!h) return;
+  if (!h.configured) { note.textContent = tr("stravaNotConfigured"); return; }
+
+  if (!h.authorised) {
+    note.textContent = tr("stravaNeedsAuth");
+    connect.hidden = false;
+    connect.onclick = async () => {
+      try {
+        await authoriseStrava();
+        note.textContent = tr("stravaAuthOpened");
+        // They approve on Strava's own site in another tab. Re-probing when
+        // this one gets focus again beats guessing at a delay.
+        window.addEventListener("focus", refreshStrava, { once: true });
+      } catch (err) {
+        note.textContent = tr("stravaFailed", { error: err.message || String(err) });
+      }
+    };
+    return;
+  }
+
+  note.textContent = h.athlete
+    ? tr("stravaConnectedAs", { name: h.athlete })
+    : tr("stravaConnectedPlain");
+  imp.hidden = false;
+  imp.onclick = importStrava;
+}
+
+async function importStrava() {
+  const imp = $("stravaImport");
+  if (imp) imp.disabled = true;
+  try {
+    $("stravaNote").textContent = tr("stravaImporting");
+    // Only what has happened since the newest activity already stored: a
+    // daily import is then one request rather than the whole history again.
+    const rows = await fetchActivities({ after: latestCardioAt(currentAthlete()) });
+    const { added, updated } = mergeCardio(toCardioAll(rows, currentAthlete()));
+    // Re-render FIRST -- it replaces the very element the message goes in --
+    // and only then say what happened.
+    if (added || updated) renderDash();
+    $("stravaNote").textContent = (added || updated)
+      ? tr("stravaImported", { n: added, u: updated })
+      : tr("stravaNothingNew");
+  } catch (err) {
+    $("stravaNote").textContent = tr("stravaFailed", { error: err.message || String(err) });
+  } finally {
+    const b = $("stravaImport");
+    if (b) b.disabled = false;
+  }
+}
+
 function renderDash() {
   const card = $("dashboardCard");
   if (!dashView) dashView = defaultDashView();
@@ -1541,7 +1633,9 @@ function renderDash() {
   const view = { ...dashView, heightM: prof?.heightM ?? null, sex: prof?.sex ?? null,
                  ageY: prof?.ageY ?? null };
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
-                                   myWeights(), myCycle(), mySleep(), myVitals(), view);
+                                   myWeights(), myCycle(), mySleep(), myVitals(),
+                                   myCardio(), view);
+  paintStrava();
   $("whoName").textContent = currentAthlete() || tr("noProfile");
   $("whoSince").textContent = tr("dashboardSub", { first: monthLabel(dashView) });
 

@@ -1059,8 +1059,18 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     ${volumeHTML(days, today)}
     <div class="daybox">
       <div style="font-weight:600">${esc(tr("yourData"))}</div>
-      <p class="sub" style="margin:6px 0 8px">${esc(tr("uploadSoon"))}</p>
-      <button type="button" class="ghost" id="uploadBtn" disabled>${esc(tr("uploadData"))}</button>
+      <!-- Filled in after probing for the local Strava helper. The default
+           text is the honest one for the common case: no helper running, so
+           nothing here can import. index.html swaps it and reveals a button
+           only once the helper answers -- same self-declaring rule the
+           YouTube link box follows. -->
+      <p class="sub" style="margin:6px 0 8px" id="stravaNote">${esc(tr("uploadSoon"))}</p>
+      <div class="row" style="margin:0">
+        <button type="button" class="ghost" id="stravaConnect" style="margin:0;padding:9px" hidden>${
+          esc(tr("stravaConnect"))}</button>
+        <button type="button" class="ghost" id="stravaImport" style="margin:0;padding:9px" hidden>${
+          esc(tr("stravaImport"))}</button>
+      </div>
     </div>
     <button class="ghost" id="shareBtn" style="margin-top:10px">${esc(tr("shareMonth"))}</button>
     <p class="sub" style="margin:12px 0 0">${esc(tr("dashboardCap"))}</p>`;

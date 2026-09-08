@@ -1,0 +1,15 @@
+# The repository is LF. Without this, a Windows checkout can silently rewrite
+# every file to CRLF at rest, which shows up as all 50-odd tracked files
+# "modified" with an empty `git diff --ignore-cr-at-eol` -- and it broke
+# tests/test_sw_cache.mjs, whose extraction regex anchors on a literal ";\n".
+#
+# This pins the policy going forward. Files already corrupted in a working
+# tree are fixed separately with `git add --renormalize .`, committed on its
+# own, which is worth doing when nobody else is mid-edit.
+* text=auto eol=lf
+
+# Never touch the vendored engine or the binary assets.
+assets/vendor/** -text
+*.task binary
+*.png binary
+*.ico binary

@@ -64,6 +64,11 @@ const heavyPath = (p) => isHeavy({ pathname: "/" + norm(p) });
 
 const local = (spec) => /^\.{0,2}\//.test(spec) && !spec.startsWith("//");
 const IMPORT = /(?:^|\n)\s*import[\s\S]*?from\s*["']([^"']+)["']/g;
+// Dynamic imports too. The pose engine and the 3D overlay are both pulled in
+// with `await import(...)` so that a page that never opens them never pays
+// for them -- and a scanner that only understood static imports would stop
+// following exactly the heaviest branches of the graph.
+const DYNIMPORT = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
 const FETCH = /fetch\(\s*["'`]([^"'`$]+)["'`]/g;
 
 const seen = new Set();
@@ -76,10 +81,12 @@ const queue = [];
 const resolve = (spec, from) => norm(path.posix.join(path.posix.dirname(from), spec));
 
 const scan = (src, from) => {
-  for (const [, spec] of src.matchAll(IMPORT)) {
-    if (!local(spec)) continue;
-    const p = resolve(spec, from);
-    if (!seen.has(p)) { seen.add(p); queue.push(p); }
+  for (const re of [IMPORT, DYNIMPORT]) {
+    for (const [, spec] of src.matchAll(re)) {
+      if (!local(spec)) continue;
+      const p = resolve(spec, from);
+      if (!seen.has(p)) { seen.add(p); queue.push(p); }
+    }
   }
   for (const [, spec] of src.matchAll(FETCH)) {
     // Skip absolute URLs and unresolvable template interpolations.
