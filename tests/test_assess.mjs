@@ -61,7 +61,7 @@ ok(A.bandScore(null, [100, 130], 30) === null, "no value is no score");
 
 /* A whole report from a plausible protocol. */
 const gaitReps = [];
-for (let i = 0; i < 12; i++) {
+for (let i = 0; i < 20; i++) {          // ten strides per leg, the recommendation
   const left = i % 2 === 0;
   gaitReps.push({
     stance_side: left ? "l" : "r",
@@ -77,18 +77,45 @@ const tests = {
     { height_flight_m: 0.32 }, { height_flight_m: 0.34 }] },
 };
 const rep = A.assessReport(tests);
-ok(rep.complete, "three complete tests make a complete assessment");
+ok(rep.complete, "three tests at their targets make a complete assessment");
 ok(rep.missing.length === 0, "with nothing missing");
+ok(rep.short.length === 0, "and nothing short");
 ok(rep.score >= 85 && rep.score <= 100, "a symmetric, in-band athlete scores high", String(rep.score));
 ok(rep.band === "strong" || rep.band === "typical", "and lands in a good band", rep.band);
 ok(rep.sides.some((s) => s.key === "contact_s"), "contact time is compared side to side");
 ok(rep.marks.some((m) => m.key === "cadence_spm" && m.within), "cadence is inside its band");
 
-/* A short walk is not a short assessment -- it is not an assessment. */
-const short = A.assessReport({ ...tests, gait: { activity: "run", perRep: gaitReps.slice(0, 4) } });
-ok(!short.complete, "four strides does not satisfy the walk");
-ok(short.missing.some((m) => m.id === "gait" && m.have === 4), "and the report says how many it had");
-ok(short.sides.length === 0, "with no side comparison drawn from it");
+/* Short of the target, the assessment is still produced -- an athlete who
+ * managed three strides a side is better served by three and a warning than
+ * by nothing. Below the floor there is nothing to average and it is not. */
+const short = A.assessReport({ ...tests, gait: { activity: "walk", perRep: gaitReps.slice(0, 6) } });
+ok(!short.complete, "three strides a side does not meet the target");
+ok(short.missing.length === 0, "but the test is not thrown away");
+ok(short.short.some((x) => x.id === "gait" && x.count.counted === 3 && x.target === 10),
+   "it is reported as short, with the count and the target");
+ok(short.sides.length > 0, "and the side comparison is still drawn from it");
+ok(short.score != null, "a short assessment still scores");
+
+const floor = A.assessReport({ ...tests, gait: { activity: "walk", perRep: gaitReps.slice(0, 2) } });
+ok(floor.missing.some((m) => m.id === "gait" && m.have === 1),
+   "one stride a side is below the floor and counts as not recorded");
+ok(floor.sides.length === 0, "with no side comparison drawn from it");
+
+/* Per leg means the smaller side: nine left and one right is not five of
+ * anything, and averaging it would hide exactly the asymmetry being looked for. */
+const lopsided = gaitReps.slice(0, 18).map((r, i) => ({ ...r, stance_side: i < 16 ? "l" : "r" }));
+const lop = A.countReps(A.ASSESS_TESTS[0], { perRep: lopsided });
+ok(lop.total === 18 && lop.l === 16 && lop.r === 2 && lop.counted === 2,
+   "the counted total is the weaker leg", JSON.stringify(lop));
+
+/* The athlete can move the target; the recommendation is the default. */
+ok(A.targetFor(A.ASSESS_TESTS[0], {}) === 10, "10 a leg is the recommendation");
+ok(A.targetFor(A.ASSESS_TESTS[0], { gait: 4 }) === 4, "and it can be set lower");
+ok(A.targetFor(A.ASSESS_TESTS[0], { gait: 0 }) === 10, "a nonsense target falls back");
+const relaxed = A.assessReport({ ...tests, gait: { activity: "walk", perRep: gaitReps.slice(0, 8) } },
+                               { gait: 4 });
+ok(relaxed.short.length === 0 && relaxed.complete,
+   "four strides a side against a target of four is complete");
 
 /* A limping gait is caught and flagged. */
 const limp = gaitReps.map((r) => r.stance_side === "l"

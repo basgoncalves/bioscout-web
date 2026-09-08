@@ -20,7 +20,7 @@
  * fix -- a blank dashboard on a site whose files were already correct.
  * Bumping evicts that cache outright rather than trusting network-first to
  * beat it on every load. */
-const CACHE = "bioscout-web-v39";
+const CACHE = "bioscout-web-v40";
 
 const SHELL = ["./", "./index.html", "./src/kinematics.js", "./src/dynamics.js",
                "./src/forces.js", "./src/overlay.js", "./src/zip.js", "./src/detect.js", "./src/profiles.js", "./src/ensemble.js", "./src/dashboard.js", "./src/fetcher.js", "./src/diary.js", "./src/media.js", "./src/weight.js", "./src/cycle.js", "./src/foods.js", "./src/share.js", "./src/sleep.js", "./src/vitals.js", "./src/cardio.js", "./src/strava.js", "./src/neckload.js", "./src/neck_gload.js", "./src/assess.js", "./src/framing.js", "./src/health.js", "./src/i18n.js", "./data/norms.json", "./data/muscle_joints.json", "./manifest.webmanifest",

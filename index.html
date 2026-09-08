@@ -504,7 +504,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 51;
+window.BUILD = 52;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -562,7 +562,8 @@ import { ensembleRep } from "./src/ensemble.js";
 import { neckLoadHTML } from "./src/neckload.js";
 import { framingWatcher } from "./src/framing.js";
 import { ASSESS_TESTS, assessReport, assessReportHTML, getAssess, startAssess,
-         putAssessTest, clearAssess, nextTest } from "./src/assess.js";
+         putAssessTest, clearAssess, nextTest, targetFor, countReps,
+         setTarget } from "./src/assess.js";
 import { makeZip, svgToPng, blobBytes } from "./src/zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
          peakJRF, selfTest as forceSelfTest,
@@ -1839,22 +1840,33 @@ function openAssess() {
 
 function renderAssess() {
   const a = getAssess(currentAthlete()) || startAssess(currentAthlete());
-  const report = assessReport(a.tests);
+  const report = assessReport(a.tests, a.targets);
   const doneN = ASSESS_TESTS.length - report.missing.length;
-  const next = nextTest(a);
 
   const steps = ASSESS_TESTS.map((t, i) => {
-    const have = a.tests[t.id]?.perRep?.length || 0;
-    const ok = have >= t.minReps;
-    const short = have > 0 && !ok;
+    const count = countReps(t, a.tests[t.id]);
+    const need = targetFor(t, a.targets);
+    const have = count.counted;
+    const ok = have >= need;
+    const short = have >= t.floor && !ok;
+    const tooFew = have > 0 && have < t.floor;
     return `<div class="daybox">
       <div style="font-weight:600">${i + 1}. ${esc(tr("assessTest_" + t.id))}
         ${ok ? `<span style="color:var(--good)"> \u2713</span>` : ""}</div>
       <p class="sub" style="margin:4px 0 8px">${esc(tr("assessHow_" + t.id))}</p>
-      ${short ? `<p class="note" style="color:var(--warn)">${
-        esc(tr("assessTooFew", { have, need: t.minReps }))}</p>` : ""}
+      ${t.perLeg ? `<div class="row" style="margin:0 0 8px">
+        <div><label for="assessTarget_${t.id}">${esc(tr("assessTargetLabel"))}</label>
+        <input id="assessTarget_${t.id}" type="number" min="1" max="50" step="1"
+               inputmode="numeric" value="${need}"></div></div>
+        <p class="note" style="margin:-4px 0 8px">${esc(tr("assessTargetNote"))}</p>` : ""}
+      ${have ? `<p class="sub" style="margin:0 0 8px${short ? ";color:var(--warn)" : ""}">${
+        esc(tr("assessHave", { n: have, need })
+            + (t.perLeg ? " " + tr("assessPerLeg") : ""))}${
+        t.perLeg && count.l != null ? esc(` (${tr("assessLeft")} ${count.l}, ${tr("assessRight")} ${count.r})`) : ""}</p>` : ""}
+      ${tooFew ? `<p class="note" style="color:var(--warn)">${
+        esc(tr("assessTooFew", { have, need: t.floor }))}</p>` : ""}
       <button type="button" class="${ok ? "ghost" : ""}" id="assessRec_${t.id}" style="margin:0">${
-        esc(tr(ok ? "assessRedo" : "assessRecord"))}</button>
+        esc(tr(have ? "assessRedo" : "assessRecord"))}</button>
     </div>`;
   }).join("");
 
@@ -1871,6 +1883,10 @@ function renderAssess() {
   for (const t of ASSESS_TESTS) {
     const b = $("assessRec_" + t.id);
     if (b) b.onclick = () => beginAssessTest(t);
+    const inp = $("assessTarget_" + t.id);
+    // Re-rendered on change so the counts beside it, and the short warning in
+    // the report below, move with the target rather than lagging it.
+    if (inp) inp.onchange = () => { setTarget(t.id, inp.value, currentAthlete()); renderAssess(); };
   }
   $("assessRestartBtn").onclick = () => {
     clearAssess(); startAssess(currentAthlete()); renderAssess();
@@ -1895,6 +1911,7 @@ function beginAssessTest(t) {
 }
 let assessToneFor = 0;
 let assessTimer = null;
+let assessHudText = "";       // what the frame loop should show during a test
 let avatarBeforeAssess = null;
 
 /* How many reps are in the frames recorded SO FAR, counted with the same
@@ -1903,16 +1920,21 @@ let avatarBeforeAssess = null;
  * 7 makes the athlete distrust the one that is right. It costs one pass over
  * the frames, which is the same work the final analysis does once, so it runs
  * on a slow tick rather than every frame. */
-function assessRepsSoFar() {
+function assessRepsSoFar(t) {
   if (!assessStep || frames.length < 20) return 0;
-  const t = ASSESS_TESTS.find((x) => x.id === assessStep);
   const spec = t && ACTIVITIES[t.activity];
   if (!spec) return 0;
   const poses = {};
   frames.forEach((f, i) => { poses[i] = f.lm; });
   try {
     const found = spec.findReps(spec.features(poses), spec.defaultCfg);
-    return (found.reps || []).length;
+    // Counted the way the report will count it, so the HUD and the page after
+    // it cannot disagree: per leg for gait, take the smaller side.
+    if (!t.perLeg) return (found.reps || []).length;
+    const sides = found.repSides || [];
+    const l = sides.filter((x) => x === "l").length;
+    const r = sides.filter((x) => x === "r").length;
+    return Math.min(l, r);
   } catch {
     // Too few frames yet, or a body the detector cannot see. Zero is honest;
     // the count catches up as soon as there is something to count.
@@ -2361,7 +2383,11 @@ function loop() {
       }
       if (recording && res.landmarks && res.landmarks.length) {
         frames.push({ t: ts, lm: toNamed(res.landmarks[0], video.videoWidth, video.videoHeight) });
-        $("hudRight").textContent = frames.length + " frames";
+        // During a test the athlete needs the rep count, not the frame count.
+        // Both used to write here and the once-a-second counter lost every
+        // time, fifty frames to one.
+        $("hudRight").textContent = assessStep ? assessHudText
+                                              : frames.length + " frames";
       }
     }
   }
@@ -2462,7 +2488,8 @@ $("recBtn").onclick = () => {
       const t = ASSESS_TESTS.find((x) => x.id === assessStep);
       let left = assessToneFor || null;
       if (left) say(tr("assessStopTone"));
-      $("hudRight").textContent = assessHud(left, 0, t.minReps);
+      const need = targetFor(t, getAssess(currentAthlete())?.targets);
+      assessHudText = assessHud(left, 0, need);
       clearInterval(assessTimer);
       assessTimer = setInterval(() => {
         if (!recording) { clearInterval(assessTimer); return; }
@@ -2473,7 +2500,7 @@ $("recBtn").onclick = () => {
           $("recBtn").click();          // stop and analyse, exactly as a tap would
           return;
         }
-        $("hudRight").textContent = assessHud(left, assessRepsSoFar(), t.minReps);
+        assessHudText = assessHud(left, assessRepsSoFar(t), need);
       }, 1000);
     }
   } else {

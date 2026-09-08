@@ -23,13 +23,38 @@ import { t as tr } from "./i18n.js";
 
 const KEY = "bioscout.assess.v1";
 
-/* The protocol. `minReps` is a refusal threshold, not a target: a gait test
- * with four strides is not a short assessment, it is not an assessment. */
+/* The protocol.
+ *
+ * `recommended` is how many the test wants; `floor` is how few it can still
+ * say anything from. Between the two the report is produced and marked short,
+ * because an athlete who managed six strides is better served by six strides
+ * and a warning than by nothing -- the number is on the page either way, so
+ * the reader can judge it. Below the floor there is genuinely nothing to
+ * average and the test is treated as not recorded.
+ *
+ * `perLeg` counts the two legs separately and takes the smaller: ten strides
+ * that are nine left and one right is not ten strides of anything.
+ */
 export const ASSESS_TESTS = [
-  { id: "gait",  activity: "walk",  minReps: 10, seconds: 30 },
-  { id: "squat", activity: "squat", minReps: 3,  seconds: 0 },
-  { id: "cmj",   activity: "cmj",   minReps: 2,  seconds: 0 },
+  { id: "gait",  activity: "walk",  perLeg: true, recommended: 10, floor: 2, seconds: 30 },
+  { id: "squat", activity: "squat", recommended: 3,  floor: 1, seconds: 0 },
+  { id: "cmj",   activity: "cmj",   recommended: 2,  floor: 1, seconds: 0 },
 ];
+
+/** The target in force for a test: the athlete's own, or the recommendation. */
+export function targetFor(t, targets = {}) {
+  const v = +targets[t.id];
+  return Number.isFinite(v) && v >= 1 ? Math.round(v) : t.recommended;
+}
+
+/** How many usable reps a recorded set holds, per leg where that matters. */
+export function countReps(t, set) {
+  const reps = set?.perRep || [];
+  if (!t.perLeg) return { total: reps.length, counted: reps.length, l: null, r: null };
+  const l = reps.filter((r) => r.stance_side === "l").length;
+  const r = reps.filter((r) => r.stance_side === "r").length;
+  return { total: reps.length, l, r, counted: Math.min(l, r) };
+}
 
 /* Reference bands: the range a healthy adult typically falls in.
  *
@@ -95,13 +120,20 @@ export function asymScore(pct) {
  * report -- a partial assessment reports what it has and says what it is
  * missing, rather than scoring the gaps as zero.
  */
-export function assessReport(tests = {}) {
-  const done = [], missing = [];
+export function assessReport(tests = {}, targets = {}) {
+  const done = [], missing = [], short = [];
   for (const t of ASSESS_TESTS) {
     const set = tests[t.id];
     const reps = set?.perRep || [];
-    if (reps.length >= t.minReps) done.push({ ...t, set, reps });
-    else missing.push({ ...t, have: reps.length });
+    const count = countReps(t, set);
+    const target = targetFor(t, targets);
+    if (count.counted >= t.floor) {
+      const entry = { ...t, set, reps, count, target, short: count.counted < target };
+      done.push(entry);
+      if (entry.short) short.push(entry);
+    } else {
+      missing.push({ ...t, have: count.counted, count, target });
+    }
   }
 
   // --- left vs right, from the gait strides -------------------------------
@@ -146,9 +178,11 @@ export function assessReport(tests = {}) {
   const score = parts.length
     ? Math.round(parts.reduce((a, p) => a + p.score * p.weight, 0) / wsum) : null;
 
-  return { done, missing, sides, marks, parts, score,
+  return { done, missing, short, sides, marks, parts, score,
            band: score == null ? null : score >= 85 ? "strong" : score >= 70 ? "typical" : "below",
-           complete: missing.length === 0 };
+           // Complete means every test is recorded to its target. A report
+           // built from short tests is still a report; it just says so.
+           complete: missing.length === 0 && short.length === 0 };
 }
 
 /* --- the stored run -------------------------------------------------------
@@ -168,7 +202,7 @@ export function getAssess(profile = null) {
 }
 
 export function startAssess(profile = null) {
-  const a = { profile, started: new Date().toISOString(), tests: {} };
+  const a = { profile, started: new Date().toISOString(), tests: {}, targets: {} };
   write(a);
   return a;
 }
@@ -183,13 +217,19 @@ export function putAssessTest(id, set, profile = null) {
 
 export function clearAssess() { write(null); }
 
-/** The next test with nothing recorded against it, or null when all are in. */
+/** The next test that is not yet recorded to its target, or null. */
 export function nextTest(a) {
-  const t = ASSESS_TESTS.find((x) => {
-    const reps = a?.tests?.[x.id]?.perRep?.length || 0;
-    return reps < x.minReps;
-  });
-  return t || null;
+  return ASSESS_TESTS.find((x) =>
+    countReps(x, a?.tests?.[x.id]).counted < targetFor(x, a?.targets)) || null;
+}
+
+/** The athlete's own target for a test, kept with the assessment. */
+export function setTarget(id, n, profile = null) {
+  const a = getAssess(profile) || startAssess(profile);
+  a.targets = a.targets || {};
+  a.targets[id] = Math.max(1, Math.round(+n) || 1);
+  write(a);
+  return a;
 }
 
 /* --- rendering ------------------------------------------------------------
@@ -216,7 +256,7 @@ function scoreDial(score) {
 }
 
 export function assessReportHTML(report) {
-  const { sides, marks, parts, score, band, missing } = report;
+  const { sides, marks, parts, score, band, missing, short } = report;
 
   const head = score == null
     ? `<p class="sub">${esc(tr("assessNothingYet"))}</p>`
@@ -232,6 +272,17 @@ export function assessReportHTML(report) {
         tests: missing.map((m) => tr("assessTest_" + m.id)).join(", ") }))}</p>`
     : "";
 
+  /* Said once, plainly, above the numbers it applies to. A short test is not
+   * wrong, it is thinner: fewer reps means the mean of them moves around more,
+   * and a left-right difference from three strides is a weaker claim than the
+   * same difference from ten. The reader is told which tests, and how short. */
+  const shortLine = short.length
+    ? `<p class="note" style="color:var(--warn)">${esc(tr("assessShortWarn", {
+        tests: short.map((x) => tr("assessTest_" + x.id)
+          + ` (${x.count.counted}/${x.target}${x.perLeg ? " " + tr("assessPerLeg") : ""})`).join(", "),
+      }))}</p>`
+    : "";
+
   const sideRows = sides.filter((s) => s.key !== "knee_asymmetry_deg").map((s) =>
     `<tr><td>${esc(tr("var_" + s.key) === "var_" + s.key ? s.key : tr("var_" + s.key))}</td>
       <td style="text-align:right">${fmt(s.left, SIDE_DP[s.key] ?? 2)}</td>
@@ -245,7 +296,7 @@ export function assessReportHTML(report) {
       <td style="text-align:right;color:var(--muted)">${fmt(m.band[0], m.dp)}–${fmt(m.band[1], m.dp)}</td>
       <td style="text-align:right;${m.within ? "" : "color:var(--warn)"}">${m.score}</td></tr>`).join("");
 
-  return `${head}${missLine}
+  return `${head}${missLine}${shortLine}
     ${sideRows ? `<div class="daybox"><div style="font-weight:600">${esc(tr("assessSides"))}</div>
       <p class="sub" style="margin:2px 0 8px">${esc(tr("assessSidesSub"))}</p>
       <table><thead><tr><th>${esc(tr("measure"))}</th><th style="text-align:right">${esc(tr("assessLeft"))}</th>
