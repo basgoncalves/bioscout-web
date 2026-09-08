@@ -29,6 +29,8 @@
   .brand { display:flex; align-items:center; gap:10px; margin:4px 0 2px; }
   .brand img { width:34px; height:34px; flex:none; }
   .brand h1 { margin:0; }
+  .brand a { margin:0; text-decoration:none; font-size:12.5px; }
+  .brand a:hover { color:var(--accent); }
   .sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
           padding:14px; margin-bottom:12px; box-shadow:var(--shadow); }
@@ -259,12 +261,28 @@
   <div class="brand">
     <img src="logo.png" alt="" width="34" height="34">
     <h1>BioScout Web</h1>
+    <a href="#" id="termsLinkBtn" class="note" style="margin-left:auto" data-i18n="termsLink">Terms</a>
   </div>
   <div style="display:flex;justify-content:flex-end;margin:-6px 0 4px">
     <select id="lang" style="width:auto;padding:5px 8px;font-size:12.5px;margin:0"></select>
   </div>
-  <p class="sub"><span data-i18n="tagline">A physics-informed, AI-powered bio tracker. Video never leaves your phone.</span>
+  <p class="sub"><span data-i18n="tagline">A physics-informed, AI-powered bio tracker.</span>
     <span class="note" id="build" style="opacity:.6"></span></p>
+
+  <dialog id="termsDlg">
+    <h2 style="font-size:16px;margin:0 0 10px" data-i18n="termsTitle">Terms &amp; privacy</h2>
+    <p class="note" style="margin:0 0 14px" data-i18n-html="termsBody">BioScout runs entirely on this
+      device. Any video you record is processed on-device for pose analysis and is
+      <b>never uploaded anywhere</b>; profiles, sessions, meals and every other reading
+      are stored only in this browser's local storage, with no account and no server
+      behind it. That also means clearing this browser's data, or uninstalling the app,
+      erases everything -- export your data first if you want to keep it.<br><br>
+      BioScout is not a medical device and does not diagnose, treat, or give medical
+      advice. It estimates joint loads and movement metrics from video for training
+      feedback only; use it at your own risk and check with a professional for
+      anything health-related. The app is provided as-is, with no warranty.</p>
+    <button class="ghost" id="termsAgreeBtn" data-i18n="termsAgree">I agree</button>
+  </dialog>
 
 
   <!-- Three views, one page. The app opens on who-is-training, because a
@@ -524,7 +542,7 @@ import { Overlay } from "./src/overlay.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
 // array of times, and a translated string inside either of them would have
 // called the array.
-import { t as tr, getLang, setLang, LANGUAGES } from "./src/i18n.js";
+import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
 import { ensembleRep } from "./src/ensemble.js";
 import { makeZip, svgToPng, blobBytes } from "./src/zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
@@ -1431,6 +1449,12 @@ $("switchUserBtn").onclick = () => { renderLogin(); showView("viewLogin"); };
 /* A modal, not a panel further down the page. As a card it sat below the
  * whole dashboard and the New session button, so tapping Edit profile
  * changed something a screen and a half away and read as a dead button. */
+/* Escape must not silently dismiss this one -- "I agree" is the only exit,
+ * so a first-time visit can't be skipped by tapping outside or hitting Esc. */
+$("termsDlg").addEventListener("cancel", (e) => e.preventDefault());
+$("termsLinkBtn").onclick = (e) => { e.preventDefault(); $("termsDlg").showModal(); };
+$("termsAgreeBtn").onclick = () => { acceptTerms(); $("termsDlg").close(); };
+
 $("settingsBtn").onclick = () => $("settingsDlg").showModal();
 $("settingsClose").onclick = () => {
   $("settingsDlg").close();
@@ -1949,26 +1973,38 @@ renderLogin();
  * before it can be overwritten and pick the same athlete and screen back up.
  * viewSession is the one exception: the archived session it was showing
  * lived only in a JS variable, gone on reload, so there's nothing honest to
- * restore it to -- the dashboard is the fallback there, not a blank card. */
-const resumeView = history.state?.view;
-const resumeProfile = lastUsedProfile();
-if (resumeProfile && resumeView && resumeView !== "viewLogin" && resumeView !== "viewSession") {
-  // Built by hand rather than calling enterAs(), which always pushes a new
-  // "viewDash" history entry -- that would fight the entry the reload kept.
-  refreshProfiles(resumeProfile.name);
-  $("profile").value = resumeProfile.name;
-  applyProfile(resumeProfile);
-  refreshDerived();
-  dashView = null;
-  if (resumeView === "viewCycle") {
-    openCycle();
+ * restore it to -- the dashboard is the fallback there, not a blank card.
+ *
+ * Wrapped in a function so a first-time visitor can be held at the terms
+ * dialog below instead of landing on a view underneath it. */
+function boot() {
+  const resumeView = history.state?.view;
+  const resumeProfile = lastUsedProfile();
+  if (resumeProfile && resumeView && resumeView !== "viewLogin" && resumeView !== "viewSession") {
+    // Built by hand rather than calling enterAs(), which always pushes a new
+    // "viewDash" history entry -- that would fight the entry the reload kept.
+    refreshProfiles(resumeProfile.name);
+    $("profile").value = resumeProfile.name;
+    applyProfile(resumeProfile);
+    refreshDerived();
+    dashView = null;
+    if (resumeView === "viewCycle") {
+      openCycle();
+    } else {
+      showView(resumeView, false);
+      renderDash();
+      renderTraining();
+    }
   } else {
-    showView(resumeView, false);
-    renderDash();
-    renderTraining();
+    showView("viewLogin");
   }
+}
+
+if (termsAccepted()) {
+  boot();
 } else {
-  showView("viewLogin");
+  $("termsDlg").showModal();
+  $("termsAgreeBtn").addEventListener("click", boot, { once: true });
 }
 
 

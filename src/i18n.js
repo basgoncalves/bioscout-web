@@ -17,6 +17,7 @@
  * that is the one that rots silently.
  */
 const LKEY = "bioscout.lang.v1";
+const TKEY = "bioscout.terms.v1";
 
 export const LANGUAGES = { en: "English", pt: "Português", de: "Deutsch" };
 
@@ -395,7 +396,11 @@ const EN = {
   "viewLabel": "{view} view",
   "motSignedFor": ".mot signed for {model}",
   "view_unknown": "unknown",
-  "tagline": "A physics-informed, AI-powered bio tracker. Video never leaves your phone.",
+  "tagline": "A physics-informed, AI-powered bio tracker.",
+  "termsLink": "Terms",
+  "termsTitle": "Terms & privacy",
+  "termsBody": "BioScout runs entirely on this device. Any video you record is processed on-device for pose analysis and is <b>never uploaded anywhere</b>; profiles, sessions, meals and every other reading are stored only in this browser's local storage, with no account and no server behind it. That also means clearing this browser's data, or uninstalling the app, erases everything \u2014 export your data first if you want to keep it.<br><br>BioScout is not a medical device and does not diagnose, treat, or give medical advice. It estimates joint loads and movement metrics from video for training feedback only; use it at your own risk and check with a professional for anything health-related. The app is provided as-is, with no warranty.",
+  "termsAgree": "I agree",
   // --- notes and messages that used to be English only -------------------
   "noteAthleteFields": "These three belong to the athlete and are saved with the profile as you change them. Mass is the one to keep current: it scales every joint moment and contact force on the page, so the field says how old the stored figure is.",
   "notePrivacy": "Profiles and training history live on <b>this device only</b> \u2014 there is no account and nothing is uploaded, so nobody else can see your sessions and neither can I. To carry them to another phone or laptop, export the file here and import it there. That is a manual step, not background sync: without a server there is no honest way to make it automatic.",
@@ -923,7 +928,11 @@ const PT = {
   "viewLabel": "vista {view}",
   "motSignedFor": ".mot com os sinais de {model}",
   "view_unknown": "desconhecida",
-  "tagline": "Um monitor biol\u00f3gico com base na f\u00edsica e em IA. O v\u00eddeo nunca sai do seu telem\u00f3vel.",
+  "tagline": "Um monitor biol\u00f3gico com base na f\u00edsica e em IA.",
+  "termsLink": "Termos",
+  "termsTitle": "Termos e privacidade",
+  "termsBody": "O BioScout funciona inteiramente neste dispositivo. Qualquer v\u00eddeo que grave \u00e9 processado no pr\u00f3prio dispositivo para a an\u00e1lise de pose e <b>nunca \u00e9 enviado para lado nenhum</b>; perfis, sess\u00f5es, refei\u00e7\u00f5es e todas as outras leituras ficam guardados apenas no armazenamento local deste navegador, sem conta e sem servidor por tr\u00e1s. Isso tamb\u00e9m significa que limpar os dados deste navegador, ou desinstalar a aplica\u00e7\u00e3o, apaga tudo \u2014 exporte os seus dados primeiro se quiser guard\u00e1-los.<br><br>O BioScout n\u00e3o \u00e9 um dispositivo m\u00e9dico e n\u00e3o diagnostica, trata nem d\u00e1 aconselhamento m\u00e9dico. Estima cargas articulares e m\u00e9tricas de movimento a partir do v\u00eddeo apenas para feedback de treino; use por sua conta e risco e consulte um profissional para qualquer assunto de sa\u00fade. A aplica\u00e7\u00e3o \u00e9 fornecida tal como est\u00e1, sem garantia.",
+  "termsAgree": "Concordo",
   // --- notas e mensagens antes s\u00f3 em ingl\u00eas ------------------------------
   "noteAthleteFields": "Estes tr\u00eas pertencem ao atleta e s\u00e3o guardados com o perfil \u00e0 medida que os altera. A massa \u00e9 a que conv\u00e9m manter atualizada: escala todos os momentos articulares e for\u00e7as de contacto da p\u00e1gina, por isso o campo indica h\u00e1 quanto tempo o valor guardado foi registado.",
   "notePrivacy": "Os perfis e o hist\u00f3rico de treino ficam <b>apenas neste dispositivo</b> \u2014 n\u00e3o h\u00e1 conta e nada \u00e9 enviado, por isso mais ningu\u00e9m v\u00ea as suas sess\u00f5es, nem eu. Para as levar para outro telem\u00f3vel ou port\u00e1til, exporte o ficheiro aqui e importe-o l\u00e1. \u00c9 um passo manual, n\u00e3o sincroniza\u00e7\u00e3o em segundo plano: sem servidor n\u00e3o h\u00e1 forma honesta de o tornar autom\u00e1tico.",
@@ -1450,7 +1459,11 @@ const DE = {
   "viewLabel": "{view} Ansicht",
   "motSignedFor": ".mot mit den Vorzeichen von {model}",
   "view_unknown": "unbekannte",
-  "tagline": "Ein physikbasierter, KI-gest\u00fctzter Bio-Tracker. Das Video verl\u00e4sst Ihr Ger\u00e4t nicht.",
+  "tagline": "Ein physikbasierter, KI-gest\u00fctzter Bio-Tracker.",
+  "termsLink": "Bedingungen",
+  "termsTitle": "Bedingungen & Datenschutz",
+  "termsBody": "BioScout l\u00e4uft vollst\u00e4ndig auf diesem Ger\u00e4t. Jedes aufgenommene Video wird f\u00fcr die Posenanalyse direkt auf dem Ger\u00e4t verarbeitet und <b>nirgendwohin hochgeladen</b>; Profile, Einheiten, Mahlzeiten und alle anderen Werte werden ausschlie\u00dflich im lokalen Speicher dieses Browsers abgelegt \u2014 es gibt kein Konto und keinen Server dahinter. Das bedeutet auch: Wird der Browser-Speicher gel\u00f6scht oder die App deinstalliert, gehen alle Daten verloren \u2014 exportieren Sie sie vorher, wenn Sie sie behalten m\u00f6chten.<br><br>BioScout ist kein Medizinprodukt und stellt keine Diagnosen, Behandlungen oder medizinische Beratung bereit. Es sch\u00e4tzt Gelenkbelastungen und Bewegungskennzahlen aus dem Video nur zum Trainings-Feedback; nutzen Sie es auf eigenes Risiko und wenden Sie sich bei gesundheitlichen Fragen an eine Fachperson. Die App wird wie besehen bereitgestellt, ohne Gew\u00e4hrleistung.",
+  "termsAgree": "Ich stimme zu",
   // --- Hinweise und Meldungen, fr\u00fcher nur Englisch ---------------------
   "noteAthleteFields": "Diese drei geh\u00f6ren zum Athleten und werden beim \u00c4ndern mit dem Profil gespeichert. Die Masse ist die, die aktuell bleiben muss: sie skaliert jedes Gelenkmoment und jede Kontaktkraft auf dieser Seite, deshalb zeigt das Feld an, wie alt der gespeicherte Wert ist.",
   "notePrivacy": "Profile und Trainingsverlauf bleiben <b>nur auf diesem Ger\u00e4t</b> \u2014 es gibt kein Konto und es wird nichts hochgeladen, also sieht niemand sonst Ihre Sitzungen, ich auch nicht. Um sie auf ein anderes Telefon oder einen Laptop mitzunehmen, exportieren Sie die Datei hier und importieren Sie sie dort. Das ist ein manueller Schritt, keine Hintergrund-Synchronisation: ohne Server gibt es keinen ehrlichen Weg, das zu automatisieren.",
@@ -1632,6 +1645,18 @@ export function setLang(next) {
   lang = next;
   try { localStorage.setItem(LKEY, next); } catch { /* private window */ }
   return true;
+}
+
+/** Whether this browser has already agreed to the terms dialog. Bumping
+ *  TKEY's version -- not just editing the wording in termsBody -- is what
+ *  re-prompts everyone; changing the text alone would leave existing
+ *  acceptances silently stale. */
+export function termsAccepted() {
+  try { return localStorage.getItem(TKEY) === "1"; } catch { return false; }
+}
+
+export function acceptTerms() {
+  try { localStorage.setItem(TKEY, "1"); } catch { /* private window */ }
 }
 
 /**
