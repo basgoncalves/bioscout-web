@@ -28,6 +28,7 @@ import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
          dayOfCycle, phaseModel, cycleDayKey, LUTEAL_DAYS, FLOWS } from "./cycle.js";
 import { itemKcal, mealKcal, describe, UNITS } from "./foods.js";
 import { collectSleep, meanSleep, duration as sleepMins, fmt as fmtSleep } from "./sleep.js";
+import { collectVitals, meanSteps } from "./vitals.js";
 import { rate, scoreColour } from "./health.js";
 
 /* Plurals come from the dictionary keys the session card already uses, rather
@@ -206,6 +207,16 @@ export function weeklyVolume(days, n = 12, today = new Date()) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+/* "8,432 steps · 58 bpm resting", or just the half that was logged. Shared by
+ * the calendar cell label and the day card so the two cannot say different
+ * things about the same day. */
+function vitalsInfo(hit) {
+  const parts = [];
+  if (Number.isFinite(hit?.steps)) parts.push(tr("vitalsSteps", { n: hit.steps.toLocaleString() }));
+  if (Number.isFinite(hit?.restingHr)) parts.push(tr("vitalsHr", { n: hit.restingHr }));
+  return parts.join(" · ");
+}
+
 /** "6 Sep", for buttons and captions that name a day other than today. */
 const shortDay = (key) =>
   localeDay(key).toLocaleDateString([], { day: "numeric", month: "short" });
@@ -229,6 +240,7 @@ function level(reps, max) {
  * are optional per meal, so a day of untyped meals would read as an empty one. */
 const weightOf = (mode) => (d) =>
   mode === "sleep" ? (d.minutes || 1)       // a night with no parseable duration still shows
+  : mode === "vitals" ? (d.steps || 1)      // a resting-HR-only day still shows
   : mode === "meals" ? d.meals.length
   : mode === "diary" ? (d.rated ? d.mood : 0.5)   // an unrated day still shows faintly
   : d.reps;
@@ -262,6 +274,8 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
         ? tr("dayCellDiary", { date: c.key, mood: hit.rated ? hit.mood.toFixed(1) : "—" })
       : mode === "meals"
         ? tr("dayCellMeals", { date: c.key, n: hit.meals.length })
+      : mode === "vitals"
+        ? tr("dayCellVitals", { date: c.key, info: vitalsInfo(hit) })
         : tr("dayCellLabel", { date: c.key, reps: nReps(hit.reps), sets: nSets(hit.sets.length) });
     // Every day is selectable, empty ones included: the dashboard is where
     // things get added, and you cannot add to a day you cannot select.
@@ -280,6 +294,7 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
         <option value="meals"${mode === "meals" ? " selected" : ""}>${esc(tr("modeMeals"))}</option>
         <option value="diary"${mode === "diary" ? " selected" : ""}>${esc(tr("modeDiary"))}</option>
         <option value="sleep"${mode === "sleep" ? " selected" : ""}>${esc(tr("sleep"))}</option>
+        <option value="vitals"${mode === "vitals" ? " selected" : ""}>${esc(tr("vitals"))}</option>
       </select>
     </div>
     <div class="calnav">
@@ -621,6 +636,43 @@ function sleepHTML(sleepDays, key, todayKey, trend) {
   </div>`;
 }
 
+/** Steps and resting heart rate for the day, typed in from a watch -- see
+ *  vitals.js for why a blank day is not carried forward from the last one. */
+function vitalsHTML(vitalsDays, key, todayKey, trend) {
+  const hit = vitalsDays.get(key);
+  const line = hit
+    ? `<p class="sub" style="margin:6px 0 0">${esc(vitalsInfo(hit))}</p>`
+    : `<p class="sub" style="margin:6px 0 0">${esc(tr("noVitalsThatDay"))}</p>`;
+
+  const trendLine = trend
+    ? `<p class="sub" style="margin:2px 0 0">${esc(tr("vitalsMean", {
+        n: trend.mean.toLocaleString(), days: trend.days }))}</p>`
+    : "";
+
+  return `<div class="daybox">
+    <div style="font-weight:600">${esc(tr("vitals"))}</div>
+    ${trendLine}${line}
+    <div class="row" style="margin-top:8px">
+      <div>
+        <label for="vitalsSteps">${esc(tr("steps"))}</label>
+        <input id="vitalsSteps" type="number" min="0" step="1" inputmode="numeric"
+               value="${hit?.steps ?? ""}">
+      </div>
+      <div>
+        <label for="vitalsHr">${esc(tr("restingHr"))}</label>
+        <input id="vitalsHr" type="number" min="1" step="1" inputmode="numeric"
+               value="${hit?.restingHr ?? ""}">
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button type="button" class="ghost" id="vitalsSave" style="margin:0;padding:9px">${
+        esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
+      ${hit ? `<button type="button" class="ghost" id="vitalsClear" style="margin:0;padding:9px">${
+        esc(tr("clearDay"))}</button>` : ""}
+    </div>
+  </div>`;
+}
+
 /* ---- the cycle view ---------------------------------------------------- */
 
 /**
@@ -889,22 +941,23 @@ export function weightFormHTML(key, todayKey, current) {
  * does not lose the selected day, and re-rendering after a new set does not
  * throw the athlete back to today.
  */
-export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, view, today = new Date()) {
+export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, vitals, view, today = new Date()) {
   const days = collectDays(sessions);
   const mealDays = collectMeals(meals);
   const diaryDays = collectDiary(diary);
   const wts = collectWeights(weights);
   const cycleDays = collectCycle(cycle);
   const sleepDays = collectSleep(sleep);
+  const vitalsDays = collectVitals(vitals);
   const o = overall(days, today);
   const todayKey = dayKey(today);
   // "cycle" is deliberately not a mode here: it already has its own section,
   // rendered under the diary on every day (see cycleHTML below), so it does
-  // not also need to be a peer of Training/Meals/Diary/Sleep in this list.
-  // Sleep has no such section of its own tucked under another one, so it
-  // stays a normal peer mode -- the calendar can shade nights the same way
-  // it shades meals or diary entries.
-  const mode = ["meals", "diary", "sleep"].includes(view.mode) ? view.mode : "training";
+  // not also need to be a peer of Training/Meals/Diary/Sleep/Vitals in this
+  // list. Sleep and vitals have no such section of their own tucked under
+  // another one, so they stay normal peer modes -- the calendar can shade
+  // nights or step counts the same way it shades meals or diary entries.
+  const mode = ["meals", "diary", "sleep", "vitals"].includes(view.mode) ? view.mode : "training";
 
   // An athlete with no training but a week of meals still has a dashboard.
   /* No special empty state. Every section already says when it has nothing --
@@ -938,13 +991,14 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
         <button class="ghost" id="addBtn" style="margin:0;padding:10px">${esc(tr("addEntry"))}</button>
       </div>
     </div>
-    ${calendarHTML({ meals: mealDays, diary: diaryDays, sleep: sleepDays }[mode] || days,
+    ${calendarHTML({ meals: mealDays, diary: diaryDays, sleep: sleepDays, vitals: vitalsDays }[mode] || days,
                    view.year, view.month, view.selected, todayKey, mode)}
     ${dayHTML(days.get(view.selected), view.selected)}
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey)}
     ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey,
                 moodTrend(diaryDays, 30, today))}
     ${sleepHTML(sleepDays, view.selected, todayKey, meanSleep(sleepDays, 14, today))}
+    ${vitalsHTML(vitalsDays, view.selected, todayKey, meanSteps(vitalsDays, 14, today))}
     ${cycleHTML(cycleDays, view.selected, todayKey)}
     ${volumeHTML(days, today)}
     <div class="daybox">

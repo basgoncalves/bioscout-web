@@ -23,6 +23,7 @@ const DKEY = "bioscout.diary.v1";
 const WKEY = "bioscout.weights.v1";
 const CYKEY = "bioscout.cycle.v1";
 const SLKEY = "bioscout.sleep.v1";
+const VKEY = "bioscout.vitals.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
  * one; curves are not, so only the most recent sets keep those.
@@ -350,6 +351,43 @@ export function clearSleep(at, profile = null) {
   return kept.length;
 }
 
+// --- vitals (steps, resting heart rate) -------------------------------------
+/* One reading per day, keyed like sleep -- see vitals.js for why these do not
+ * carry forward the way weight does. */
+const VITALS_MAX = 2000;
+
+export function listVitals() {
+  const v = read(VKEY, []);
+  return Array.isArray(v) ? v : [];
+}
+
+export function setVitals({ profile = null, at, steps = null, restingHr = null }) {
+  if (!at) return null;
+  const s = steps === null || steps === "" ? null : Math.round(+steps);
+  const h = restingHr === null || restingHr === "" ? null : Math.round(+restingHr);
+  const entry = {
+    at, profile,
+    steps: Number.isFinite(s) && s >= 0 ? s : null,
+    restingHr: Number.isFinite(h) && h > 0 ? h : null,
+  };
+  if (entry.steps === null && entry.restingHr === null) return null;
+  const day = String(at).slice(0, 10);
+  const all = listVitals().filter(
+    (x) => !(x.profile === entry.profile && String(x.at).slice(0, 10) === day));
+  all.push(entry);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(VKEY, all.slice(-VITALS_MAX));
+  return entry;
+}
+
+export function clearVitals(at, profile = null) {
+  const day = String(at).slice(0, 10);
+  const kept = listVitals().filter(
+    (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
+  write(VKEY, kept);
+  return kept.length;
+}
+
 // --- stored waveforms ------------------------------------------------------
 const r3 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(3) : 0));
 const r2 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(2) : 0));
@@ -429,6 +467,7 @@ export function exportAll() {
     weights: listWeights(),
     cycle: listCycle(),
     sleep: listSleep(),
+    vitals: listVitals(),
   };
 }
 
@@ -449,7 +488,7 @@ export function importAll(data) {
   }
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
                    sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
-                   weightsAdded: 0, cycleAdded: 0, sleepAdded: 0 };
+                   weightsAdded: 0, cycleAdded: 0, sleepAdded: 0, vitalsAdded: 0 };
 
   const store = listProfiles();
   for (const p of (data.profiles && data.profiles.profiles) || []) {
@@ -531,6 +570,15 @@ export function importAll(data) {
   }
   slp.sort((a, b) => String(a.at).localeCompare(String(b.at)));
   write(SLKEY, slp.slice(-SLEEP_MAX));
+
+  const vit = listVitals();
+  const seenV = new Set(vit.map((x) => `${x.profile}|${String(x.at).slice(0, 10)}`));
+  for (const x of data.vitals || []) {
+    if (!x || !x.at || seenV.has(`${x.profile}|${String(x.at).slice(0, 10)}`)) continue;
+    vit.push(x); seenV.add(`${x.profile}|${String(x.at).slice(0, 10)}`); report.vitalsAdded++;
+  }
+  vit.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(VKEY, vit.slice(-VITALS_MAX));
 
   // Photos are not in the export. They live in IndexedDB and would multiply
   // the file size by an order of magnitude in base64 -- an export you cannot

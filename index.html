@@ -503,6 +503,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listDiary, addDiary, deleteDiary, profileTags, saveProfileTags,
          listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
          listSleep, setSleep, clearSleep,
+         listVitals, setVitals, clearVitals,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices }
@@ -1484,6 +1485,11 @@ function mySleep() {
   return listSleep().filter((s) => s.profile === who);
 }
 
+function myVitals() {
+  const who = currentAthlete();
+  return listVitals().filter((v) => v.profile === who);
+}
+
 function myCycle() {
   const who = currentAthlete();
   return listCycle().filter((c) => c.profile === who);
@@ -1524,7 +1530,7 @@ function renderDash() {
   const view = { ...dashView, heightM: prof?.heightM ?? null, sex: prof?.sex ?? null,
                  ageY: prof?.ageY ?? null };
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
-                                   myWeights(), myCycle(), mySleep(), view);
+                                   myWeights(), myCycle(), mySleep(), myVitals(), view);
   $("whoName").textContent = currentAthlete() || tr("noProfile");
   $("whoSince").textContent = tr("dashboardSub", { first: monthLabel(dashView) });
 
@@ -1578,6 +1584,17 @@ function renderDash() {
   };
   if ($("sleepClear")) $("sleepClear").onclick = () => {
     clearSleep(atOnDay(dashView.selected), currentAthlete());
+    renderDash();
+  };
+  if ($("vitalsSave")) $("vitalsSave").onclick = () => {
+    if (!setVitals({ profile: currentAthlete(), at: atOnDay(dashView.selected),
+                     steps: $("vitalsSteps").value, restingHr: $("vitalsHr").value })) {
+      say(tr("vitalsNeedsOne"), true); return;
+    }
+    renderDash();
+  };
+  if ($("vitalsClear")) $("vitalsClear").onclick = () => {
+    clearVitals(atOnDay(dashView.selected), currentAthlete());
     renderDash();
   };
   card.querySelectorAll("tr.sessionRow[data-session]").forEach((row) => {
@@ -1924,7 +1941,35 @@ queueMicrotask(refreshDerived);
 if (lastUsedProfile()) applyProfile(lastUsedProfile());
 renderTraining();
 renderLogin();
-showView("viewLogin");
+
+/* A reload is not a fresh visit: the browser keeps the current history
+ * entry's state across it, so `history.state` here still names whatever
+ * screen was open a moment ago. Dropping the athlete back at the login
+ * picker every time they refresh throws that away for no reason -- read it
+ * before it can be overwritten and pick the same athlete and screen back up.
+ * viewSession is the one exception: the archived session it was showing
+ * lived only in a JS variable, gone on reload, so there's nothing honest to
+ * restore it to -- the dashboard is the fallback there, not a blank card. */
+const resumeView = history.state?.view;
+const resumeProfile = lastUsedProfile();
+if (resumeProfile && resumeView && resumeView !== "viewLogin" && resumeView !== "viewSession") {
+  // Built by hand rather than calling enterAs(), which always pushes a new
+  // "viewDash" history entry -- that would fight the entry the reload kept.
+  refreshProfiles(resumeProfile.name);
+  $("profile").value = resumeProfile.name;
+  applyProfile(resumeProfile);
+  refreshDerived();
+  dashView = null;
+  if (resumeView === "viewCycle") {
+    openCycle();
+  } else {
+    showView(resumeView, false);
+    renderDash();
+    renderTraining();
+  }
+} else {
+  showView("viewLogin");
+}
 
 
 
