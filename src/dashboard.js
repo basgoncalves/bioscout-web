@@ -472,6 +472,7 @@ function mealsHTML(day, key, todayKey) {
            <th style="text-align:right">${esc(tr("kcal"))}</th><th></th></tr></thead>
          <tbody>${rows}</tbody></table>${sum}`
       : `<p class="sub" style="margin:6px 0 0">${esc(tr("noMealsThatDay"))}</p>`}
+    <button type="button" class="ghost" id="addMealBtn" style="margin-top:8px">${esc(tr("addMeal"))}</button>
   </div>`;
 }
 
@@ -630,8 +631,7 @@ function sleepHTML(sleepDays, key, todayKey, trend) {
     <div class="row" style="margin-top:8px">
       <button type="button" class="ghost" id="sleepSave" style="margin:0;padding:9px">${
         esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
-      ${hit ? `<button type="button" class="ghost" id="sleepClear" style="margin:0;padding:9px">${
-        esc(tr("clearDay"))}</button>` : ""}
+      <button type="button" class="ghost" id="sleepImport" style="margin:0;padding:9px">${esc(tr("import"))}</button>
     </div>
   </div>`;
 }
@@ -667,8 +667,7 @@ function vitalsHTML(vitalsDays, key, todayKey, trend) {
     <div class="row" style="margin-top:8px">
       <button type="button" class="ghost" id="vitalsSave" style="margin:0;padding:9px">${
         esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
-      ${hit ? `<button type="button" class="ghost" id="vitalsClear" style="margin:0;padding:9px">${
-        esc(tr("clearDay"))}</button>` : ""}
+      <button type="button" class="ghost" id="vitalsImport" style="margin:0;padding:9px">${esc(tr("import"))}</button>
     </div>
   </div>`;
 }
@@ -876,6 +875,7 @@ function diaryHTML(day, key, todayKey, trend) {
     <div style="font-weight:600">${esc(tr("diary"))}</div>
     ${trendLine}
     ${rows || `<p class="sub" style="margin:6px 0 0">${esc(tr("noDiaryThatDay"))}</p>`}
+    <button type="button" class="ghost" id="addDiaryBtn" style="margin-top:8px">${esc(tr("addEntry"))}</button>
   </div>`;
 }
 
@@ -987,9 +987,6 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
             ? tr("weightMeasured", { kg: w.kg.toFixed(1) })
             : tr("weightCarried", { kg: w.kg.toFixed(1), n: nDays(w.stale) }))}</p>`
         : ""; })()}
-      <div class="row" style="margin-top:8px">
-        <button class="ghost" id="addBtn" style="margin:0;padding:10px">${esc(tr("addEntry"))}</button>
-      </div>
     </div>
     ${calendarHTML({ meals: mealDays, diary: diaryDays, sleep: sleepDays, vitals: vitalsDays }[mode] || days,
                    view.year, view.month, view.selected, todayKey, mode)}

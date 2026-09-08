@@ -1132,30 +1132,16 @@ let cycleDraft = null;
 let mealShot = null;                 // a File waiting to be attached
 let mealDraft = { items: [] };
 
-function openAdd(step = null) {
+/* `step` used to default to null and open a Training/Meal/Diary picker here
+ * first -- that picker is gone now that Meals and Diary each carry their own
+ * button, so every caller passes the step it wants directly. */
+function openAdd(step) {
   const dlg = $("addDlg");
   const body = $("addDlgBody");
   const key = dashView.selected;
   const todayKey = dayKey(new Date());
-  const when = key === todayKey ? tr("today") : shortDate(key);
 
-  if (!step) {
-    body.innerHTML = `
-      <h2 style="font-size:16px;margin:0 0 10px">${tr("addTo", { date: when })}</h2>
-      <button class="ghost" data-step="training">${tr("newTrainingSession")}</button>
-      <button class="ghost" data-step="meal">${tr("meal")}</button>
-      <button class="ghost" data-step="diary">${tr("diary")}</button>`;
-    body.querySelectorAll("button[data-step]").forEach((b) => {
-      b.onclick = () => {
-        // Training and cycle are places, not forms: they get a screen.
-        // Training asks for today's weight first if it does not have one --
-        // mass scales every joint moment the session will report, so this is
-        // the one moment where the number actually matters.
-        if (b.dataset.step === "training") return openAdd("weight");
-        openAdd(b.dataset.step);
-      };
-    });
-  } else if (step === "meal") {
+  if (step === "meal") {
     if (!mealDraft.items.length) mealDraft.items.push({ name: "", unit: "g", qty: null, grams: null, kcal100: null });
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("meal")}</h2>`
       + mealFormHTML(key, todayKey, mealDraft, foodNames(profileFoods(currentAthlete())));
@@ -1595,7 +1581,8 @@ function renderDash() {
   card.querySelectorAll("button.diaryDel").forEach((b) => {
     b.onclick = () => { deleteDiary(b.dataset.at, currentAthlete()); renderDash(); };
   });
-  if ($("addBtn")) $("addBtn").onclick = () => openAdd();
+  if ($("addMealBtn")) $("addMealBtn").onclick = () => openAdd("meal");
+  if ($("addDiaryBtn")) $("addDiaryBtn").onclick = () => openAdd("diary");
   if ($("shareBtn")) $("shareBtn").onclick = shareMonth;
   if ($("newTrainingBtn")) $("newTrainingBtn").onclick = () => openAdd("weight");
   if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);
@@ -1606,10 +1593,12 @@ function renderDash() {
     }
     renderDash();
   };
-  if ($("sleepClear")) $("sleepClear").onclick = () => {
-    clearSleep(atOnDay(dashView.selected), currentAthlete());
-    renderDash();
-  };
+  // Sleep and vitals both import through the same whole-device merge as the
+  // "Import" button in Edit profile (importAll is additive and idempotent --
+  // see profiles.js) rather than a parser of their own for a one-off file
+  // format. A watch export that only carries sleep or vitals fields still
+  // merges in fine; whatever else the file happens to include comes along.
+  if ($("sleepImport")) $("sleepImport").onclick = () => $("importProfilesFile").click();
   if ($("vitalsSave")) $("vitalsSave").onclick = () => {
     if (!setVitals({ profile: currentAthlete(), at: atOnDay(dashView.selected),
                      steps: $("vitalsSteps").value, restingHr: $("vitalsHr").value })) {
@@ -1617,10 +1606,7 @@ function renderDash() {
     }
     renderDash();
   };
-  if ($("vitalsClear")) $("vitalsClear").onclick = () => {
-    clearVitals(atOnDay(dashView.selected), currentAthlete());
-    renderDash();
-  };
+  if ($("vitalsImport")) $("vitalsImport").onclick = () => $("importProfilesFile").click();
   card.querySelectorAll("tr.sessionRow[data-session]").forEach((row) => {
     row.onclick = () => openSessionView(row.dataset.session);
   });
