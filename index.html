@@ -518,7 +518,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 60;
+window.BUILD = 61;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -4298,7 +4298,16 @@ if (DEMO) {
 
 // Offline: after one visit the whole app (engine, model, code) is cached.
 if ("serviceWorker" in navigator && location.protocol === "https:") {
-  navigator.serviceWorker.register("sw.js").then((reg) => {
+  /* updateViaCache: "none" is the important word here.
+   *
+   * By default the browser may serve sw.js itself from its HTTP cache, and
+   * GitHub Pages sends max-age=600 -- so for ten minutes after a push the old
+   * worker keeps running, keeps serving the shell it cached, and reg.update()
+   * finds "no change" because it never reached the network. A fix can be
+   * deployed, verifiably present on the server, and still not be what the page
+   * is running. That is exactly how a broken login screen survived being
+   * fixed. */
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((reg) => {
     reg.update();
     // A waiting worker means a newer version is already downloaded. Reload once
     // so the user gets it now rather than several visits later.
@@ -4307,6 +4316,27 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
       if (!reloaded) { reloaded = true; location.reload(); }
     });
   }).catch(() => {});
+
+  /* Belt and braces: ask the network what the current build is, and if the
+   * page running is not it, reload once.
+   *
+   * The worker dance above is the mechanism; this is the check that it worked.
+   * It is one conditional request against a file already being fetched, it
+   * only ever fires when the served build genuinely differs from the running
+   * one, and the sessionStorage guard means a page that somehow cannot update
+   * reloads once and then stops rather than looping. */
+  window.addEventListener("load", () => setTimeout(async () => {
+    try {
+      const html = await (await fetch("index.html", { cache: "no-store" })).text();
+      const served = +(html.match(/window\.BUILD = (\d+)/) || [])[1];
+      if (!served || served === window.BUILD) return;
+      if (sessionStorage.getItem("bioscout.staleReload") === String(served)) return;
+      sessionStorage.setItem("bioscout.staleReload", String(served));
+      const cs = await caches.keys();
+      await Promise.all(cs.filter((k) => k.includes("shell")).map((k) => caches.delete(k)));
+      location.reload();
+    } catch { /* offline, or no caches API: keep running what we have */ }
+  }, 1500));
 }
 </script>
 </body>
