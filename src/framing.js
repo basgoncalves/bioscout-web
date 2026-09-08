@@ -43,10 +43,11 @@ export function frameIssue(lm) {
  * shown, in both directions, so the pill appears once and stays put.
  */
 export function framingWatcher(frames = 5) {
-  let bad = 0, good = 0, shown = null;
+  let bad = 0, good = 0, shown = null, seenBody = 0;
   return {
     /** Feed one frame's landmarks; returns what to show, or null. */
     see(lm) {
+      if (lm) seenBody++;
       const now = frameIssue(lm);
       if (now) { bad++; good = 0; } else { good++; bad = 0; }
       if (bad >= frames) shown = now;
@@ -54,7 +55,12 @@ export function framingWatcher(frames = 5) {
       return shown;
     },
     /** Between takes, so a new recording does not inherit the last one. */
-    reset() { bad = 0; good = 0; shown = null; },
+    reset() { bad = 0; good = 0; shown = null; seenBody = 0; },
     get shown() { return shown; },
+    /** Whether a body has been seen at all since the last reset. A camera
+     *  pointed at a torso reports no body rather than a badly framed one, so
+     *  "nothing to warn about" and "nothing there" have to be distinguishable
+     *  by anything deciding whether a take can work. */
+    get sawBody() { return seenBody > 0; },
   };
 }

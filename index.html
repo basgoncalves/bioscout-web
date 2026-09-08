@@ -505,7 +505,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 53;
+window.BUILD = 54;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1938,6 +1938,30 @@ function beginAssessTest(t) {
 let assessToneFor = 0;
 let assessTimer = null;
 let assessHudText = "";       // what the frame loop should show during a test
+let assessLeadTimer = null;
+
+/* Count the athlete in, then start recording. They have to walk to their mark
+ * after pressing the button, so the test cannot begin on the press itself. */
+function assessLeadIn(t, seconds = 6) {
+  clearInterval(assessLeadTimer);
+  let left = seconds;
+  const tick = () => {
+    if (!$("viewRecord") || $("viewRecord").classList.contains("hidden")) {
+      clearInterval(assessLeadTimer); return;                 // they left
+    }
+    if (left <= 0) {
+      clearInterval(assessLeadTimer);
+      stopTone();
+      if (!recording) $("recBtn").click();
+      return;
+    }
+    say(tr("assessGetReady", { n: left }));
+    $("hudRight").textContent = tr("assessSecondsLeft", { n: left });
+    left -= 1;
+  };
+  tick();
+  assessLeadTimer = setInterval(tick, 1000);
+}
 let avatarBeforeAssess = null;
 
 /* How many reps are in the frames recorded SO FAR, counted with the same
@@ -1982,13 +2006,14 @@ function assessHud(secondsLeft, n, need) {
  * and the training log below stops being the point of the screen. */
 function enterAssessMode(t) {
   const n = ASSESS_TESTS.findIndex((x) => x.id === t.id) + 1;
+  const need = targetFor(t, getAssess(currentAthlete())?.targets);
   $("assessBanner").innerHTML = `
     <div style="font-weight:600">${esc(tr("assessStepOf", {
       n, total: ASSESS_TESTS.length, name: tr("assessTest_" + t.id) }))}</div>
     <p class="sub" style="margin:4px 0 8px">${esc(tr("assessHow_" + t.id))}</p>
     <p class="note" style="margin:0 0 10px">${esc(t.seconds
-      ? tr("assessNeedStrides", { n: t.minReps, s: t.seconds })
-      : tr("assessNeedReps", { n: t.minReps }))}</p>
+      ? tr("assessNeedStrides", { n: need, s: t.seconds })
+      : tr("assessNeedReps", { n: need }))}</p>
     <button type="button" id="assessStartBtn" style="margin:0">${esc(tr("assessStartTest"))}</button>
     <button type="button" class="ghost" id="assessCancel" style="margin-top:8px">${
       esc(tr("assessLeave"))}</button>`;
@@ -2000,8 +2025,13 @@ function enterAssessMode(t) {
     b.disabled = true;
     await startCamera();
     // startCamera hides its own button on success and says why on failure.
-    if ($("startBtn").classList.contains("hidden")) b.classList.add("hidden");
-    else b.disabled = false;
+    if (!$("startBtn").classList.contains("hidden")) { b.disabled = false; return; }
+    b.classList.add("hidden");
+    // One button for the whole test: it opens the camera, gives them time to
+    // reach their mark, starts recording, and stops itself when the test has
+    // what it needs. Pressing record was a second thing to remember while
+    // standing five metres away from the phone.
+    assessLeadIn(t);
   };
   $("assessCancel").onclick = () => { exitAssessMode(); openAssess(); };
   document.body.classList.add("assessMode");
@@ -2489,8 +2519,28 @@ async function startCameraQuiet() {
   await video.play();
 }
 
+let framingOverride = false;      // they were warned and pressed again
+
 $("recBtn").onclick = () => {
   if (!recording) {
+    /* Refuse a take that cannot produce anything, once.
+     *
+     * Every one of these tests is measured from the feet, and a camera framed
+     * on the torso gives a recording that can only end in a refusal -- after
+     * the athlete has walked, jumped or raised for thirty seconds. Better to
+     * spend that argument before the take than after it. Pressing again goes
+     * ahead regardless: the check can be wrong, and it is not the athlete's
+     * job to argue with it twice. */
+    if (assessStep && !framingOverride) {
+      const bad = framing.shown;
+      if (!framing.sawBody || bad) {
+        clearInterval(assessLeadTimer);
+        framingOverride = true;
+        say(tr(!framing.sawBody ? "assessNoBodyYet" : "assessBadFraming_" + bad), true);
+        return;
+      }
+    }
+    framingOverride = false;
     frames = []; recording = true;
     framing.reset();
     videoBlob = null; videoChunks = [];
@@ -2520,13 +2570,18 @@ $("recBtn").onclick = () => {
       assessTimer = setInterval(() => {
         if (!recording) { clearInterval(assessTimer); return; }
         if (left != null) left -= 1;
-        if (left != null && left <= 0) {
+        const got = assessRepsSoFar(t);
+        // Stops itself on whichever comes first: the count the test needs, or
+        // the clock for the tests that run to one. Nobody should have to walk
+        // back to the phone mid-test to decide whether that was enough.
+        const enough = got >= need;
+        if ((left != null && left <= 0) || enough) {
           clearInterval(assessTimer);
           stopTone();
           $("recBtn").click();          // stop and analyse, exactly as a tap would
           return;
         }
-        assessHudText = assessHud(left, assessRepsSoFar(t), need);
+        assessHudText = assessHud(left, got, need);
       }, 1000);
     }
   } else {

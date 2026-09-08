@@ -90,9 +90,11 @@ for (const [file, names] of exportsOf) for (const n of names) offered.set(n, fil
  * findReps off an object the page already has, and flagging it as a missing
  * import sent the last reader looking for a bug that was not there. The
  * lookbehind drops anything preceded by a dot (or by more identifier, which
- * `\b` alone also let through). A bare call still matches, which is the case
- * this check exists for. */
-const used = new Set([...script.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]));
+ * `\b` alone also let through), and anything introduced by `get`, `set` or
+ * `function`, which is a definition rather than a call. A bare call still
+ * matches, which is the case this check exists for. */
+const CALL = /(?<![.\w$]|\bget |\bset |\bfunction )([A-Za-z_$][\w$]*)\s*\(/g;
+const used = new Set([...script.matchAll(CALL)].map((m) => m[1]));
 for (const name of used) {
   if (!offered.has(name) || declared.has(name)) continue;
   fail(`calls ${name}(), exported by ${offered.get(name)}, but never imports it`);
@@ -199,7 +201,10 @@ const declaredIn = (src) => {
   for (const m of src.matchAll(/(?:^|[^\w.$])([A-Za-z_$][\w$]*)\s*=>/g)) names.add(m[1]);
   for (const m of src.matchAll(/catch\s*\(([^)]*)\)/g)) add(m[1]);
   // Class and object-literal methods: `resize(w, h) {` declares resize.
-  for (const m of src.matchAll(/^\s*(?:async\s+|\*\s*|static\s+)*([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*\{/gm)) {
+  // `get sawBody() {` declares one too -- an accessor is a definition, and
+  // reading it as a call to something unimported is the same false positive
+  // as reading `spec.findReps(...)` that way.
+  for (const m of src.matchAll(/^\s*(?:async\s+|\*\s*|static\s+|get\s+|set\s+)*([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*\{/gm)) {
     names.add(m[1]); add(m[2]);
   }
   // `probe as probeHelper` declares probeHelper, not probe.
