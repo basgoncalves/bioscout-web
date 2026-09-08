@@ -6,9 +6,9 @@
 <meta name="theme-color" content="#1c4a48">
 <title>BioScout Web — a physics-informed, AI-powered bio tracker</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="favicon.ico" sizes="any">
-<link rel="icon" type="image/png" href="icon-192.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="assets/icons/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="assets/icons/icon-192.png">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
 <style>
   :root {
     --bg:#f6f7f9; --card:#fff; --ink:#14161a; --muted:#5d626e;
@@ -266,7 +266,7 @@
     <button class="ghost" id="navHome" data-i18n="home">Home</button>
   </div>
   <div class="brand">
-    <img src="logo.png" alt="" width="34" height="34">
+    <img src="assets/icons/logo.png" alt="" width="34" height="34">
     <h1>BioScout Web</h1>
     <a href="#" id="termsLinkBtn" class="note" style="margin-left:auto" data-i18n="termsLink">Terms</a>
   </div>
@@ -418,7 +418,7 @@
 
   <section id="viewRecord" class="hidden">
     <div class="card hidden" id="assessBanner"></div>
-    <div class="card" id="setup">
+    <div class="card trainOnly" id="setup">
     <div class="row trainOnly" style="margin-bottom:11px">
       <div>
         <label for="activity" data-i18n="movement">Movement</label>
@@ -467,8 +467,8 @@
         of video is four minutes of work to reach six seconds of squat.</p>
     </div>
     <input id="fileInput" type="file" accept="video/*" class="hidden">
-    <div class="status" id="status" data-i18n="statusStarting">Starting…</div>
     </div>
+    <div class="status" id="status" style="margin:0 2px 10px" data-i18n="statusStarting">Starting…</div>
   <div id="stage">
     <video id="video" playsinline muted></video>
     <canvas class="overlay" id="overlay"></canvas>
@@ -503,7 +503,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 47;
+window.BUILD = 48;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1904,13 +1904,24 @@ function enterAssessMode(t) {
   $("assessBanner").innerHTML = `
     <div style="font-weight:600">${esc(tr("assessStepOf", {
       n, total: ASSESS_TESTS.length, name: tr("assessTest_" + t.id) }))}</div>
-    <p class="sub" style="margin:4px 0 0">${esc(tr("assessHow_" + t.id))}</p>
-    <p class="note" style="margin:6px 0 0">${esc(t.seconds
+    <p class="sub" style="margin:4px 0 8px">${esc(tr("assessHow_" + t.id))}</p>
+    <p class="note" style="margin:0 0 10px">${esc(t.seconds
       ? tr("assessNeedStrides", { n: t.minReps, s: t.seconds })
       : tr("assessNeedReps", { n: t.minReps }))}</p>
-    <button type="button" class="ghost" id="assessCancel" style="margin-top:10px">${
+    <button type="button" id="assessStartBtn" style="margin:0">${esc(tr("assessStartTest"))}</button>
+    <button type="button" class="ghost" id="assessCancel" style="margin-top:8px">${
       esc(tr("assessLeave"))}</button>`;
   $("assessBanner").classList.remove("hidden");
+  // The one button on the screen does what Start camera does -- the assessment
+  // has already made every other choice that card was offering.
+  $("assessStartBtn").onclick = async () => {
+    const b = $("assessStartBtn");
+    b.disabled = true;
+    await startCamera();
+    // startCamera hides its own button on success and says why on failure.
+    if ($("startBtn").classList.contains("hidden")) b.classList.add("hidden");
+    else b.disabled = false;
+  };
   $("assessCancel").onclick = () => { exitAssessMode(); openAssess(); };
   document.body.classList.add("assessMode");
   $("trainingCard").classList.add("trainOnly");
