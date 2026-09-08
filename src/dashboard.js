@@ -26,7 +26,7 @@ import { MOODS, collectDiary, moodTrend, tagLevels, LEVEL_MAX } from "./diary.js
 import { collectWeights, weightOn, weightSeries } from "./weight.js";
 import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
          dayOfCycle, phaseModel, cycleDayKey, LUTEAL_DAYS, FLOWS } from "./cycle.js";
-import { itemKcal, mealKcal, describe } from "./foods.js";
+import { itemKcal, mealKcal, describe, UNITS } from "./foods.js";
 import { collectSleep, meanSleep, duration as sleepMins, fmt as fmtSleep } from "./sleep.js";
 import { rate, scoreColour } from "./health.js";
 
@@ -279,7 +279,6 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
         <option value="training"${mode === "meals" ? "" : " selected"}>${esc(tr("modeTraining"))}</option>
         <option value="meals"${mode === "meals" ? " selected" : ""}>${esc(tr("modeMeals"))}</option>
         <option value="diary"${mode === "diary" ? " selected" : ""}>${esc(tr("modeDiary"))}</option>
-        <option value="cycle"${mode === "cycle" ? " selected" : ""}>${esc(tr("modeCycle"))}</option>
       </select>
     </div>
     <div class="calnav">
@@ -738,13 +737,24 @@ export function cycleFormHTML(key, current, symptoms, draft = null) {
 export function mealFormHTML(key, todayKey, draft = { items: [] }, names = []) {
   const rows = (draft.items || []).map((it, i) => {
     const k = itemKcal(it);
+    const unit = it.unit || "g";
+    // The amount on screen is whatever was typed (`qty`), in `unit`; `grams`
+    // stays the canonical figure the calorie arithmetic runs on. Older items
+    // saved before units existed have only `grams`, which IS the amount once
+    // the unit defaults to "g" -- so this falls back to it.
+    const amt = it.qty ?? it.grams;
+    const decimalUnit = unit === "Kg" || unit === "L";
     return `<div class="itemRow">
       <input class="itemName" data-i="${i}" list="foodList" value="${esc(it.name || "")}"
              placeholder="${esc(tr("foodName"))}" autocomplete="off">
-      <button type="button" class="stepBtn gramStep" data-i="${i}" data-d="-10">−</button>
-      <input class="itemGrams" data-i="${i}" type="number" inputmode="numeric" min="0" step="5"
-             value="${it.grams ?? ""}" aria-label="${esc(tr("grams"))}">
-      <button type="button" class="stepBtn gramStep" data-i="${i}" data-d="10">+</button>
+      <select class="itemUnit" data-i="${i}" aria-label="${esc(tr("unit"))}">
+        ${UNITS.map((u) => `<option value="${u}"${u === unit ? " selected" : ""}>${u}</option>`).join("")}
+      </select>
+      <button type="button" class="stepBtn gramStep" data-i="${i}" data-dir="-1">−</button>
+      <input class="itemGrams" data-i="${i}" type="number" inputmode="decimal" min="0"
+             step="${decimalUnit ? "0.1" : "1"}"
+             value="${amt ?? ""}" aria-label="${esc(tr("grams"))}">
+      <button type="button" class="stepBtn gramStep" data-i="${i}" data-dir="1">+</button>
       <span class="itemKcal">${k === null ? "—" : k}</span>
       <button type="button" class="linky itemDel" data-i="${i}"
               aria-label="${esc(tr("delete"))}">×</button>
@@ -883,7 +893,10 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
   const sleepDays = collectSleep(sleep);
   const o = overall(days, today);
   const todayKey = dayKey(today);
-  const mode = ["meals", "diary", "cycle"].includes(view.mode) ? view.mode : "training";
+  // "cycle" is deliberately not a mode here: it already has its own section,
+  // rendered under the diary on every day (see cycleHTML below), so it does
+  // not also need to be a peer of Training/Meals/Diary in this list.
+  const mode = ["meals", "diary"].includes(view.mode) ? view.mode : "training";
 
   // An athlete with no training but a week of meals still has a dashboard.
   /* No special empty state. Every section already says when it has nothing --

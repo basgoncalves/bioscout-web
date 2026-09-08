@@ -81,6 +81,7 @@
   .itemRow input.itemName { flex:1; min-width:0; margin:0; padding:9px; font-size:13.5px; }
   .itemRow input.itemGrams { width:56px; flex:none; margin:0; padding:9px 4px; text-align:center;
                              font-size:13.5px; }
+  .itemRow select.itemUnit { width:64px; flex:none; margin:0; padding:9px 2px; font-size:12.5px; }
   .itemKcal { width:42px; text-align:right; font-size:12.5px; color:var(--muted);
               font-variant-numeric:tabular-nums; }
   .steps { margin-top:8px; }
@@ -504,7 +505,7 @@ import { DEFAULT_TAGS, toggleTag, stepTag } from "./src/diary.js";
 import { collectWeights, weightOn } from "./src/weight.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
          dayOfCycle } from "./src/cycle.js";
-import { densityFor, foodNames, describe, mealKcal } from "./src/foods.js";
+import { densityFor, foodNames, describe, mealKcal, toGrams, unitStep } from "./src/foods.js";
 import { CARD, cardStats, drawCard, shareCard } from "./src/share.js";
 import { collectMeals } from "./src/dashboard.js";
 import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
@@ -719,6 +720,13 @@ $("saveProfileBtn").onclick = () => {
   say(ok ? tr("savedTo", { name: s.name })
          : "Could not save — browser storage is unavailable here.", !ok);
   refreshProfiles(s.name);
+  // A save that worked is a save that's done: close, same as the explicit
+  // Close button, rather than leaving the dialog sitting open on top of its
+  // own success message.
+  if (ok) {
+    $("settingsDlg").close();
+    renderDash();
+  }
 };
 /* Every field marked "saved" writes straight back to the profile.
  *
@@ -1115,7 +1123,7 @@ function openAdd(step = null) {
       };
     });
   } else if (step === "meal") {
-    if (!mealDraft.items.length) mealDraft.items.push({ name: "", grams: null, kcal100: null });
+    if (!mealDraft.items.length) mealDraft.items.push({ name: "", unit: "g", qty: null, grams: null, kcal100: null });
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("meal")}</h2>`
       + mealFormHTML(key, todayKey, mealDraft, foodNames(profileFoods(currentAthlete())));
     wireMealForm(key, todayKey);
@@ -1210,20 +1218,34 @@ function wireMealForm(key, todayKey) {
       // should get a number the moment the name matches something.
       it.kcal100 = densityFor(el.value, custom());
     });
+    body.querySelectorAll("select.itemUnit").forEach((el) => {
+      const it = mealDraft.items[+el.dataset.i];
+      if (it) it.unit = el.value;
+    });
     body.querySelectorAll("input.itemGrams").forEach((el) => {
       const it = mealDraft.items[+el.dataset.i];
-      if (it) it.grams = el.value === "" ? null : +el.value;
+      if (!it) return;
+      it.qty = el.value === "" ? null : +el.value;
+      it.grams = toGrams(it.qty, it.unit || "g");
     });
   };
   const redraw = () => { sync(); openAdd("meal"); };
 
   body.querySelectorAll("input.itemName").forEach((el) => { el.onchange = redraw; });
   body.querySelectorAll("input.itemGrams").forEach((el) => { el.onchange = redraw; });
+  body.querySelectorAll("select.itemUnit").forEach((el) => { el.onchange = redraw; });
   body.querySelectorAll("button.gramStep").forEach((b) => {
     b.onclick = () => {
       sync();
       const it = mealDraft.items[+b.dataset.i];
-      it.grams = Math.max(0, (it.grams || 0) + +b.dataset.d);
+      const unit = it.unit || "g";
+      const step = unitStep(unit) * +b.dataset.dir;
+      const next = Math.max(0, (it.qty ?? 0) + step);
+      // Kg/L move in tenths -- floating point leaves 0.30000000000000004
+      // behind a run of +0.1 taps, which is the kind of thing a person
+      // notices and a computer should have hidden.
+      it.qty = Math.round(next * 100) / 100;
+      it.grams = toGrams(it.qty, unit);
       openAdd("meal");
     };
   });
@@ -1232,7 +1254,7 @@ function wireMealForm(key, todayKey) {
   });
   $("itemAdd").onclick = () => {
     sync();
-    mealDraft.items.push({ name: "", grams: null, kcal100: null });
+    mealDraft.items.push({ name: "", unit: "g", qty: null, grams: null, kcal100: null });
     openAdd("meal");
   };
 
@@ -1587,7 +1609,7 @@ function renderTraining() {
       <tbody>${rows}</tbody></table>
     <div id="peakChartBox" style="margin-top:10px">${
       peakVar ? setChart(series, peakVar) : ""}</div>
-    <button class="ghost" id="summaryBtn" style="margin-top:10px">${tr("finishSummarise")}</button>
+    <button id="summaryBtn" style="margin-top:10px">${tr("finishSummarise")}</button>
     <button class="ghost" id="newSessionBtn" style="margin-top:8px">${tr("newSession")}</button>
     <div id="summaryBox"></div>`;
   $("newSessionBtn").onclick = () => {

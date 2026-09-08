@@ -12,6 +12,8 @@
  * kept -- a long session would blow the storage quota -- so the export writes
  * whatever sets are still in memory in full, and older ones as summaries.
  */
+import { UNITS } from "./foods.js";
+
 const PKEY = "bioscout.profiles.v1";
 const SKEY = "bioscout.session.v1";
 const AKEY = "bioscout.archive.v1";
@@ -147,6 +149,11 @@ export function addMeal({ profile = null, text = "", kcal = null, at = null,
       name: String(i.name || "").slice(0, 80),
       grams: Number.isFinite(+i.grams) && +i.grams > 0 ? Math.round(+i.grams) : null,
       kcal100: Number.isFinite(+i.kcal100) && +i.kcal100 >= 0 ? +i.kcal100 : null,
+      // The unit and the amount as typed, so a meal read back later still
+      // says "200 mL" rather than silently becoming "200 g" -- grams above
+      // stays the figure the arithmetic runs on, this is only the label.
+      unit: UNITS.includes(i.unit) ? i.unit : "g",
+      qty: Number.isFinite(+i.qty) && +i.qty > 0 ? +i.qty : null,
     }))
     .filter((i) => i.name);
   const entry = {

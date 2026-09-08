@@ -33,6 +33,37 @@ export const DEFAULT_FOODS = {
   "Honey": 304, "Chocolate, dark": 546, "Pancakes": 227, "Protein powder": 375,
 };
 
+/**
+ * A meal item's amount is entered in whichever unit is convenient -- grams or
+ * millilitres for most things, kilograms or litres for a bag or a bottle,
+ * "units" for something counted rather than weighed (an egg, a protein bar).
+ * Every density above is kcal per 100 g, so the amount has to become grams
+ * before itemKcal can use it.
+ *
+ * "units" has no fixed weight -- an egg and a protein bar are not the same
+ * mass -- so it does not convert. An item logged in units stays uncounted for
+ * calories, exactly like a food itemKcal has never heard of: honest, not a
+ * guess dressed up as a gram figure.
+ */
+export const UNITS = ["g", "mL", "Kg", "L", "units"];
+const UNIT_TO_GRAMS = { g: 1, mL: 1, Kg: 1000, L: 1000, units: null };
+
+/** The amount, converted to grams -- or null when the unit does not convert. */
+export function toGrams(amount, unit = "g") {
+  if (amount == null || amount === "") return null;
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return null;
+  const f = UNIT_TO_GRAMS[unit] ?? 1;
+  return f == null ? null : n * f;
+}
+
+/** How far the +/- buttons move the on-screen amount, sized to the unit --
+ *  Kg and L are already a x1000 scale on g/mL, so a step of 10 there would
+ *  jump 10 kg at a tap; "units" moves one at a time. */
+export function unitStep(unit = "g") {
+  return unit === "Kg" || unit === "L" ? 0.1 : unit === "units" ? 1 : 10;
+}
+
 /** Energy of one item, rounded to whole kcal. Nulls anywhere give null. */
 export function itemKcal(item) {
   // null and "" both become 0 through Number(), which would turn "we do not
@@ -96,6 +127,14 @@ export function foodNames(custom = {}) {
  */
 export function describe(items) {
   return (items || [])
-    .map((i) => `${i.name}${Number(i.grams) > 0 ? ` ${Math.round(i.grams)} g` : ""}`)
+    .map((i) => {
+      // Display amount is whatever was typed, in whatever unit was chosen --
+      // grams is only the arithmetic's unit, not the label's.
+      const amt = i.qty ?? i.grams;
+      if (!(Number(amt) > 0)) return i.name;
+      const unit = i.unit || "g";
+      const n = unit === "Kg" || unit === "L" ? Math.round(amt * 100) / 100 : Math.round(amt);
+      return `${i.name} ${n} ${unit}`;
+    })
     .join(" · ");
 }
