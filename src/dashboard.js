@@ -228,7 +228,7 @@ function level(reps, max) {
  * logged on a food day. Calories would be the obvious alternative, but they
  * are optional per meal, so a day of untyped meals would read as an empty one. */
 const weightOf = (mode) => (d) =>
-  mode === "cycle" ? (d.flow || 1)          // a logged day with no flow still shows
+  mode === "sleep" ? (d.minutes || 1)       // a night with no parseable duration still shows
   : mode === "meals" ? d.meals.length
   : mode === "diary" ? (d.rated ? d.mood : 0.5)   // an unrated day still shows faintly
   : d.reps;
@@ -255,9 +255,9 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
     if (c.key === todayKey) cls.push("today");
     if (c.key === selected) cls.push("sel");
     const label = !hit ? c.key
-      : mode === "cycle"
-        ? tr("dayCellCycle", { date: c.key, flow: hit.flow
-            ? tr(FLOWS.find((f) => f.v === hit.flow).key) : tr("logged") })
+      : mode === "sleep"
+        ? tr("dayCellSleep", { date: c.key,
+            hours: hit.minutes != null ? fmtSleep(hit.minutes) : tr("logged") })
       : mode === "diary"
         ? tr("dayCellDiary", { date: c.key, mood: hit.rated ? hit.mood.toFixed(1) : "—" })
       : mode === "meals"
@@ -279,6 +279,7 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
         <option value="training"${mode === "meals" ? "" : " selected"}>${esc(tr("modeTraining"))}</option>
         <option value="meals"${mode === "meals" ? " selected" : ""}>${esc(tr("modeMeals"))}</option>
         <option value="diary"${mode === "diary" ? " selected" : ""}>${esc(tr("modeDiary"))}</option>
+        <option value="sleep"${mode === "sleep" ? " selected" : ""}>${esc(tr("sleep"))}</option>
       </select>
     </div>
     <div class="calnav">
@@ -895,8 +896,11 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
   const todayKey = dayKey(today);
   // "cycle" is deliberately not a mode here: it already has its own section,
   // rendered under the diary on every day (see cycleHTML below), so it does
-  // not also need to be a peer of Training/Meals/Diary in this list.
-  const mode = ["meals", "diary"].includes(view.mode) ? view.mode : "training";
+  // not also need to be a peer of Training/Meals/Diary/Sleep in this list.
+  // Sleep has no such section of its own tucked under another one, so it
+  // stays a normal peer mode -- the calendar can shade nights the same way
+  // it shades meals or diary entries.
+  const mode = ["meals", "diary", "sleep"].includes(view.mode) ? view.mode : "training";
 
   // An athlete with no training but a week of meals still has a dashboard.
   /* No special empty state. Every section already says when it has nothing --
@@ -931,7 +935,7 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
         <button class="ghost" id="shareBtn" style="margin:0;padding:10px">${esc(tr("shareMonth"))}</button>
       </div>
     </div>
-    ${calendarHTML({ meals: mealDays, diary: diaryDays, cycle: cycleDays }[mode] || days,
+    ${calendarHTML({ meals: mealDays, diary: diaryDays, sleep: sleepDays }[mode] || days,
                    view.year, view.month, view.selected, todayKey, mode)}
     ${dayHTML(days.get(view.selected), view.selected)}
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey)}
