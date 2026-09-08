@@ -55,6 +55,27 @@ const arrayNamed = (name) => {
 const SHELL = arrayNamed("SHELL");
 const HEAVY = arrayNamed("HEAVY");
 
+/* The shell and the heavy assets must live in SEPARATE caches, and the eviction
+ * must keep both. One cache meant every shell bump deleted the pose engine and
+ * the meshes -- twenty megabytes re-downloaded, during which the camera button
+ * is disabled and the app looks broken. This is the check that stops that
+ * being reintroduced by a tidy-up. */
+{
+  const shellCache = sw.match(/const SHELL_CACHE\s*=\s*"([^"]+)"/);
+  const heavyCache = sw.match(/const HEAVY_CACHE\s*=\s*"([^"]+)"/);
+  check(!!shellCache && !!heavyCache, "sw.js must define SHELL_CACHE and HEAVY_CACHE");
+  if (shellCache && heavyCache) {
+    check(shellCache[1] !== heavyCache[1],
+          "the shell and heavy caches must not be the same cache");
+  }
+  check(/KEEP\s*=\s*\[\s*SHELL_CACHE\s*,\s*HEAVY_CACHE\s*\]/.test(sw),
+        "activate must keep both caches, not just one");
+  check(/skipExisting/.test(sw),
+        "install must not re-add heavy assets that are already cached");
+  check(!/const CACHE\s*=/.test(sw),
+        "the single CACHE constant is gone, so a bump cannot evict the engine");
+}
+
 const heavyBody = sw.match(/const isHeavy\s*=\s*\(url\)\s*=>([\s\S]*?);\n/);
 if (!heavyBody) throw new Error("could not find isHeavy in sw.js");
 const isHeavy = new Function("url", `return (${heavyBody[1]});`);

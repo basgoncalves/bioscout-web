@@ -505,7 +505,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 55;
+window.BUILD = 56;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2017,7 +2017,9 @@ function enterAssessMode(t) {
     <p class="note" style="margin:0 0 10px">${esc(t.seconds
       ? tr("assessNeedStrides", { n: need, s: t.seconds })
       : tr("assessNeedReps", { n: need }))}</p>
-    <button type="button" id="assessStartBtn" style="margin:0">${esc(tr("assessStartTest"))}</button>
+    <button type="button" id="assessStartBtn" style="margin:0"${
+      $("startBtn").disabled ? " disabled" : ""}>${esc($("startBtn").disabled
+      ? tr("startCameraLoading") : tr("assessStartTest"))}</button>
     <button type="button" class="ghost" id="assessCancel" style="margin-top:8px">${
       esc(tr("assessLeave"))}</button>`;
   $("assessBanner").classList.remove("hidden");
@@ -2376,14 +2378,24 @@ if (termsAccepted()) {
 
 
 if (!DEMO) say(tr("loadingEngine"));
+// The engine is ~20 MB the first time. Until it lands the camera button has to
+// stay disabled, and a greyed-out button with no reason beside it is the app
+// looking broken -- so it says what it is waiting for, in its own label.
+const startLabel = $("startBtn").textContent;
+$("startBtn").textContent = tr("startCameraLoading");
 if (await loadMediaPipe()) {
   try {
     landmarker = await makeLandmarker();
     if (!DEMO) say(tr("ready"));
+    $("startBtn").textContent = startLabel;
     $("startBtn").disabled = false;
+    if (assessStep) $("assessStartBtn")?.removeAttribute("disabled");
   } catch (err) {
+    $("startBtn").textContent = tr("startCameraFailed");
     if (!DEMO) say(tr("sayModelFailed", { err: err.message }), true);
   }
+} else {
+  $("startBtn").textContent = tr("startCameraFailed");
 }
 
 // --- camera ----------------------------------------------------------------
