@@ -297,6 +297,41 @@ for (const [label, raw] of files) {
   }
 }
 
+
+/* --- a video file must be STEPPED, not played --------------------------- *
+ *
+ * Analysing one 3.3 s jump four times gave four jump heights, because the clip
+ * was played and whatever frames the machine presented while the pose model was
+ * busy were the frames that got analysed. The fix is to seek frame by frame, so
+ * every run visits the same instants. This check exists because the old way is
+ * the obvious way: anyone reaching for v.play() here would restore a
+ * measurement that depends on how loaded the laptop was, and nothing else in
+ * the suite would notice -- the numbers stay plausible, they just stop being
+ * the same numbers.
+ */
+{
+  const whole = readFileSync("index.html", "utf8");
+  const from = whole.indexOf("async function analyseVideoBlob(");
+  const to = whole.indexOf("async function finish()");
+  if (from < 0 || to < from) fail("index.html: cannot find analyseVideoBlob to check");
+  else {
+    const body = whole.slice(from, to);
+    if (/\.play\(\)/.test(body)) {
+      fail("analyseVideoBlob plays the video; it must seek frame by frame so the "
+           + "same file gives the same answer");
+    }
+    if (!/currentTime = /.test(body)) {
+      fail("analyseVideoBlob does not seek: frames would be whatever the machine "
+           + "happened to present");
+    }
+    if (!/frames\.push\(\{ i,/.test(body)) {
+      fail("analyseVideoBlob must record each frame's grid index, or an "
+           + "untracked frame silently shortens the clip");
+    }
+    if (!bad) console.log("ok    video files are stepped frame by frame, not played");
+  }
+}
+
 if (bad) {
   console.error(`\nFAIL  ${bad} wiring problem(s)`);
   process.exit(1);

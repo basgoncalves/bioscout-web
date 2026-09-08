@@ -539,7 +539,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 75;
+window.BUILD = 76;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1346,7 +1346,7 @@ function openAdd(step) {
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("weightBeforeSession")}</h2>`
       + weightFormHTML(key, todayKey, current)
       + `<button class="ghost" id="weightSkip" style="margin-top:8px">${tr("skipToSession")}</button>`;
-    const go = () => { dlg.close(); startTraining(); };
+    const go = () => { dlg.close(); startTraining(key); };
     $("weightAddDay").onclick = () => {
       const kg = $("weightKg").value;
       if (!addWeight({ profile: currentAthlete(), kg, at: atOnDay(key) })) {
@@ -1640,12 +1640,18 @@ $("settingsClose").onclick = () => {
   renderDash();                      // a renamed athlete, or a new mass
 };
 
-function startTraining() {
+function startTraining(dayKeyStr) {
   // A session with sets in it is training in progress; archive it before
   // starting the next, exactly as the results card does.
   const open = getSession();
   if (open && open.sets && open.sets.length) archiveSession();
-  newSession(currentAthlete());
+  /* Filed on the day the athlete opened it from, not on today.
+   *
+   * The day view is where a session is started, and starting one from the 6th
+   * to work through videos filmed on the 6th put every set on today instead.
+   * The 6th then read "No training recorded on this day" with the recordings
+   * sitting under a date the athlete never chose. */
+  newSession(currentAthlete(), dayKeyStr ? atOnDay(dayKeyStr) : null);
   /* A new session starts with an empty results card.
    *
    * The card is painted once per analysis and never cleared, so the plot from
@@ -3016,6 +3022,7 @@ async function startCameraQuiet() {
   await video.play();
 }
 
+let fileFps = null;      // the grid a video file was sampled on
 let leadDone = false;          // the countdown for this take has already run
 
 $("recBtn").onclick = () => {
@@ -3130,7 +3137,58 @@ $("fileInput").onchange = async (e) => {
   if (file) await analyseVideoBlob(file);
 };
 
-/** Track a video from anywhere: the file picker, or the local fetch helper. */
+/**
+ * Track a video from anywhere: the file picker, or the local fetch helper.
+ *
+ * THE SAME FILE MUST GIVE THE SAME ANSWER. It did not. Analysing one 3.3 s jump
+ * four times produced 86, 90, 97 and 110 frames at four different "frame
+ * rates", and four jump heights between 25.3 and 27.1 cm -- because the clip
+ * was PLAYED and whatever frames the machine managed to present while the pose
+ * model was busy were the frames that got analysed. On a slower moment more
+ * frames were missed, the clip appeared shorter, and every timing derived from
+ * it moved. A measurement that depends on how loaded the laptop was is not a
+ * measurement.
+ *
+ * So the video is not played at all now. It is stepped: seek, wait for the
+ * frame, track it, seek again. Every run visits the same instants and produces
+ * the same numbers, and the frame rate handed to the analysis is the grid that
+ * was actually sampled rather than a wall-clock estimate of it.
+ *
+ * The native rate is found first from a few presented frames -- the SMALLEST
+ * gap between them, because a dropped frame makes a gap that is a multiple of
+ * the real one and a median would happily return the multiple. If that probe
+ * says nothing usable, 30 Hz is assumed and said out loud.
+ */
+const PROBE_MS = 700;              // long enough for several frames at any rate
+const MAX_SAMPLE_FRAMES = 3000;    // ~100 s at 30 Hz; beyond that, sample coarser
+const SEEK_TIMEOUT_MS = 3000;
+
+/** The clip's own frame interval in seconds, or null if it cannot be told. */
+async function probeFrameRate(v) {
+  if (!v.requestVideoFrameCallback) return null;
+  const times = [];
+  await new Promise((resolve) => {
+    const stop = () => { v.pause(); resolve(); };
+    const tick = (_, m) => {
+      times.push(m.mediaTime);
+      if (times.length > 60) return stop();
+      v.requestVideoFrameCallback(tick);
+    };
+    v.requestVideoFrameCallback(tick);
+    v.play().catch(stop);
+    setTimeout(stop, PROBE_MS);
+  });
+  const gaps = [];
+  for (let i = 1; i < times.length; i++) {
+    const d = times[i] - times[i - 1];
+    if (d > 1e-4) gaps.push(d);
+  }
+  if (gaps.length < 3) return null;
+  const dt = Math.min(...gaps);
+  // Anything outside 5-240 Hz is the probe misreading, not a real video.
+  return dt >= 1 / 240 && dt <= 1 / 5 ? dt : null;
+}
+
 async function analyseVideoBlob(file) {
   say(tr("sayReadingVideo"));
   const v = document.createElement("video");
@@ -3138,39 +3196,54 @@ async function analyseVideoBlob(file) {
   await new Promise((r) => { v.onloadedmetadata = r; });
   frames = [];
   if (!(await loadMediaPipe())) return;
+
+  let dt = await probeFrameRate(v);
+  const assumed = !dt;
+  if (!dt) dt = 1 / 30;
+  v.pause();
+  const duration = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+  if (!duration) { say(tr("sayVideoNoDuration"), true); return; }
+  /* A long clip is sampled coarser rather than cut short.
+   *
+   * Truncating would hand back an analysis of the first minute labelled as an
+   * analysis of the clip. A coarser grid keeps the whole movement, costs
+   * resolution in the timings, and is stated. */
+  if (duration / dt > MAX_SAMPLE_FRAMES) dt = duration / MAX_SAMPLE_FRAMES;
+  const fpsGrid = 1 / dt;
+  fileFps = fpsGrid;
+  if (assumed) say(tr("sayAssumedFps", { fps: fpsGrid.toFixed(0) }), true);
+
   const off = await makeLandmarker();
-  await v.play();
-  /* Stop on whichever happens first: the next frame, the end of the video, or
-   * a stall.
-   *
-   * requestVideoFrameCallback only fires when a frame is PRESENTED, and after
-   * the last one there are no more -- so awaiting it alone hangs forever on
-   * the final frame of every clip. It looked exactly like the analysis being
-   * slow: "Tracking 14.5s / 14.6s" and then nothing, with the whole video
-   * already tracked and one callback short of finishing.
-   *
-   * The timeout covers the third case, a video that neither presents another
-   * frame nor reports itself ended -- a decode stall, or a tab put in the
-   * background mid-analysis. Better to analyse the frames we have and say so
-   * than to leave a progress line frozen with no way out. */
-  const STALL_MS = 4000;
-  const step = () => new Promise((resolve) => {
+  const seekTo = (t) => new Promise((resolve) => {
     let settled = false;
-    const done = (m) => { if (!settled) { settled = true; resolve(m); } };
-    v.requestVideoFrameCallback((_, m) => done(m));
-    v.addEventListener("ended", () => done(null), { once: true });
-    setTimeout(() => done(null), STALL_MS);
+    const done = () => { if (!settled) { settled = true; resolve(); } };
+    v.addEventListener("seeked", done, { once: true });
+    setTimeout(done, SEEK_TIMEOUT_MS);   // a seek that never lands must not hang
+    v.currentTime = t;
   });
 
-  while (!v.ended) {
-    const meta = await step();
-    if (!meta) break;                       // ended, or stalled
-    const res = off.detectForVideo(v, meta.mediaTime * 1000);
+  const n = Math.max(1, Math.floor(duration / dt));
+  for (let i = 0; i < n; i++) {
+    const t = i * dt;
+    if (t > duration) break;
+    await seekTo(t);
+    // The timestamp handed to the model is the GRID time, not v.currentTime:
+    // a seek lands on the nearest keyframe-decoded frame, and feeding the model
+    // a timestamp that goes backwards makes it drop the frame outright.
+    const res = off.detectForVideo(v, Math.round(t * 1000));
     if (res.landmarks && res.landmarks.length) {
-      frames.push({ t: meta.mediaTime * 1000, lm: toNamed(res.landmarks[0], v.videoWidth, v.videoHeight) });
+      // `i` is the GRID index, and it is what the analysis keys off. A frame
+      // the model found no body in is then a hole at its own place in time
+      // rather than a frame quietly removed -- which used to shorten the clip
+      // and speed up every movement in it by however many frames were missed.
+      frames.push({ i, t: t * 1000,
+                    lm: toNamed(res.landmarks[0], v.videoWidth, v.videoHeight) });
     }
-    say(tr("sayTrackingProgress", { t: v.currentTime.toFixed(1),
-                                    dur: v.duration.toFixed(1), frames: frames.length }));
+    if (i % 5 === 0) {
+      say(tr("sayTrackingProgress", { t: t.toFixed(1),
+                                      dur: duration.toFixed(1),
+                                      frames: frames.length }));
+    }
   }
   off.close();
   try { v.pause(); URL.revokeObjectURL(v.src); } catch { /* already gone */ }
@@ -3183,10 +3256,17 @@ async function finish() {
     say(tr("sayTooFewFrames", { n: frames.length }), true);
     return;
   }
+  /* The sampling grid, when there was one.
+   *
+   * A file is stepped on a fixed grid, so its rate is known exactly and does
+   * not have to be inferred from how many frames survived. A live recording has
+   * no grid -- frames arrive when the camera and the model allow -- so there
+   * the wall clock is still the only answer available. */
   const span = (frames[frames.length - 1].t - frames[0].t) / 1000;
-  const fps = span > 0 ? (frames.length - 1) / span : 30;
+  const fps = fileFps || (span > 0 ? (frames.length - 1) / span : 30);
   const poses = {};
-  frames.forEach((f, i) => { poses[i] = f.lm; });
+  frames.forEach((f, i) => { poses[f.i ?? i] = f.lm; });
+  fileFps = null;                       // the next take is live unless it says
   let activity = $("activity").value;
   const heightM = parseFloat($("height").value) || 1.75;
   let detection = null;
@@ -3506,6 +3586,20 @@ function chart(rep, activity, res) {
   for (const [mv] of marks) {
     g += `<line x1="${sx(mv)}" y1="${P.t}" x2="${sx(mv)}" y2="${H - P.b}" stroke="var(--muted)" stroke-width=".8" stroke-dasharray="3 3"/>`;
   }
+  /* Foot contacts on the whole-run panel, in each foot's own colour.
+   *
+   * Faint, and behind the curves: they are there to let the eye cut the bout
+   * into strides, not to compete with the measurement. Every other panel is a
+   * single stride and needs no such marks; this is the only panel where the
+   * strides are not already the axis. */
+  if (rep.contacts) {
+    for (const [side, col] of [["l", SIDE_L], ["r", SIDE_R]]) {
+      for (const ct of rep.contacts[side] || []) {
+        if (ct < t[0] || ct > t[t.length - 1]) continue;
+        g += `<line x1="${sx(ct)}" y1="${P.t}" x2="${sx(ct)}" y2="${H - P.b}" stroke="${col}" stroke-width="1" stroke-opacity=".45"/>`;
+      }
+    }
+  }
   if (allBands) {
     allSeries.forEach(([, vals], i) => {
       const b = allBands[i];
@@ -3532,7 +3626,10 @@ function chart(rep, activity, res) {
     `<span><i class="swatch" style="${
       swatchStyle((o && o.color) || COLORS[i % COLORS.length], o)}"></i>${n}</span>`).join("");
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>
-          <div class="legend">${legend}${bands ? `<span>${tr("sdBetweenReps")}</span>` : ""}${
+          <div class="legend">${legend}${
+            rep.contacts && ((rep.contacts.l || []).length + (rep.contacts.r || []).length)
+              ? `<span>${tr("footContactMarks")}</span>` : ""}${
+            bands ? `<span>${tr("sdBetweenReps")}</span>` : ""}${
             rep.isMean && rep.eventAligned && marks.length
               ? `<span>${tr("dashedLabel", { items:
                   marks.map(([, n2]) => n2).filter(Boolean).join(" · ")

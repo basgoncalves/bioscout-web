@@ -88,8 +88,19 @@ export function lastUsedProfile() {
 }
 
 // --- training session ------------------------------------------------------
-export function newSession(profileName) {
-  const s = { started: new Date().toISOString(), profile: profileName || null, sets: [] };
+/**
+ * Start a session, optionally ON A GIVEN DAY.
+ *
+ * `startedAt` exists because the day view lets an athlete open a session on any
+ * day of the calendar -- typically to work through videos they filmed earlier
+ * -- and without it the session was stamped with the moment the button was
+ * pressed. The recordings then filed themselves under today, the day the
+ * athlete had selected stayed empty, and the honest reading of the screen was
+ * that the work had been lost.
+ */
+export function newSession(profileName, startedAt = null) {
+  const s = { started: startedAt || new Date().toISOString(),
+              profile: profileName || null, sets: [] };
   write(SKEY, s);
   return s;
 }
@@ -502,6 +513,7 @@ export function saveCurves(sessionStarted, index, result) {
   if (result.whole) {
     const w = result.whole;
     const o = { rep: "all", wholeTrial: true, bounds: w.bounds,
+                contacts: w.contacts || null,
                 times: r3(w.times), coords: {} };
     for (const [k, v] of Object.entries(w.coords || {})) o.coords[k] = r3(v);
     if (w.dyn) {
@@ -697,7 +709,10 @@ export function addSet(result, fps, extra = {}) {
   const s = getSession() || newSession(extra.profile);
   const set = {
     index: s.sets.length + 1,
-    at: new Date().toISOString(),
+    // On the session's day, at the clock time the set was recorded. A set
+    // stamped with today's date inside a session filed on the 6th is a set the
+    // day view will not show with its own session.
+    at: onSessionDay(s.started),
     activity: result.activity,
     fps: +fps.toFixed(1),
     reps: result.reps.length,
@@ -714,6 +729,16 @@ export function addSet(result, fps, extra = {}) {
   s.sets.push(set);
   write(SKEY, s);
   return set;
+}
+
+/** Now, moved onto the session's calendar day. Same clock time, so the sets of
+ *  a back-dated session still read in the order they were recorded. */
+function onSessionDay(started) {
+  const now = new Date();
+  const d = new Date(started);
+  if (isNaN(d) || d.toDateString() === now.toDateString()) return now.toISOString();
+  d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+  return d.toISOString();
 }
 
 function summariseRep(r, activity) {

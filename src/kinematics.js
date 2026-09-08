@@ -1781,8 +1781,20 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       const wb = [0, Math.floor((F._n - 1) / 2), F._n - 1];
       const w = spec.coords(F, wb, fps, pxPerM, refA, refB,
                             { model: osimModel, ankleValid: view.ankle_usable });
+      /* Where each foot met the floor, in seconds from the start of the clip.
+       *
+       * The whole-run panel without them is a wall of oscillation: the eye can
+       * see that something changes across the bout and cannot see which stride
+       * it changed in. With them the panel becomes readable as strides, and it
+       * is the one place the stride boundaries can be shown at all -- every
+       * other panel IS a stride. Sides are kept apart because the two feet
+       * land at different times and one merged list of marks would say the
+       * athlete contacted twice as often as they did. */
+      const sc = found.sideContacts || {};
+      const at = (cs) => (cs || []).map((c) => +(c[0] / fps).toFixed(3));
       whole = { rep: "all", wholeTrial: true, times: w.times, coords: w.coords,
-                bounds: wb };
+                bounds: wb,
+                contacts: { l: at(sc.l), r: at(sc.r) } };
     } catch { whole = null; }
   }
 
