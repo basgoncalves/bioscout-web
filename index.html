@@ -2784,6 +2784,27 @@ function videoConstraints() {
   return v;
 }
 
+/* Which way the open camera actually points.
+ *
+ * `facing` is only what we ASKED for, and the lens picker does not go through
+ * it: choosing the ultra-wide opens a device by id, so facingMode is never
+ * sent and `facing` stays on whatever it was -- "user" if the session started
+ * on the front camera. Mirroring off that variable then leaves the front
+ * camera's flip on a rear lens. The track knows the truth, so ask it, and fall
+ * back to the label and then to `facing` where getSettings is thin. */
+function frontFacing() {
+  const track = stream?.getVideoTracks?.()[0];
+  const mode = track?.getSettings?.().facingMode;
+  if (mode) return mode === "user";
+  const label = track?.label || "";
+  if (/\bfront\b/i.test(label)) return true;
+  if (/\b(back|rear|environment)\b/i.test(label)) return false;
+  return facing === "user";
+}
+
+/** True while the picture on screen is flipped left-for-right. */
+let mirrored = true;
+
 /** Pull the zoom down to whatever the track's minimum is. */
 async function widenLens() {
   const track = stream?.getVideoTracks?.()[0];
@@ -2841,7 +2862,8 @@ async function startCamera() {
     return;
   }
   video.srcObject = stream;
-  video.classList.toggle("rear", facing !== "user");
+  mirrored = frontFacing();
+  video.classList.toggle("rear", !mirrored);
   await video.play();
   await widenLens();
   await listLenses();
@@ -2893,7 +2915,7 @@ function loop() {
       draw(res);
       if (avatar && avatar.setName) {
         avatar.update(res.landmarks?.[0], res.worldLandmarks?.[0],
-                      video.videoWidth, video.videoHeight, facing === "user");
+                      video.videoWidth, video.videoHeight, mirrored);
       }
       if (recording && res.landmarks && res.landmarks.length) {
         frames.push({ t: ts, lm: toNamed(res.landmarks[0], video.videoWidth, video.videoHeight) });
@@ -2970,7 +2992,7 @@ function draw(res) {
     recording ? `<span class="rec">${tr("hudRecording")}</span>` : tr("hudTracking"),
     outOfShot ? `<span class="rec">${tr("hudFrame_" + outOfShot)}</span>` : "",
   ].filter(Boolean).join(" · ");
-  const mirror = facing === "user";
+  const mirror = mirrored;
   const X = (p) => (mirror ? (1 - p.x) : p.x) * w, Y = (p) => p.y * h;
   ctx.lineWidth = Math.max(2, w / 260);
   ctx.strokeStyle = "rgba(91,147,245,.95)";
@@ -3016,7 +3038,8 @@ async function startCameraQuiet() {
   stream = await navigator.mediaDevices.getUserMedia({
     video: videoConstraints(), audio: false });
   video.srcObject = stream;
-  video.classList.toggle("rear", facing !== "user");
+  mirrored = frontFacing();
+  video.classList.toggle("rear", !mirrored);
   await widenLens();
   await listLenses();
   await video.play();
