@@ -29,6 +29,7 @@ import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
 import { itemKcal, mealKcal, describe, UNITS } from "./foods.js";
 import { collectSleep, meanSleep, duration as sleepMins, fmt as fmtSleep } from "./sleep.js";
 import { collectVitals, meanSteps } from "./vitals.js";
+import { collectCardio, fmtDuration, fmtDistance, pace } from "./cardio.js";
 import { rate, scoreColour } from "./health.js";
 
 /* Plurals come from the dictionary keys the session card already uses, rather
@@ -37,6 +38,7 @@ import { rate, scoreColour } from "./health.js";
 const nSets = (n) => tr(n === 1 ? "nSet" : "nSets", { n });
 const nReps = (n) => tr(n === 1 ? "nRep" : "nRepsCount", { n });
 const nDays = (n) => tr(n === 1 ? "nDay" : "nDays", { n });
+const nActs = (n) => tr(n === 1 ? "nActivity" : "nActivities", { n });
 
 /* ---- days ------------------------------------------------------------- */
 
@@ -94,21 +96,40 @@ export function collectMeals(meals, profile = null) {
  * session that runs through midnight is two days of training, and the athlete
  * looking at the calendar means the day they did the work.
  */
-export function collectDays(sessions) {
+const emptyDay = (key) => ({
+  key, sets: [], reps: 0, activities: new Set(), sessions: new Set(),
+  cardio: [], cardioSeconds: 0, cardioMetres: 0,
+});
+
+/**
+ * Days that have training on them, from sets and from imported cardio both.
+ *
+ * `cardio` is optional and folds into the SAME day rather than a calendar of
+ * its own: the day you ran and the day you squatted are both training days.
+ * What it does not do is add to `reps` -- a 40-minute run has no reps, and
+ * inventing some would corrupt every volume bar in the app. A cardio-only day
+ * therefore exists with reps of zero, which the shading handles deliberately.
+ */
+export function collectDays(sessions, cardio = []) {
   const days = new Map();
   for (const s of sessions) {
     for (const set of s.sets || []) {
       const key = dayKey(set.at || s.started);
       if (!key) continue;
-      if (!days.has(key)) {
-        days.set(key, { key, sets: [], reps: 0, activities: new Set(), sessions: new Set() });
-      }
+      if (!days.has(key)) days.set(key, emptyDay(key));
       const d = days.get(key);
       d.sets.push({ ...set, session: s.started, profile: s.profile ?? null });
       d.reps += set.reps || 0;
       if (set.activity) d.activities.add(set.activity);
       d.sessions.add(s.started);
     }
+  }
+  for (const [key, c] of collectCardio(cardio)) {
+    if (!days.has(key)) days.set(key, emptyDay(key));
+    const d = days.get(key);
+    d.cardio = c.items;
+    d.cardioSeconds = c.seconds;
+    d.cardioMetres = c.metres;
   }
   for (const d of days.values()) d.sets.sort((a, b) => String(a.at).localeCompare(String(b.at)));
   return days;
@@ -243,7 +264,10 @@ const weightOf = (mode) => (d) =>
   : mode === "vitals" ? (d.steps || 1)      // a resting-HR-only day still shows
   : mode === "meals" ? d.meals.length
   : mode === "diary" ? (d.rated ? d.mood : 0.5)   // an unrated day still shows faintly
-  : d.reps;
+  // A run has no reps, so a cardio-only day would shade as an empty one.
+  // It shows at the lowest level instead: present, without claiming a volume
+  // it does not have.
+  : (d.reps || (d.cardio && d.cardio.length ? 1 : 0));
 
 function calendarHTML(days, year, month, selected, todayKey, mode) {
   const weeks = monthMatrix(year, month);
@@ -320,32 +344,67 @@ function volumeHTML(days, today) {
 }
 
 function dayHTML(day, key) {
+  const btns = `<div class="row" style="margin-top:10px">
+      <button id="newTrainingBtn" style="margin:0">${esc(tr("newTrainingSession"))}</button>
+      <button type="button" class="ghost" id="trainImport" style="margin:0;padding:9px">${esc(tr("import"))}</button>
+    </div>`;
   if (!day) {
     return `<div class="daybox"><div style="font-weight:600">${esc(tr("modeTraining"))}</div>
-      <p class="sub" style="margin:6px 0 0">${esc(tr("noTrainingThatDay"))}</p>
-      <button id="newTrainingBtn" style="margin-top:10px">${esc(tr("newTrainingSession"))}</button></div>`;
+      <p class="sub" style="margin:6px 0 0">${esc(tr("noTrainingThatDay"))}</p>${btns}</div>`;
   }
   const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const rows = day.sets.map((s) => {
-    const load = [s.addedKg ? "+" + s.addedKg : "", s.assistKg ? "−" + s.assistKg : ""]
-      .filter(Boolean).join(" ");
-    // `session` is that set's session's own `started` timestamp -- its
-    // identity -- so a click can open that session's summary regardless of
-    // how many other sessions share this day.
-    return `<tr class="sessionRow" data-session="${esc(s.session)}"><td>${esc(time(s.at))}</td><td>${esc(tr(s.activity))}</td>
-      <td>${s.reps}</td><td>${esc(load)}</td></tr>`;
-  }).join("");
+  // One row per SESSION, not per set: a set is a trial inside a session and
+  // every trial of one session used to open the same summary page. Sets are
+  // folded onto their session's `started` timestamp -- the session's identity.
+  const bySession = new Map();
+  for (const s of day.sets) {
+    if (!bySession.has(s.session)) bySession.set(s.session, { started: s.session, sets: 0, reps: 0, acts: new Set() });
+    const g = bySession.get(s.session);
+    g.sets++; g.reps += s.reps; g.acts.add(s.activity);
+  }
+  const rows = [...bySession.values()].map((g) =>
+    `<tr class="sessionRow" data-session="${esc(g.started)}"><td>${esc(time(g.started))}</td>
+      <td>${[...g.acts].map((a) => esc(tr(a))).join(", ")}</td><td>${g.sets}</td><td>${g.reps}</td></tr>`).join("");
   const acts = [...day.activities].map((a) => esc(tr(a))).join(", ");
+
+  const hasSets = day.sets.length > 0;
+  const cardio = day.cardio || [];
+  const cardioRows = cardio.map((c) => {
+    // Pace goes in the title rather than a column: it is meaningless for a
+    // rowing machine or a gym class, and an empty sixth column on every such
+    // row is worse than a tooltip on the rows that have one.
+    const p = pace(c.seconds, c.metres);
+    return `<tr><td>${esc(time(c.at))}</td><td>${esc(c.sport)}</td>
+      <td>${esc(fmtDuration(c.seconds))}</td>
+      <td${p ? ` title="${esc(tr("paceLabel", { pace: p }))}"` : ""}>${
+        esc(fmtDistance(c.metres) || "—")}</td>
+      <td>${c.avgHr ? Math.round(c.avgHr) : "—"}</td></tr>`;
+  }).join("");
+  const cardioBlock = cardio.length ? `
+    <div style="font-weight:600;margin-top:${hasSets ? "14px" : "0"}">${esc(tr("cardio"))}</div>
+    <p class="sub" style="margin:2px 0 8px">${esc(nActs(cardio.length))} · ${
+      esc(fmtDuration(day.cardioSeconds))}${
+      day.cardioMetres ? " · " + esc(fmtDistance(day.cardioMetres)) : ""}</p>
+    <table><thead><tr><th>${esc(tr("time"))}</th><th>${esc(tr("sport"))}</th>
+      <th>${esc(tr("duration"))}</th><th>${esc(tr("distance"))}</th>
+      <th>${esc(tr("avgHrCol"))}</th></tr></thead>
+      <tbody>${cardioRows}</tbody></table>
+    <p class="sub" style="margin:8px 0 0">${esc(tr("cardioSource"))}</p>` : "";
+
+  /* Sets and cardio get separate summaries. Reps-and-load and
+   * time-and-distance do not average into one sentence, and a day with only a
+   * run would otherwise open with "0 sets, 0 reps" over an empty table. */
   return `<div class="daybox">
     <div style="font-weight:600">${esc(tr("modeTraining"))}</div>
+    ${hasSets ? `
     <p class="sub" style="margin:2px 0 8px">${esc(tr("daySub", {
       sets: nSets(day.sets.length), reps: nReps(day.reps),
     }))}${day.sessions.size > 1 ? " · " + esc(tr("nSessionsOnDay", { n: day.sessions.size })) : ""
     }${acts ? " · " + acts : ""}</p>
     <table><thead><tr><th>${esc(tr("time"))}</th><th>${esc(tr("movement"))}</th>
-      <th>${esc(tr("reps"))}</th><th>${esc(tr("load"))}</th></tr></thead>
+      <th>${esc(tr("sets"))}</th><th>${esc(tr("reps"))}</th></tr></thead>
       <tbody>${rows}</tbody></table>
-    <p class="sub" style="margin:8px 0 0">${esc(tr("tapSessionHint"))}</p>
+    <p class="sub" style="margin:8px 0 0">${esc(tr("tapSessionHint"))}</p>` : ""}${cardioBlock}${btns}
   </div>`;
 }
 
@@ -941,8 +1000,8 @@ export function weightFormHTML(key, todayKey, current) {
  * does not lose the selected day, and re-rendering after a new set does not
  * throw the athlete back to today.
  */
-export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, vitals, view, today = new Date()) {
-  const days = collectDays(sessions);
+export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, vitals, cardio, view, today = new Date()) {
+  const days = collectDays(sessions, cardio);
   const mealDays = collectMeals(meals);
   const diaryDays = collectDiary(diary);
   const wts = collectWeights(weights);

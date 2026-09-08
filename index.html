@@ -544,6 +544,7 @@ import { Overlay } from "./src/overlay.js";
 // called the array.
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
 import { ensembleRep } from "./src/ensemble.js";
+import { neckLoadHTML } from "./src/neckload.js";
 import { makeZip, svgToPng, blobBytes } from "./src/zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
          peakJRF, selfTest as forceSelfTest,
@@ -1585,6 +1586,7 @@ function renderDash() {
   if ($("addDiaryBtn")) $("addDiaryBtn").onclick = () => openAdd("diary");
   if ($("shareBtn")) $("shareBtn").onclick = shareMonth;
   if ($("newTrainingBtn")) $("newTrainingBtn").onclick = () => openAdd("weight");
+  if ($("trainImport")) $("trainImport").onclick = () => $("importProfilesFile").click();
   if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);
   if ($("sleepSave")) $("sleepSave").onclick = () => {
     if (!setSleep({ profile: currentAthlete(), at: atOnDay(dashView.selected),
@@ -1763,7 +1765,8 @@ function renderSessionView() {
       ${t ? `<table><thead><tr><th>${tr("measure")}</th><th>${tr("firstSet")}</th><th>${tr("lastSet")}</th><th>${tr("change")}</th></tr></thead>
         <tbody>${t}</tbody></table>
         <p class="note">${tr("noteChangeFirstLast")}</p>`
-        : `<p class="note">${tr("noteNotEnoughSets")}</p>`}` : ""}`;
+        : `<p class="note">${tr("noteNotEnoughSets")}</p>`}` : ""}
+    ${sess.sets.some((x) => x.activity === "neck") ? neckLoadHTML() : ""}`;
 
   const pv = $("sessionPeakVar");
   if (pv) pv.onchange = () => { sessionViewVar = pv.value; renderSessionView(); };
@@ -1790,6 +1793,7 @@ function renderSummary() {
       <tbody>${t}</tbody></table>
       <p class="note">${tr("noteChangeFirstLast")}</p>`
       : `<p class="note">${tr("noteNotEnoughSets")}</p>`}
+    ${getSession().sets.some((x) => x.activity === "neck") ? neckLoadHTML() : ""}
     <button class="ghost" id="saveExportBtn" style="margin-top:12px">${tr("saveExport")}</button>
     <button class="ghost" id="closeSummaryBtn" style="margin-top:8px">${tr("close")}</button>
     <div class="status" id="sessionZipStatus"></div>`;

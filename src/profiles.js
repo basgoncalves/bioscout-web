@@ -24,6 +24,7 @@ const WKEY = "bioscout.weights.v1";
 const CYKEY = "bioscout.cycle.v1";
 const SLKEY = "bioscout.sleep.v1";
 const VKEY = "bioscout.vitals.v1";
+const CDKEY = "bioscout.cardio.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
  * one; curves are not, so only the most recent sets keep those.
@@ -388,6 +389,63 @@ export function clearVitals(at, profile = null) {
   return kept.length;
 }
 
+// --- cardio (imported endurance activities) ---------------------------------
+/* Keyed on the SOURCE's own id, not on the day: a day can hold a commute ride
+ * and an evening run, and re-importing must recognise both rather than
+ * stacking copies. See cardio.js for why these are not sessions. */
+const CARDIO_MAX = 5000;
+
+export function listCardio() {
+  const c = read(CDKEY, []);
+  return Array.isArray(c) ? c : [];
+}
+
+/**
+ * Merge imported activities in, by id.
+ *
+ * Re-importing the same window is a no-op, and an activity renamed or
+ * re-typed on the source updates in place instead of arriving as a second
+ * copy. Only a change that IS one is counted, so an import that found nothing
+ * new can say exactly that.
+ */
+export function mergeCardio(items) {
+  const all = listCardio();
+  const at = new Map(all.map((c, i) => [c.id, i]));
+  let added = 0, updated = 0;
+  for (const c of items || []) {
+    if (!c || !c.id || !c.at) continue;
+    const i = at.get(c.id);
+    if (i === undefined) { all.push(c); at.set(c.id, all.length - 1); added++; continue; }
+    const merged = { ...all[i], ...c };
+    if (JSON.stringify(merged) !== JSON.stringify(all[i])) { all[i] = merged; updated++; }
+  }
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(CDKEY, all.slice(-CARDIO_MAX));
+  return { added, updated };
+}
+
+export function deleteCardio(id, profile = null) {
+  const kept = listCardio().filter((c) => !(c.id === id && c.profile === profile));
+  write(CDKEY, kept);
+  return kept.length;
+}
+
+/**
+ * When the newest stored activity happened, as a Date, or null.
+ *
+ * This is what makes a repeat import cheap: the source is asked only for what
+ * has happened since, rather than for the whole history every time.
+ */
+export function latestCardioAt(profile = null) {
+  let newest = null;
+  for (const c of listCardio()) {
+    if (profile && c.profile !== profile) continue;
+    if (!newest || String(c.at) > newest) newest = String(c.at);
+  }
+  const d = newest ? new Date(newest) : null;
+  return d && !Number.isNaN(d.getTime()) ? d : null;
+}
+
 // --- stored waveforms ------------------------------------------------------
 const r3 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(3) : 0));
 const r2 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(2) : 0));
@@ -468,6 +526,7 @@ export function exportAll() {
     cycle: listCycle(),
     sleep: listSleep(),
     vitals: listVitals(),
+    cardio: listCardio(),
   };
 }
 
@@ -488,7 +547,7 @@ export function importAll(data) {
   }
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
                    sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
-                   weightsAdded: 0, cycleAdded: 0, sleepAdded: 0, vitalsAdded: 0 };
+                   weightsAdded: 0, cycleAdded: 0, sleepAdded: 0, vitalsAdded: 0, cardioAdded: 0 };
 
   const store = listProfiles();
   for (const p of (data.profiles && data.profiles.profiles) || []) {
@@ -579,6 +638,12 @@ export function importAll(data) {
   }
   vit.sort((a, b) => String(a.at).localeCompare(String(b.at)));
   write(VKEY, vit.slice(-VITALS_MAX));
+
+  // Cardio merges on the source id, which mergeCardio already does, so the
+  // import path is the same code the Strava button uses.
+  if (Array.isArray(data.cardio) && data.cardio.length) {
+    report.cardioAdded = mergeCardio(data.cardio).added;
+  }
 
   // Photos are not in the export. They live in IndexedDB and would multiply
   // the file size by an order of magnitude in base64 -- an export you cannot
