@@ -77,11 +77,15 @@
   button.moodBtn.m3.on { background:#7a7a7a; } button.moodBtn.m4.on { background:#4d8a5a; }
   button.moodBtn.m5.on { background:#3f8f6f; }
   .chips { display:flex; flex-wrap:wrap; gap:6px; }
-  .itemRow { display:flex; align-items:center; gap:5px; margin-bottom:6px; }
+  .itemRow { display:flex; align-items:center; gap:4px; margin-bottom:6px; }
   .itemRow input.itemName { flex:1; min-width:0; margin:0; padding:9px; font-size:13.5px; }
-  .itemRow input.itemGrams { width:56px; flex:none; margin:0; padding:9px 4px; text-align:center;
+  .itemRow input.itemGrams { width:48px; flex:none; margin:0; padding:9px 2px; text-align:center;
                              font-size:13.5px; }
-  .itemRow select.itemUnit { width:64px; flex:none; margin:0; padding:9px 2px; font-size:12.5px; }
+  /* Narrower than a normal select and centred: it only ever needs to show a
+     couple of characters ("g", "Kg"), and the row is already tight without
+     it also taking a full-size field's width away from the food name. */
+  .itemRow select.itemUnit { width:42px; flex:none; margin:0; padding:9px 1px; font-size:11px;
+                             text-align:center; text-align-last:center; }
   .itemKcal { width:42px; text-align:right; font-size:12.5px; color:var(--muted);
               font-variant-numeric:tabular-nums; }
   .steps { margin-top:8px; }

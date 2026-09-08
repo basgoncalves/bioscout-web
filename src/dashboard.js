@@ -932,7 +932,6 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
         : ""; })()}
       <div class="row" style="margin-top:8px">
         <button class="ghost" id="addBtn" style="margin:0;padding:10px">${esc(tr("addEntry"))}</button>
-        <button class="ghost" id="shareBtn" style="margin:0;padding:10px">${esc(tr("shareMonth"))}</button>
       </div>
     </div>
     ${calendarHTML({ meals: mealDays, diary: diaryDays, sleep: sleepDays }[mode] || days,
@@ -949,5 +948,6 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
       <p class="sub" style="margin:6px 0 8px">${esc(tr("uploadSoon"))}</p>
       <button type="button" class="ghost" id="uploadBtn" disabled>${esc(tr("uploadData"))}</button>
     </div>
+    <button class="ghost" id="shareBtn" style="margin-top:10px">${esc(tr("shareMonth"))}</button>
     <p class="sub" style="margin:12px 0 0">${esc(tr("dashboardCap"))}</p>`;
 }
