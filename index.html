@@ -490,6 +490,12 @@
     </label>
     <p class="note" style="margin:2px 0 0" data-i18n="gestureNote">Two quick fists, either hand.
       For when the phone is across the room.</p>
+    <div id="lensRow" class="hidden" style="margin-top:10px">
+      <label for="lensSel" data-i18n="lens">Lens</label>
+      <select id="lensSel"></select>
+      <p class="note" style="margin:2px 0 0" data-i18n="lensNote">An ultra-wide lens fits your whole
+        body in from much closer. Zoom is set as wide as the camera allows.</p>
+    </div>
     <button class="ghost" id="switchBtn" data-i18n="switchCamera">Switch camera</button>
     <button class="ghost" id="stopBtn" data-i18n="closeCamera">Close camera</button>
   </div>
@@ -512,7 +518,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 59;
+window.BUILD = 60;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1479,14 +1485,6 @@ $("switchUserBtn").onclick = () => { renderLogin(); showView("viewLogin"); };
  * changed something a screen and a half away and read as a dead button. */
 /* Escape must not silently dismiss this one -- "I agree" is the only exit,
  * so a first-time visit can't be skipped by tapping outside or hitting Esc. */
-$("gestureOn").checked = gestureOn;
-$("gestureOn").onchange = () => {
-  gestureOn = $("gestureOn").checked;
-  gesture.reset();
-  try { localStorage.setItem(GKEY, gestureOn ? "1" : "0"); } catch { /* private window */ }
-  say(tr(gestureOn ? "gestureArmed" : "gestureOff"));
-};
-
 $("termsDlg").addEventListener("cancel", (e) => e.preventDefault());
 $("termsLinkBtn").onclick = (e) => { e.preventDefault(); $("termsDlg").showModal(); };
 $("termsAgreeBtn").onclick = () => { acceptTerms(); $("termsDlg").close(); };
@@ -2458,6 +2456,78 @@ if (await loadMediaPipe()) {
 // --- camera ----------------------------------------------------------------
 const video = $("video"), overlay = $("overlay"), ctx = overlay.getContext("2d");
 
+/* Getting the whole body in the frame, without walking further back.
+ *
+ * Every refused take in this app so far has been the same thing: the athlete
+ * is too close and the feet are out of shot, and the advice was always to step
+ * back -- which needs a room they may not have. A phone usually has a wider
+ * answer already in it.
+ *
+ * Two separate mechanisms, and they are not interchangeable:
+ *
+ *   ZOOM is a property of the open track. Phones often start a stream at 1x
+ *   when the camera can go below it, so asking for the minimum is free field
+ *   of view that was there all along.
+ *
+ *   THE ULTRA-WIDE (0.5x) IS A DIFFERENT CAMERA, not a zoom level. It has its
+ *   own deviceId and the only way to it is to open that device by id. No
+ *   amount of constraining the current track will find it.
+ *
+ * Both are best-effort: getCapabilities is unimplemented on some browsers and
+ * empty on others, and a phone with one rear camera simply has nothing to
+ * offer. Nothing here throws when that is the case.
+ */
+let lensId = null;                       // the deviceId the athlete picked
+
+function videoConstraints() {
+  const v = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+  if (lensId) v.deviceId = { exact: lensId };
+  else v.facingMode = facing;
+  return v;
+}
+
+/** Pull the zoom down to whatever the track's minimum is. */
+async function widenLens() {
+  const track = stream?.getVideoTracks?.()[0];
+  if (!track?.getCapabilities) return;
+  try {
+    const cap = track.getCapabilities();
+    if (cap.zoom && Number.isFinite(cap.zoom.min)) {
+      await track.applyConstraints({ advanced: [{ zoom: cap.zoom.min }] });
+    }
+  } catch { /* the browser does not do zoom; the picture is still a picture */ }
+}
+
+/* Label the cameras and let them choose. Labels are blank until permission has
+ * been granted, which is why this runs after the stream is open rather than
+ * on load -- before that the list is real but anonymous, and "camera 2 of 4"
+ * helps nobody find the ultra-wide. */
+async function listLenses() {
+  if (!navigator.mediaDevices?.enumerateDevices) return;
+  let cams = [];
+  try {
+    cams = (await navigator.mediaDevices.enumerateDevices())
+      .filter((d) => d.kind === "videoinput");
+  } catch { return; }
+  const row = $("lensRow"), sel = $("lensSel");
+  if (cams.length < 2) { row.classList.add("hidden"); return; }
+  const current = stream?.getVideoTracks?.()[0]?.getSettings?.().deviceId || lensId;
+  sel.innerHTML = cams.map((c, i) =>
+    `<option value="${esc(c.deviceId)}"${c.deviceId === current ? " selected" : ""}>${
+      esc(c.label || tr("lensN", { n: i + 1 }))}</option>`).join("");
+  row.classList.remove("hidden");
+  sel.onchange = async () => {
+    lensId = sel.value;
+    // Reopening is the only way to change camera: a track is bound to its
+    // device for life.
+    for (const t of stream?.getTracks?.() || []) t.stop();
+    stream = null;
+    $("startBtn").classList.remove("hidden");
+    $("stage").classList.remove("on");
+    await startCamera();
+  };
+}
+
 async function startCamera() {
   if (!window.isSecureContext) {
     say(tr("sayNeedsHttps"), true);
@@ -2465,7 +2535,7 @@ async function startCamera() {
   }
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: videoConstraints(),
       audio: false,
     });
   } catch (err) {
@@ -2475,6 +2545,8 @@ async function startCamera() {
   video.srcObject = stream;
   video.classList.toggle("rear", facing !== "user");
   await video.play();
+  await widenLens();
+  await listLenses();
   $("stage").classList.add("on");
   $("controls").classList.remove("hidden");
   $("startBtn").classList.add("hidden");
@@ -2548,6 +2620,22 @@ let gestureOn = (() => {
   try { return localStorage.getItem(GKEY) !== "0"; } catch { return true; }
 })();
 
+/* Wired HERE, immediately below the declaration, and not up with the other
+ * dialog wiring where it started.
+ *
+ * `let` is hoisted but not initialised, so reading gestureOn from higher up
+ * the module threw a temporal-dead-zone error -- which, at module top level,
+ * kills the whole script. The visible symptom was the login screen listing no
+ * athletes at all: renderLogin never ran, and nothing said why, because the
+ * exception happened before any of the code that reports exceptions. */
+$("gestureOn").checked = gestureOn;
+$("gestureOn").onchange = () => {
+  gestureOn = $("gestureOn").checked;
+  gesture.reset();
+  try { localStorage.setItem(GKEY, gestureOn ? "1" : "0"); } catch { /* private window */ }
+  say(tr(gestureOn ? "gestureArmed" : "gestureOff"));
+};
+
 function draw(res) {
   const w = video.videoWidth, h = video.videoHeight;
   if (!w) return;
@@ -2599,10 +2687,15 @@ $("switchBtn").onclick = async () => {
   if (stream) { stream.getTracks().forEach((t) => t.stop()); await startCameraQuiet(); }
 };
 async function startCameraQuiet() {
+  // Switch camera resets the lens choice: the front camera does not have the
+  // back camera's deviceId, and holding on to it would reopen the same lens.
+  lensId = null;
   stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    video: videoConstraints(), audio: false });
   video.srcObject = stream;
   video.classList.toggle("rear", facing !== "user");
+  await widenLens();
+  await listLenses();
   await video.play();
 }
 
