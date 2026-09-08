@@ -69,7 +69,10 @@ for (let i = 0; i < 20; i++) {          // ten strides per leg, the recommendati
     cadence_spm: 110, duty_factor: 0.60, knee_asymmetry_deg: 2,
   });
 }
+const tiptoeReps = [...Array(26)].map(() => ({ stance_side: "l", heel_lift: 0.5 }))
+  .concat([...Array(25)].map(() => ({ stance_side: "r", heel_lift: 0.5 })));
 const tests = {
+  tiptoe: { activity: "heelraise", perRep: tiptoeReps },
   gait: { activity: "run", perRep: gaitReps },
   squat: { activity: "squat", perRep: [
     { knee_flex_max_deg: 115 }, { knee_flex_max_deg: 118 }, { knee_flex_max_deg: 112 }] },
@@ -130,7 +133,7 @@ ok(lrep.score < rep.score, "and it costs the overall score",
 /* Nothing recorded reports nothing, rather than a flattering default. */
 const empty = A.assessReport({});
 ok(empty.score === null, "an empty assessment has no score");
-ok(empty.missing.length === 3, "and lists all three tests as missing");
+ok(empty.missing.length === A.ASSESS_TESTS.length, "and lists every test as missing");
 
 /* The rendered report survives every state it can be in. */
 for (const [name, r] of [["full", rep], ["short", short], ["empty", empty]]) {
@@ -138,6 +141,58 @@ for (const [name, r] of [["full", rep], ["short", short], ["empty", empty]]) {
   ok(typeof html === "string" && html.length > 0 && !html.includes("undefined"),
      `${name} report renders without holes`);
 }
+
+/* --- the tip-toe test ---------------------------------------------------
+ * The review it comes from concluded that no validated threshold exists, so
+ * the app's job is to report the count and keep the grading attached, never to
+ * turn it into a verdict. */
+ok(rep.tiptoe.left === 26 && rep.tiptoe.right === 25, "both legs are counted separately");
+ok(rep.tiptoe.weaker === 25, "the weaker leg is the one reported against the thresholds");
+ok(Math.abs(rep.tiptoe.lsi - 96.15) < 0.1, "symmetry is weaker over stronger",
+   rep.tiptoe.lsi.toFixed(2));
+ok(rep.tiptoe.byDistance.length === 3, "with a row per distance");
+ok(rep.tiptoe.byDistance[0].reps.meets, "25 a side meets the 5 km consensus value");
+ok(!rep.tiptoe.byDistance[2].reps.comfortably,
+   "but not comfortably the 20 km one");
+
+/* The tip-toe result must not reach the score: every threshold behind it is
+ * graded very low, and a score is read as a verdict. */
+const withTT = A.assessReport(tests).score;
+const noTT = A.assessReport({ ...tests, tiptoe: undefined }).score;
+ok(withTT === noTT, "tip-toe capacity does not move the overall score",
+   `${withTT} vs ${noTT}`);
+
+const ttHtml = A.assessReportHTML(rep);
+ok(/VERY LOW/i.test(ttHtml), "the rendered report carries the evidence grading");
+ok(ttHtml.includes("not a gate"), "and says the values are not a gate");
+
+/* --- filing an assessment ------------------------------------------------ */
+const store = {};
+globalThis.localStorage = {
+  getItem: (k) => (k in store ? store[k] : null),
+  setItem: (k, v) => { store[k] = String(v); },
+  removeItem: (k) => { delete store[k]; },
+};
+
+A.clearAssess();
+A.startAssess("Ada");
+const attendance = A.finishAssess("Ada");
+ok(attendance.attendanceOnly, "an assessment with nothing recorded still files");
+ok(attendance.missing.length === A.ASSESS_TESTS.length, "with every test marked not recorded");
+ok(attendance.score === null, "and no score invented for it");
+ok(A.listAssessments("Ada").length === 1, "it lands in the history");
+ok(A.getAssess("Ada") === null, "and the working assessment is cleared");
+
+A.startAssess("Ada");
+A.putAssessTest("squat", tests.squat, "Ada");
+const partial = A.finishAssess("Ada");
+ok(partial.recorded.includes("squat"), "a partial assessment files what it has");
+ok(!partial.attendanceOnly, "and is not attendance-only");
+ok(partial.missing.includes("gait") && partial.missing.includes("cmj"),
+   "naming the gaps so a later visit can fill them",
+   partial.missing.join(","));
+ok(A.listAssessments("Ada").length === 2, "history keeps both");
+ok(A.listAssessments("Bob").length === 0, "and is per athlete");
 
 console.log(fails ? `\n${fails} FAILED` : "\nAll checks passed");
 process.exit(fails ? 1 : 0);

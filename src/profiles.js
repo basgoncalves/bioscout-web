@@ -718,6 +718,11 @@ function summariseRep(r, activity) {
     o.depth_m = r.depth_m != null ? +r.depth_m.toFixed(3) : null;
     o.down_s = +r.eccentric_s?.toFixed(2);
     o.up_s = +r.concentric_s?.toFixed(2);
+  } else if (activity == "heelraise") {
+    o.stance_side = r.stance_side ?? null;
+    o.heel_lift = r.heel_lift ?? null;
+    o.up_s = r.up_s ?? null;
+    o.down_s = r.down_s ?? null;
   } else if (activity === "run" || activity === "walk") {
     // Which foot the stride belongs to. Without it a gait recording cannot be
     // split left from right, which is most of what the assessment reads.

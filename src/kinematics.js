@@ -1207,6 +1207,124 @@ export const DEFAULT_WALK_CFG = {
   stationaryM: 0.35,
 };
 
+/* --- heel raises (the tip-toe test) --------------------------------------
+ *
+ * A heel raise is the smallest movement this app measures: the heel comes up a
+ * few centimetres while the toe stays where it is. Everything else here is
+ * found from how far the body travels, which is useless at this scale, so the
+ * signal is the heel's height ABOVE THE TOE OF THE SAME FOOT rather than above
+ * the floor. That difference matters: it cancels the camera drifting, the
+ * athlete swaying, and the floor line being wrong, because both landmarks move
+ * together with all three.
+ *
+ * Scaled by foot length -- the heel-to-toe distance while the foot is flat --
+ * rather than by shank, so "a full raise" means the same thing on a tall
+ * athlete and a short one, and so the number has a meaning: a lift of 1.0 is
+ * the heel raised by the length of the foot.
+ */
+export function buildHeelRaiseFeatures(poses) {
+  const frames = Object.keys(poses).map(Number).sort((a, b) => a - b);
+  if (!frames.length) throw new Error("no pose frames");
+  const lo = frames[0], hi = frames[frames.length - 1], n = hi - lo + 1;
+  const F = {};
+  for (const k of ["lift_l", "lift_r", "heel_y_l", "heel_y_r", "toe_y_l", "toe_y_r",
+                   "foot_len_l", "foot_len_r", "hip_cy", "knee_flex_l", "knee_flex_r"]) {
+    F[k] = new Array(n).fill(NaN);
+  }
+  for (const fi of frames) {
+    const i = fi - lo, lm = poses[fi];
+    const lh = lm.left_heel, rh = lm.right_heel;
+    const lt = lm.left_foot_index, rt = lm.right_foot_index;
+    const lhip = lm.left_hip, rhip = lm.right_hip;
+    const lk = lm.left_knee, rk = lm.right_knee, la = lm.left_ankle, ra = lm.right_ankle;
+    if (lh) F.heel_y_l[i] = lh[1];
+    if (rh) F.heel_y_r[i] = rh[1];
+    if (lt) F.toe_y_l[i] = lt[1];
+    if (rt) F.toe_y_r[i] = rt[1];
+    if (lh && lt) F.foot_len_l[i] = Math.hypot(lt[0] - lh[0], lt[1] - lh[1]);
+    if (rh && rt) F.foot_len_r[i] = Math.hypot(rt[0] - rh[0], rt[1] - rh[1]);
+    const hp = mid(lhip, rhip);
+    if (hp) F.hip_cy[i] = hp[1];
+    F.knee_flex_l[i] = 180 - angle3(lhip, lk, la);
+    F.knee_flex_r[i] = 180 - angle3(rhip, rk, ra);
+  }
+  // Foot length from the flat-footed frames: the 80th percentile, because a
+  // raised heel SHORTENS the heel-to-toe distance in the image and the median
+  // would be dragged down by the raises themselves.
+  for (const sd of ["l", "r"]) {
+    const flat = nanpercentile(F["foot_len_" + sd], 80);
+    const len = flat > 1e-6 ? flat : 1;
+    for (let i = 0; i < n; i++) {
+      // y grows downward, so the heel being ABOVE the toe is toe_y - heel_y.
+      F["lift_" + sd][i] = (F["toe_y_" + sd][i] - F["heel_y_" + sd][i]) / len;
+    }
+    // Standing is not lift zero: the heel landmark sits slightly above the toe
+    // even flat-footed. Subtract that resting offset so a rep is measured from
+    // where this athlete's foot actually rests.
+    const rest = nanpercentile(F["lift_" + sd], 20);
+    for (let i = 0; i < n; i++) F["lift_" + sd][i] -= rest;
+    F["_footLen_" + sd] = len;
+  }
+  F._lo = lo; F._n = n; F._scale = nanmedian(F.foot_len_l) || 1;
+  F._coverage = frames.length / n;
+  return F;
+}
+
+export const DEFAULT_HEELRAISE_CFG = {
+  // A raise counts once the heel is a third of a foot length up. Full range in
+  // the standardised test is higher than that, but the test is scored on reps
+  // and a threshold set at the ideal would silently drop the late, smaller
+  // reps -- which is exactly where the endurance information is.
+  minLift: 0.33,
+  minRepFrames: 8,      // ~0.3 s at 30 fps: faster than that is a bounce
+  smoothWin: 5,
+};
+
+/* One rep is one heel lift and return, counted per foot. Both feet are counted
+ * from the same clip and each rep carries the side it happened on, so a single
+ * recording gives the left count, the right count, and the symmetry between
+ * them -- which is the comparison the test is usually run for. */
+export function findHeelRaiseReps(F, cfg = DEFAULT_HEELRAISE_CFG) {
+  const perSide = (sd) => {
+    const y = smooth(interpNan(F["lift_" + sd]), cfg.smoothWin);
+    const peaks = localMaxima(y, cfg.minRepFrames, cfg.minLift);
+    const out = [];
+    for (let k = 0; k < peaks.length; k++) {
+      const pk = peaks[k];
+      const left = k > 0 ? peaks[k - 1] : 0;
+      const right = k < peaks.length - 1 ? peaks[k + 1] : F._n - 1;
+      // Down either side of the peak: the rep runs trough to trough, so the
+      // return to the floor is inside it rather than being someone else's rep.
+      const t0 = pk > left ? argmin(y, left, pk) : left;
+      const t1 = right > pk ? argmin(y, pk, right) : right;
+      if (t1 - t0 < cfg.minRepFrames) continue;
+      out.push([t0, pk, t1]);
+    }
+    return out;
+  };
+  const l = perSide("l"), r = perSide("r");
+  const tagged = [...l.map((b) => ({ b, sd: "l" })), ...r.map((b) => ({ b, sd: "r" }))]
+    .sort((p, q) => p.b[0] - q.b[0]);
+  if (!tagged.length) {
+    return { reps: [], repSides: [], sideReps: { l, r }, depth: F.lift_l,
+             refused: "noHeelRaises" };
+  }
+  return { reps: tagged.map((t) => t.b), repSides: tagged.map((t) => t.sd),
+           sideReps: { l, r }, depth: F.lift_l };
+}
+
+/** Per-rep numbers for a heel raise: how high, and how long it took. */
+export function heelRaiseMetrics(F, rep, fps, sd) {
+  const [t0, pk, t1] = rep;
+  const y = F["lift_" + sd];
+  return {
+    heel_lift: +(y[pk] || 0).toFixed(3),
+    up_s: +((pk - t0) / fps).toFixed(2),
+    down_s: +((t1 - pk) / fps).toFixed(2),
+    stance_side: sd,
+  };
+}
+
 export const DEFAULT_SIDESTEP_CFG = {
   // A side step is judged by how far the hips travel sideways, in shank
   // lengths. 0.5 is about a third of a metre on an adult -- below that it is
@@ -1432,6 +1550,17 @@ export const ACTIVITIES = {
    * because the athlete was asked for one of them: an assessment that says
    * "walk" and reports "running" is telling them their test was misread, and
    * the refusal text has to talk about the task they actually performed. */
+  /* The tip-toe test. Per-leg because the two sides are counted separately and
+   * the comparison between them is most of the point; not `travels`, because
+   * the athlete stands still, so the kinetics caveat that follows travelling
+   * does not apply. */
+  heelraise: {
+    label: "heel raises", perLeg: true, heelRaise: true,
+    columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_HEELRAISE_CFG,
+    features: buildHeelRaiseFeatures, findReps: findHeelRaiseReps,
+    coords: perLegRepCoordinates, reference: squatReferencePositions,
+    phases: ["up_s", "down_s"],
+  },
   walk: {
     label: "walking", perLeg: true, travels: true, cyclic: true, gait: true,
     columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_WALK_CFG,

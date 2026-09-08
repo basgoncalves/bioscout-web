@@ -429,6 +429,7 @@
           <option value="cmj" data-i18n="cmj">Countermovement jump</option>
           <option value="sj" data-i18n="sj">Squat jump</option>
           <option value="slsquat" data-i18n="slsquat">Single-leg squat</option>
+          <option value="heelraise" data-i18n="heelraise">Heel raises (tip-toe)</option>
           <option value="walk" data-i18n="walk">Walking</option>
           <option value="run" data-i18n="run">Running</option>
           <option value="sidestep" data-i18n="sidestep">Side step</option>
@@ -504,7 +505,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 52;
+window.BUILD = 53;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -563,7 +564,7 @@ import { neckLoadHTML } from "./src/neckload.js";
 import { framingWatcher } from "./src/framing.js";
 import { ASSESS_TESTS, assessReport, assessReportHTML, getAssess, startAssess,
          putAssessTest, clearAssess, nextTest, targetFor, countReps,
-         setTarget } from "./src/assess.js";
+         setTarget, finishAssess, listAssessments } from "./src/assess.js";
 import { makeZip, svgToPng, blobBytes } from "./src/zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
          peakJRF, selfTest as forceSelfTest,
@@ -1877,8 +1878,25 @@ function renderAssess() {
       n: doneN, total: ASSESS_TESTS.length }))}</p>
     ${steps}
     <div id="assessReportBox" style="margin-top:12px">${assessReportHTML(report)}</div>
+    <button type="button" id="assessFinishBtn" style="margin-top:12px">${
+      esc(tr("assessFinish"))}</button>
+    <p class="note" style="margin:6px 0 0">${esc(report.done.length
+      ? tr("assessFinishNote", { n: report.done.length, total: ASSESS_TESTS.length })
+      : tr("assessFinishEmpty"))}</p>
     <button type="button" class="ghost" id="assessRestartBtn" style="margin-top:10px">${
-      esc(tr("assessRestart"))}</button>`;
+      esc(tr("assessRestart"))}</button>
+    ${(() => {
+      const past = listAssessments(currentAthlete()).slice(-5).reverse();
+      if (!past.length) return "";
+      return `<div class="daybox" style="margin-top:12px">
+        <div style="font-weight:600">${esc(tr("assessPast"))}</div>
+        <table><tbody>${past.map((a) => `<tr>
+          <td>${esc(new Date(a.finished).toLocaleDateString())}</td>
+          <td>${esc(a.attendanceOnly ? tr("assessAttendanceOnly")
+                    : tr("assessFiledTests", { n: a.recorded.length, total: ASSESS_TESTS.length }))}</td>
+          <td style="text-align:right">${a.score == null ? "—" : a.score}</td></tr>`).join("")}
+        </tbody></table></div>`;
+    })()}`;
 
   for (const t of ASSESS_TESTS) {
     const b = $("assessRec_" + t.id);
@@ -1890,6 +1908,14 @@ function renderAssess() {
   }
   $("assessRestartBtn").onclick = () => {
     clearAssess(); startAssess(currentAthlete()); renderAssess();
+  };
+  // Files whatever is there, including nothing: the visit happened either way.
+  $("assessFinishBtn").onclick = () => {
+    const filed = finishAssess(currentAthlete());
+    say(filed.attendanceOnly ? tr("sayAssessAttendance")
+        : tr("sayAssessFiled", { n: filed.recorded.length, total: ASSESS_TESTS.length }));
+    startAssess(currentAthlete());
+    renderAssess();
   };
   if (next && !report.complete) { /* nothing to focus; the list is short */ }
 }
@@ -3612,6 +3638,7 @@ function render(res, fps) {
     el.innerHTML = `<h1 style="font-size:17px">${tr("noRepsFound", { activity: tr(res.activity) })}</h1>
       ${res.refused === "feet" ? `<p class="note banner">${
         tr("feetNotInFrame", { pct: ((res.footCoverage ?? 0) * 100).toFixed(0) })}</p>`
+      : res.refused === "noHeelRaises" ? `<p class="note banner">${tr("noHeelRaises")}</p>`
       : res.refused === "noStrides" ? `<p class="note banner">${
           tr(res.activity === "walk" ? "noStridesWalk" : "noStrides")}</p>`
       : `<p class="note">${tr("noteCoverage", {
