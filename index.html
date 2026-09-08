@@ -525,7 +525,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 65;
+window.BUILD = 66;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1754,6 +1754,33 @@ function renderDash() {
     renderDash();
   };
   if ($("vitalsImport")) $("vitalsImport").onclick = () => $("importProfilesFile").click();
+  /* An assessment filed on the day being looked at, offered on the day being
+   * looked at. The calendar already outlines those days in red, which tells
+   * the athlete something happened without giving them any way to read it --
+   * and the list on the assessment screen is somewhere they have no reason to
+   * go looking. */
+  (() => {
+    const filed = listAssessments(currentAthlete())
+      .filter((a) => a.finished && dayKey(new Date(a.finished)) === dashView.selected);
+    if (!filed.length) return;
+    const box = document.createElement("div");
+    box.className = "daybox";
+    box.innerHTML = `<div style="font-weight:600">${esc(tr("assess"))}</div>
+      ${filed.map((a, i) => `<button type="button" class="ghost filedAssess"
+        data-at="${esc(a.finished)}" style="margin:8px 0 0">${
+        esc(new Date(a.finished).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            + " \u2014 " + (a.attendanceOnly ? tr("assessAttendanceOnly")
+              : tr("assessFiledTests", { n: a.recorded.length, total: ASSESS_TESTS.length })))}</button>`).join("")}`;
+    card.appendChild(box);
+    box.querySelectorAll("button.filedAssess").forEach((b) => {
+      b.onclick = () => {
+        const a = listAssessments(currentAthlete()).find((x) => x.finished === b.dataset.at);
+        if (!a) return;
+        showView("viewAssess");
+        openPastAssessment(a);
+      };
+    });
+  })();
   card.querySelectorAll("tr.sessionRow[data-session]").forEach((row) => {
     row.onclick = () => openSessionView(row.dataset.session);
   });
@@ -1918,7 +1945,16 @@ function renderAssess() {
     ${neckTrainingHTML(dashboardData())}
     ${(() => {
       const past = listAssessments(currentAthlete()).slice(-5).reverse();
-      if (!past.length) return "";
+      /* Shown even when empty. It used to disappear, so an athlete who had
+       * never pressed Finish saw no list, no explanation, and concluded the
+       * app had lost their assessments -- when in truth nothing had ever been
+       * filed. An empty section that says how a record gets here is the
+       * difference between a missing feature and a missing step. */
+      if (!past.length) {
+        return `<div class="daybox" style="margin-top:12px">
+          <div style="font-weight:600">${esc(tr("assessPast"))}</div>
+          <p class="sub" style="margin:2px 0 0">${esc(tr("assessPastNone"))}</p></div>`;
+      }
       return `<div class="daybox" style="margin-top:12px">
         <div style="font-weight:600">${esc(tr("assessPast"))}</div>
         <p class="sub" style="margin:2px 0 8px">${esc(tr("assessPastHint"))}</p>
@@ -2001,8 +2037,13 @@ function beginAssessTest(t) {
   /* If the engine is still downloading, opening the camera now would give
    * them a live picture that cannot be analysed and a button that does
    * nothing. Wait, say so, and open it the moment the engine lands. */
-  if (engineReady) { if (!stream) startCamera().then(syncRecLabel); }
-  else { pendingAssessCamera = true; syncRecLabel(); }
+  if (engineReady) {
+    // Called either way: coming from the previous test the camera is already
+    // open, startCamera is skipped, and the button kept the recorder's word
+    // for it -- "Start recording" on a screen that says Test 2 of 5.
+    if (!stream) startCamera().then(syncRecLabel);
+    syncRecLabel();
+  } else { pendingAssessCamera = true; syncRecLabel(); }
   // The tone is scheduled from the moment recording starts, not from this
   // click: the athlete still has to walk to their mark.
   assessToneFor = t.seconds || 0;
