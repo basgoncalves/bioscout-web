@@ -44,7 +44,19 @@ for (const f of readdirSync("src").filter((f) => f.endsWith(".js") && f !== "sw.
 /* ---- what the page imported ------------------------------------------- */
 
 const imported = new Set();
-for (const m of script.matchAll(/import\s*\{([^}]+)\}\s*from\s*["']([^"']+)["']/g)) {
+
+/* Two ways in, and both count. A name pulled in with `const { X } = await
+ * import(...)` is as imported as one on a static import line -- the module is
+ * simply fetched when it is first needed instead of at page load, which is
+ * how the heavy optional branches (the pose engine, the 3D overlay) avoid
+ * costing anything on a load that never opens them. A checker that knew only
+ * the static form would report those as calls to something never imported,
+ * and the fix for that complaint would be to undo the laziness. */
+const STATIC_IMPORT = /import\s*\{([^}]+)\}\s*from\s*["']([^"']+)["']/g;
+const DYNAMIC_IMPORT =
+  /(?:const|let|var)\s*\{([^{}\n]+)\}\s*=\s*await\s+import\(\s*["']([^"']+)["']\s*\)/g;
+
+for (const m of [...script.matchAll(STATIC_IMPORT), ...script.matchAll(DYNAMIC_IMPORT)]) {
   const from = m[2];
   for (const part of m[1].split(",")) {
     const [orig, alias] = part.split(/\s+as\s+/).map((s) => s.trim());
@@ -74,7 +86,13 @@ for (const re of [/^\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm,
 const offered = new Map();
 for (const [file, names] of exportsOf) for (const n of names) offered.set(n, file);
 
-const used = new Set([...script.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]));
+/* A method call is not a call to an imported name: `spec.findReps(...)` reads
+ * findReps off an object the page already has, and flagging it as a missing
+ * import sent the last reader looking for a bug that was not there. The
+ * lookbehind drops anything preceded by a dot (or by more identifier, which
+ * `\b` alone also let through). A bare call still matches, which is the case
+ * this check exists for. */
+const used = new Set([...script.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]));
 for (const name of used) {
   if (!offered.has(name) || declared.has(name)) continue;
   fail(`calls ${name}(), exported by ${offered.get(name)}, but never imports it`);

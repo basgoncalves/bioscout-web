@@ -503,7 +503,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 48;
+window.BUILD = 49;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1895,6 +1895,37 @@ let assessToneFor = 0;
 let assessTimer = null;
 let avatarBeforeAssess = null;
 
+/* How many reps are in the frames recorded SO FAR, counted with the same
+ * detector that will count them at the end. A second, simpler live counter
+ * would be worse than none: a HUD that says 10 strides and a report that says
+ * 7 makes the athlete distrust the one that is right. It costs one pass over
+ * the frames, which is the same work the final analysis does once, so it runs
+ * on a slow tick rather than every frame. */
+function assessRepsSoFar() {
+  if (!assessStep || frames.length < 20) return 0;
+  const t = ASSESS_TESTS.find((x) => x.id === assessStep);
+  const spec = t && ACTIVITIES[t.activity];
+  if (!spec) return 0;
+  const poses = {};
+  frames.forEach((f, i) => { poses[i] = f.lm; });
+  try {
+    const found = spec.findReps(spec.features(poses), spec.defaultCfg);
+    return (found.reps || []).length;
+  } catch {
+    // Too few frames yet, or a body the detector cannot see. Zero is honest;
+    // the count catches up as soon as there is something to count.
+    return 0;
+  }
+}
+
+/* The HUD line during a test: what is left and what is in the bag. */
+function assessHud(secondsLeft, n, need) {
+  const done = n >= need ? " \u2713" : "";
+  return (secondsLeft == null
+    ? tr("assessHudReps", { n, need })
+    : tr("assessHudTimed", { s: secondsLeft, n, need })) + done;
+}
+
 /* The recorder, dressed as the test page. Nothing about the pose pipeline
  * changes -- what changes is that every choice the protocol has already made
  * (which movement, what load, whether to keep the video) stops being offered,
@@ -2412,23 +2443,26 @@ $("recBtn").onclick = () => {
     $("recBtn").textContent = tr("stopAndAnalyse");
     $("results").classList.add("hidden");
     say(tr("sayRecordingNow"));
-    // The walk test runs to a tone rather than to the athlete's judgement, so
-    // every walk is the same length and the stride count is comparable.
-    if (assessStep && assessToneFor) {
-      let left = assessToneFor;
-      say(tr("assessStopTone"));
-      $("hudRight").textContent = tr("assessSecondsLeft", { n: left });
+    // A test counts itself as it runs: the athlete needs to know whether the
+    // ten strides are in without waiting for the analysis. The walk also runs
+    // to a tone rather than to their judgement, so every walk is the same
+    // length and the stride counts are comparable.
+    if (assessStep) {
+      const t = ASSESS_TESTS.find((x) => x.id === assessStep);
+      let left = assessToneFor || null;
+      if (left) say(tr("assessStopTone"));
+      $("hudRight").textContent = assessHud(left, 0, t.minReps);
       clearInterval(assessTimer);
       assessTimer = setInterval(() => {
-        left -= 1;
         if (!recording) { clearInterval(assessTimer); return; }
-        if (left <= 0) {
+        if (left != null) left -= 1;
+        if (left != null && left <= 0) {
           clearInterval(assessTimer);
           stopTone();
           $("recBtn").click();          // stop and analyse, exactly as a tap would
           return;
         }
-        $("hudRight").textContent = tr("assessSecondsLeft", { n: left });
+        $("hudRight").textContent = assessHud(left, assessRepsSoFar(), t.minReps);
       }, 1000);
     }
   } else {
