@@ -101,16 +101,37 @@ export function interpNan(arr) {
 }
 
 /** numpy.convolve(arr, ones(win)/win, mode='same') -- zero padded, centred. */
+/**
+ * Moving average, over the samples that EXIST.
+ *
+ * The window is divided by how many samples fell inside it, not by its nominal
+ * width. The previous version convolved with a zero-padded array, which meant
+ * the first and last few samples of every signal were mixed with zeros and
+ * pulled toward it -- the final sample of a 3-wide smooth came out at two
+ * thirds of its true value, and of a 9-wide smooth at five ninths.
+ *
+ * That is not cosmetic. Every detector in this file thresholds a smoothed
+ * signal: foot contacts, jump rise, dip depth, hand height. A clip that ended
+ * mid-stride had its last contact pulled below the threshold and lost, and a
+ * signal that was flat to the end acquired a cliff at the end that looked
+ * exactly like a real fall -- which is how a hand held motionless above the
+ * head came to be detected as a shot being released.
+ */
 export function smooth(arr, win) {
   const a = Array.from(arr, Number);
   if (win <= 1 || a.length < win) return a;
   const n = a.length;
-  const full = new Array(n + win - 1).fill(0);
+  const half = (win - 1) >> 1;
+  const out = new Array(n);
   for (let i = 0; i < n; i++) {
-    for (let j = 0; j < win; j++) full[i + j] += a[i] / win;
+    let sum = 0, k = 0;
+    for (let j = Math.max(0, i - half); j <= Math.min(n - 1, i + half); j++) {
+      const v = a[j];
+      if (Number.isFinite(v)) { sum += v; k++; }
+    }
+    out[i] = k ? sum / k : NaN;
   }
-  const off = (win - 1) >> 1;
-  return full.slice(off, off + n);
+  return out;
 }
 
 export const clip = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -1655,6 +1676,169 @@ export function sidestepMetrics(F, rep, fps, pxPerM, midX) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// the jump shot
+// ---------------------------------------------------------------------------
+/* Shooting mechanics from one side-on camera, and nothing about the ball.
+ *
+ * WHAT THIS CAN AND CANNOT SEE. There is no ball and no hoop in these
+ * measurements: the pose model tracks a body, so what is measured is what the
+ * body did. That is most of shooting mechanics -- the dip, the legs, when the
+ * hand released relative to the top of the jump, and above all whether the
+ * same thing happened on every attempt -- but it is not the shot going in.
+ * Whether it went in is the athlete's own tap, and the report never guesses it.
+ *
+ * RELEASE IS A PROXY. The instant the ball leaves the hand cannot be seen
+ * without the ball. The frame used here is peak wrist height, which follows
+ * true release by a frame or two as the hand finishes its snap -- at 30 fps
+ * that is 30-60 ms, and at 240 fps it is 4-8. Every number timed from release
+ * inherits that offset. It is constant across attempts of the same style, so
+ * differences BETWEEN shots are trustworthy while the absolute value is not,
+ * and the report says so rather than implying a precision it does not have.
+ *
+ * SIDE-ON ONLY. Elbow flare, guide-hand position and left-right alignment are
+ * frontal questions and are not answered here. A frontal clip is refused for
+ * this task rather than measured badly.
+ */
+export const DEFAULT_SHOT_CFG = {
+  smoothWin: 3,
+  // The hand has to finish above the head for this to be a shot rather than a
+  // pass, a dribble or a rebound. In hip-height units (F._scale), the top of
+  // the head is around 0.85; 0.95 puts the wrist clearly above it.
+  minReleaseRise: 0.95,
+  // The hand has to have come DOWN first. A catch-and-shoot dips less than a
+  // free throw, so this is deliberately shallow -- it exists to reject a hand
+  // that was already up, not to grade the dip.
+  minDipFrac: 0.12,
+  // Two shots cannot be a third of a second apart. This also stops the little
+  // rebound of the follow-through being read as a second attempt.
+  minShotFrames: 14,
+  // How long after release the follow-through is worth keeping, in seconds.
+  followS: 0.45,
+  // Below this the clip is frontal and the sagittal measures are not valid.
+  minFrontality: 0.6,
+};
+
+/** Jump-shot features: the jump, plus the shooting arm. */
+export function buildShotFeatures(poses) {
+  const F = buildJumpFeatures(poses);
+  const frames = Object.keys(poses).map(Number).sort((a, b) => a - b);
+  const n = F._n, lo = F._lo;
+  for (const k of ["wrist_y_l", "wrist_y_r", "wrist_x_l", "wrist_x_r",
+                   "elbow_flex_l", "elbow_flex_r", "head_y"]) {
+    F[k] = new Array(n).fill(NaN);
+  }
+  for (const fi of frames) {
+    const i = fi - lo, lm = poses[fi];
+    const ls = lm.left_shoulder, rs = lm.right_shoulder;
+    const le = lm.left_elbow, re = lm.right_elbow;
+    const lw = lm.left_wrist, rw = lm.right_wrist;
+    if (lw) { F.wrist_y_l[i] = lw[1]; F.wrist_x_l[i] = lw[0]; }
+    if (rw) { F.wrist_y_r[i] = rw[1]; F.wrist_x_r[i] = rw[0]; }
+    F.elbow_flex_l[i] = 180 - angle3(ls, le, lw);
+    F.elbow_flex_r[i] = 180 - angle3(rs, re, rw);
+    if (lm.nose) F.head_y[i] = lm.nose[1];
+  }
+  /* The shooting hand is the one that goes highest.
+   *
+   * Not the one that is higher on average, and not a handedness setting: the
+   * guide hand rides up with the ball and separates only at the top, so the
+   * two are close together for most of every shot and only the peak tells them
+   * apart. Picking it per clip rather than per athlete also means a left-handed
+   * athlete, or a right-hander shooting lefty for a drill, needs no setting.
+   */
+  const top = (a) => { const v = a.filter(isNum); return v.length ? Math.min(...v) : Infinity; };
+  const side = top(F.wrist_y_r) <= top(F.wrist_y_l) ? "r" : "l";
+  F._shootSide = side;
+  F.wrist_y = F["wrist_y_" + side];
+  F.wrist_x = F["wrist_x_" + side];
+  F.elbow_flex = F["elbow_flex_" + side];
+  // Hand height above the floor, in hip-heights, so it means the same thing at
+  // any camera distance.
+  F.hand = F.wrist_y.map((y) => (isNum(y) && isNum(F._floorY)
+    ? (F._floorY - y) / F._scale : NaN));
+  return F;
+}
+
+/**
+ * One "rep" per attempt: [dip, release, end of follow-through].
+ *
+ * Release is peak wrist height -- see the note at the top of this section for
+ * what that costs.
+ */
+export function findShotReps(F, cfg = DEFAULT_SHOT_CFG) {
+  const n = F._n;
+  const hand = smooth(interpNan(F.hand), cfg.smoothWin);
+  const peaks = localMaxima(hand, cfg.minShotFrames, cfg.minReleaseRise);
+  const follow = Math.max(3, Math.round(cfg.followS * 30));
+  const reps = [];
+  for (let k = 0; k < peaks.length; k++) {
+    const rel = peaks[k];
+    const left = k > 0 ? peaks[k - 1] : 0;
+    const dip = rel > left ? argmin(hand, left, rel) : left;
+    if (hand[rel] - hand[dip] < cfg.minDipFrac) continue;   // the hand was already up
+    if ((rel - dip) < 3) continue;
+    const end = Math.min(n - 1, rel + follow);
+    if (end <= rel) continue;
+    /* The hand must COME DOWN again.
+     *
+     * Without this, a hand raised and held -- a rebound, a catch above the
+     * head, an athlete standing with the ball up while the next player shoots
+     * -- has a highest frame like any other, and that frame becomes a
+     * "release" with a dip in front of it and a full set of numbers behind it.
+     * A shot ends with the arm coming down; anything that does not is not one. */
+    let low = hand[rel];
+    for (let i = rel + 1; i <= end; i++) if (hand[i] < low) low = hand[i];
+    if (hand[rel] - low < cfg.minDipFrac) continue;
+    reps.push([dip, rel, end]);
+  }
+  return { reps, rise: hand,
+           refused: reps.length ? null : "noShots",
+           shootSide: F._shootSide };
+}
+
+/**
+ * What one attempt did.
+ *
+ * `apexOffset_s` is the only number here that is hard to get any other way and
+ * is worth the whole module: whether the ball left the hand on the way up, at
+ * the top, or on the way down. Negative is before the apex.
+ */
+export function shotMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_SHOT_CFG) {
+  const [dip, rel, end] = rep;
+  const wristY = interpNan(F.wrist_y), hipY = interpNan(F.hip_cy);
+  const elbow = interpNan(F.elbow_flex), knee = interpNan(F.knee_flex);
+  const m = (px) => (pxPerM > 0 ? +(px / pxPerM).toFixed(3) : null);
+  // The apex of the BODY, not of the hand: the highest the hips got between
+  // the dip and the end of the follow-through.
+  let apex = dip;
+  for (let i = dip; i <= end; i++) if (hipY[i] < hipY[apex]) apex = i;
+  // Flight, by the same rule the jumps use, so a jump shot and a
+  // countermovement jump do not report height two different ways.
+  const lift = cfg.liftFrac ?? DEFAULT_JUMP_CFG.liftFrac;
+  let air = 0;
+  for (let i = dip; i <= end; i++) {
+    if (F.foot_rise[i] > lift * F._scale) air++;
+  }
+  const flight = air / fps;
+  const G = 9.80665;
+  return {
+    release_height_m: m(F._floorY - wristY[rel]),
+    dip_hand_m: m(F._floorY - wristY[dip]),
+    release_elbow_deg: isNum(elbow[rel]) ? +elbow[rel].toFixed(1) : null,
+    dip_elbow_deg: isNum(elbow[dip]) ? +elbow[dip].toFixed(1) : null,
+    knee_flex_at_dip_deg: isNum(knee[dip]) ? +knee[dip].toFixed(1) : null,
+    // Up from the dip to release: the part of a shot a coach calls the motion.
+    load_s: +((rel - dip) / fps).toFixed(3),
+    follow_s: +((end - rel) / fps).toFixed(3),
+    // Negative: released on the way up. Positive: released while falling.
+    apex_offset_s: +((rel - apex) / fps).toFixed(3),
+    flight_s: air ? +flight.toFixed(3) : 0,
+    jump_height_m: air ? +((G * flight * flight) / 8).toFixed(3) : 0,
+    shoot_side: F._shootSide,
+  };
+}
+
 export const ACTIVITIES = {
   pullup: {
     label: "pull-up", columns: DRIVEN_COORDS, defaultCfg: DEFAULT_PULLUP_CFG,
@@ -1742,6 +1926,17 @@ export const ACTIVITIES = {
     coords: perLegRepCoordinates, reference: squatReferencePositions,
     phases: ["contact_phase_s", "swing_phase_s"],
   },
+  /* A jump shot is a jump plus an arm, so it borrows the jump's coordinate set
+   * and its features. It is deliberately NOT flagged `jump: true`: that flag
+   * routes a rep into jumpMetrics and the jump table, which report take-off and
+   * landing, and a shot is not read that way -- the events that matter are the
+   * dip and the release. */
+  jumpshot: {
+    label: "jump shot", columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_SHOT_CFG,
+    features: buildShotFeatures, findReps: findShotReps,
+    coords: squatRepCoordinates, reference: jumpReferencePositions,
+    phases: ["load_s", "follow_s"], shot: true,
+  },
   sidestep: {
     label: "side step", perLeg: true, travels: true, frontalTask: true,
     columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_SIDESTEP_CFG,
@@ -1766,7 +1961,8 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   const view = viewQuality(poses);
 
   const reps = bounds.map((b, i) => {
-    const { times, coords } = (activity === "squat" || spec.jump || spec.perLeg)
+    const { times, coords } = (activity === "squat" || spec.jump || spec.perLeg
+                               || spec.shot)
       ? spec.coords(F, b, fps, pxPerM, refA, refB,
                     { model: osimModel, ankleValid: view.ankle_usable })
       : activity === "neck"
@@ -1794,7 +1990,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       s.flexion_extension_range_deg = span("pitch1", "pitch2");
       s.lateral_bend_range_deg = span("roll1", "roll2");
       s.rotation_range_deg = span("yaw1", "yaw2");
-    } else if (activity === "squat" || spec.jump || spec.perLeg) {
+    } else if (activity === "squat" || spec.jump || spec.perLeg || spec.shot) {
       // knee_angle is SIGNED per model family, so report peak flexion as a
       // magnitude; otherwise a GPK export summarises as "-2 deg".
       s.knee_flex_max_deg = Math.max(...coords.knee_angle_r.map(Math.abs));
@@ -1843,6 +2039,9 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
             && pxPerM > 0) {
           s.stride_length_m = +(Math.abs(hx[b[2]] - hx[b[0]]) / pxPerM).toFixed(3);
         }
+      }
+      if (spec.shot) {
+        Object.assign(s, shotMetrics(F, b, fps, pxPerM, conf));
       }
       if (activity === "sidestep") {
         Object.assign(s, sidestepMetrics(F, b, fps, pxPerM, found.midX ?? refB));

@@ -197,6 +197,9 @@
   button.day .dayDot { position:absolute; right:4px; top:4px; width:5px; height:5px;
                        border-radius:50%; background:#c9483d; }
   tr.assessRow td { color:#e0736a; }
+  button.mk { display:inline-block; width:32px; padding:5px 0; margin:0 3px 0 0;
+              font-size:13px; line-height:1.1; }
+  button.mk.on { border-color:var(--accent); color:var(--accent); font-weight:700; }
   .infoDot { display:inline-flex; align-items:center; justify-content:center;
              width:16px; height:16px; margin-left:7px; border-radius:50%;
              border:1px solid var(--line); background:var(--bg); color:var(--muted);
@@ -464,6 +467,7 @@
           <option value="auto" data-i18n="auto">Detect automatically</option>
           <option value="pullup" data-i18n="pullup">Pull-up</option>
           <option value="dip" data-i18n="dip">Dip</option>
+          <option value="jumpshot" data-i18n="jumpshot">Basketball jump shot</option>
           <option value="squat" data-i18n="squat">Squat</option>
           <option value="cmj" data-i18n="cmj">Countermovement jump</option>
           <option value="sj" data-i18n="sj">Squat jump</option>
@@ -564,7 +568,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 78;
+window.BUILD = 79;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -598,7 +602,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listCardio, mergeCardio, latestCardioAt,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
-         saveCurves, getCurves, curveIndices }
+         saveCurves, getCurves, curveIndices, setRepOutcome }
        from "./src/profiles.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML, weightFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
@@ -1021,6 +1025,11 @@ const PEAK_VARS = {
   peak_ankle_Nm:      { label: "Peak ankle moment (magnitude)", unit: "N·m", dp: 0,
                         supersededBy: "peak_ankle_pf_Nm" },
   peak_grf_bw:        { label: "Peak vertical GRF", unit: "×BW", dp: 2 },
+  release_height_m:   { label: "Release height", unit: "m", dp: 2 },
+  release_elbow_deg:  { label: "Elbow at release", unit: "°", dp: 0 },
+  apex_offset_s:      { label: "Release vs jump apex", unit: "s", dp: 2 },
+  load_s:             { label: "Dip to release", unit: "s", dp: 2 },
+  jump_height_m:      { label: "Jump height", unit: "m", dp: 2 },
   /* Gait measures worth carrying between sets.
    *
    * Ordered as they are read: what the stride did in time and space, then the
@@ -4038,6 +4047,51 @@ function topMusclesForJoint(rep, joint, n = 5) {
   return peaks.sort((a, b) => b[1] - a[1]).slice(0, n);
 }
 
+/**
+ * Make percentage, and what the made shots did differently.
+ *
+ * Only over attempts that were actually tapped -- an untapped shot has no
+ * outcome, and counting it as a miss would turn "I forgot" into data. With
+ * fewer than three of each the comparison is not offered at all: a difference
+ * between one make and one miss is a difference between two shots, and dressing
+ * it up with a mean and an arrow would invite exactly the reading it cannot
+ * support.
+ */
+function shotSummary(res) {
+  const tapped = res.reps.filter((r) => r.made === true || r.made === false);
+  if (!tapped.length) return `<p class="note">${tr("noteTapOutcome")}</p>`;
+  const made = tapped.filter((r) => r.made === true);
+  const missed = tapped.filter((r) => r.made === false);
+  const pct = Math.round((100 * made.length) / tapped.length);
+  const line = `<p class="sub" style="margin:8px 0 0">${tr("shotMakePct", {
+    pct, made: made.length, n: tapped.length,
+    untapped: res.reps.length - tapped.length })}</p>`;
+  const MIN = 3;
+  if (made.length < MIN || missed.length < MIN) {
+    return line + `<p class="note">${tr("noteTooFewToCompare", { min: MIN })}</p>`;
+  }
+  const mean = (a, k) => {
+    const v = a.map((r) => r[k]).filter((x) => Number.isFinite(x));
+    return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null;
+  };
+  const KEYS = [["release_height_m", 2, "m"], ["apex_offset_s", 2, "s"],
+                ["release_elbow_deg", 0, "\u00b0"], ["knee_flex_at_dip_deg", 0, "\u00b0"],
+                ["load_s", 2, "s"]];
+  const rows = KEYS.map(([k, dp, unit]) => {
+    const a = mean(made, k), b = mean(missed, k);
+    if (a == null || b == null) return "";
+    return `<tr><td>${varSpec(k).label || k}</td>
+      <td>${a.toFixed(dp)}<span class="sub"> ${unit}</span></td>
+      <td>${b.toFixed(dp)}<span class="sub"> ${unit}</span></td>
+      <td>${(a - b >= 0 ? "+" : "") + (a - b).toFixed(dp)}</td></tr>`;
+  }).join("");
+  return line + `<table style="margin-top:8px"><thead><tr>
+      <th>${tr("measure")}</th><th>${tr("shotMadeCol")}</th>
+      <th>${tr("shotMissedCol")}</th><th>${tr("shotDiffCol")}</th>
+    </tr></thead><tbody>${rows}</tbody></table>
+    <p class="note">${tr("noteShotCompare", { made: made.length, missed: missed.length })}</p>`;
+}
+
 function jointSubplot(rep, res, j) {
   const d = rep.dyn;
   const moment = d[j.series];
@@ -4534,6 +4588,7 @@ function render(res, fps) {
         tr("feetNotInFrame", { pct: ((res.footCoverage ?? 0) * 100).toFixed(0) })}</p>`
       : res.refused === "handsOverhead" ? `<p class="note banner">${tr("handsOverheadNotDip")}</p>`
       : res.refused === "noDips" ? `<p class="note banner">${tr("noDipsFound")}</p>`
+      : res.refused === "noShots" ? `<p class="note banner">${tr("noShotsFound")}</p>`
       : res.refused === "noHeelRaises" ? `<p class="note banner">${tr("noHeelRaises")}</p>`
       : res.refused === "noStrides" ? `<p class="note banner">${
           tr(res.activity === "walk" ? "noStridesWalk" : "noStrides")}</p>`
@@ -4631,6 +4686,7 @@ function render(res, fps) {
    * the moment and force panels, the mean row and both exports all hang off the
    * code below this point, and a separate early return for each task would have
    * duplicated the markup while duplicating none of that. */
+  const isShot = res.activity === "jumpshot";
   const isDip = res.activity === "dip";
   const isSL = res.activity === "slsquat";
   const isRun = res.activity === "run" || res.activity === "walk";
@@ -4686,6 +4742,23 @@ function render(res, fps) {
       <td>${nn(r.arm_flex_range_deg, 0)}°</td>
       <td>${nn(r.pelvis_travel_m)}</td></tr>`).join("");
 
+  /* The shot table, with the one thing the camera cannot answer left to the
+   * athlete. A tap is two buttons rather than a toggle because an untapped
+   * attempt has to stay visibly untapped: a toggle that starts on "miss" would
+   * make silence look like a verdict, and the make percentage below is computed
+   * only over shots that were actually tapped. */
+  const madeCell = (r) => `<td style="white-space:nowrap">
+      <button class="ghost mk${r.made === true ? " on" : ""}" data-rep="${r.rep}"
+        data-made="1" title="${esc(tr("shotMade"))}">\u25cf</button>
+      <button class="ghost mk${r.made === false ? " on" : ""}" data-rep="${r.rep}"
+        data-made="0" title="${esc(tr("shotMissed"))}">\u25cb</button></td>`;
+  const shotRows = !isShot ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+      <td>${nn(r.release_height_m)}</td>
+      <td>${nn(r.apex_offset_s, 2)}</td>
+      <td>${nn(r.release_elbow_deg, 0)}\u00b0</td>
+      <td>${nn(r.knee_flex_at_dip_deg, 0)}\u00b0</td>
+      ${madeCell(r)}</tr>`).join("");
+
   const sideRows = !isSide ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
       <td>${sideName(r.plant_side)}</td>
       <td>${nn(r.out_s)}</td><td>${nn(r.back_s)}</td>
@@ -4710,7 +4783,11 @@ function render(res, fps) {
     : `<tr><td>${r.rep}</td><td>${r.concentric_s.toFixed(2)}</td><td>${r.eccentric_s.toFixed(2)}</td>
          <td>${r.elbow_flex_max_deg.toFixed(0)}°</td><td>${r.arm_flex_range_deg.toFixed(0)}°</td>
          <td>${r.pelvis_travel_m.toFixed(2)}</td></tr>`).join("");
-  const head = isDip
+  const head = isShot
+    ? `<tr><th>${tr("shotN")}</th><th>${tr("releaseH")}</th><th>${tr("vsApex")}</th>
+        <th>${tr("elbowAtRelease")}</th><th>${tr("kneeAtDip")}</th>
+        <th>${tr("madeCol")}</th></tr>`
+    : isDip
     ? `<tr><th>${tr("rep")}</th><th>${tr("down")}</th><th>${tr("up")}</th>
         <th>${tr("elbow")}</th><th>${tr("shoulder")}</th><th>${tr("depthM")}</th></tr>`
     : isSL
@@ -4774,7 +4851,12 @@ function render(res, fps) {
     const st = meanRep && meanRep.stats[k];
     return st ? `${st.mean.toFixed(d)}<span class="sub"> ±${st.sd.toFixed(d)}</span>` : "—";
   };
-  const meanRow = !meanRep ? "" : isDip
+  const meanRow = !meanRep ? "" : isShot
+    ? `<tr class="meanrow"><td>${tr("mean")}</td>
+         <td>${ms("release_height_m")}</td><td>${ms("apex_offset_s")}</td>
+         <td>${ms("release_elbow_deg", 0)}\u00b0</td>
+         <td>${ms("knee_flex_at_dip_deg", 0)}\u00b0</td><td>\u2014</td></tr>`
+    : isDip
     ? `<tr class="meanrow"><td>${tr("mean")}</td>
          <td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
          <td>${ms("elbow_flex_max_deg", 0)}°</td>
@@ -4820,8 +4902,9 @@ function render(res, fps) {
       ${tr("motSignedFor", { model: res.osimModel })}</p>
     ${setSwitcher(res)}
     <table><thead>${head}</thead><tbody>${
-      isDip ? dipRows : isSL ? slRows : isRun ? runRows : isSide ? sideRows
-            : isJump ? jumpRows : rows()}${meanRow}</tbody></table>
+      isShot ? shotRows : isDip ? dipRows : isSL ? slRows : isRun ? runRows
+             : isSide ? sideRows : isJump ? jumpRows : rows()}${meanRow}</tbody></table>
+    <div id="shotSummaryBox">${isShot ? shotSummary(res) : ""}</div>
     ${runPanel}
     ${suspect.length ? `<p class="note banner">${
       tr("heightsDisagree", { n: suspect.length, total: n })}</p>` : ""}
@@ -4899,6 +4982,25 @@ function render(res, fps) {
     $("forceBox").innerHTML = forcePanel(items[i], res);
   }
   select(0);
+
+  /* The make/miss taps. Rebuilt in place rather than re-rendering the card: a
+   * full re-render would collapse the chart the athlete is looking at and
+   * scroll them away from the row they just tapped. */
+  el.querySelectorAll("button.mk").forEach((b) => {
+    b.onclick = () => {
+      const rep = +b.dataset.rep, made = b.dataset.made === "1";
+      const hit = res.reps.find((r) => r.rep === rep);
+      if (!hit) return;
+      hit.made = hit.made === made ? null : made;
+      if (res.setIndex != null) setRepOutcome(res.setIndex, rep, made);
+      el.querySelectorAll(`button.mk[data-rep="${rep}"]`).forEach((x) => {
+        x.classList.toggle("on",
+          (x.dataset.made === "1") === hit.made && hit.made !== null);
+      });
+      const box = el.querySelector("#shotSummaryBox");
+      if (box) box.innerHTML = shotSummary(res);
+    };
+  });
 
   $("zipBtn").onclick = () => exportZip(res, fps);
 

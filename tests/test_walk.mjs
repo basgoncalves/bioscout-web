@@ -155,5 +155,35 @@ function walkAwayAndBack({ strideF = 66, cycles = 12, duty = 0.62,
      `${far.length} strides out there`);
 }
 
+/* --- the smoother must not invent a cliff at the ends --------------------- *
+ *
+ * Every detector in kinematics.js thresholds a smoothed signal, so what the
+ * smoother does at the first and last samples decides whether the first and
+ * last events of a clip exist. It used to convolve with a zero-padded array:
+ * the final sample of a 3-wide smooth came back at two thirds of its value and
+ * of a 9-wide smooth at five ninths. A clip that ended mid-stride lost its last
+ * contact, and a flat signal grew a cliff at the end that looked like a real
+ * fall. It now averages over the samples that exist.
+ */
+{
+  const { smooth } = await import("../src/kinematics.js");
+  const flat = new Array(24).fill(5);
+  for (const win of [3, 5, 9]) {
+    const out = smooth(flat, win);
+    const worst = Math.max(...out.map((v) => Math.abs(v - 5)));
+    ok(worst < 1e-9, `a flat signal stays flat end to end (window ${win})`,
+       `worst error ${worst.toFixed(3)}`);
+  }
+  const ramp = Array.from({ length: 24 }, (_, i) => i);
+  const sm = smooth(ramp, 5);
+  ok(Math.abs(sm[0] - 1) < 1e-9 && Math.abs(sm[23] - 22) < 1e-9,
+     "and a ramp keeps its ends, averaged over what is there",
+     `${sm[0]} ... ${sm[23]}`);
+  const gappy = [1, NaN, 3, NaN, 5, 6, 7];
+  ok(smooth(gappy, 3).every(Number.isFinite),
+     "gaps are skipped, not counted as zero");
+}
+
 console.log(fails ? `\n${fails} FAILED` : "\nAll checks passed");
 process.exit(fails ? 1 : 0);
+

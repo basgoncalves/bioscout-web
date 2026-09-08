@@ -731,6 +731,25 @@ export function addSet(result, fps, extra = {}) {
   return set;
 }
 
+/**
+ * Record whether an attempt went in.
+ *
+ * Writes onto the stored set, because the analysis in memory is gone as soon
+ * as the athlete opens another one and the tap has to survive that. `made` is
+ * true, false, or null for "not said" -- tapping the same answer twice clears
+ * it, so a mis-tap is undoable and does not become permanent data.
+ */
+export function setRepOutcome(setIndex, rep, made) {
+  const s = getSession();
+  if (!s) return false;
+  const set = s.sets.find((x) => x.index === setIndex);
+  const r = set && (set.perRep || []).find((x) => x.rep === rep);
+  if (!r) return false;
+  r.made = r.made === made ? null : made;
+  write(SKEY, s);
+  return true;
+}
+
 /** Now, moved onto the session's calendar day. Same clock time, so the sets of
  *  a back-dated session still read in the order they were recorded. */
 function onSessionDay(started) {
@@ -798,6 +817,20 @@ function summariseRep(r, activity) {
     o.travel_m = r.pelvis_travel_m != null ? +r.pelvis_travel_m.toFixed(3) : null;
     o.up_s = +r.concentric_s?.toFixed(2);
     o.down_s = +r.eccentric_s?.toFixed(2);
+  } else if (activity === "jumpshot") {
+    o.release_height_m = r.release_height_m ?? null;
+    o.release_elbow_deg = r.release_elbow_deg ?? null;
+    o.knee_flex_at_dip_deg = r.knee_flex_at_dip_deg ?? null;
+    o.apex_offset_s = r.apex_offset_s ?? null;
+    o.load_s = r.load_s ?? null;
+    o.jump_height_m = r.jump_height_m ?? null;
+    o.shoot_side = r.shoot_side ?? null;
+    /* `made` is deliberately absent until the athlete taps it.
+     *
+     * null is not "missed": nothing in this app can see the ball, so an
+     * untapped attempt has no outcome, and a make percentage computed over
+     * untapped shots would be a number invented out of silence. */
+    o.made = r.made ?? null;
   } else if (activity === "dip") {
     // The depth is the travel, named for what it is in this movement. Down
     // before up, because that is the order a dip happens in.
