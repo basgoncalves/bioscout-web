@@ -401,6 +401,10 @@
     <div class="card" id="cycleCard"></div>
   </section>
 
+  <section id="viewAssess" class="hidden">
+    <div class="card" id="assessCard"></div>
+  </section>
+
   <section id="viewSession" class="hidden">
     <div class="card" id="sessionCard"></div>
   </section>
@@ -491,7 +495,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 45;
+window.BUILD = 46;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -547,6 +551,8 @@ import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
 import { ensembleRep } from "./src/ensemble.js";
 import { neckLoadHTML } from "./src/neckload.js";
+import { ASSESS_TESTS, assessReport, assessReportHTML, getAssess, startAssess,
+         putAssessTest, clearAssess, nextTest } from "./src/assess.js";
 import { makeZip, svgToPng, blobBytes } from "./src/zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
          peakJRF, selfTest as forceSelfTest,
@@ -1376,7 +1382,7 @@ $("mealShotFile").onchange = (e) => {
  * gets stored. The login screen writes to it rather than replacing it, so
  * there is still exactly one source of truth for the athlete.
  */
-const VIEWS = ["viewLogin", "viewDash", "viewCycle", "viewRecord", "viewSession"];
+const VIEWS = ["viewLogin", "viewDash", "viewCycle", "viewRecord", "viewAssess", "viewSession"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -1398,6 +1404,7 @@ window.addEventListener("popstate", (e) => {
   showView(id, false);
   if (id === "viewDash") renderDash();
   if (id === "viewCycle") renderCycle();
+  if (id === "viewAssess") renderAssess();
 });
 
 $("navBack").onclick = () => history.back();
@@ -1681,6 +1688,7 @@ function renderDash() {
   if ($("shareBtn")) $("shareBtn").onclick = shareMonth;
   if ($("newTrainingBtn")) $("newTrainingBtn").onclick = () => openAdd("weight");
   if ($("trainImport")) $("trainImport").onclick = () => $("importProfilesFile").click();
+  if ($("assessBtn")) $("assessBtn").onclick = () => openAssess();
   if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);
   if ($("sleepSave")) $("sleepSave").onclick = () => {
     if (!setSleep({ profile: currentAthlete(), at: atOnDay(dashView.selected),
@@ -1783,6 +1791,104 @@ function renderTraining() {
 
 /** The session an id (its own `started` timestamp) names -- the live one if
  *  it's still open, otherwise wherever it landed in the archive. */
+/* --- physical assessment --------------------------------------------------
+ * Three tests recorded through the ordinary recorder, then one report. The
+ * only state here is which test the recorder is currently serving: everything
+ * else lives in the stored assessment, so a reload mid-protocol resumes.
+ */
+let assessStep = null;          // the test id the recorder is recording for
+
+/* The stop tone for the walk. A short two-tone beep from an oscillator --
+ * no asset to cache, and it plays on a phone that has been silent since the
+ * page loaded because the recording button was a user gesture. */
+function stopTone() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const beep = (at, hz) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = hz;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + at);
+      g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + at + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + at + 0.35);
+      o.connect(g).connect(ctx.destination);
+      o.start(ctx.currentTime + at); o.stop(ctx.currentTime + at + 0.4);
+    };
+    beep(0, 880); beep(0.22, 660);
+    setTimeout(() => ctx.close().catch(() => {}), 1200);
+  } catch { /* no audio on this device; the countdown still shows */ }
+}
+
+function openAssess() {
+  if (!getAssess(currentAthlete())) startAssess(currentAthlete());
+  showView("viewAssess");
+  renderAssess();
+}
+
+function renderAssess() {
+  const a = getAssess(currentAthlete()) || startAssess(currentAthlete());
+  const report = assessReport(a.tests);
+  const doneN = ASSESS_TESTS.length - report.missing.length;
+  const next = nextTest(a);
+
+  const steps = ASSESS_TESTS.map((t, i) => {
+    const have = a.tests[t.id]?.perRep?.length || 0;
+    const ok = have >= t.minReps;
+    const short = have > 0 && !ok;
+    return `<div class="daybox">
+      <div style="font-weight:600">${i + 1}. ${esc(tr("assessTest_" + t.id))}
+        ${ok ? `<span style="color:var(--good)"> \u2713</span>` : ""}</div>
+      <p class="sub" style="margin:4px 0 8px">${esc(tr("assessHow_" + t.id))}</p>
+      ${short ? `<p class="note" style="color:var(--warn)">${
+        esc(tr("assessTooFew", { have, need: t.minReps }))}</p>` : ""}
+      <button type="button" class="${ok ? "ghost" : ""}" id="assessRec_${t.id}" style="margin:0">${
+        esc(tr(ok ? "assessRedo" : "assessRecord"))}</button>
+    </div>`;
+  }).join("");
+
+  $("assessCard").innerHTML = `
+    <h1 style="font-size:18px;margin:0 0 2px">${esc(tr("assess"))}</h1>
+    <p class="sub" style="margin:0 0 4px">${esc(tr("assessIntro"))}</p>
+    <p class="sub" style="margin:0 0 12px">${esc(tr("assessDone", {
+      n: doneN, total: ASSESS_TESTS.length }))}</p>
+    ${steps}
+    <div id="assessReportBox" style="margin-top:12px">${assessReportHTML(report)}</div>
+    <button type="button" class="ghost" id="assessRestartBtn" style="margin-top:10px">${
+      esc(tr("assessRestart"))}</button>`;
+
+  for (const t of ASSESS_TESTS) {
+    const b = $("assessRec_" + t.id);
+    if (b) b.onclick = () => beginAssessTest(t);
+  }
+  $("assessRestartBtn").onclick = () => {
+    clearAssess(); startAssess(currentAthlete()); renderAssess();
+  };
+  if (next && !report.complete) { /* nothing to focus; the list is short */ }
+}
+
+/* Hand the recorder over to one test: same recorder, same pipeline, with the
+ * activity chosen for the athlete so a protocol test cannot be analysed as the
+ * wrong movement. The walk also gets a timed stop tone. */
+function beginAssessTest(t) {
+  assessStep = t.id;
+  $("activity").value = t.activity;
+  const open = getSession();
+  if (!(open && open.sets && open.sets.length)) newSession(currentAthlete());
+  renderTraining();
+  showView("viewRecord");
+  say(tr("assessHow_" + t.id));
+  if (t.seconds) {
+    // The tone is scheduled from the moment recording actually starts, not
+    // from this click: the athlete still has to walk to their mark.
+    assessToneFor = t.seconds;
+  } else {
+    assessToneFor = 0;
+  }
+}
+let assessToneFor = 0;
+let assessTimer = null;
+
 function findSession(id) {
   const live = getSession();
   if (live && live.started === id) return live;
@@ -2074,6 +2180,12 @@ function boot() {
     dashView = null;
     if (resumeView === "viewCycle") {
       openCycle();
+    } else if (resumeView === "viewAssess") {
+      // Unlike viewSession, the assessment's state is stored, so a reload
+      // mid-protocol comes back to the same three steps rather than home.
+      showView("viewAssess", false);
+      renderDash();
+      renderAssess();
     } else {
       showView(resumeView, false);
       renderDash();
@@ -2244,8 +2356,28 @@ $("recBtn").onclick = () => {
     $("recBtn").textContent = tr("stopAndAnalyse");
     $("results").classList.add("hidden");
     say(tr("sayRecordingNow"));
+    // The walk test runs to a tone rather than to the athlete's judgement, so
+    // every walk is the same length and the stride count is comparable.
+    if (assessStep && assessToneFor) {
+      let left = assessToneFor;
+      say(tr("assessStopTone"));
+      $("hudRight").textContent = tr("assessSecondsLeft", { n: left });
+      clearInterval(assessTimer);
+      assessTimer = setInterval(() => {
+        left -= 1;
+        if (!recording) { clearInterval(assessTimer); return; }
+        if (left <= 0) {
+          clearInterval(assessTimer);
+          stopTone();
+          $("recBtn").click();          // stop and analyse, exactly as a tap would
+          return;
+        }
+        $("hudRight").textContent = tr("assessSecondsLeft", { n: left });
+      }, 1000);
+    }
   } else {
     recording = false;
+    clearInterval(assessTimer);
     $("recBtn").textContent = tr("startRecording");
     $("hudRight").textContent = "";
     if (recorder && recorder.state !== "inactive") {
@@ -2339,6 +2471,16 @@ async function finish() {
         if (sess) saveCurves(sess.started, set.index, lastResult);
         viewingSet = set.index;
         renderTraining();
+        // An assessment test is a set like any other -- it stays in the
+        // training log -- and it is ALSO filed under the test it was
+        // recorded for, so the report can be rebuilt from stored data.
+        if (assessStep) {
+          const id = assessStep;
+          assessStep = null; assessToneFor = 0;
+          putAssessTest(id, set, currentAthlete());
+          showView("viewAssess");
+          renderAssess();
+        }
       } catch (e) {
         console.warn("could not log the set", e);
       }

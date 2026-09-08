@@ -715,6 +715,9 @@ function summariseRep(r, activity) {
     o.down_s = +r.eccentric_s?.toFixed(2);
     o.up_s = +r.concentric_s?.toFixed(2);
   } else if (activity === "run") {
+    // Which foot the stride belongs to. Without it a gait recording cannot be
+    // split left from right, which is most of what the assessment reads.
+    o.stance_side = r.stance_side ?? null;
     o.stride_s = r.stride_s ?? null;
     o.contact_s = r.contact_s ?? null;
     o.swing_s = r.swing_s ?? null;

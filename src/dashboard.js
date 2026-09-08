@@ -347,7 +347,8 @@ function dayHTML(day, key) {
   const btns = `<div class="row" style="margin-top:10px">
       <button id="newTrainingBtn" style="margin:0">${esc(tr("newTrainingSession"))}</button>
       <button type="button" class="ghost" id="trainImport" style="margin:0;padding:9px">${esc(tr("import"))}</button>
-    </div>`;
+    </div>
+    <button type="button" class="ghost" id="assessBtn" style="margin-top:8px">${esc(tr("assess"))}</button>`;
   if (!day) {
     return `<div class="daybox"><div style="font-weight:600">${esc(tr("modeTraining"))}</div>
       <p class="sub" style="margin:6px 0 0">${esc(tr("noTrainingThatDay"))}</p>${btns}</div>`;
