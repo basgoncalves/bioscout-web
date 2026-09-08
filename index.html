@@ -188,7 +188,14 @@
   button.day.l3 { background:color-mix(in srgb, var(--accent) 70%, var(--bg)); color:#fff; }
   button.day.l4 { background:var(--accent); color:#fff; }
   button.day.today { border-color:var(--ink); }
+  /* An assessment day, in the same calendar as training. A border rather than
+     a fill: the fill is volume, and an assessment usually sits on a day that
+     has training on it too. */
+  button.day.assessDay { border-color:#c9483d; border-width:2px; }
   button.day.sel { outline:2px solid var(--accent); outline-offset:1px; }
+  /* The recorder, put to work by the assessment: everything that belongs to
+     free training goes away, because the protocol chose all of it already. */
+  body.assessMode .trainOnly { display:none !important; }
   .daybox { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
   .vbars { display:flex; align-items:flex-end; gap:3px; height:56px; }
   .vbar { flex:1; height:100%; display:flex; align-items:flex-end; }
@@ -410,8 +417,9 @@
   </section>
 
   <section id="viewRecord" class="hidden">
+    <div class="card hidden" id="assessBanner"></div>
     <div class="card" id="setup">
-    <div class="row" style="margin-bottom:11px">
+    <div class="row trainOnly" style="margin-bottom:11px">
       <div>
         <label for="activity" data-i18n="movement">Movement</label>
         <select id="activity">
@@ -427,7 +435,7 @@
         </select>
       </div>
     </div>
-    <div class="row" style="margin-bottom:11px">
+    <div class="row trainOnly" style="margin-bottom:11px">
       <div>
         <label for="added" data-i18n="addedLoad">Added load (kg)</label>
         <input id="added" type="number" step="0.5" value="0" min="0" inputmode="decimal">
@@ -437,16 +445,16 @@
         <input id="assist" type="number" step="0.5" value="0" min="0" inputmode="decimal">
       </div>
     </div>
-    <p class="note" style="margin:-4px 0 10px" data-i18n-html="noteLoad">Barbell, vest or belt in
+    <p class="note trainOnly" style="margin:-4px 0 10px" data-i18n-html="noteLoad">Barbell, vest or belt in
       <b>Added</b>; band or machine offload in <b>Assistance</b>. Both apply at
       once — a loaded bar with a band assist is added minus assist.</p>
-    <label style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
+    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="saveVideo" style="width:auto;margin:0">
       <span data-i18n="keepVideo">Also keep the video in the export</span>
     </label>
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
-    <button class="ghost" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
+    <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
     <div id="linkRow" class="hidden" style="margin-top:11px">
       <label for="linkUrl" data-i18n="videoLink">Video link</label>
       <input id="linkUrl" type="url" placeholder="https://youtube.com/shorts/…" autocomplete="off" inputmode="url">
@@ -495,7 +503,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 46;
+window.BUILD = 47;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1392,6 +1400,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
  * can do on Android. `push` is false when we are REACTING to a back, or the
  * two would fight. */
 function showView(id, push = true) {
+  if (id !== "viewRecord" && assessStep) exitAssessMode();
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
   $("navBar").classList.toggle("hidden", id === "viewLogin" || id === "viewDash");
   if (push && history.state?.view !== id) history.pushState({ view: id }, "", "#" + id);
@@ -1876,18 +1885,54 @@ function beginAssessTest(t) {
   const open = getSession();
   if (!(open && open.sets && open.sets.length)) newSession(currentAthlete());
   renderTraining();
+  enterAssessMode(t);
   showView("viewRecord");
-  say(tr("assessHow_" + t.id));
-  if (t.seconds) {
-    // The tone is scheduled from the moment recording actually starts, not
-    // from this click: the athlete still has to walk to their mark.
-    assessToneFor = t.seconds;
-  } else {
-    assessToneFor = 0;
-  }
+  // The tone is scheduled from the moment recording starts, not from this
+  // click: the athlete still has to walk to their mark.
+  assessToneFor = t.seconds || 0;
 }
 let assessToneFor = 0;
 let assessTimer = null;
+let avatarBeforeAssess = null;
+
+/* The recorder, dressed as the test page. Nothing about the pose pipeline
+ * changes -- what changes is that every choice the protocol has already made
+ * (which movement, what load, whether to keep the video) stops being offered,
+ * and the training log below stops being the point of the screen. */
+function enterAssessMode(t) {
+  const n = ASSESS_TESTS.findIndex((x) => x.id === t.id) + 1;
+  $("assessBanner").innerHTML = `
+    <div style="font-weight:600">${esc(tr("assessStepOf", {
+      n, total: ASSESS_TESTS.length, name: tr("assessTest_" + t.id) }))}</div>
+    <p class="sub" style="margin:4px 0 0">${esc(tr("assessHow_" + t.id))}</p>
+    <p class="note" style="margin:6px 0 0">${esc(t.seconds
+      ? tr("assessNeedStrides", { n: t.minReps, s: t.seconds })
+      : tr("assessNeedReps", { n: t.minReps }))}</p>
+    <button type="button" class="ghost" id="assessCancel" style="margin-top:10px">${
+      esc(tr("assessLeave"))}</button>`;
+  $("assessBanner").classList.remove("hidden");
+  $("assessCancel").onclick = () => { exitAssessMode(); openAssess(); };
+  document.body.classList.add("assessMode");
+  $("trainingCard").classList.add("trainOnly");
+  // Landmarks only. A character mesh over an assessment reads as a toy, and
+  // the thing being judged here is where the joints actually were.
+  if (avatarBeforeAssess === null) avatarBeforeAssess = $("avatar").value;
+  if ($("avatar").value) { $("avatar").value = ""; setAvatar(""); }
+}
+
+function exitAssessMode() {
+  assessStep = null;
+  assessToneFor = 0;
+  clearInterval(assessTimer);
+  document.body.classList.remove("assessMode");
+  $("assessBanner").classList.add("hidden");
+  $("trainingCard").classList.remove("trainOnly");
+  if (avatarBeforeAssess) {
+    $("avatar").value = avatarBeforeAssess;
+    setAvatar(avatarBeforeAssess);
+  }
+  avatarBeforeAssess = null;
+}
 
 function findSession(id) {
   const live = getSession();
@@ -2464,7 +2509,8 @@ async function finish() {
       // Never let the training log take the analysis down with it: the results
       // are the point of the recording, the set row is a bonus on top.
       try {
-        const set = addSet(lastResult, fps, { profile: $("profile").value || null });
+        const set = addSet(lastResult, fps, { profile: $("profile").value || null,
+                                             assess: assessStep });
         lastResult.setIndex = set.index;
         pageSets.push({ index: set.index, res: lastResult, fps });
         const sess = getSession();
@@ -2476,7 +2522,7 @@ async function finish() {
         // recorded for, so the report can be rebuilt from stored data.
         if (assessStep) {
           const id = assessStep;
-          assessStep = null; assessToneFor = 0;
+          exitAssessMode();
           putAssessTest(id, set, currentAthlete());
           showView("viewAssess");
           renderAssess();

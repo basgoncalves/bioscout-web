@@ -665,6 +665,10 @@ export function addSet(result, fps, extra = {}) {
     ageY: result.ageY ?? null,
     view: result.view?.view ?? null,
     detected: result.detection ? result.detection.activity : null,
+    // Which assessment test this set was recorded for, if any. An assessment
+    // set is still an ordinary set -- same session, same log -- and this is
+    // the one thing that distinguishes it, including on the calendar.
+    assess: extra.assess || null,
     perRep: result.reps.map((r) => summariseRep(r, result.activity)),
   };
   s.sets.push(set);

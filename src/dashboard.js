@@ -98,7 +98,7 @@ export function collectMeals(meals, profile = null) {
  */
 const emptyDay = (key) => ({
   key, sets: [], reps: 0, activities: new Set(), sessions: new Set(),
-  cardio: [], cardioSeconds: 0, cardioMetres: 0,
+  cardio: [], cardioSeconds: 0, cardioMetres: 0, assess: false,
 });
 
 /**
@@ -120,6 +120,7 @@ export function collectDays(sessions, cardio = []) {
       const d = days.get(key);
       d.sets.push({ ...set, session: s.started, profile: s.profile ?? null });
       d.reps += set.reps || 0;
+      if (set.assess) d.assess = true;
       if (set.activity) d.activities.add(set.activity);
       d.sessions.add(s.started);
     }
@@ -288,6 +289,9 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
     const cls = ["day"];
     if (!c.inMonth) cls.push("out");
     if (hit) cls.push("has", "l" + level(w(hit), max));
+    // Outlined, not recoloured: the fill still means training volume, and an
+    // assessment day is usually a training day too.
+    if (hit?.assess) cls.push("assessDay");
     if (c.key === todayKey) cls.push("today");
     if (c.key === selected) cls.push("sel");
     const label = !hit ? c.key
