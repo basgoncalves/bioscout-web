@@ -416,6 +416,30 @@
       <div id="addDlgBody"></div>
       <button class="ghost" id="addDlgClose" data-i18n="close">Close</button>
     </dialog>
+
+    <!-- Trim a clip before analysing it. Scrubbing sets the handle you last
+         touched, so the athlete finds the frame they mean by watching it
+         rather than by arithmetic on a duration. -->
+    <dialog id="trimDlg">
+      <h2 style="font-size:16px;margin:0 0 2px" data-i18n="trimTitle">Which part?</h2>
+      <p class="sub" style="margin:0 0 10px" data-i18n="trimSub">Analyse only the frames you need. Everything outside the range is skipped.</p>
+      <video id="trimVid" playsinline muted preload="metadata"
+             style="width:100%;max-height:46vh;background:#000;border-radius:10px"></video>
+      <div class="row" style="margin:10px 0 0">
+        <div>
+          <label for="trimStart"><span data-i18n="trimFrom">From</span> <span class="sub" id="trimStartOut"></span></label>
+          <input id="trimStart" type="range" min="0" max="1000" value="0" step="1">
+        </div>
+        <div>
+          <label for="trimEnd"><span data-i18n="trimTo">To</span> <span class="sub" id="trimEndOut"></span></label>
+          <input id="trimEnd" type="range" min="0" max="1000" value="1000" step="1">
+        </div>
+      </div>
+      <p class="sub" id="trimCount" style="margin:6px 0 0"></p>
+      <button id="trimGo" style="margin-top:10px" data-i18n="trimAnalyse">Analyse this range</button>
+      <button class="ghost" id="trimAll" style="margin-top:8px" data-i18n="trimWhole">Use the whole clip</button>
+      <button class="ghost" id="trimCancel" style="margin-top:8px" data-i18n="cancel">Cancel</button>
+    </dialog>
   </section>
 
   <section id="viewCycle" class="hidden">
@@ -540,7 +564,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 77;
+window.BUILD = 78;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -3192,7 +3216,18 @@ async function probeFrameRate(v) {
   if (!v.requestVideoFrameCallback) return null;
   const times = [];
   await new Promise((resolve) => {
-    const stop = () => { v.pause(); resolve(); };
+    const stop = () => { v.pause(); v.playbackRate = 1; resolve(); };
+    /* Played SLOWLY, or a high-speed clip reads as an ordinary one.
+     *
+     * requestVideoFrameCallback fires per frame PRESENTED, and a 240 fps clip
+     * played at 1x on a 60 Hz screen presents 60 of those frames a second --
+     * so the gaps in media time come out at 1/60 and the probe concludes the
+     * phone filmed at 60. Every slow-motion clip would then be sampled at a
+     * quarter of the resolution it was filmed at, which is the entire reason
+     * for filming it that way: at 240 fps a flight time is known to +-4 ms
+     * instead of +-17. A quarter speed presents four times as many distinct
+     * frames per second of wall clock and finds the real rate. */
+    v.playbackRate = 0.25;
     const tick = (_, m) => {
       times.push(m.mediaTime);
       if (times.length > 60) return stop();
@@ -3213,7 +3248,58 @@ async function probeFrameRate(v) {
   return dt >= 1 / 240 && dt <= 1 / 5 ? dt : null;
 }
 
-async function analyseVideoBlob(file) {
+/**
+ * Ask which part of the clip to analyse.
+ *
+ * Resolves to [t0, t1] in seconds, or null if the athlete backed out. A clip
+ * is usually longer than the thing in it -- walking to the bar, three reps,
+ * walking away -- and analysing all of it costs a minute of tracking to
+ * produce reps nobody asked about, plus a first and last "rep" that are the
+ * athlete arriving and leaving.
+ */
+function askTrim(file, dt, duration) {
+  return new Promise((resolve) => {
+    const dlg = $("trimDlg"), v = $("trimVid");
+    const a = $("trimStart"), b = $("trimEnd");
+    const url = URL.createObjectURL(file);
+    v.src = url;
+    a.value = 0; b.value = 1000;
+    let last = a;                       // the handle the scrubber follows
+    const at = (el) => (+el.value / 1000) * duration;
+    const fmt = (t) => `${t.toFixed(2)} s`;
+    const paint = () => {
+      if (+a.value > +b.value - 5) {
+        if (last === a) a.value = String(Math.max(0, +b.value - 5));
+        else b.value = String(Math.min(1000, +a.value + 5));
+      }
+      $("trimStartOut").textContent = fmt(at(a));
+      $("trimEndOut").textContent = fmt(at(b));
+      const n = Math.max(1, Math.floor((at(b) - at(a)) / dt));
+      $("trimCount").textContent = tr("trimFrames", {
+        n, fps: (1 / dt).toFixed(0), s: (at(b) - at(a)).toFixed(2) });
+    };
+    const scrub = (el) => { last = el; v.currentTime = at(el); paint(); };
+    a.oninput = () => scrub(a);
+    b.oninput = () => scrub(b);
+    const done = (val) => {
+      dlg.close();
+      a.oninput = b.oninput = null;
+      try { v.pause(); v.removeAttribute("src"); v.load(); } catch { /* gone */ }
+      URL.revokeObjectURL(url);
+      resolve(val);
+    };
+    $("trimGo").onclick = () => done([at(a), at(b)]);
+    $("trimAll").onclick = () => done([0, duration]);
+    $("trimCancel").onclick = () => done(null);
+    dlg.addEventListener("cancel", (e) => { e.preventDefault(); done(null); },
+                         { once: true });
+    v.onloadeddata = () => { v.currentTime = 0; paint(); };
+    paint();
+    dlg.showModal();
+  });
+}
+
+async function analyseVideoBlob(file, { trim = true } = {}) {
   say(tr("sayReadingVideo"));
   const v = document.createElement("video");
   v.src = URL.createObjectURL(file); v.muted = true; v.playsInline = true;
@@ -3232,7 +3318,14 @@ async function analyseVideoBlob(file) {
    * Truncating would hand back an analysis of the first minute labelled as an
    * analysis of the clip. A coarser grid keeps the whole movement, costs
    * resolution in the timings, and is stated. */
-  if (duration / dt > MAX_SAMPLE_FRAMES) dt = duration / MAX_SAMPLE_FRAMES;
+  let from = 0, to = duration;
+  if (trim) {
+    const range = await askTrim(file, dt, duration);
+    if (!range) { say(tr("sayTrimCancelled")); return; }
+    [from, to] = range;
+  }
+  const span = to - from;
+  if (span / dt > MAX_SAMPLE_FRAMES) dt = span / MAX_SAMPLE_FRAMES;
   const fpsGrid = 1 / dt;
   fileFps = fpsGrid;
   if (assumed) say(tr("sayAssumedFps", { fps: fpsGrid.toFixed(0) }), true);
@@ -3246,10 +3339,10 @@ async function analyseVideoBlob(file) {
     v.currentTime = t;
   });
 
-  const n = Math.max(1, Math.floor(duration / dt));
+  const n = Math.max(1, Math.floor(span / dt));
   for (let i = 0; i < n; i++) {
-    const t = i * dt;
-    if (t > duration) break;
+    const t = from + i * dt;
+    if (t > to) break;
     await seekTo(t);
     // The timestamp handed to the model is the GRID time, not v.currentTime:
     // a seek lands on the nearest keyframe-decoded frame, and feeding the model
@@ -3264,8 +3357,8 @@ async function analyseVideoBlob(file) {
                     lm: toNamed(res.landmarks[0], v.videoWidth, v.videoHeight) });
     }
     if (i % 5 === 0) {
-      say(tr("sayTrackingProgress", { t: t.toFixed(1),
-                                      dur: duration.toFixed(1),
+      say(tr("sayTrackingProgress", { t: (t - from).toFixed(1),
+                                      dur: span.toFixed(1),
                                       frames: frames.length }));
     }
   }
@@ -3287,6 +3380,7 @@ async function finish() {
    * no grid -- frames arrive when the camera and the model allow -- so there
    * the wall clock is still the only answer available. */
   const span = (frames[frames.length - 1].t - frames[0].t) / 1000;
+  const fromFile = !!fileFps;
   const fps = fileFps || (span > 0 ? (frames.length - 1) / span : 30);
   const poses = {};
   frames.forEach((f, i) => { poses[f.i ?? i] = f.lm; });
@@ -3318,6 +3412,10 @@ async function finish() {
     lastResult = analyse(poses, fps, { heightM, activity,
                                        osimModel: OSIM_MODEL });
     lastResult.detection = detection;
+    // Where the frames came from decides what can honestly be said about the
+    // timing: a file was sampled on a grid we chose, a camera delivered
+    // whatever it managed.
+    lastResult.fromFile = !!fromFile;
     await enrich(lastResult, poses, fps, heightM, activity);
     if (lastResult.reps.length && !DEMO) {
       // Never let the training log take the analysis down with it: the results
@@ -4747,7 +4845,8 @@ function render(res, fps) {
     <div id="dynBox"></div>
     <div id="forceBox"></div>
     ${isJump ? `<p class="note">${tr("noteTwoHeights")}</p>` : ""}
-    <p class="note">${tr("noteAnglesMeasured", { fps: fps.toFixed(1) })}</p>`;
+    <p class="note">${tr(res.fromFile ? "noteAnglesFile" : "noteAnglesMeasured",
+                          { fps: fps.toFixed(1), ms: (1000 / fps).toFixed(0) })}</p>`;
 
   const tabs = $("repTabs");
   items.forEach((r, i) => {
