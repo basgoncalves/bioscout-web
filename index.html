@@ -518,7 +518,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 62;
+window.BUILD = 63;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1914,7 +1914,9 @@ function renderAssess() {
       if (!past.length) return "";
       return `<div class="daybox" style="margin-top:12px">
         <div style="font-weight:600">${esc(tr("assessPast"))}</div>
-        <table><tbody>${past.map((a) => `<tr>
+        <p class="sub" style="margin:2px 0 8px">${esc(tr("assessPastHint"))}</p>
+        <table><tbody>${past.map((a, i) => `<tr class="pastRow" data-past="${i}"
+          style="cursor:pointer">
           <td>${esc(new Date(a.finished).toLocaleDateString())}</td>
           <td>${esc(a.attendanceOnly ? tr("assessAttendanceOnly")
                     : tr("assessFiledTests", { n: a.recorded.length, total: ASSESS_TESTS.length }))}</td>
@@ -1930,6 +1932,16 @@ function renderAssess() {
     // the report below, move with the target rather than lagging it.
     if (inp) inp.onchange = () => { setTarget(t.id, inp.value, currentAthlete()); renderAssess(); };
   }
+  /* A filed assessment can be read again. It was being written to history and
+   * then made unreachable: the report is rebuilt from the stored tests, which
+   * is the whole reason those were kept rather than only the score. */
+  $("assessCard").querySelectorAll("tr.pastRow[data-past]").forEach((row) => {
+    row.onclick = () => {
+      const past = listAssessments(currentAthlete()).slice(-5).reverse();
+      const a = past[+row.dataset.past];
+      if (a) openPastAssessment(a);
+    };
+  });
   $("assessRestartBtn").onclick = () => {
     clearAssess(); startAssess(currentAthlete()); renderAssess();
   };
@@ -1947,6 +1959,23 @@ function renderAssess() {
 /* Hand the recorder over to one test: same recorder, same pipeline, with the
  * activity chosen for the athlete so a protocol test cannot be analysed as the
  * wrong movement. The walk also gets a timed stop tone. */
+/* A past assessment, shown as it was filed. Read-only: recording into it would
+ * silently rewrite a dated record, and the date is most of what makes it worth
+ * keeping. */
+function openPastAssessment(a) {
+  const report = assessReport(a.tests, a.targets);
+  const when = new Date(a.finished).toLocaleString();
+  $("assessCard").innerHTML = `
+    <h1 style="font-size:18px;margin:0 0 2px">${esc(tr("assessPastTitle"))}</h1>
+    <p class="sub" style="margin:0 0 12px">${esc(when)}${a.note ? " — " + esc(a.note) : ""}</p>
+    ${a.attendanceOnly
+      ? `<p class="note">${esc(tr("assessAttendanceOnlyLong"))}</p>`
+      : assessReportHTML(report)}
+    <button type="button" class="ghost" id="assessBackBtn" style="margin-top:12px">${
+      esc(tr("assessBackToCurrent"))}</button>`;
+  $("assessBackBtn").onclick = () => renderAssess();
+}
+
 function beginAssessTest(t) {
   assessStep = t.id;
   $("activity").value = t.activity;

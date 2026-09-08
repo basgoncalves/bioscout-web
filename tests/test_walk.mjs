@@ -92,5 +92,68 @@ ok(sWalk.walk > sWalk.squat && sWalk.walk > sWalk.cmj,
 ok(sWalk.run < 0.2, "a clip with no flight in it barely scores as a run",
    sWalk.run.toFixed(2));
 
+/* --- the protocol the assessment actually asks for ----------------------
+ *
+ * "Walk away from the camera and back." Filmed head-on, that does two things
+ * at once that a fixed reference cannot survive: the feet climb the image as
+ * the athlete recedes -- perspective, not the foot leaving the ground -- and
+ * the whole body shrinks, so a contact band that is a fixed fraction of the
+ * clip's median shank is far too wide near the camera and far too narrow away
+ * from it. A planted foot at the far end then sits well above a floor line
+ * fixed at the clip's 97th percentile, and every step there reads as airborne.
+ *
+ * This fixture reproduces exactly that: the same gait, with the feet and the
+ * body scaled by distance over the clip.
+ */
+function walkAwayAndBack({ strideF = 66, cycles = 12, duty = 0.62,
+                           W = 720, H = 1280, near = 1, far = 0.45 } = {}) {
+  const n = strideF * cycles, lift = 0.10;
+  const phase = (i, ph) => {
+    const t = ((i / strideF) + ph) % 1;
+    return t < duty ? 0 : lift * Math.sin(Math.PI * (t - duty) / (1 - duty));
+  };
+  const poses = {};
+  for (let i = 0; i < n; i++) {
+    // Out to the far end and back: scale 1 -> far -> 1.
+    const u = i / (n - 1);
+    const k = near + (far - near) * (1 - Math.abs(2 * u - 1));
+    // Everything converges toward the vanishing point as the body recedes,
+    // which lifts the feet up the image exactly as a real walk does.
+    const horizon = 0.45;
+    const at = (yStand) => horizon + (yStand - horizon) * k;
+    const P = (x, y) => [(0.5 + (x - 0.5) * k) * W, at(y) * H];
+    const hipY = 0.55, toeY = 0.93;
+    poses[i] = {
+      nose: P(0.5, 0.18), left_shoulder: P(0.46, 0.32), right_shoulder: P(0.54, 0.32),
+      left_hip: P(0.47, hipY), right_hip: P(0.53, hipY),
+      left_knee: P(0.47, hipY + 0.17), right_knee: P(0.53, hipY + 0.17),
+      left_ankle: P(0.47, toeY - phase(i, 0)), right_ankle: P(0.53, toeY - phase(i, 0.5)),
+      left_heel: P(0.46, toeY - phase(i, 0) + 0.008),
+      right_heel: P(0.52, toeY - phase(i, 0.5) + 0.008),
+      left_foot_index: P(0.49, toeY - phase(i, 0) + 0.015),
+      right_foot_index: P(0.55, toeY - phase(i, 0.5) + 0.015),
+    };
+  }
+  return poses;
+}
+
+{
+  const poses = walkAwayAndBack();
+  const found = findWith("walk", poses);
+  ok(!found.refused, "a walk away from the camera and back is not refused",
+     found.refused || "");
+  ok(found.reps.length >= 16,
+     "and still yields strides at both ends of the room", `${found.reps.length} strides`);
+  ok(found.sideReps.l.length >= 6 && found.sideReps.r.length >= 6,
+     "on both feet", `${found.sideReps.l.length}/${found.sideReps.r.length}`);
+
+  /* The far half is the half that used to disappear, so check it explicitly
+   * rather than trusting a total that the near half could carry on its own. */
+  const mid = (66 * 12) / 2;
+  const far = found.reps.filter((r) => r[0] > mid * 0.55 && r[2] < mid * 1.45);
+  ok(far.length >= 4, "including in the middle of the clip, at the far end",
+     `${far.length} strides out there`);
+}
+
 console.log(fails ? `\n${fails} FAILED` : "\nAll checks passed");
 process.exit(fails ? 1 : 0);

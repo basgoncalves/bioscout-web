@@ -1044,17 +1044,86 @@ export function findSLSquatReps(F, cfg = DEFAULT_SLSQUAT_CFG) {
  * of the floor line. The floor is the 97th percentile of every observed foot
  * position, which is robust to the one dropped frame that a plain minimum is
  * not. Returns contiguous [start, end] index pairs. */
-function contactPeriods(F, side, band = 0.09, minFrames = 3, mergeGap = 3) {
+/* The floor, and the body, as they are AT EACH MOMENT rather than on average.
+ *
+ * A clip where the athlete walks away from the camera and back breaks both of
+ * the constants this used to rely on. Walking away moves the feet UP the image
+ * -- that is perspective, not the foot leaving the ground -- so a floor line
+ * fixed at the clip's 97th percentile sits far below the planted foot at the
+ * far end, and every step there reads as airborne. At the same time the body
+ * shrinks, so a contact band that is a fixed fraction of the MEDIAN shank is
+ * several times too wide near the camera and far too narrow away from it.
+ *
+ * Both are therefore taken locally: the floor from a high percentile of the
+ * foot's own recent history, and the scale from this frame's shank. The window
+ * is deliberately wider than a stride, so it spans stance and swing and lands
+ * on the floor rather than on whatever the foot was doing just then.
+ */
+function rollingStat(y, win, q) {
+  const out = new Array(y.length).fill(NaN);
+  for (let i = 0; i < y.length; i++) {
+    const lo = Math.max(0, i - win), hi = Math.min(y.length - 1, i + win);
+    const w = [];
+    for (let k = lo; k <= hi; k++) if (isNum(y[k])) w.push(y[k]);
+    out[i] = w.length ? nanpercentile(w, q) : NaN;
+  }
+  return out;
+}
+
+function contactPeriods(F, side, band = 0.09, minFrames = 3, mergeGap = 3,
+                        hipRelative = false) {
   const y = interpNan(F["foot_y_" + side]);
   // Hysteresis: a foot has to come well clear of the floor to count as lifted,
   // once it is down. A single threshold chopped one stance into three whenever
   // the ankle landmark wobbled across the line -- and three stances is three
   // strides, which is how a 0.63 s stride came out as 0.42 s.
-  const inTol = band * F._scale, outTol = 1.8 * band * F._scale;
+  /* Measure the foot against the HIP, not against the picture.
+   *
+   * Walking away from the camera moves the feet up the image and shrinks the
+   * body, and it does both to the hip as well -- so the drop from hip to foot,
+   * divided by the leg, is the same number at either end of the room while an
+   * absolute floor line is wrong at both. That ratio is what the contact test
+   * runs on now. It is dimensionless, it needs no rolling window chasing the
+   * athlete down the corridor, and a clip filmed head-on stops being a special
+   * case.
+   *
+   * A rolling floor was tried first and is not enough: a symmetric window over
+   * a moving athlete is biased toward the near end of the window by roughly
+   * half the distance travelled across it, which at the far end of a room is
+   * several times the contact band.
+   */
+  const hip = interpNan(F.hip_cy || []);
+  const shank = interpNan(F.shank_len || []);
+  const rel = new Array(F._n).fill(NaN);
+  for (let i = 0; i < F._n; i++) {
+    if (isNum(y[i]) && isNum(hip[i]) && isNum(shank[i]) && shank[i] > 1e-6) {
+      rel[i] = (y[i] - hip[i]) / shank[i];
+    }
+  }
+  /* Hip-relative ONLY where the hip is a valid stand-in for the ground.
+   *
+   * In a walk one foot is always down, so the hip stays a fixed height above
+   * the floor and moving with it costs nothing. In a run the hip is airborne
+   * for part of every stride -- it rises with the feet -- so measuring the
+   * feet against it cancels precisely the flight phase the run is defined by.
+   * Turned on for walking, it read a run's duty factor as 0.5 with 17 ms of
+   * flight, which is a walk's description of a run.
+   */
+  const usable = hipRelative && rel.filter(isNum).length >= 0.5 * F._n;
+  // The planted foot sits at the far end of that ratio; 97th percentile for
+  // the same reason the floor used one, to survive a dropped frame.
+  const ground = usable ? nanpercentile(rel, 97) : null;
+
   const out = [];
   let start = -1, down = false;
   for (let i = 0; i < F._n; i++) {
-    const h = isNum(y[i]) ? F._floorY - y[i] : Infinity;
+    // Falls back to the absolute floor where the hip is not tracked, which is
+    // the close-up shots -- there the camera is not moving relative to the
+    // athlete anyway, so the old measure is fine.
+    const h = usable
+      ? (isNum(rel[i]) ? ground - rel[i] : Infinity)
+      : (isNum(y[i]) ? (F._floorY - y[i]) / F._scale : Infinity);
+    const inTol = band, outTol = 1.8 * band;
     down = down ? h < outTol : h < inTol;
     if (down && start < 0) start = i;
     if (!down && start >= 0) { out.push([start, i - 1]); start = -1; }
@@ -1146,9 +1215,9 @@ export function findRunReps(F, cfg = DEFAULT_RUN_CFG) {
   // Measure the side with more complete contact data; a stride is a stride
   // whichever foot defines it.
   const cl = realStances(contactPeriods(F, "l", cfg.contactBand,
-                                        cfg.minContactFrames), F._n);
+                                        cfg.minContactFrames, 3, cfg.hipRelative), F._n);
   const cr = realStances(contactPeriods(F, "r", cfg.contactBand,
-                                        cfg.minContactFrames), F._n);
+                                        cfg.minContactFrames, 3, cfg.hipRelative), F._n);
   const side = cl.length >= cr.length ? "l" : "r";
   const cs = side === "l" ? cl : cr;
   // Strides for BOTH feet. The charts and the ensemble mean still run off one
@@ -1199,6 +1268,13 @@ export function findRunReps(F, cfg = DEFAULT_RUN_CFG) {
  */
 export const DEFAULT_WALK_CFG = {
   ...DEFAULT_RUN_CFG,
+  /* Measure the feet against the hip rather than against a fixed floor line.
+   * The assessment asks the athlete to walk away from the camera and back, and
+   * filmed head-on that moves the feet up the image and shrinks the body -- so
+   * an absolute floor is wrong everywhere except where it was measured, and
+   * every step at the far end reads as airborne. The hip moves with both, and
+   * in a walk it never leaves the ground. See contactPeriods. */
+  hipRelative: true,
   // 1.6 s at 60 fps is a slow but ordinary walking stride; the running ceiling
   // of 90 frames would throw those away as "too long to be a stride".
   maxStrideFrames: 150,
