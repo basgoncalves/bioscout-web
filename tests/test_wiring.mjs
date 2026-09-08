@@ -204,7 +204,13 @@ const declaredIn = (src) => {
   // `get sawBody() {` declares one too -- an accessor is a definition, and
   // reading it as a call to something unimported is the same false positive
   // as reading `spec.findReps(...)` that way.
-  for (const m of src.matchAll(/^\s*(?:async\s+|\*\s*|static\s+|get\s+|set\s+)*([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*\{/gm)) {
+  // The parameter list tolerates one level of nesting, because a default value
+  // is often a call: `reset(now = Date.now()) {` stopped the old pattern at the
+  // first `)`, so the method was never recorded as declared and every use of it
+  // was reported as a missing import.
+  const PARAMS = "((?:[^()]|\\([^()]*\\))*)";
+  for (const m of src.matchAll(new RegExp(
+      `^\\s*(?:async\\s+|\\*\\s*|static\\s+|get\\s+|set\\s+)*([A-Za-z_$][\\w$]*)\\s*\\(${PARAMS}\\)\\s*\\{`, "gm"))) {
     names.add(m[1]); add(m[2]);
   }
   // `probe as probeHelper` declares probeHelper, not probe.
