@@ -503,7 +503,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 49;
+window.BUILD = 50;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -559,6 +559,7 @@ import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
 import { ensembleRep } from "./src/ensemble.js";
 import { neckLoadHTML } from "./src/neckload.js";
+import { framingWatcher } from "./src/framing.js";
 import { ASSESS_TESTS, assessReport, assessReportHTML, getAssess, startAssess,
          putAssessTest, clearAssess, nextTest } from "./src/assess.js";
 import { makeZip, svgToPng, blobBytes } from "./src/zip.js";
@@ -2377,6 +2378,11 @@ function toNamed(lms, w, h) {
 const BONES = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],
                [23,25],[25,27],[24,26],[26,28],[27,31],[28,32]];
 
+/* The live framing check lives in src/framing.js so its hysteresis can be
+ * tested without a camera; see there for why it is not the same check the
+ * analysis runs afterwards. */
+const framing = framingWatcher();
+
 function draw(res) {
   const w = video.videoWidth, h = video.videoHeight;
   if (!w) return;
@@ -2386,9 +2392,12 @@ function draw(res) {
     $("hudLeft").textContent = tr("hudNoBody");
     return;
   }
-  $("hudLeft").innerHTML = recording
-    ? `<span class="rec">${tr("hudRecording")}</span>` : tr("hudTracking");
   const lm = res.landmarks[0];
+  const outOfShot = framing.see(lm);
+  $("hudLeft").innerHTML = [
+    recording ? `<span class="rec">${tr("hudRecording")}</span>` : tr("hudTracking"),
+    outOfShot ? `<span class="rec">${tr("hudFrame_" + outOfShot)}</span>` : "",
+  ].filter(Boolean).join(" · ");
   const mirror = facing === "user";
   const X = (p) => (mirror ? (1 - p.x) : p.x) * w, Y = (p) => p.y * h;
   ctx.lineWidth = Math.max(2, w / 260);
@@ -2430,6 +2439,7 @@ async function startCameraQuiet() {
 $("recBtn").onclick = () => {
   if (!recording) {
     frames = []; recording = true;
+    framing.reset();
     videoBlob = null; videoChunks = [];
     // Opt-in, off by default. The recording is held in memory and only ever
     // written to the user's own download; nothing is uploaded.

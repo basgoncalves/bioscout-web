@@ -31,6 +31,14 @@ for (const lang of ["en", "pt", "de"]) {
   }
   ok(missing.length === 0, `${lang} has every protocol key`, missing.join(", "));
 }
+/* The framing warnings are keyed by which part of the body left the picture,
+ * built at runtime, so nothing else checks they all exist. */
+for (const lang of ["en", "pt", "de"]) {
+  i18n.setLang(lang);
+  const missing = ["feet", "head", "both"]
+    .filter((k) => i18n.t(`hudFrame_${k}`) === `hudFrame_${k}`);
+  ok(missing.length === 0, `${lang} has every framing warning`, missing.join(", "));
+}
 i18n.setLang("en");
 
 /* Symmetry is relative to the mean of the two sides, so swapping the legs
