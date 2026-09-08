@@ -13,6 +13,7 @@
  * whatever sets are still in memory in full, and older ones as summaries.
  */
 import { UNITS } from "./foods.js";
+import { groupPeaks } from "./muscle_groups.js";
 import { listAssessments, importAssessments } from "./assess.js";
 
 const PKEY = "bioscout.profiles.v1";
@@ -724,6 +725,42 @@ function summariseRep(r, activity) {
     o.peak_knee_Nm = pk(r.dyn.knee_moment);
     o.peak_ankle_Nm = pk(r.dyn.ankle_moment);
     o.peak_grf_bw = +(Math.max(...r.dyn.grf_vertical) / r.dyn.body_weight_n).toFixed(2);
+    /* Extensor and flexor peaks kept apart.
+     *
+     * The magnitude above answers "how big did it get", which for a stride is
+     * almost always the extensor peak -- so a flexor moment that halved between
+     * sets moved that number not at all. The convention here is extension
+     * positive, so the two peaks are the signed maximum and the signed minimum,
+     * and a joint that never went the other way reports 0 rather than a
+     * borrowed value from the side it did go.
+     *
+     * The antero-posterior ground reaction is split the same way and for the
+     * same reason: braking and propulsion are different events of the stride
+     * and one summary number hides whichever is smaller. */
+    const hi = (a) => +Math.max(0, ...a).toFixed(1);
+    const lo = (a) => +Math.max(0, ...a.map((v) => -v)).toFixed(1);
+    o.peak_hip_ext_Nm = hi(r.dyn.hip_moment);
+    o.peak_hip_flex_Nm = lo(r.dyn.hip_moment);
+    o.peak_knee_ext_Nm = hi(r.dyn.knee_moment);
+    o.peak_knee_flex_Nm = lo(r.dyn.knee_moment);
+    o.peak_ankle_pf_Nm = hi(r.dyn.ankle_moment);
+    o.peak_ankle_df_Nm = lo(r.dyn.ankle_moment);
+    if (r.dyn.grf_horizontal && r.dyn.body_weight_n) {
+      const bw = r.dyn.body_weight_n;
+      o.peak_grf_prop_bw = +(Math.max(0, ...r.dyn.grf_horizontal) / bw).toFixed(2);
+      o.peak_grf_brake_bw =
+        +(Math.max(0, ...r.dyn.grf_horizontal.map((v) => -v)) / bw).toFixed(2);
+    }
+  }
+  /* Peak force per functional muscle group.
+   *
+   * The stance side's, when the rep has one -- a stride's forces belong to the
+   * foot the stride belongs to, and taking the larger of the two sides there
+   * would report the swinging leg whenever it happened to peak higher. These
+   * come from the surrogate, and every place they are shown says so. */
+  if (r.forces && r.forceNames) {
+    const g = groupPeaks(r.forces, r.forceNames, r.stance_side || null);
+    for (const [k, v] of Object.entries(g)) o["peak_" + k + "_N"] = +v.toFixed(0);
   }
   if (activity === "squat") {
     o.knee_flex_max_deg = r.knee_flex_max_deg;
@@ -772,7 +809,10 @@ function summariseRep(r, activity) {
     o.flight_s = r.flight_s ?? null;
     o.duty_factor = r.duty_factor ?? null;
     o.cadence_spm = r.cadence_spm ?? null;
+    o.stride_length_m = r.stride_length_m ?? null;
     o.knee_flex_max_deg = r.knee_flex_max_deg;
+    o.hip_flex_max_deg = r.hip_flex_max_deg ?? null;
+    o.ankle_dorsi_max_deg = r.ankle_dorsi_max_deg ?? null;
     o.knee_asymmetry_deg = r.knee_asymmetry_deg ?? null;
   } else if (activity === "sidestep") {
     o.excursion_m = r.excursion_m ?? null;

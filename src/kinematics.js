@@ -1740,6 +1740,18 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
         const sc = found.sideContacts || {};
         Object.assign(s, strideMetrics(F, b, fps,
           { otherContacts: sd === "l" ? sc.r : sc.l }));
+        /* Stride length, over the ground.
+         *
+         * How far the hip actually moved between this foot's two contacts.
+         * On a treadmill that is close to zero, and that is the true answer to
+         * the question asked -- the athlete did not travel. It is not the
+         * belt's stride length, which no camera pointed at the runner can see,
+         * and the app must not print one as though it could. */
+        const hx = F.hip_cx;
+        if (hx && Number.isFinite(hx[b[0]]) && Number.isFinite(hx[b[2]])
+            && pxPerM > 0) {
+          s.stride_length_m = +(Math.abs(hx[b[2]] - hx[b[0]]) / pxPerM).toFixed(3);
+        }
       }
       if (activity === "sidestep") {
         Object.assign(s, sidestepMetrics(F, b, fps, pxPerM, found.midX ?? refB));

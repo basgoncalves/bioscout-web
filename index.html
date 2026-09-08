@@ -539,7 +539,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 74;
+window.BUILD = 75;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -989,10 +989,50 @@ const PEAK_VARS = {
   hip_flex_max_deg:   { label: "Peak hip flexion", unit: "°", dp: 0 },
   travel_m:           { label: "Body travel", unit: "m", dp: 2 },
   elbow_flex_max_deg: { label: "Peak elbow flexion", unit: "°", dp: 0 },
-  peak_hip_Nm:        { label: "Peak hip moment", unit: "N·m", dp: 0 },
-  peak_knee_Nm:       { label: "Peak knee moment", unit: "N·m", dp: 0 },
-  peak_ankle_Nm:      { label: "Peak ankle moment", unit: "N·m", dp: 0 },
-  peak_grf_bw:        { label: "Peak GRF", unit: "×BW", dp: 2 },
+  peak_hip_Nm:        { label: "Peak hip moment (magnitude)", unit: "N·m", dp: 0,
+                        supersededBy: "peak_hip_ext_Nm" },
+  peak_knee_Nm:       { label: "Peak knee moment (magnitude)", unit: "N·m", dp: 0,
+                        supersededBy: "peak_knee_ext_Nm" },
+  peak_ankle_Nm:      { label: "Peak ankle moment (magnitude)", unit: "N·m", dp: 0,
+                        supersededBy: "peak_ankle_pf_Nm" },
+  peak_grf_bw:        { label: "Peak vertical GRF", unit: "×BW", dp: 2 },
+  /* Gait measures worth carrying between sets.
+   *
+   * Ordered as they are read: what the stride did in time and space, then the
+   * angles, then the moments, then the ground reaction, then the muscle
+   * groups. The `pair` field names the measure that belongs on the SAME chart:
+   * an extensor peak means little without the flexor peak beside it, and a
+   * propulsive impulse means little without the braking one. */
+  stride_length_m:    { label: "Stride length (over ground)", unit: "m", dp: 2 },
+  ankle_dorsi_max_deg:{ label: "Peak ankle dorsiflexion", unit: "°", dp: 0 },
+  peak_hip_ext_Nm:    { label: "Peak hip moment", unit: "N·m", dp: 0,
+                        pair: "peak_hip_flex_Nm",
+                        seriesLabel: "extensor", pairLabel: "flexor" },
+  peak_hip_flex_Nm:   { label: "Peak hip flexor moment", unit: "N·m", dp: 0, hidden: true },
+  peak_knee_ext_Nm:   { label: "Peak knee moment", unit: "N·m", dp: 0,
+                        pair: "peak_knee_flex_Nm",
+                        seriesLabel: "extensor", pairLabel: "flexor" },
+  peak_knee_flex_Nm:  { label: "Peak knee flexor moment", unit: "N·m", dp: 0, hidden: true },
+  peak_ankle_pf_Nm:   { label: "Peak ankle moment", unit: "N·m", dp: 0,
+                        pair: "peak_ankle_df_Nm",
+                        seriesLabel: "plantar flexor", pairLabel: "dorsiflexor" },
+  peak_ankle_df_Nm:   { label: "Peak ankle dorsiflexor moment", unit: "N·m", dp: 0, hidden: true },
+  peak_grf_prop_bw:   { label: "Peak horizontal GRF", unit: "×BW", dp: 2,
+                        pair: "peak_grf_brake_bw",
+                        seriesLabel: "propulsive", pairLabel: "braking" },
+  peak_grf_brake_bw:  { label: "Peak braking GRF", unit: "×BW", dp: 2, hidden: true },
+  peak_hip_ext_N:     { label: "Peak hip extensor force (model)", unit: "N", dp: 0,
+                        pair: "peak_hip_flex_N",
+                        seriesLabel: "extensors", pairLabel: "flexors", modelled: true },
+  peak_hip_flex_N:    { label: "Peak hip flexor force (model)", unit: "N", dp: 0,
+                        hidden: true, modelled: true },
+  peak_knee_ext_N:    { label: "Peak knee extensor force (model)", unit: "N", dp: 0,
+                        pair: "peak_knee_flex_N",
+                        seriesLabel: "extensors", pairLabel: "flexors", modelled: true },
+  peak_knee_flex_N:   { label: "Peak knee flexor force (model)", unit: "N", dp: 0,
+                        hidden: true, modelled: true },
+  peak_ankle_pf_N:    { label: "Peak plantar flexor force (model)", unit: "N", dp: 0,
+                        modelled: true },
   duration_s:         { label: "Rep duration", unit: "s", dp: 2 },
   up_s:               { label: "Concentric time", unit: "s", dp: 2 },
   down_s:             { label: "Eccentric time", unit: "s", dp: 2 },
@@ -1024,6 +1064,19 @@ let sessionViewVar = null;
 // reaching for it there is a temporal-dead-zone error that leaves the
 // card blank.
 const SET_COLOR = "#2f6fe4";
+// The second half of a pair. Distinct from SET_COLOR at a glance and readable
+// in both themes; deliberately not the gait side colours, which mean left and
+// right and must not come to mean anything else.
+const PAIR_COLOR = "#c2761f";
+
+/** The name of one half of a paired measure, for legends and the table. */
+function seriesName(key, isPair) {
+  const base = PEAK_VARS[key] || {};
+  const k = isPair ? base.pairLabel : base.seriesLabel;
+  if (!k) return varSpec(key).label;
+  const t = tr("series_" + k.replace(/\s+/g, "_"));
+  return t.startsWith("series_") ? k : t;
+}
 
 /** Keys that at least one set actually carries a number for. */
 function availablePeakVars(sess) {
@@ -1035,8 +1088,19 @@ function availablePeakVars(sess) {
       }
     }
   }
-  return [...seen].sort((a, b) =>
-    Object.keys(PEAK_VARS).indexOf(a) - Object.keys(PEAK_VARS).indexOf(b));
+  /* A paired measure is offered once, under the name of the pair.
+   *
+   * "Peak knee moment" draws the extensor and the flexor peak together, so
+   * listing "Peak knee flexor moment" separately would put the same chart in
+   * the menu twice under a name that describes half of it. */
+  /* And a measure that a better one replaced is dropped once the better one is
+   * actually there. The old whole-magnitude moment peaks stay available for
+   * sessions recorded before the extensor/flexor split, and disappear from the
+   * menu the moment a set in this session carries the split. */
+  return [...seen].filter((k) => !PEAK_VARS[k].hidden)
+    .filter((k) => !(PEAK_VARS[k].supersededBy && seen.has(PEAK_VARS[k].supersededBy)))
+    .sort((a, b) =>
+      Object.keys(PEAK_VARS).indexOf(a) - Object.keys(PEAK_VARS).indexOf(b));
 }
 
 /** Per set: mean of the chosen measure across that set's reps, with the range.
@@ -1062,22 +1126,40 @@ function setSeries(sess, key) {
 /** The set's number in the table: the mean, and under it where the middle of
  *  the set sat. The mean on its own says nothing about whether the reps
  *  agreed, and the peak on its own is one rep. */
-function peakCell(pt, spec) {
-  const mean = `${pt.mean.toFixed(spec.dp)}<span class="sub"> ${spec.unit}</span>`;
-  if (pt.p1 == null || !(pt.p99 > pt.p1)) return mean;
-  return `${mean}<br><span class="sub" style="font-size:11px">${
-    pt.p1.toFixed(spec.dp)}\u2013${pt.p99.toFixed(spec.dp)}</span>`;
+function peakCell(pt, spec, pair) {
+  const one = (p, color) => {
+    const m = `<span${color ? ` style="color:${color}"` : ""}>${
+      p.mean.toFixed(spec.dp)}</span>`;
+    return p.p1 != null && p.p99 > p.p1
+      ? `${m}<span class="sub" style="font-size:11px"> ${
+          p.p1.toFixed(spec.dp)}\u2013${p.p99.toFixed(spec.dp)}</span>`
+      : m;
+  };
+  const unit = `<span class="sub"> ${spec.unit}</span>`;
+  if (!pair || pair.mean == null) return one(pt) + unit;
+  // Both halves of the pair, one per line, in the colours they carry on the
+  // chart -- so the number in the table and the mark on the plot are the same
+  // thing and do not have to be matched up by guesswork.
+  return `${one(pt, SET_COLOR)}${unit}<br>${one(pair, PAIR_COLOR)}${unit}`;
 }
 
 /** Mean per set with the within-set range as a whisker. Deliberately not a
  *  line: sets are ordinal, and joining them implies you could read a value
  *  between set 2 and set 3. */
-function setChart(points, key) {
+function setChart(points, key, pairPoints) {
   const spec = varSpec(key);
   const ok = points.filter((p) => p.mean != null);
   if (ok.length < 1) return `<p class="note">${tr("noteNoValues")}</p>`;
+  /* The other half of the pair, on the same axis.
+   *
+   * An extensor peak on its own answers half the question: a knee that took
+   * the same extensor moment this set but half the flexor moment is a
+   * different knee, and two charts in two clicks is not a comparison. Same
+   * units, same scale, offset a little along x so the two whiskers do not sit
+   * on top of each other. */
+  const pairOk = (pairPoints || []).filter((p) => p.mean != null);
   const W = 320, H = 150, P = { l: 42, r: 10, t: 12, b: 24 };
-  const vals = ok.flatMap((p) => [p.min, p.max, p.mean]);
+  const vals = ok.concat(pairOk).flatMap((p) => [p.min, p.max, p.mean]);
   let lo = Math.min(...vals), hi = Math.max(...vals);
   const pad = (hi - lo) * 0.15 || Math.abs(hi || 1) * 0.1 || 1;
   lo -= pad; hi += pad;
@@ -1090,8 +1172,8 @@ function setChart(points, key) {
     g += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="var(--line)" stroke-width=".8"/>`;
     g += `<text x="${P.l - 5}" y="${yy + 3.5}" font-size="9" text-anchor="end" fill="var(--muted)">${val.toFixed(spec.dp)}</text>`;
   }
-  points.forEach((pt, i) => {
-    const x = sx(i);
+  const DX = pairOk.length ? 5 : 0;
+  const drawPoint = (pt, x, color) => {
     if (pt.mean == null) return;
     if (pt.max > pt.min) {
       g += `<line x1="${x}" y1="${sy(pt.min)}" x2="${x}" y2="${sy(pt.max)}" stroke="var(--muted)" stroke-width="1.2"/>`;
@@ -1103,14 +1185,23 @@ function setChart(points, key) {
       // has too few reps for percentiles the thick bar is simply absent, which
       // is the honest way to say a percentile of four reps means nothing.
       if (pt.p1 != null && pt.p99 != null && pt.p99 > pt.p1) {
-        g += `<line x1="${x}" y1="${sy(pt.p1)}" x2="${x}" y2="${sy(pt.p99)}" stroke="${SET_COLOR}" stroke-width="4.5" stroke-opacity=".38" stroke-linecap="round"/>`;
+        g += `<line x1="${x}" y1="${sy(pt.p1)}" x2="${x}" y2="${sy(pt.p99)}" stroke="${color}" stroke-width="4.5" stroke-opacity=".38" stroke-linecap="round"/>`;
       }
     }
-    g += `<circle cx="${x}" cy="${sy(pt.mean)}" r="4.2" fill="${SET_COLOR}"/>`;
+    g += `<circle cx="${x}" cy="${sy(pt.mean)}" r="4.2" fill="${color}"/>`;
+  };
+  points.forEach((pt, i) => {
+    const x = sx(i);
+    drawPoint(pt, x - DX, SET_COLOR);
+    if (DX && pairPoints && pairPoints[i]) drawPoint(pairPoints[i], x + DX, PAIR_COLOR);
     g += `<text x="${x}" y="${H - 7}" font-size="9" text-anchor="middle" fill="var(--muted)">${pt.index}</text>`;
   });
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:150px">${g}</svg>
-    <div class="legend"><span><i class="swatch" style="background:${SET_COLOR}"></i>${tr("setMean")}</span>
+    <div class="legend">${pairOk.length
+      ? `<span><i class="swatch" style="background:${SET_COLOR}"></i>${
+          esc(seriesName(key, false))}</span><span><i class="swatch" style="background:${
+          PAIR_COLOR}"></i>${esc(seriesName(key, true))}</span>`
+      : `<span><i class="swatch" style="background:${SET_COLOR}"></i>${tr("setMean")}</span>`}
       <span>${tr("whisker")}</span>${ok.some((p) => p.p1 != null && p.p99 > p.p1)
         ? `<span><i class="swatch" style="background:${SET_COLOR};opacity:.38"></i>${tr("pctBand")}</span>` : ""
       }<span>${spec.unit}</span></div>
@@ -1862,12 +1953,15 @@ function renderTraining() {
   const vars = availablePeakVars(sess);
   if (!vars.includes(peakVar)) peakVar = vars[0] || null;
   const series = peakVar ? setSeries(sess, peakVar) : [];
+  const pairKey = peakVar && PEAK_VARS[peakVar] ? PEAK_VARS[peakVar].pair : null;
+  const pairSeries = pairKey ? setSeries(sess, pairKey) : null;
   const spec = peakVar ? varSpec(peakVar) : null;
   const byIndex = Object.fromEntries(series.map((x) => [x.index, x]));
 
   const rows = sess.sets.map((s) => {
     const pv = byIndex[s.index];
-    const cell = pv && pv.mean != null ? peakCell(pv, spec) : "—";
+    const pp = pairSeries ? pairSeries.find((x) => x.index === s.index) : null;
+    const cell = pv && pv.mean != null ? peakCell(pv, spec, pp) : "—";
     return `<tr><td>${tr("setLabel", { n: s.index })}</td><td>${tr(s.activity)}</td>
       <td>${s.reps}</td><td>${s.addedKg ? "+" + s.addedKg : ""}${s.assistKg ? " −" + s.assistKg : ""}</td>
       <td>${cell}</td>
@@ -1892,7 +1986,7 @@ function renderTraining() {
             : tr("peakCol")}</th><th>${tr("time")}</th></tr></thead>
       <tbody>${rows}</tbody></table>
     <div id="peakChartBox" style="margin-top:10px">${
-      peakVar ? setChart(series, peakVar) : ""}</div>
+      peakVar ? setChart(series, peakVar, pairSeries) : ""}</div>
     <button id="summaryBtn" style="margin-top:10px">${tr("finishSummarise")}</button>
     <button class="ghost" id="newSessionBtn" style="margin-top:8px">${tr("newSession")}</button>
     <div id="summaryBox"></div>`;
@@ -1914,12 +2008,16 @@ function renderTraining() {
     // would collapse an open summary underneath it.
     const sess2 = getSession();
     const ser = setSeries(sess2, peakVar);
-    $("peakChartBox").innerHTML = setChart(ser, peakVar);
+    const pk2 = PEAK_VARS[peakVar] ? PEAK_VARS[peakVar].pair : null;
+    const pser = pk2 ? setSeries(sess2, pk2) : null;
+    $("peakChartBox").innerHTML = setChart(ser, peakVar, pser);
     const sp = varSpec(peakVar);
     const byI = Object.fromEntries(ser.map((x) => [x.index, x]));
+    const byP = pser ? Object.fromEntries(pser.map((x) => [x.index, x])) : null;
     [...$("trainingCard").querySelectorAll("tbody tr")].forEach((tr, i) => {
       const st = sess2.sets[i], hit = st && byI[st.index];
-      tr.cells[4].innerHTML = hit && hit.mean != null ? peakCell(hit, sp) : "—";
+      tr.cells[4].innerHTML = hit && hit.mean != null
+        ? peakCell(hit, sp, byP && st ? byP[st.index] : null) : "—";
     });
   };
 }
