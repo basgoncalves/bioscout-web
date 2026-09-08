@@ -23,10 +23,10 @@
  * v41: the icons moved from the repo root into assets/icons/. The old cache
  * still holds ./logo.png and friends at paths that no longer exist, so it has
  * to be evicted rather than merged. */
-const CACHE = "bioscout-web-v42";
+const CACHE = "bioscout-web-v43";
 
 const SHELL = ["./", "./index.html", "./src/kinematics.js", "./src/dynamics.js",
-               "./src/forces.js", "./src/overlay.js", "./src/zip.js", "./src/detect.js", "./src/profiles.js", "./src/ensemble.js", "./src/dashboard.js", "./src/fetcher.js", "./src/diary.js", "./src/media.js", "./src/weight.js", "./src/cycle.js", "./src/foods.js", "./src/share.js", "./src/sleep.js", "./src/vitals.js", "./src/cardio.js", "./src/strava.js", "./src/neckload.js", "./src/neck_gload.js", "./src/assess.js", "./src/framing.js", "./src/tiptoe_ref.js", "./src/health.js", "./src/i18n.js", "./data/norms.json", "./data/muscle_joints.json", "./manifest.webmanifest",
+               "./src/forces.js", "./src/overlay.js", "./src/zip.js", "./src/detect.js", "./src/profiles.js", "./src/ensemble.js", "./src/dashboard.js", "./src/fetcher.js", "./src/diary.js", "./src/media.js", "./src/weight.js", "./src/cycle.js", "./src/foods.js", "./src/share.js", "./src/sleep.js", "./src/vitals.js", "./src/cardio.js", "./src/strava.js", "./src/neckload.js", "./src/neck_gload.js", "./src/assess.js", "./src/framing.js", "./src/tiptoe_ref.js", "./src/neck_load.js", "./src/health.js", "./src/i18n.js", "./data/norms.json", "./data/muscle_joints.json", "./manifest.webmanifest",
                "./assets/icons/logo.png", "./assets/icons/icon-192.png",
                "./assets/icons/icon-512.png", "./assets/icons/icon-maskable-512.png",
                "./assets/icons/apple-touch-icon.png", "./assets/icons/favicon.ico"];

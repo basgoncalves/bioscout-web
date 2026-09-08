@@ -505,7 +505,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 54;
+window.BUILD = 55;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -562,6 +562,7 @@ import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from
 import { ensembleRep } from "./src/ensemble.js";
 import { neckLoadHTML } from "./src/neckload.js";
 import { framingWatcher } from "./src/framing.js";
+import { neckLoadHTML as neckTrainingHTML, setNeckLoadTr } from "./src/neck_load.js";
 import { ASSESS_TESTS, assessReport, assessReportHTML, getAssess, startAssess,
          putAssessTest, clearAssess, nextTest, targetFor, countReps,
          setTarget, finishAssess, listAssessments } from "./src/assess.js";
@@ -861,6 +862,7 @@ function applyStaticI18n() {
     }
   };
   applyStaticI18n();
+  setNeckLoadTr(tr);
 })();
 
 $("exportProfilesBtn").onclick = () => {
@@ -1885,6 +1887,7 @@ function renderAssess() {
       : tr("assessFinishEmpty"))}</p>
     <button type="button" class="ghost" id="assessRestartBtn" style="margin-top:10px">${
       esc(tr("assessRestart"))}</button>
+    ${neckTrainingHTML(dashboardData())}
     ${(() => {
       const past = listAssessments(currentAthlete()).slice(-5).reverse();
       if (!past.length) return "";

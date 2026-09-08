@@ -71,7 +71,10 @@ for (let i = 0; i < 20; i++) {          // ten strides per leg, the recommendati
 }
 const tiptoeReps = [...Array(26)].map(() => ({ stance_side: "l", heel_lift: 0.5 }))
   .concat([...Array(25)].map(() => ({ stance_side: "r", heel_lift: 0.5 })));
+const neckReps = [...Array(6)].map(() => ({
+  flex_ext_deg: 62, bend_deg: 41, rotation_deg: 71 }));
 const tests = {
+  neck: { activity: "neck", perRep: neckReps },
   tiptoe: { activity: "heelraise", perRep: tiptoeReps },
   gait: { activity: "run", perRep: gaitReps },
   squat: { activity: "squat", perRep: [
@@ -165,6 +168,13 @@ ok(withTT === noTT, "tip-toe capacity does not move the overall score",
 const ttHtml = A.assessReportHTML(rep);
 ok(/VERY LOW/i.test(ttHtml), "the rendered report carries the evidence grading");
 ok(ttHtml.includes("not a gate"), "and says the values are not a gate");
+
+/* The neck test is reported and, like the tip-toe test, kept out of the score:
+ * there is no population norm for neck range here to score against. */
+ok(rep.neck.flex_ext_deg === 62 && rep.neck.rotation_deg === 71,
+   "the neck test reports its three ranges");
+ok(A.assessReport(tests).score === A.assessReport({ ...tests, neck: undefined }).score,
+   "and does not move the overall score");
 
 /* --- filing an assessment ------------------------------------------------ */
 const store = {};

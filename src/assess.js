@@ -46,6 +46,10 @@ export const ASSESS_TESTS = [
   // recordings of a to-failure test is asking for the second one to be
   // recorded tired.
   { id: "tiptoe", activity: "heelraise", perLeg: true, recommended: 25, floor: 3, seconds: 0 },
+  // Neck range of motion. Reported, never scored: there is no population norm
+  // for neck range in this project, so the only honest comparison is to the
+  // athlete's own earlier tests, which the load panel makes.
+  { id: "neck", activity: "neck", recommended: 6, floor: 2, seconds: 0 },
 ];
 
 /** The target in force for a test: the athlete's own, or the recommendation. */
@@ -205,6 +209,20 @@ export function assessReport(tests = {}, targets = {}) {
     };
   }
 
+  /* --- neck range, reported and not scored ------------------------------
+   * Same reasoning as the tip-toe panel: nothing here has a reference range
+   * worth scoring against, so the numbers are shown and left as numbers. */
+  const nk = done.find((d) => d.id === "neck");
+  let neck = null;
+  if (nk) {
+    const pick = (k) => {
+      const v = nk.reps.map((r) => r[k]).filter((x) => Number.isFinite(x));
+      return v.length ? Math.max(...v) : null;
+    };
+    neck = { reps: nk.reps.length, flex_ext_deg: pick("flex_ext_deg"),
+             bend_deg: pick("bend_deg"), rotation_deg: pick("rotation_deg") };
+  }
+
   // --- one number, from parts that are all on the page --------------------
   const symScores = sides.map((s) => s.score).filter((s) => s != null);
   const magScores = marks.map((m) => m.score).filter((s) => s != null);
@@ -215,7 +233,7 @@ export function assessReport(tests = {}, targets = {}) {
   const score = parts.length
     ? Math.round(parts.reduce((a, p) => a + p.score * p.weight, 0) / wsum) : null;
 
-  return { done, missing, short, sides, marks, parts, score, tiptoe,
+  return { done, missing, short, sides, marks, parts, score, tiptoe, neck,
            band: score == null ? null : score >= 85 ? "strong" : score >= 70 ? "typical" : "below",
            // Complete means every test is recorded to its target. A report
            // built from short tests is still a report; it just says so.
@@ -382,8 +400,22 @@ function tiptoeHTML(tt) {
   </div>`;
 }
 
+/* The neck panel: three ranges and nothing else. No band, no score, no
+ * comparison to a population that this project has not measured. */
+function neckHTML(nk) {
+  if (!nk) return "";
+  const row = (k) => `<tr><td>${esc(tr("var_" + k) === "var_" + k ? k : tr("var_" + k))}</td>
+    <td style="text-align:right">${nk[k] == null ? "\u2014" : nk[k].toFixed(0) + "\u00b0"}</td></tr>`;
+  return `<div class="daybox">
+    <div style="font-weight:600">${esc(tr("neckTestTitle"))}</div>
+    <p class="sub" style="margin:2px 0 8px">${esc(tr("neckTestSub", { n: nk.reps }))}</p>
+    <table><tbody>${["flex_ext_deg", "bend_deg", "rotation_deg"].map(row).join("")}</tbody></table>
+    <p class="note">${esc(tr("neckTestNote"))}</p>
+  </div>`;
+}
+
 export function assessReportHTML(report) {
-  const { sides, marks, parts, score, band, missing, short, tiptoe } = report;
+  const { sides, marks, parts, score, band, missing, short, tiptoe, neck } = report;
 
   const head = score == null
     ? `<p class="sub">${esc(tr("assessNothingYet"))}</p>`
@@ -439,5 +471,6 @@ export function assessReportHTML(report) {
         <th style="text-align:right">${esc(tr("scoreCol"))}</th></tr></thead>
         <tbody>${markRows}</tbody></table></div>` : ""}
     ${tiptoeHTML(tiptoe)}
+    ${neckHTML(neck)}
     <p class="note">${esc(tr("assessCaveat"))}</p>`;
 }
