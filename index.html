@@ -471,6 +471,13 @@
     <input id="fileInput" type="file" accept="video/*" class="hidden">
     </div>
     <div class="status" id="status" style="margin:0 2px 10px" data-i18n="statusStarting">Starting…</div>
+  <!-- Directly above the picture: this is the number the athlete is watching
+       while they work, and it was sitting up in the banner with the setup
+       text, out of eyeline of the thing it counts. -->
+  <div id="assessCount" class="hidden" style="margin:0 2px 6px">
+    <div id="assessCountBig" style="font-size:34px;font-weight:700;line-height:1.1"></div>
+    <div id="assessCountSub" class="sub" style="margin-top:2px"></div>
+  </div>
   <div id="stage">
     <video id="video" playsinline muted></video>
     <canvas class="overlay" id="overlay"></canvas>
@@ -518,7 +525,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 63;
+window.BUILD = 64;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1984,6 +1991,18 @@ function beginAssessTest(t) {
   renderTraining();
   enterAssessMode(t);
   showView("viewRecord");
+  /* Open the camera here rather than behind a button.
+   *
+   * Choosing this test WAS the decision to do it, and the click that got here
+   * is a real user gesture, so getUserMedia is allowed. Two buttons meaning
+   * "begin" -- one above the picture and one below it -- is one too many, and
+   * the one below is the one in reach when the athlete is looking at
+   * themselves. */
+  /* If the engine is still downloading, opening the camera now would give
+   * them a live picture that cannot be analysed and a button that does
+   * nothing. Wait, say so, and open it the moment the engine lands. */
+  if (engineReady) { if (!stream) startCamera().then(syncRecLabel); }
+  else { pendingAssessCamera = true; syncRecLabel(); }
   // The tone is scheduled from the moment recording starts, not from this
   // click: the athlete still has to walk to their mark.
   assessToneFor = t.seconds || 0;
@@ -1992,6 +2011,7 @@ let assessToneFor = 0;
 let assessTimer = null;
 let assessHudText = "";       // what the frame loop should show during a test
 let engineReady = false;      // the pose engine has finished loading
+let pendingAssessCamera = false;  // a test was opened before the engine was ready
 
 /* The assessment's own start button, brought into line with the engine.
  *
@@ -2002,11 +2022,20 @@ let engineReady = false;      // the pose engine has finished loading
  * an app that is in fact ready to record. So the load path calls this when it
  * finishes, rather than only flipping the disabled attribute and leaving the
  * label behind to contradict it. */
-function syncAssessStartBtn() {
-  const b = $("assessStartBtn");
-  if (!b || b.classList.contains("hidden")) return;
-  b.disabled = !engineReady;
-  b.textContent = engineReady ? tr("assessStartTest") : tr("startCameraLoading");
+/* The record button belongs to the assessment while a test is open: "Start
+ * recording" is the app's word for it, "Start test" is the athlete's. */
+function syncRecLabel() {
+  const b = $("recBtn");
+  if (!b) return;
+  if (assessStep && !engineReady) {
+    b.disabled = true;
+    b.textContent = tr("startCameraLoading");
+    return;
+  }
+  b.disabled = false;
+  b.textContent = recording
+    ? (assessStep ? tr("assessStopTest") : tr("stopAndAnalyse"))
+    : (assessStep ? tr("assessStartTest") : tr("startRecording"));
 }
 let assessLeadTimer = null;
 
@@ -2120,31 +2149,9 @@ function enterAssessMode(t) {
     <p class="note" style="margin:0 0 10px">${esc(t.seconds
       ? tr("assessNeedStrides", { n: need, s: t.seconds })
       : tr("assessNeedReps", { n: need }))}</p>
-    <div id="assessCount" class="hidden" style="margin:2px 0 10px">
-      <div id="assessCountBig" style="font-size:34px;font-weight:700;line-height:1.1"></div>
-      <div id="assessCountSub" class="sub" style="margin-top:2px"></div>
-    </div>
-    <button type="button" id="assessStartBtn" style="margin:0"${
-      engineReady ? "" : " disabled"}>${esc(engineReady
-      ? tr("assessStartTest") : tr("startCameraLoading"))}</button>
     <button type="button" class="ghost" id="assessCancel" style="margin-top:8px">${
       esc(tr("assessLeave"))}</button>`;
   $("assessBanner").classList.remove("hidden");
-  // The one button on the screen does what Start camera does -- the assessment
-  // has already made every other choice that card was offering.
-  $("assessStartBtn").onclick = async () => {
-    const b = $("assessStartBtn");
-    b.disabled = true;
-    await startCamera();
-    // startCamera hides its own button on success and says why on failure.
-    if (!$("startBtn").classList.contains("hidden")) { b.disabled = false; return; }
-    b.classList.add("hidden");
-    // One button for the whole test: it opens the camera, gives them time to
-    // reach their mark, starts recording, and stops itself when the test has
-    // what it needs. Pressing record was a second thing to remember while
-    // standing five metres away from the phone.
-    assessLeadIn(t);
-  };
   $("assessCancel").onclick = () => { exitAssessMode(); openAssess(); };
   document.body.classList.add("assessMode");
   $("trainingCard").classList.add("trainOnly");
@@ -2157,6 +2164,8 @@ function enterAssessMode(t) {
 function exitAssessMode() {
   $("assessCount")?.classList.add("hidden");
   assessStep = null;
+  leadDone = false;
+  syncRecLabel();
   assessToneFor = 0;
   clearInterval(assessTimer);
   document.body.classList.remove("assessMode");
@@ -2498,7 +2507,13 @@ if (await loadMediaPipe()) {
     $("startBtn").textContent = startLabel;
     $("startBtn").disabled = false;
     engineReady = true;
-    syncAssessStartBtn();
+    syncRecLabel();
+    // A test opened while this was loading is still on screen, waiting.
+    if (pendingAssessCamera) {
+      pendingAssessCamera = false;
+      if (!stream) await startCamera();
+      syncRecLabel();
+    }
   } catch (err) {
     $("startBtn").textContent = tr("startCameraFailed");
     if (!DEMO) say(tr("sayModelFailed", { err: err.message }), true);
@@ -2755,8 +2770,22 @@ async function startCameraQuiet() {
 
 let framingOverride = false;      // they were warned and pressed again
 
+let leadDone = false;          // the countdown for this take has already run
+
 $("recBtn").onclick = () => {
   if (!recording) {
+    /* Only the tests the athlete has to walk away for get counted in.
+     *
+     * The walk needs it: they press start here and then have to be at the far
+     * end of the room before the clock matters. Sitting in front of the camera
+     * for the neck test, a countdown is six seconds of being told to wait for
+     * something they are already ready for. */
+    const at = assessStep && ASSESS_TESTS.find((x) => x.id === assessStep);
+    if (at && at.seconds && !leadDone) {
+      leadDone = true;
+      assessLeadIn(at);
+      return;
+    }
     /* Refuse a take that cannot produce anything, once.
      *
      * Every one of these tests is measured from the feet, and a camera framed
@@ -2776,6 +2805,7 @@ $("recBtn").onclick = () => {
     }
     framingOverride = false;
     frames = []; recording = true;
+    leadDone = false;
     framing.reset();
     gesture.reset();
     videoBlob = null; videoChunks = [];
@@ -2788,7 +2818,7 @@ $("recBtn").onclick = () => {
         recorder.start();
       } catch { recorder = null; }
     }
-    $("recBtn").textContent = tr("stopAndAnalyse");
+    $("recBtn").textContent = assessStep ? tr("assessStopTest") : tr("stopAndAnalyse");
     $("results").classList.add("hidden");
     say(tr("sayRecordingNow"));
     // A test counts itself as it runs: the athlete needs to know whether the
@@ -2833,7 +2863,7 @@ $("recBtn").onclick = () => {
     recording = false;
     gesture.reset();
     clearInterval(assessTimer);
-    $("recBtn").textContent = tr("startRecording");
+    $("recBtn").textContent = assessStep ? tr("assessStartTest") : tr("startRecording");
     $("hudRight").textContent = "";
     if (recorder && recorder.state !== "inactive") {
       recorder.onstop = () => {
