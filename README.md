@@ -16,6 +16,19 @@ of vendored pose engine here has no business in a `pip install`. What the two
 share is the analysis core, and that link is enforced rather than assumed — see
 *Verification*.
 
+## Running it locally
+
+    python serve.py          # then open http://localhost:8000
+
+Serves the working tree with caching switched off, so a reload shows the file
+you just saved rather than whatever the service worker kept. The camera works
+because browsers treat `localhost` as a secure context -- open it by that name,
+not by 127.0.0.1.
+
+Testing on a phone needs HTTPS, since the phone is not localhost: put a tunnel
+in front of it (`npx localtunnel --port 8000`, or `cloudflared tunnel --url
+http://localhost:8000`) and open the https address it gives you.
+
 ## What is not in this repository
 
 Three things are deliberately absent from the public build, and the app is
