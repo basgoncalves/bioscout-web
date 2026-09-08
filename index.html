@@ -525,7 +525,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 66;
+window.BUILD = 67;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1760,6 +1760,26 @@ function renderDash() {
    * and the list on the assessment screen is somewhere they have no reason to
    * go looking. */
   (() => {
+    /* An assessment with tests in it but not filed is the state that has been
+     * losing people's work: the recordings are in the training log, the
+     * assessment page has them, and nothing anywhere says that the record is
+     * one button away from existing. Say it here, where they are. */
+    const open = getAssess(currentAthlete());
+    const openN = open ? ASSESS_TESTS.filter((t) =>
+      countReps(t, open.tests?.[t.id]).counted >= t.floor).length : 0;
+    if (openN) {
+      const nag = document.createElement("div");
+      nag.className = "daybox";
+      nag.style.borderColor = "var(--warn)";
+      nag.innerHTML = `<div style="font-weight:600">${esc(tr("assessUnfiledTitle"))}</div>
+        <p class="sub" style="margin:4px 0 10px">${esc(tr("assessUnfiled", {
+          n: openN, total: ASSESS_TESTS.length }))}</p>
+        <button type="button" id="assessOpenUnfiled" style="margin:0">${
+          esc(tr("assessOpenUnfiled"))}</button>`;
+      card.appendChild(nag);
+      $("assessOpenUnfiled").onclick = () => openAssess();
+    }
+
     const filed = listAssessments(currentAthlete())
       .filter((a) => a.finished && dayKey(new Date(a.finished)) === dashView.selected);
     if (!filed.length) return;
@@ -1933,6 +1953,13 @@ function renderAssess() {
     <p class="sub" style="margin:0 0 4px">${esc(tr("assessIntro"))}</p>
     <p class="sub" style="margin:0 0 12px">${esc(tr("assessDone", {
       n: doneN, total: ASSESS_TESTS.length }))}</p>
+    ${report.done.length ? `<div class="daybox" style="border-color:var(--warn)">
+      <div style="font-weight:600">${esc(tr("assessUnfiledTitle"))}</div>
+      <p class="sub" style="margin:4px 0 10px">${esc(tr("assessUnfiled", {
+        n: report.done.length, total: ASSESS_TESTS.length }))}</p>
+      <button type="button" id="assessFinishTop" style="margin:0">${
+        esc(tr("assessFinish"))}</button>
+    </div>` : ""}
     ${steps}
     <div id="assessReportBox" style="margin-top:12px">${assessReportHTML(report)}</div>
     <button type="button" id="assessFinishBtn" style="margin-top:12px">${
@@ -1989,13 +2016,20 @@ function renderAssess() {
     clearAssess(); startAssess(currentAthlete()); renderAssess();
   };
   // Files whatever is there, including nothing: the visit happened either way.
-  $("assessFinishBtn").onclick = () => {
+  /* Filing is the step that turns five recordings into a dated record, and it
+   * was the last control on a page that is five test blocks and a full report
+   * long -- so it was below the fold, every time, and assessments were being
+   * recorded and never filed. The same action now sits at the top the moment
+   * there is anything to file. */
+  const finishNow = () => {
     const filed = finishAssess(currentAthlete());
     say(filed.attendanceOnly ? tr("sayAssessAttendance")
         : tr("sayAssessFiled", { n: filed.recorded.length, total: ASSESS_TESTS.length }));
     startAssess(currentAthlete());
     renderAssess();
   };
+  $("assessFinishBtn").onclick = finishNow;
+  if ($("assessFinishTop")) $("assessFinishTop").onclick = finishNow;
   if (next && !report.complete) { /* nothing to focus; the list is short */ }
 }
 
