@@ -88,6 +88,8 @@
                              text-align:center; text-align-last:center; }
   .itemKcal { width:42px; text-align:right; font-size:12.5px; color:var(--muted);
               font-variant-numeric:tabular-nums; }
+  tr.sessionRow { cursor:pointer; }
+  tr.sessionRow:hover td { background:var(--bg); }
   .steps { margin-top:8px; }
   .stepRow { display:flex; align-items:center; gap:8px; padding:5px 0; }
   .stepName { flex:1; font-size:13.5px; }
@@ -379,6 +381,10 @@
 
   <section id="viewCycle" class="hidden">
     <div class="card" id="cycleCard"></div>
+  </section>
+
+  <section id="viewSession" class="hidden">
+    <div class="card" id="sessionCard"></div>
   </section>
 
   <section id="viewRecord" class="hidden">
@@ -918,6 +924,10 @@ function varSpec(key) {
 const UNIT_KEYS = { "steps/min": "unit_spm", "\u00d7BW": "unit_bw" };
 
 let peakVar = null;      // survives re-renders of the training card
+// A past session opened read-only from the day view -- its own state so
+// switching charts there never disturbs the live session's peakVar.
+let sessionViewSess = null;
+let sessionViewVar = null;
 // Its own colour, not COLORS[0]: the training card renders at module
 // init, before the chart palette further down has been evaluated, and
 // reaching for it there is a temporal-dead-zone error that leaves the
@@ -1349,7 +1359,7 @@ $("mealShotFile").onchange = (e) => {
  * gets stored. The login screen writes to it rather than replacing it, so
  * there is still exactly one source of truth for the athlete.
  */
-const VIEWS = ["viewLogin", "viewDash", "viewCycle", "viewRecord"];
+const VIEWS = ["viewLogin", "viewDash", "viewCycle", "viewRecord", "viewSession"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -1570,6 +1580,9 @@ function renderDash() {
     clearSleep(atOnDay(dashView.selected), currentAthlete());
     renderDash();
   };
+  card.querySelectorAll("tr.sessionRow[data-session]").forEach((row) => {
+    row.onclick = () => openSessionView(row.dataset.session);
+  });
 
 }
 
@@ -1643,6 +1656,90 @@ function renderTraining() {
         ? `${hit.mean.toFixed(sp.dp)}<span class="sub"> ${sp.unit}</span>` : "—";
     });
   };
+}
+
+/** The session an id (its own `started` timestamp) names -- the live one if
+ *  it's still open, otherwise wherever it landed in the archive. */
+function findSession(id) {
+  const live = getSession();
+  if (live && live.started === id) return live;
+  return listArchive().find((s) => s.started === id) || null;
+}
+
+/** A finished session, read-only: the day view's rows link here instead of
+ *  everyone sharing the one live trainingCard, which only ever shows
+ *  whatever is currently open. */
+function openSessionView(id) {
+  const sess = findSession(id);
+  if (!sess) return;
+  sessionViewSess = sess;
+  sessionViewVar = null;
+  showView("viewSession");
+  renderSessionView();
+}
+
+function renderSessionView() {
+  const sess = sessionViewSess;
+  const card = $("sessionCard");
+  if (!sess) { card.innerHTML = ""; return; }
+  const vars = availablePeakVars(sess);
+  if (!sessionViewVar || !vars.includes(sessionViewVar)) sessionViewVar = vars[0] || null;
+  const series = sessionViewVar ? setSeries(sess, sessionViewVar) : [];
+  const spec = sessionViewVar ? varSpec(sessionViewVar) : null;
+  const byIndex = Object.fromEntries(series.map((x) => [x.index, x]));
+
+  const rows = sess.sets.map((s) => {
+    const pv = byIndex[s.index];
+    const cell = pv && pv.mean != null
+      ? `${pv.mean.toFixed(spec.dp)}<span class="sub"> ${spec.unit}</span>` : "—";
+    return `<tr><td>${tr("setLabel", { n: s.index })}</td><td>${tr(s.activity)}</td>
+      <td>${s.reps}</td><td>${s.addedKg ? "+" + s.addedKg : ""}${s.assistKg ? " −" + s.assistKg : ""}</td>
+      <td>${cell}</td>
+      <td>${new Date(s.at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</td></tr>`;
+  }).join("");
+  const varOpts = vars.map((k) =>
+    `<option value="${k}"${k === sessionViewVar ? " selected" : ""}>${varSpec(k).label}</option>`).join("");
+  const total = sess.sets.reduce((a, b) => a + b.reps, 0);
+
+  // Same trend table renderSummary() builds for the live session -- a
+  // finished session has nothing left to summarise on demand, so it's shown
+  // straight away rather than behind its own button.
+  const sum = summariseSession(sess);
+  const t = sum ? sum.trends.map((x) => {
+    const bad = x.lowerIsWorse ? x.change < -0.02 * Math.abs(x.first || 1)
+                               : x.change > 0.05 * Math.abs(x.first || 1);
+    const arrow = x.change > 0 ? "▲" : x.change < 0 ? "▼" : "–";
+    return `<tr><td>${x.label}</td><td>${x.first}${x.unit}</td><td>${x.last}${x.unit}</td>
+      <td style="color:${bad ? "var(--warn)" : "var(--muted)"}">${arrow} ${x.pct > 0 ? "+" : ""}${x.pct}%</td></tr>`;
+  }).join("") : "";
+
+  card.innerHTML = `
+    <h1 style="font-size:17px;margin:0 0 2px">${tr("trainingSession")}</h1>
+    <p class="sub" style="margin-bottom:10px">${sess.profile ? sess.profile + " · " : ""}
+      ${tr("sessionSub", {
+        sets: tr(sess.sets.length === 1 ? "nSet" : "nSets", { n: sess.sets.length }),
+        reps: tr(total === 1 ? "nRep" : "nRepsCount", { n: total }),
+        time: new Date(sess.started).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}),
+      })}</p>
+    <table><thead><tr><th>${tr("set")}</th><th>${tr("movement")}</th><th>${tr("reps")}</th><th>${tr("load")}</th>
+      <th>${vars.length
+            ? `<select id="sessionPeakVar" class="thsel">${varOpts}</select>`
+            : tr("peakCol")}</th><th>${tr("time")}</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+    <div id="sessionChartBox" style="margin-top:10px">${
+      sessionViewVar ? setChart(series, sessionViewVar) : ""}</div>
+    ${sum ? `<h2 style="font-size:15px;margin:14px 0 4px">${tr("summary")}</h2>
+      <p class="sub" style="margin-bottom:8px">${tr("summarySub", {
+        sets: tr(sum.sets === 1 ? "nSet" : "nSets", { n: sum.sets }),
+        reps: tr(sum.total_reps === 1 ? "nRep" : "nRepsCount", { n: sum.total_reps }),
+        perSet: sum.reps_per_set.join(", "), dur: sum.mean_rep_duration_s })}</p>
+      ${t ? `<table><thead><tr><th>${tr("measure")}</th><th>${tr("firstSet")}</th><th>${tr("lastSet")}</th><th>${tr("change")}</th></tr></thead>
+        <tbody>${t}</tbody></table>
+        <p class="note">${tr("noteChangeFirstLast")}</p>`
+        : `<p class="note">${tr("noteNotEnoughSets")}</p>`}` : ""}`;
+
+  const pv = $("sessionPeakVar");
+  if (pv) pv.onchange = () => { sessionViewVar = pv.value; renderSessionView(); };
 }
 
 function renderSummary() {

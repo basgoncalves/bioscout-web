@@ -314,7 +314,10 @@ function dayHTML(day, key) {
   const rows = day.sets.map((s) => {
     const load = [s.addedKg ? "+" + s.addedKg : "", s.assistKg ? "−" + s.assistKg : ""]
       .filter(Boolean).join(" ");
-    return `<tr><td>${esc(time(s.at))}</td><td>${esc(tr(s.activity))}</td>
+    // `session` is that set's session's own `started` timestamp -- its
+    // identity -- so a click can open that session's summary regardless of
+    // how many other sessions share this day.
+    return `<tr class="sessionRow" data-session="${esc(s.session)}"><td>${esc(time(s.at))}</td><td>${esc(tr(s.activity))}</td>
       <td>${s.reps}</td><td>${esc(load)}</td></tr>`;
   }).join("");
   const acts = [...day.activities].map((a) => esc(tr(a))).join(", ");
@@ -327,7 +330,8 @@ function dayHTML(day, key) {
     <table><thead><tr><th>${esc(tr("time"))}</th><th>${esc(tr("movement"))}</th>
       <th>${esc(tr("reps"))}</th><th>${esc(tr("load"))}</th></tr></thead>
       <tbody>${rows}</tbody></table>
-    <button id="newTrainingBtn" style="margin-top:10px">${esc(tr("newTrainingSession"))}</button></div>`;
+    <p class="sub" style="margin:8px 0 0">${esc(tr("tapSessionHint"))}</p>
+  </div>`;
 }
 
 /**

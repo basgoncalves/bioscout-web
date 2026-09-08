@@ -1,7 +1,7 @@
 /**
  * Every id the app reaches for exists somewhere.
  *
- * The page is one file with three views and ~60 wired elements, and the
+ * The page is one file with five views and ~60 wired elements, and the
  * scripts find all of them by id. Move a control from one view to another and
  * everything still looks right; delete one, or rename it, and the failure is a
  * TypeError at the moment somebody taps it -- on a phone, mid-session, with no
@@ -109,4 +109,4 @@ if (!rel) { bad++; console.error("FAIL  no window.RELEASE"); }
 if (!bld) { bad++; console.error("FAIL  window.BUILD is not a number -- it has to increment"); }
 
 if (bad) process.exit(1);
-console.log(`ok    ${used.size} referenced ids, 4 views, ${LAID_OUT.length} laid-out buttons reset`);
+console.log(`ok    ${used.size} referenced ids, 5 views, ${LAID_OUT.length} laid-out buttons reset`);
