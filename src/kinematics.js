@@ -275,6 +275,87 @@ export function referencePositions(F) {
 }
 
 // ---------------------------------------------------------------------------
+// dips
+// ---------------------------------------------------------------------------
+/* A dip is a pull-up read upside down, and almost nothing else has to change.
+ *
+ * The same landmarks answer it -- elbow, shoulder, trunk, and how far the body
+ * travelled -- because in both movements the arms carry the whole body and the
+ * legs carry nothing. What differs is the direction and therefore the order of
+ * the phases: a pull-up starts at the bottom and the effort raises you, a dip
+ * starts at LOCKOUT and the effort stops you falling and then puts you back.
+ * So the rep runs top - bottom - top, and the eccentric comes first.
+ *
+ * The one thing that must not be shared is the hands-overhead test. It is what
+ * makes a pull-up a pull-up, and for a dip the same test has to come out the
+ * other way: hands at the hips, taking load from below. Without that check the
+ * two movements are the same signal with the sign flipped, and a clip of one
+ * would happily be measured as the other.
+ */
+export const DEFAULT_DIP_CFG = {
+  // As a fraction of torso length. A dip to 90 degrees of elbow flexion drops
+  // the shoulders by roughly a third of a torso; the floor is set below that so
+  // a shallow rep is still counted and reported as shallow, rather than being
+  // silently dropped and reported as no rep at all.
+  minDropFrac: 0.18,
+  minRepFrames: 12,
+  minElbowFlexionDeg: 40,
+  smoothWin: 5,
+  // Hands overhead means the athlete is hanging, not supporting. A dip filmed
+  // so badly that the wrists read overhead for most of it is not a dip this
+  // app can measure.
+  maxOverheadFrac: 0.3,
+};
+
+/**
+ * Dip features: everything buildFeatures gives, plus how far the body has sunk
+ * below its own lockout.
+ *
+ * Lockout is the 10th percentile of shoulder height (image y grows downward,
+ * so the smallest y is the highest position) rather than the minimum: one
+ * frame of tracking noise at the top would otherwise set the reference for the
+ * whole clip and shift every depth in it.
+ */
+export function buildDipFeatures(poses) {
+  const F = buildFeatures(poses);
+  const lockY = nanpercentile(F.shoulder_cy, 10);
+  F.drop = F.shoulder_cy.map((y) => (isNum(y) && isNum(lockY)
+    ? (y - lockY) / F._scale : NaN));
+  F._lockY = lockY;
+  return F;
+}
+
+/** Reps of a dip: lockout, bottom, lockout. */
+export function findDipReps(F, cfg = DEFAULT_DIP_CFG) {
+  const n = F._n;
+  const drop = smooth(interpNan(F.drop), cfg.smoothWin);
+  const elbow = interpNan(F.elbow);
+  const overhead = F.hands_overhead.map((v) => (isNum(v) ? v : 0) > 0.5);
+  const overheadFrac = overhead.reduce((a, b) => a + (b ? 1 : 0), 0) / (n || 1);
+  // Hanging, not supporting: refuse rather than measure a pull-up as a dip.
+  if (overheadFrac > cfg.maxOverheadFrac) return { reps: [], drop, refused: "handsOverhead" };
+
+  const bottoms = localMaxima(drop, cfg.minRepFrames, cfg.minDropFrac);
+  const reps = [];
+  for (let k = 0; k < bottoms.length; k++) {
+    const bot = bottoms[k];
+    const left = k > 0 ? bottoms[k - 1] : 0;
+    const right = k < bottoms.length - 1 ? bottoms[k + 1] : n - 1;
+    const b0 = bot > left ? argmin(drop, left, bot) : left;
+    const b1 = right > bot ? argmin(drop, bot, right) : right;
+    // Elbows must actually bend. A body that sinks with straight arms is the
+    // shoulders shrugging, or the bar moving, and neither is a dip.
+    const straight = Math.max(elbow[b0], elbow[b1]), bent = elbow[bot];
+    if (isNum(straight) && isNum(bent)
+        && (straight - bent) < cfg.minElbowFlexionDeg) continue;
+    if ((b1 - b0) < cfg.minRepFrames) continue;
+    if ((bot - b0) < 3 || (b1 - bot) < 3) continue;
+    reps.push([b0, bot, b1]);
+  }
+  return { reps, drop, refused: reps.length ? null : "noDips" };
+}
+
+// ---------------------------------------------------------------------------
 // squats
 // ---------------------------------------------------------------------------
 export const DEFAULT_SQUAT_CFG = {
@@ -1580,6 +1661,16 @@ export const ACTIVITIES = {
     features: buildFeatures, findReps, coords: repCoordinates,
     reference: referencePositions, phases: ["concentric_s", "eccentric_s"],
   },
+  /* The phase order is the whole difference from a pull-up, and it is not
+   * cosmetic: `phases` names what the first and second halves of the rep ARE.
+   * A dip lowers first, so the eccentric is first, and a dip reported with a
+   * pull-up's phase names would put every athlete's descent in the column
+   * headed "up". */
+  dip: {
+    label: "dip", columns: DRIVEN_COORDS, defaultCfg: DEFAULT_DIP_CFG,
+    features: buildDipFeatures, findReps: findDipReps, coords: repCoordinates,
+    reference: referencePositions, phases: ["eccentric_s", "concentric_s"],
+  },
   neck: {
     label: "neck movement", columns: NECK_DRIVEN_COORDS, defaultCfg: DEFAULT_NECK_CFG,
     features: buildNeckFeatures, findReps: findNeckReps,
@@ -1757,8 +1848,23 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
         Object.assign(s, sidestepMetrics(F, b, fps, pxPerM, found.midX ?? refB));
       }
     } else {
+      /* The peak is taken from the MEASUREMENT, not from the exported column.
+       *
+       * `coords.elbow_flex_r` is clipped to the OpenSim model's own range on
+       * the way out, which is right for a .mot file and wrong for a summary:
+       * three dips in a row reported peak elbow flexion of exactly 150 deg,
+       * and identical peaks to three significant figures across independent
+       * reps are not a measurement, they are a ceiling. The clipped column
+       * still goes to the file; the number the athlete reads is what the
+       * camera saw, with a flag when the two differ. */
+      const rawElbow = interpNan(F.elbow).slice(b[0], b[2] + 1)
+        .map((v) => 180 - v).filter(isNum);
+      const capped = Math.max(...coords.elbow_flex_r);
       s.elbow_flex_min_deg = Math.min(...coords.elbow_flex_r);
-      s.elbow_flex_max_deg = Math.max(...coords.elbow_flex_r);
+      s.elbow_flex_max_deg = rawElbow.length
+        ? +Math.max(...rawElbow).toFixed(1) : capped;
+      s.elbow_clipped = rawElbow.length
+        ? Math.max(...rawElbow) > capped + 0.5 : false;
       s.arm_flex_range_deg = Math.max(...coords.arm_flex_r) - Math.min(...coords.arm_flex_r);
     }
     if (coords.pelvis_ty) {

@@ -798,6 +798,14 @@ function summariseRep(r, activity) {
     o.travel_m = r.pelvis_travel_m != null ? +r.pelvis_travel_m.toFixed(3) : null;
     o.up_s = +r.concentric_s?.toFixed(2);
     o.down_s = +r.eccentric_s?.toFixed(2);
+  } else if (activity === "dip") {
+    // The depth is the travel, named for what it is in this movement. Down
+    // before up, because that is the order a dip happens in.
+    o.elbow_flex_max_deg = r.elbow_flex_max_deg;
+    o.arm_flex_range_deg = r.arm_flex_range_deg ?? null;
+    o.depth_m = r.pelvis_travel_m != null ? +r.pelvis_travel_m.toFixed(3) : null;
+    o.down_s = +r.eccentric_s?.toFixed(2);
+    o.up_s = +r.concentric_s?.toFixed(2);
   } else if (activity === "cmj" || activity === "sj") {
     o.height_flight_m = r.height_flight_m ?? null;
     o.height_com_m = r.height_com_m ?? null;

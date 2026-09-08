@@ -439,6 +439,7 @@
         <select id="activity">
           <option value="auto" data-i18n="auto">Detect automatically</option>
           <option value="pullup" data-i18n="pullup">Pull-up</option>
+          <option value="dip" data-i18n="dip">Dip</option>
           <option value="squat" data-i18n="squat">Squat</option>
           <option value="cmj" data-i18n="cmj">Countermovement jump</option>
           <option value="sj" data-i18n="sj">Squat jump</option>
@@ -539,7 +540,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 76;
+window.BUILD = 77;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -3500,6 +3501,17 @@ function viewNote(res) {
     const w = res.reps.filter((r) => r.walking).length;
     bits.push(tr("looksLikeWalking", { n: w, total: res.reps.length }));
   }
+  /* Say when a joint went past the model's range.
+   *
+   * The angle in the table is what the camera measured; the angle in the .mot
+   * is clipped to what the OpenSim model accepts, because a model driven past
+   * its range renders a collapsed figure. Both are correct and they disagree,
+   * so the disagreement is stated rather than left for someone to find by
+   * opening the file. */
+  if (res.reps.some((r) => r.elbow_clipped)) {
+    const k = res.reps.filter((r) => r.elbow_clipped).length;
+    bits.push(tr("elbowPastModelRange", { n: k, total: res.reps.length }));
+  }
   if (res.activity === "slsquat" && res.refused === "bothFeetDown") {
     bits.push(tr("bothFeetDown"));
   }
@@ -4422,6 +4434,8 @@ function render(res, fps) {
     el.innerHTML = `<h1 style="font-size:17px">${tr("noRepsFound", { activity: tr(res.activity) })}</h1>
       ${res.refused === "feet" ? `<p class="note banner">${
         tr("feetNotInFrame", { pct: ((res.footCoverage ?? 0) * 100).toFixed(0) })}</p>`
+      : res.refused === "handsOverhead" ? `<p class="note banner">${tr("handsOverheadNotDip")}</p>`
+      : res.refused === "noDips" ? `<p class="note banner">${tr("noDipsFound")}</p>`
       : res.refused === "noHeelRaises" ? `<p class="note banner">${tr("noHeelRaises")}</p>`
       : res.refused === "noStrides" ? `<p class="note banner">${
           tr(res.activity === "walk" ? "noStridesWalk" : "noStrides")}</p>`
@@ -4519,6 +4533,7 @@ function render(res, fps) {
    * the moment and force panels, the mean row and both exports all hang off the
    * code below this point, and a separate early return for each task would have
    * duplicated the markup while duplicating none of that. */
+  const isDip = res.activity === "dip";
   const isSL = res.activity === "slsquat";
   const isRun = res.activity === "run" || res.activity === "walk";
   const isSide = res.activity === "sidestep";
@@ -4561,6 +4576,18 @@ function render(res, fps) {
       <tbody>${footRow("left", rs.left)}${footRow("right", rs.right)}</tbody></table>
     <p class="note">${tr("noteRunBout")}</p>`;
 
+  /* A dip's own row: the descent first, and the travel called depth.
+   *
+   * It cannot share the pull-up row. That row prints the concentric first
+   * under a heading that says "up", which for a dip is the second half of the
+   * rep -- so every athlete's descent would appear in the column headed with
+   * the opposite word, and the numbers would be right while the table lied. */
+  const dipRows = !isDip ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+      <td>${nn(r.eccentric_s)}</td><td>${nn(r.concentric_s)}</td>
+      <td>${nn(r.elbow_flex_max_deg, 0)}°</td>
+      <td>${nn(r.arm_flex_range_deg, 0)}°</td>
+      <td>${nn(r.pelvis_travel_m)}</td></tr>`).join("");
+
   const sideRows = !isSide ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
       <td>${sideName(r.plant_side)}</td>
       <td>${nn(r.out_s)}</td><td>${nn(r.back_s)}</td>
@@ -4585,7 +4612,10 @@ function render(res, fps) {
     : `<tr><td>${r.rep}</td><td>${r.concentric_s.toFixed(2)}</td><td>${r.eccentric_s.toFixed(2)}</td>
          <td>${r.elbow_flex_max_deg.toFixed(0)}°</td><td>${r.arm_flex_range_deg.toFixed(0)}°</td>
          <td>${r.pelvis_travel_m.toFixed(2)}</td></tr>`).join("");
-  const head = isSL
+  const head = isDip
+    ? `<tr><th>${tr("rep")}</th><th>${tr("down")}</th><th>${tr("up")}</th>
+        <th>${tr("elbow")}</th><th>${tr("shoulder")}</th><th>${tr("depthM")}</th></tr>`
+    : isSL
     ? `<tr><th>${tr("rep")}</th><th>${tr("stance")}</th><th>${tr("down")}</th>
         <th>${tr("up")}</th><th>${tr("stanceKnee")}</th><th>${tr("lrDiff")}</th></tr>`
     : isRun
@@ -4646,7 +4676,13 @@ function render(res, fps) {
     const st = meanRep && meanRep.stats[k];
     return st ? `${st.mean.toFixed(d)}<span class="sub"> ±${st.sd.toFixed(d)}</span>` : "—";
   };
-  const meanRow = !meanRep ? "" : isSL
+  const meanRow = !meanRep ? "" : isDip
+    ? `<tr class="meanrow"><td>${tr("mean")}</td>
+         <td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
+         <td>${ms("elbow_flex_max_deg", 0)}°</td>
+         <td>${ms("arm_flex_range_deg", 0)}°</td>
+         <td>${ms("pelvis_travel_m")}</td></tr>`
+    : isSL
     ? `<tr class="meanrow"><td>${tr("mean")}</td><td>—</td>
          <td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
          <td>${ms("stance_knee_flex_max_deg", 0)}°</td>
@@ -4686,8 +4722,8 @@ function render(res, fps) {
       ${tr("motSignedFor", { model: res.osimModel })}</p>
     ${setSwitcher(res)}
     <table><thead>${head}</thead><tbody>${
-      isSL ? slRows : isRun ? runRows : isSide ? sideRows
-           : isJump ? jumpRows : rows()}${meanRow}</tbody></table>
+      isDip ? dipRows : isSL ? slRows : isRun ? runRows : isSide ? sideRows
+            : isJump ? jumpRows : rows()}${meanRow}</tbody></table>
     ${runPanel}
     ${suspect.length ? `<p class="note banner">${
       tr("heightsDisagree", { n: suspect.length, total: n })}</p>` : ""}
