@@ -533,7 +533,7 @@ let FilesetResolver = null, PoseLandmarker = null;
 async function loadMediaPipe() {
   if (PoseLandmarker) return true;
   try {
-    const mp = await import("./vendor/vision_bundle.mjs");
+    const mp = await import("./assets/vendor/vision_bundle.mjs");
     FilesetResolver = mp.FilesetResolver; PoseLandmarker = mp.PoseLandmarker;
     return true;
   } catch (err) {
@@ -542,7 +542,7 @@ async function loadMediaPipe() {
   }
 }
 async function makeLandmarker() {
-  const fileset = await FilesetResolver.forVisionTasks("./vendor/wasm");
+  const fileset = await FilesetResolver.forVisionTasks("./assets/vendor/wasm");
   return PoseLandmarker.createFromOptions(fileset, {
     baseOptions: { modelAssetPath: "assets/pose_landmarker_full.task", delegate: "GPU" },
     runningMode: "VIDEO", numPoses: 1,
