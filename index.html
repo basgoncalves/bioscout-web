@@ -197,6 +197,12 @@
   button.day .dayDot { position:absolute; right:4px; top:4px; width:5px; height:5px;
                        border-radius:50%; background:#c9483d; }
   tr.assessRow td { color:#e0736a; }
+  .infoDot { display:inline-flex; align-items:center; justify-content:center;
+             width:16px; height:16px; margin-left:7px; border-radius:50%;
+             border:1px solid var(--line); background:var(--bg); color:var(--muted);
+             font-size:11px; font-weight:700; font-style:italic; line-height:1;
+             text-decoration:none; vertical-align:middle; }
+  .infoDot:hover, .infoDot:focus { color:var(--accent); border-color:var(--accent); }
   .tagAssess { font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
                color:#e0736a; border:1px solid #c9483d; border-radius:4px; padding:1px 4px;
                margin-left:6px; white-space:nowrap; }
@@ -533,7 +539,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 70;
+window.BUILD = 73;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -571,7 +577,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
        from "./src/profiles.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML, weightFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
-         collectDays } from "./src/dashboard.js";
+         collectDays, percentile } from "./src/dashboard.js";
 import { probe as probeHelper, fetchClip } from "./src/fetcher.js";
 import { probe as probeStrava, authorise as authoriseStrava,
          fetchActivities, toCardioAll } from "./src/strava.js";
@@ -1042,8 +1048,25 @@ function setSeries(sess, key) {
       .filter((x) => typeof x === "number" && Number.isFinite(x));
     if (!v.length) return { index: st.index, mean: null };
     const mean = v.reduce((a, b) => a + b, 0) / v.length;
-    return { index: st.index, mean, min: Math.min(...v), max: Math.max(...v), n: v.length };
+    /* Mean, the full range, and the 1st-to-99th percentile inside it.
+     *
+     * The range alone is decided by two reps and moves with the worst one, so a
+     * single stumble makes a set look inconsistent. The percentiles say where
+     * the body of the set actually sat. They are only computed from three reps
+     * up; below that they would be the range again wearing a different name. */
+    return { index: st.index, mean, min: Math.min(...v), max: Math.max(...v),
+             p1: percentile(v, 0.01), p99: percentile(v, 0.99), n: v.length };
   });
+}
+
+/** The set's number in the table: the mean, and under it where the middle of
+ *  the set sat. The mean on its own says nothing about whether the reps
+ *  agreed, and the peak on its own is one rep. */
+function peakCell(pt, spec) {
+  const mean = `${pt.mean.toFixed(spec.dp)}<span class="sub"> ${spec.unit}</span>`;
+  if (pt.p1 == null || !(pt.p99 > pt.p1)) return mean;
+  return `${mean}<br><span class="sub" style="font-size:11px">${
+    pt.p1.toFixed(spec.dp)}\u2013${pt.p99.toFixed(spec.dp)}</span>`;
 }
 
 /** Mean per set with the within-set range as a whisker. Deliberately not a
@@ -1075,13 +1098,22 @@ function setChart(points, key) {
       for (const v of [pt.min, pt.max]) {
         g += `<line x1="${x - 4}" y1="${sy(v)}" x2="${x + 4}" y2="${sy(v)}" stroke="var(--muted)" stroke-width="1.2"/>`;
       }
+      // The 1st-to-99th percentile, drawn thick INSIDE the thin full range, so
+      // the two are one mark and cannot be mistaken for each other. When a set
+      // has too few reps for percentiles the thick bar is simply absent, which
+      // is the honest way to say a percentile of four reps means nothing.
+      if (pt.p1 != null && pt.p99 != null && pt.p99 > pt.p1) {
+        g += `<line x1="${x}" y1="${sy(pt.p1)}" x2="${x}" y2="${sy(pt.p99)}" stroke="${SET_COLOR}" stroke-width="4.5" stroke-opacity=".38" stroke-linecap="round"/>`;
+      }
     }
     g += `<circle cx="${x}" cy="${sy(pt.mean)}" r="4.2" fill="${SET_COLOR}"/>`;
     g += `<text x="${x}" y="${H - 7}" font-size="9" text-anchor="middle" fill="var(--muted)">${pt.index}</text>`;
   });
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:150px">${g}</svg>
     <div class="legend"><span><i class="swatch" style="background:${SET_COLOR}"></i>${tr("setMean")}</span>
-      <span>${tr("whisker")}</span><span>${spec.unit}</span></div>
+      <span>${tr("whisker")}</span>${ok.some((p) => p.p1 != null && p.p99 > p.p1)
+        ? `<span><i class="swatch" style="background:${SET_COLOR};opacity:.38"></i>${tr("pctBand")}</span>` : ""
+      }<span>${spec.unit}</span></div>
     <p class="note" style="margin-top:2px">${tr("noteSetAxis")}</p>`;
 }
 
@@ -1835,8 +1867,7 @@ function renderTraining() {
 
   const rows = sess.sets.map((s) => {
     const pv = byIndex[s.index];
-    const cell = pv && pv.mean != null
-      ? `${pv.mean.toFixed(spec.dp)}<span class="sub"> ${spec.unit}</span>` : "—";
+    const cell = pv && pv.mean != null ? peakCell(pv, spec) : "—";
     return `<tr><td>${tr("setLabel", { n: s.index })}</td><td>${tr(s.activity)}</td>
       <td>${s.reps}</td><td>${s.addedKg ? "+" + s.addedKg : ""}${s.assistKg ? " −" + s.assistKg : ""}</td>
       <td>${cell}</td>
@@ -1888,8 +1919,7 @@ function renderTraining() {
     const byI = Object.fromEntries(ser.map((x) => [x.index, x]));
     [...$("trainingCard").querySelectorAll("tbody tr")].forEach((tr, i) => {
       const st = sess2.sets[i], hit = st && byI[st.index];
-      tr.cells[4].innerHTML = hit && hit.mean != null
-        ? `${hit.mean.toFixed(sp.dp)}<span class="sub"> ${sp.unit}</span>` : "—";
+      tr.cells[4].innerHTML = hit && hit.mean != null ? peakCell(hit, sp) : "—";
     });
   };
 }
@@ -3228,7 +3258,14 @@ async function enrich(res, poses, fps, heightM, activity) {
       r.forceModel = fm;
       r.forceImplausible = implausibleFraction(out.forces);
     }
-  } catch (err) { console.warn("force model failed", err); }
+  } catch (err) {
+    /* Say so on the page. A missing or refused force model used to remove the
+     * muscle-force panel and the joint-contact-force comparison with it and
+     * leave nothing behind -- results that simply stopped, which reads as the
+     * analysis having decided there was nothing to show. */
+    console.warn("force model failed", err);
+    res.forcesUnavailable = String(err && err.message || err);
+  }
 }
 
 // A squat filmed face-on still yields plausible-looking knee and hip numbers
@@ -3752,9 +3789,9 @@ function momentPanel(rep, res) {
 
 function forcePanel(rep, res) {
   if (!rep.forces || !rep.forces.length) {
-    return res && res.restored
-      ? `<p class="note">${tr("noteForcesNotKept")}</p>`
-      : "";
+    if (res && res.restored) return `<p class="note">${tr("noteForcesNotKept")}</p>`;
+    return res && res.forcesUnavailable
+      ? `<p class="note banner">${tr("noteNoForceModel")}</p>` : "";
   }
   const fm = rep.forceModel;
   const bad = rep.forceImplausible || 0;
@@ -4153,8 +4190,9 @@ function render(res, fps) {
     const tabsN = $("repTabs");
     itemsN.forEach((r, i) => {
       const b = document.createElement("button");
-      b.textContent = r.isMean ? tr("meanOfN", { n: r.nReps })
-                               : tr("repN", { n: r.rep });
+      b.textContent = r.isMean
+        ? (r.soloRep ? tr("soloRepTab") : tr("meanOfN", { n: r.nReps }))
+        : tr("repN", { n: r.rep });
       b.onclick = () => selN(i);
       tabsN.appendChild(b);
     });
@@ -4255,7 +4293,18 @@ function render(res, fps) {
       <td>${nn(r.excursion_m)}</td>
       <td>${nn(r.knee_flex_at_plant_deg, 0)}°</td></tr>`).join("");
 
-  const rows = isJump ? "" : res.reps.map((r) => isSquat
+  /* A FUNCTION, called only by the branch that uses it -- not a const.
+   *
+   * These are the squat and pull-up rows. As a const they were built for every
+   * activity, including the four that have their own table above, and a run
+   * rep has no concentric_s: reading .toFixed off it threw before the table
+   * this row set is not even part of was reached. The whole analysis then
+   * disappeared behind "Analysis failed: Cannot read properties of undefined",
+   * with the strides measured, the moments computed and the set already in the
+   * training log. The same mistake was fixed once for jumps, with a comment
+   * above jumpRows, and left in place here. Lazy is not an optimisation here;
+   * it is what makes the mistake impossible to make again. */
+  const rows = () => res.reps.map((r) => isSquat
     ? `<tr><td>${r.rep}</td><td>${r.eccentric_s.toFixed(2)}</td><td>${r.concentric_s.toFixed(2)}</td>
          <td>${r.knee_flex_max_deg.toFixed(0)}°</td><td>${r.hip_flex_max_deg.toFixed(0)}°</td>
          <td>${r.depth_m.toFixed(2)}</td></tr>`
@@ -4349,7 +4398,7 @@ function render(res, fps) {
     ${setSwitcher(res)}
     <table><thead>${head}</thead><tbody>${
       isSL ? slRows : isRun ? runRows : isSide ? sideRows
-           : isJump ? jumpRows : rows}${meanRow}</tbody></table>
+           : isJump ? jumpRows : rows()}${meanRow}</tbody></table>
     ${runPanel}
     ${suspect.length ? `<p class="note banner">${
       tr("heightsDisagree", { n: suspect.length, total: n })}</p>` : ""}
@@ -4379,9 +4428,12 @@ function render(res, fps) {
   items.forEach((r, i) => {
     const b = document.createElement("button");
     b.textContent = r.isMean
-      ? (r.stance_side ? tr("meanOfNSide", { n: r.nReps,
-                                             side: sideName(r.stance_side) })
-                       : tr("meanOfN", { n: r.nReps }))
+      ? (r.soloRep
+          ? (r.stance_side ? tr("soloRepSideTab", { side: sideName(r.stance_side) })
+                           : tr("soloRepTab"))
+          : r.stance_side ? tr("meanOfNSide", { n: r.nReps,
+                                                side: sideName(r.stance_side) })
+                          : tr("meanOfN", { n: r.nReps }))
       : (isRun && r.stance_side
           ? tr("repNSide", { n: r.rep, side: sideName(r.stance_side) })
           : tr("repN", { n: r.rep }));
@@ -4393,9 +4445,10 @@ function render(res, fps) {
   function select(i) {
     [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
     $("chartBox").innerHTML = chart(items[i], res.activity, res)
-      + (items[i].isMean ? `<p class="note">${tr(
-           items[i].eventAligned ? "noteMeanEventAligned" : "noteMeanStretched",
-           { n: items[i].nReps })}${tr("noteMeanBand")}</p>` : "");
+      + (items[i].isMean ? `<p class="note">${items[i].soloRep
+           ? tr("noteSoloRep")
+           : tr(items[i].eventAligned ? "noteMeanEventAligned" : "noteMeanStretched",
+                { n: items[i].nReps }) + tr("noteMeanBand")}</p>` : "");
     $("dynBox").innerHTML = momentPanel(items[i], res);
     $("dynBox").querySelectorAll("button.muscle").forEach((b) => {
       b.onclick = () => {

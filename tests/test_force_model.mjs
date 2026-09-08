@@ -15,7 +15,8 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 
-globalThis.fetch = async (u) => ({ json: async () => JSON.parse(readFileSync(u, "utf8")) });
+globalThis.fetch = async (u) => ({ ok: existsSync(u), status: existsSync(u) ? 200 : 404,
+                                   json: async () => JSON.parse(readFileSync(u, "utf8")) });
 const { loadForceModel, predictForces, selfTest, peakJRF } = await import("../src/forces.js");
 
 /* The fixture is a local-only asset.
@@ -31,6 +32,24 @@ if (!existsSync("data/force_model.json")) {
   console.log("skip  data/force_model.json is not in this checkout (see .gitignore)");
   process.exit(0);
 }
+/* The DEFAULT url, not the one this test passes.
+ *
+ * index.html calls loadForceModel() with no argument, inside a try that only
+ * console.warns -- so when the tree was reorganised and force_model.json moved
+ * into data/ while the default stayed at the root, every muscle force and every
+ * joint-contact-force comparison quietly vanished from the results and no test
+ * noticed, because every test passed the path explicitly. This one reads the
+ * default out of the source and requires it to name a file that exists. It sits
+ * below the skip above on purpose: whoever moves the model has the model, and a
+ * checkout without it must not go red over a file it was never given. */
+{
+  const src = readFileSync("src/forces.js", "utf8");
+  const mm = /loadForceModel\(url = "([^"]+)"\)/.exec(src);
+  const ok = !!mm && existsSync(mm[1]);
+  console.log(`${ok ? "ok  " : "FAIL"}  default force-model path (${mm ? mm[1] : "not found"}) exists`);
+  if (!ok) process.exit(1);
+}
+
 const m = await loadForceModel("data/force_model.json");
 let failed = 0;
 const check = (ok, msg) => { console.log(`${ok ? "ok  " : "FAIL"}  ${msg}`); if (!ok) failed++; };

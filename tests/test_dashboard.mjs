@@ -181,5 +181,23 @@ const overnight = [session("2026-08-14T21:00:00.000Z", [
      "Monday and Sunday fall in the same ISO week", `${prev.reps} reps / ${prev.sets} sets`);
 }
 
+/* --- percentiles on the set chart ---------------------------------------- */
+{
+  const { percentile } = await import("../src/dashboard.js");
+  const okp = (c, m) => { console.log(`  [${c ? "OK  " : "FAIL"}] ${m}`); if (!c) bad++; };
+  const ten = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  okp(percentile(ten, 0.5) === 5.5, "the median of 1..10 is 5.5");
+  okp(Math.abs(percentile(ten, 0.01) - 1.09) < 1e-9,
+     "p1 interpolates between the order statistics (q*(n-1), not q*n)");
+  okp(Math.abs(percentile(ten, 0.99) - 9.91) < 1e-9, "and so does p99");
+  okp(percentile([5, 5, 5], 0.99) === 5, "a set that repeated exactly has no spread");
+  okp(percentile([3, 9], 0.99) === null,
+     "two reps get no percentile: it would just be the range again");
+  okp(percentile([1, NaN, 3, undefined, 5], 0.5) === 3,
+     "gaps are dropped, not counted as zero");
+  okp(percentile([9, 1, 5], 0.5) === 5, "input order does not matter");
+}
+
 console.log(bad ? `\nFAIL  ${bad} check(s)` : "\nALL CHECKS PASSED");
 process.exit(bad ? 1 : 0);
+

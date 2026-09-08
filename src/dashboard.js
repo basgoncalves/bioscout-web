@@ -708,9 +708,23 @@ function sleepHTML(sleepDays, key, todayKey, trend) {
     <div class="row" style="margin-top:8px">
       <button type="button" class="ghost" id="sleepSave" style="margin:0;padding:9px">${
         esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
-      <button type="button" class="ghost" id="sleepImport" style="margin:0;padding:9px">${esc(tr("import"))}</button>
+      <button type="button" class="ghost" id="sleepImport" style="margin:0;padding:9px">${esc(tr("import"))}${importInfo()}</button>
     </div>
   </div>`;
+}
+
+/* The "i" beside every Import button.
+ *
+ * There is exactly one import format and no way to guess it from the button,
+ * so people hand it their watch's own export and get a refusal that tells them
+ * nothing. A hover says what the file has to be; the link goes to the page that
+ * says it properly, including the formats that do NOT work, which is the half
+ * the refusal never covers. It is a link and not a tooltip alone because a
+ * tooltip cannot be read on a phone at all. */
+export function importInfo() {
+  return `<a class="infoDot" href="formats.html" target="_blank" rel="noopener"
+     title="${esc(tr("importAcceptsTip"))}"
+     aria-label="${esc(tr("importAcceptsTip"))}">i</a>`;
 }
 
 /** Steps and resting heart rate for the day, typed in from a watch -- see
@@ -744,7 +758,7 @@ function vitalsHTML(vitalsDays, key, todayKey, trend) {
     <div class="row" style="margin-top:8px">
       <button type="button" class="ghost" id="vitalsSave" style="margin:0;padding:9px">${
         esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
-      <button type="button" class="ghost" id="vitalsImport" style="margin:0;padding:9px">${esc(tr("import"))}</button>
+      <button type="button" class="ghost" id="vitalsImport" style="margin:0;padding:9px">${esc(tr("import"))}${importInfo()}</button>
     </div>
   </div>`;
 }
@@ -1092,4 +1106,23 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     </div>
     <button class="ghost" id="shareBtn" style="margin-top:10px">${esc(tr("shareMonth"))}</button>
     <p class="sub" style="margin:12px 0 0">${esc(tr("dashboardCap"))}</p>`;
+}
+
+/**
+ * A percentile of a list of numbers, by linear interpolation between the two
+ * neighbouring order statistics (the same definition numpy uses by default).
+ *
+ * Exported and tested rather than written inline in the chart, because the
+ * off-by-one in `q * n` versus `q * (n - 1)` is invisible on a plot: it shifts
+ * every value by one rep's worth and still draws a perfectly plausible
+ * whisker. With fewer than three values a percentile is a restatement of the
+ * extremes, so it is not offered -- the caller draws the range alone.
+ */
+export function percentile(values, q) {
+  const v = values.filter((x) => typeof x === "number" && Number.isFinite(x))
+                  .sort((a, b) => a - b);
+  if (v.length < 3) return null;
+  const i = q * (v.length - 1);
+  const lo = Math.floor(i), hi = Math.ceil(i);
+  return lo === hi ? v[lo] : v[lo] + (v[hi] - v[lo]) * (i - lo);
 }

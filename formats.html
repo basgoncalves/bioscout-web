@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c4a48">
+<title>File formats — BioScout Web</title>
+<link rel="icon" href="assets/icons/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="assets/icons/icon-192.png">
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --ink:#14161a; --muted:#5d626e;
+    --line:#e2e5ea; --accent:#2d706c; --warn:#b4540f; --good:#1d7a45;
+    --shadow:0 1px 3px rgba(0,0,0,.07), 0 6px 20px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111318; --card:#191c22; --ink:#eceef2; --muted:#9aa1ae;
+            --line:#2a2e37; --accent:#4fa79e; --warn:#e08a4a; --good:#4fbd7d;
+            --shadow:0 1px 3px rgba(0,0,0,.4); }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:640px; margin:0 auto; padding:20px 14px 48px; }
+  h1 { font-size:21px; margin:0 0 2px; letter-spacing:-.01em; }
+  h2 { font-size:16px; margin:0 0 8px; }
+  .sub { color:var(--muted); font-size:13px; margin:0 0 18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+          padding:14px 16px; margin-bottom:12px; box-shadow:var(--shadow); }
+  .note { color:var(--muted); font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin:6px 0 4px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line);
+           vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12.5px; }
+  tr:last-child td { border-bottom:0; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px;
+         background:rgba(127,127,127,.14); padding:1px 5px; border-radius:5px; }
+  a { color:var(--accent); }
+  ul { margin:6px 0 0; padding-left:20px; }
+  li { margin-bottom:4px; }
+  .back { display:inline-block; margin-bottom:14px; font-size:13.5px;
+          text-decoration:none; color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="index.html">&lsaquo; Back to BioScout</a>
+  <h1>File formats</h1>
+  <p class="sub">Everything BioScout Web will read, and everything it writes.
+    Nothing on this page leaves your device.</p>
+
+  <div class="card">
+    <h2>Import</h2>
+    <p class="note" style="margin-top:0">There is exactly one import format, and every
+      Import button in the app &mdash; training, sleep, vitals, Edit profile &mdash;
+      opens the same one. It reads the whole file and merges whatever it finds, so a
+      file that only carries sleep still imports fine from the Sleep button.</p>
+    <table>
+      <thead><tr><th>Format</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr><td><code>.json</code><br><span class="note">BioScout export</span></td>
+            <td>A file BioScout itself wrote, with <code>"format":
+              "bioscout-profile-export"</code> at the top. Make one under
+              <b>Edit profile &rarr; Export</b> on the device that has the data.
+              It carries profiles, sessions, meals, diary, weight, cycle, sleep,
+              vitals, cardio and filed assessments &mdash; everything except
+              photos and the analysed curves.</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Importing is <b>additive</b>: nothing already on this device is
+      deleted or overwritten by an import, and importing the same file twice adds
+      nothing the second time. A file written by a newer version of BioScout than
+      the one you are running is refused rather than half-read.</p>
+  </div>
+
+  <div class="card">
+    <h2>Not accepted (yet)</h2>
+    <p class="note" style="margin-top:0">These are the files people most often try.
+      None of them work today, and the app will say so rather than import
+      something wrong:</p>
+    <ul class="note">
+      <li>Watch and phone exports &mdash; Garmin, Amazfit / Zepp, Fitbit, Polar,
+        Apple Health, Google Fit, Samsung Health, Withings.</li>
+      <li>Activity files &mdash; <code>.fit</code>, <code>.tcx</code>,
+        <code>.gpx</code>.</li>
+      <li>Spreadsheets &mdash; <code>.csv</code>, <code>.xlsx</code>. BioScout
+        writes CSV but does not read it.</li>
+      <li>Motion files &mdash; <code>.mot</code>, <code>.sto</code>,
+        <code>.trc</code>, <code>.c3d</code>.</li>
+    </ul>
+    <p class="note">Until one of these is supported, the way in is to type the
+      numbers into the Sleep and Vitals boxes on the day they belong to, or to
+      convert your export into the BioScout JSON above.</p>
+  </div>
+
+  <div class="card">
+    <h2>Video for analysis</h2>
+    <p class="note" style="margin-top:0"><b>Analyse a video file</b> takes any video
+      your own browser can play &mdash; there is no separate decoder, so if the clip
+      opens in the browser it will analyse.</p>
+    <ul class="note">
+      <li><code>.mp4</code> (H.264) is the safest everywhere.</li>
+      <li><code>.webm</code> and <code>.mov</code> usually work; a
+        <code>.mov</code> in Apple ProRes, and HEVC on some browsers, will not.</li>
+      <li>Frame rate is read from the clip. Nothing is uploaded: the pose model
+        runs on this device, on this file.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>What BioScout writes</h2>
+    <table>
+      <thead><tr><th>File</th><th>Contents</th></tr></thead>
+      <tbody>
+        <tr><td><code>.json</code></td><td>The export above &mdash; the only file
+          that can be imported back in.</td></tr>
+        <tr><td><code>.mot</code></td><td>Joint angles per frame, in OpenSim motion
+          format, signed for the model named on the results card.</td></tr>
+        <tr><td><code>.sto</code></td><td>Joint moments, where the movement and the
+          camera view allow them to be computed.</td></tr>
+        <tr><td><code>.zip</code></td><td>Everything for the session: the files
+          above, per-rep CSVs, a README explaining each one, and the video if you
+          ticked that box.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+</body>
+</html>

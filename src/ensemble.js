@@ -190,10 +190,21 @@ export function scalarStats(reps, key) {
  * one rep is that rep, and offering it as a separate tab would just be a
  * duplicate that quietly implies more data than exists.
  */
+/* One rep is allowed, and is not a "mean".
+ *
+ * The reference curves in the corpus are on a 0-100% grid, so a rep can only be
+ * laid against them once it has been put on that grid -- which is what this
+ * function does on its way to averaging. Refusing to run for a single rep
+ * therefore did not just withhold a mean: it withheld the comparison with the
+ * literature from every clip that caught one repetition, which is most clips of
+ * a test. With one rep there is no spread, so no band is produced and the
+ * caller is told (`soloRep`) so it can say "1 rep, normalised" rather than
+ * "mean of 1", which would be a claim about a spread that does not exist. */
 export function ensembleRep(reps) {
-  if (!Array.isArray(reps) || reps.length < 2) return null;
+  if (!Array.isArray(reps) || reps.length < 1) return null;
   const usable = reps.filter((r) => Array.isArray(r.times) && r.times.length > 1);
-  if (usable.length < 2) return null;
+  if (usable.length < 1) return null;
+  const solo = usable.length === 1;
 
   const pct = Array.from({ length: GRID }, (_, k) => k);
 
@@ -215,9 +226,9 @@ export function ensembleRep(reps) {
   const [dyn, dynSd] = meanDict(usable, (r) => r.dyn, align);
 
   const out = {
-    rep: "mean", isMean: true, nReps: usable.length,
+    rep: "mean", isMean: true, soloRep: solo, nReps: usable.length,
     times: pct, timeUnit: "%",
-    coords, sd: { coords: coordSd },
+    coords, sd: solo ? {} : { coords: coordSd },
     bounds: usable[0].bounds,
     // Where the turnaround falls. When the reps were event-aligned this is
     // exactly where every rep's turnaround now sits; otherwise it is the mean
@@ -229,7 +240,7 @@ export function ensembleRep(reps) {
     landPct: dst && dst.length > 3 ? 100 * dst[2] : null,
     eventAligned: aligned,
   };
-  if (dyn && Object.keys(dyn).length) { out.dyn = dyn; out.sd.dyn = dynSd; }
+  if (dyn && Object.keys(dyn).length) { out.dyn = dyn; if (!solo) out.sd.dyn = dynSd; }
 
   const forces = meanMatrix(usable, "forces", align);
   if (forces) {

@@ -238,6 +238,37 @@ for (const [label, raw] of files) {
   }
 }
 
+
+/* --- one activity's table rows must never be built for another ------------
+ *
+ * render() lays out six different tables and picks one. Building the rows for
+ * all six first is what broke running for a whole day: the squat/pull-up row
+ * builder ran over running strides, read .toFixed off an absent concentric_s,
+ * and threw before the table it belongs to was reached -- so a clip with the
+ * strides measured and the moments computed showed nothing but "Analysis
+ * failed". The same mistake had already been made and fixed once, for jumps.
+ *
+ * So: every eager `const *Rows =` in index.html must start with its own
+ * activity guard, and the squat/pull-up set (which has no flag of its own,
+ * being the fall-through) must be a function that only the branch using it
+ * calls. */
+{
+  const whole = readFileSync("index.html", "utf8");
+  const from = whole.indexOf("function render(res, fps) {");
+  const to = whole.indexOf("// --- demo mode");
+  if (from < 0 || to < from) fail("index.html: cannot find render() to check");
+  const html = whole.slice(from, to);
+  for (const m of html.matchAll(/const (\w*Rows) = ([^\n]*)/g)) {
+    const [, name, rhs] = m;
+    if (!/^!?is\w+ \?/.test(rhs)) {
+      fail(`index.html builds ${name} without an activity guard: ${rhs.slice(0, 60)}`);
+    }
+  }
+  if (!/const rows = \(\) =>/.test(html)) {
+    fail("index.html: the squat/pull-up rows must be a function, not a const built for every activity");
+  }
+}
+
 if (bad) {
   console.error(`\nFAIL  ${bad} wiring problem(s)`);
   process.exit(1);

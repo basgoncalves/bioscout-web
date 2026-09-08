@@ -35,9 +35,19 @@ function unpack(m) {
   return { shape: m.shape, data: new Float32Array(buf) };
 }
 
-export async function loadForceModel(url = "force_model.json") {
+/* The default is the path the file actually lives at, and it is a default
+ * rather than something the caller passes because getting it wrong is silent:
+ * index.html loads the model inside a try that only console.warns, so a 404
+ * here removes every muscle force and every joint-contact-force comparison
+ * from the results with nothing on the page to say why. That is exactly what
+ * happened when the tree was reorganised and force_model.json moved into
+ * data/ while this default stayed at the root. tests/test_force_model.mjs now
+ * checks the default resolves to a file that exists. */
+export async function loadForceModel(url = "data/force_model.json") {
   if (cached) return cached;
-  const j = await (await fetch(url)).json();
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`force model not available (${r.status} for ${url})`);
+  const j = await r.json();
   if (j.format !== "fais-forcenet/1") {
     throw new Error(`unsupported force model format ${j.format}`);
   }
