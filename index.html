@@ -525,7 +525,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 67;
+window.BUILD = 68;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2998,9 +2998,31 @@ async function analyseVideoBlob(file) {
   if (!(await loadMediaPipe())) return;
   const off = await makeLandmarker();
   await v.play();
-  const step = () => new Promise((r) => v.requestVideoFrameCallback((_, m) => r(m)));
+  /* Stop on whichever happens first: the next frame, the end of the video, or
+   * a stall.
+   *
+   * requestVideoFrameCallback only fires when a frame is PRESENTED, and after
+   * the last one there are no more -- so awaiting it alone hangs forever on
+   * the final frame of every clip. It looked exactly like the analysis being
+   * slow: "Tracking 14.5s / 14.6s" and then nothing, with the whole video
+   * already tracked and one callback short of finishing.
+   *
+   * The timeout covers the third case, a video that neither presents another
+   * frame nor reports itself ended -- a decode stall, or a tab put in the
+   * background mid-analysis. Better to analyse the frames we have and say so
+   * than to leave a progress line frozen with no way out. */
+  const STALL_MS = 4000;
+  const step = () => new Promise((resolve) => {
+    let settled = false;
+    const done = (m) => { if (!settled) { settled = true; resolve(m); } };
+    v.requestVideoFrameCallback((_, m) => done(m));
+    v.addEventListener("ended", () => done(null), { once: true });
+    setTimeout(() => done(null), STALL_MS);
+  });
+
   while (!v.ended) {
     const meta = await step();
+    if (!meta) break;                       // ended, or stalled
     const res = off.detectForVideo(v, meta.mediaTime * 1000);
     if (res.landmarks && res.landmarks.length) {
       frames.push({ t: meta.mediaTime * 1000, lm: toNamed(res.landmarks[0], v.videoWidth, v.videoHeight) });
@@ -3009,6 +3031,7 @@ async function analyseVideoBlob(file) {
                                     dur: v.duration.toFixed(1), frames: frames.length }));
   }
   off.close();
+  try { v.pause(); URL.revokeObjectURL(v.src); } catch { /* already gone */ }
   finish();
 }
 
