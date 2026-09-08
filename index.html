@@ -512,7 +512,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 57;
+window.BUILD = 58;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2019,6 +2019,42 @@ function assessHud(secondsLeft, n, need) {
     : tr("assessHudTimed", { s: secondsLeft, n, need })) + done;
 }
 
+/* The same count, big, in the banner. Per-leg tests show the two sides
+ * separately as well as the total that matters: during the tip-toe test the
+ * athlete does one leg and then the other, and "12" means nothing to them
+ * without knowing which leg it belongs to. */
+function paintAssessCount(t, n, need, secondsLeft) {
+  const box = $("assessCount");
+  if (!box) return;
+  box.classList.remove("hidden");
+  const enough = n >= need;
+  $("assessCountBig").textContent = `${n} / ${need}`;
+  $("assessCountBig").style.color = enough ? "var(--good)" : "var(--ink)";
+  const bits = [];
+  if (t.perLeg) {
+    const sides = assessSideCounts(t);
+    bits.push(`${tr("assessLeft")} ${sides.l} \u00b7 ${tr("assessRight")} ${sides.r}`);
+  }
+  if (secondsLeft != null) bits.push(tr("assessSecondsLeft", { n: secondsLeft }));
+  bits.push(enough ? tr("assessCountEnough") : tr("assessCountKeepGoing"));
+  $("assessCountSub").textContent = bits.join(" \u2014 ");
+}
+
+/* Reps per side from the frames so far, for the tests where the sides are the
+ * point. Same detector as the count itself; see assessRepsSoFar. */
+function assessSideCounts(t) {
+  const spec = t && ACTIVITIES[t.activity];
+  if (!spec || frames.length < 20) return { l: 0, r: 0 };
+  const poses = {};
+  frames.forEach((f, i) => { poses[i] = f.lm; });
+  try {
+    const found = spec.findReps(spec.features(poses), spec.defaultCfg);
+    const sides = found.repSides || [];
+    return { l: sides.filter((x) => x === "l").length,
+             r: sides.filter((x) => x === "r").length };
+  } catch { return { l: 0, r: 0 }; }
+}
+
 /* The recorder, dressed as the test page. Nothing about the pose pipeline
  * changes -- what changes is that every choice the protocol has already made
  * (which movement, what load, whether to keep the video) stops being offered,
@@ -2033,6 +2069,10 @@ function enterAssessMode(t) {
     <p class="note" style="margin:0 0 10px">${esc(t.seconds
       ? tr("assessNeedStrides", { n: need, s: t.seconds })
       : tr("assessNeedReps", { n: need }))}</p>
+    <div id="assessCount" class="hidden" style="margin:2px 0 10px">
+      <div id="assessCountBig" style="font-size:34px;font-weight:700;line-height:1.1"></div>
+      <div id="assessCountSub" class="sub" style="margin-top:2px"></div>
+    </div>
     <button type="button" id="assessStartBtn" style="margin:0"${
       $("startBtn").disabled ? " disabled" : ""}>${esc($("startBtn").disabled
       ? tr("startCameraLoading") : tr("assessStartTest"))}</button>
@@ -2064,6 +2104,7 @@ function enterAssessMode(t) {
 }
 
 function exitAssessMode() {
+  $("assessCount")?.classList.add("hidden");
   assessStep = null;
   assessToneFor = 0;
   clearInterval(assessTimer);
@@ -2612,16 +2653,25 @@ $("recBtn").onclick = () => {
       let left = assessToneFor || null;
       if (left) say(tr("assessStopTone"));
       const need = targetFor(t, getAssess(currentAthlete())?.targets);
+      let graceLeft = null;
       assessHudText = assessHud(left, 0, need);
+      paintAssessCount(t, 0, need, left);
       clearInterval(assessTimer);
       assessTimer = setInterval(() => {
         if (!recording) { clearInterval(assessTimer); return; }
         if (left != null) left -= 1;
         const got = assessRepsSoFar(t);
-        // Stops itself on whichever comes first: the count the test needs, or
-        // the clock for the tests that run to one. Nobody should have to walk
-        // back to the phone mid-test to decide whether that was enough.
-        const enough = got >= need;
+        /* Stops itself on whichever comes first: the count the test needs, or
+         * the clock for the tests that run to one. Nobody should have to walk
+         * back to the phone mid-test to decide whether that was enough.
+         *
+         * One tick of grace after the count lands, because a rep is only
+         * counted at its peak and the detector needs the way back down to call
+         * it a rep at all. Cutting on the peak drops the last one it just
+         * counted, which would leave the athlete a rep short of a target the
+         * screen had already told them they had hit. */
+        if (got >= need) graceLeft = graceLeft == null ? 1 : graceLeft - 1;
+        const enough = graceLeft != null && graceLeft <= 0;
         if ((left != null && left <= 0) || enough) {
           clearInterval(assessTimer);
           stopTone();
@@ -2629,6 +2679,7 @@ $("recBtn").onclick = () => {
           return;
         }
         assessHudText = assessHud(left, got, need);
+        paintAssessCount(t, got, need, left);
       }, 1000);
     }
   } else {
