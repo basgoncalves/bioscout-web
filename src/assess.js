@@ -49,7 +49,7 @@ export const ASSESS_TESTS = [
   // Neck range of motion. Reported, never scored: there is no population norm
   // for neck range in this project, so the only honest comparison is to the
   // athlete's own earlier tests, which the load panel makes.
-  { id: "neck", activity: "neck", recommended: 6, floor: 2, seconds: 0 },
+  { id: "neck", activity: "neck", recommended: 6, floor: 2, seconds: 0, closeUp: true },
 ];
 
 /** The target in force for a test: the athlete's own, or the recommendation. */

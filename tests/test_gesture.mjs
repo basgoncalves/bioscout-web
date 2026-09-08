@@ -37,6 +37,27 @@ ok(handOpenness(body({ visible: false }), "r") === null,
    "a hand with no points is null, not a fist");
 ok(handOpenness(null, "r") === null, "and no body at all is null");
 
+/* The shape the CAMERA hands it.
+ *
+ * MediaPipe emits {x, y} objects; every test above feeds [x, y] pairs. For one
+ * build the watcher read only pairs, so all of the above passed and the live
+ * gesture never once fired -- the distances were NaN and the watcher declined
+ * silently, which is indistinguishable from an athlete not signalling. This
+ * check is the one that would have caught it. */
+const asObjects = (lm) => lm.map((p) => (p ? { x: p[0], y: p[1] } : p));
+ok(Math.abs(handOpenness(asObjects(body({ spread: 0.5 })), "r") - 0.5) < 1e-9,
+   "openness reads MediaPipe's {x,y} landmarks, not just [x,y] pairs");
+{
+  const g = gestureWatcher();
+  g.reset(0);
+  const t = 4000;
+  ok(g.see(asObjects(body({ spread: 0.6 })), t) === false, "object frames: open");
+  ok(g.see(asObjects(body({ spread: 0.15 })), t + 100) === false, "object frames: one fist is not the signal");
+  ok(g.see(asObjects(body({ spread: 0.6 })), t + 200) === false, "object frames: open again");
+  ok(g.see(asObjects(body({ spread: 0.15 })), t + 300) === true,
+     "and two fists on object landmarks fires, exactly as on pairs");
+}
+
 const open = body({ spread: 0.6 }), fist = body({ spread: 0.15 });
 const half = body({ spread: (OPEN_AT + CLOSED_AT) / 2 });
 

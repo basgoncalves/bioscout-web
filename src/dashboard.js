@@ -294,6 +294,7 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
     if (hit?.assess) cls.push("assessDay");
     if (c.key === todayKey) cls.push("today");
     if (c.key === selected) cls.push("sel");
+    const assessNote = hit?.assess ? " \u00b7 " + tr("assessTag") : "";
     const label = !hit ? c.key
       : mode === "sleep"
         ? tr("dayCellSleep", { date: c.key,
@@ -307,9 +308,13 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
         : tr("dayCellLabel", { date: c.key, reps: nReps(hit.reps), sets: nSets(hit.sets.length) });
     // Every day is selectable, empty ones included: the dashboard is where
     // things get added, and you cannot add to a day you cannot select.
+    // The red outline says something happened; the label says what, for anyone
+    // reading by tooltip or by screen reader rather than by colour.
+    const full = label + assessNote;
     return `<button type="button" class="${cls.join(" ")}" data-day="${c.key}"
-      title="${esc(label)}" aria-label="${esc(label)}">
-      <span>${c.date.getDate()}</span></button>`;
+      title="${esc(full)}" aria-label="${esc(full)}">
+      <span>${c.date.getDate()}</span>${assessNote
+        ? `<span class="dayDot" aria-hidden="true"></span>` : ""}</button>`;
   }).join("");
 
   const title = new Date(year, month, 1)
@@ -363,12 +368,20 @@ function dayHTML(day, key) {
   // folded onto their session's `started` timestamp -- the session's identity.
   const bySession = new Map();
   for (const s of day.sets) {
-    if (!bySession.has(s.session)) bySession.set(s.session, { started: s.session, sets: 0, reps: 0, acts: new Set() });
+    if (!bySession.has(s.session)) {
+      bySession.set(s.session, { started: s.session, sets: 0, reps: 0, acts: new Set(), assess: 0 });
+    }
     const g = bySession.get(s.session);
     g.sets++; g.reps += s.reps; g.acts.add(s.activity);
+    if (s.assess) g.assess++;
   }
+  /* An assessment reads differently from training and should look different.
+   * The sets are tagged, so the row can say what it was rather than presenting
+   * a screening as an ordinary session that happens to contain a walk. */
   const rows = [...bySession.values()].map((g) =>
-    `<tr class="sessionRow" data-session="${esc(g.started)}"><td>${esc(time(g.started))}</td>
+    `<tr class="sessionRow${g.assess ? " assessRow" : ""}" data-session="${esc(g.started)}">
+      <td>${esc(time(g.started))}${g.assess
+        ? ` <span class="tagAssess">${esc(tr("assessTag"))}</span>` : ""}</td>
       <td>${[...g.acts].map((a) => esc(tr(a))).join(", ")}</td><td>${g.sets}</td><td>${g.reps}</td></tr>`).join("");
   const acts = [...day.activities].map((a) => esc(tr(a))).join(", ");
 

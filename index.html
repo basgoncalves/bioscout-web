@@ -191,7 +191,15 @@
   /* An assessment day, in the same calendar as training. A border rather than
      a fill: the fill is volume, and an assessment usually sits on a day that
      has training on it too. */
-  button.day.assessDay { border-color:#c9483d; border-width:2px; }
+  button.day.assessDay { border-color:#c9483d; border-width:2px; position:relative; }
+  /* A dot as well as the border: colour alone is not a label, and on a small
+     calendar a 2px border change is easy to miss entirely. */
+  button.day .dayDot { position:absolute; right:4px; top:4px; width:5px; height:5px;
+                       border-radius:50%; background:#c9483d; }
+  tr.assessRow td { color:#e0736a; }
+  .tagAssess { font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
+               color:#e0736a; border:1px solid #c9483d; border-radius:4px; padding:1px 4px;
+               margin-left:6px; white-space:nowrap; }
   button.day.sel { outline:2px solid var(--accent); outline-offset:1px; }
   /* The recorder, put to work by the assessment: everything that belongs to
      free training goes away, because the protocol chose all of it already. */
@@ -525,7 +533,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 68;
+window.BUILD = 69;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1515,6 +1523,13 @@ function startTraining() {
   const open = getSession();
   if (open && open.sets && open.sets.length) archiveSession();
   newSession(currentAthlete());
+  /* A new session starts with an empty results card.
+   *
+   * The card is painted once per analysis and never cleared, so the plot from
+   * the last take stayed on screen under a fresh session -- looking, on a day
+   * with an earlier session, exactly like a result belonging to this one. */
+  $("results").classList.add("hidden");
+  $("results").innerHTML = "";
   renderTraining();
   showView("viewRecord");
 }
@@ -2899,7 +2914,14 @@ $("recBtn").onclick = () => {
      * spend that argument before the take than after it. Pressing again goes
      * ahead regardless: the check can be wrong, and it is not the athlete's
      * job to argue with it twice. */
-    if (assessStep && !framingOverride) {
+    /* Close-up tests are exempt. The neck test is filmed from the chest up on
+     * purpose, so the feet are out of shot by design and the framing check has
+     * nothing true to say about it -- it refused every first press, and the
+     * athlete learned to press twice, which is the check teaching people to
+     * ignore it. */
+    const closeUp = assessStep
+      && ASSESS_TESTS.find((x) => x.id === assessStep)?.closeUp;
+    if (assessStep && !closeUp && !framingOverride) {
       const bad = framing.shown;
       if (!framing.sawBody || bad) {
         clearInterval(assessLeadTimer);

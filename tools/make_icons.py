@@ -1,4 +1,10 @@
-"""Generate BioScout Web app icons from the package logo."""
+"""Generate BioScout Web app icons from the package logo.
+
+Usage: python tools/make_icons.py <source-logo> assets/icons
+
+The icons live in assets/icons/, not the repo root -- index.html, the
+manifest and sw.js all reference them there.
+"""
 from PIL import Image
 from collections import deque
 import sys

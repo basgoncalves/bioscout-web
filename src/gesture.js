@@ -27,7 +27,21 @@ const HAND = {
   r: { wrist: 16, elbow: 14, tips: [18, 20, 22] },
 };
 
-const dist = (a, b) => (a && b ? Math.hypot(a[0] - b[0], a[1] - b[1]) : NaN);
+/* Landmarks arrive from MediaPipe as {x, y} objects and from the tests as
+ * [x, y] pairs. Both are read here.
+ *
+ * This is not tidiness. The watcher was written against pairs, the tests fed
+ * it pairs, the tests passed -- and the live camera hands it objects, where
+ * a[0] is undefined, every distance is NaN, and the watcher silently never
+ * fires. The feature looked finished and did nothing. Reading both shapes is
+ * what makes the passing test mean the live path works. */
+const px = (p) => (Array.isArray(p) ? p[0] : p && p.x);
+const py = (p) => (Array.isArray(p) ? p[1] : p && p.y);
+const dist = (a, b) => {
+  if (!a || !b) return NaN;
+  const dx = px(a) - px(b), dy = py(a) - py(b);
+  return Number.isFinite(dx) && Number.isFinite(dy) ? Math.hypot(dx, dy) : NaN;
+};
 
 /**
  * How open a hand is, as a fraction of the forearm.
