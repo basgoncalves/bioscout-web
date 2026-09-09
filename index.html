@@ -535,7 +535,7 @@
     <button id="recBtn" data-i18n="startRecording">Start recording</button>
     <label style="display:flex;align-items:center;gap:8px;margin:10px 0 0;
                   font-size:13.5px;color:var(--ink)">
-      <input type="checkbox" id="gestureOn" style="width:auto;margin:0" checked>
+      <input type="checkbox" id="gestureOn" style="width:auto;margin:0">
       <span data-i18n="gestureToggle">Start and stop with a gesture</span>
     </label>
     <p class="note" style="margin:2px 0 0" data-i18n="gestureNote">Two quick fists, either hand.
@@ -568,7 +568,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 79;
+window.BUILD = 80;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2986,8 +2986,19 @@ const framing = framingWatcher();
  * athlete who turns it off has a reason and should not have to repeat it. */
 const GKEY = "bioscout.gesture.v1";
 const gesture = gestureWatcher();
+/* OFF unless the athlete turns it on.
+ *
+ * It shipped on, and it ended takes by itself: the watcher was reading raw
+ * landmarks with no confidence filter, so a hand the model could not really see
+ * jittered across both thresholds and read as two clenches. The detector is
+ * much stricter now -- confidence floor, a state that must hold for three
+ * frames, a minimum gap between the two fists -- but none of that has been
+ * checked against a real camera, and the cost of being wrong is asymmetric: a
+ * gesture that fails to fire is an inconvenience, a gesture that fires on its
+ * own destroys the recording it interrupts. So it stays opt-in until a real
+ * camera says otherwise. Anyone who had it on keeps it on. */
 let gestureOn = (() => {
-  try { return localStorage.getItem(GKEY) !== "0"; } catch { return true; }
+  try { return localStorage.getItem(GKEY) === "1"; } catch { return false; }
 })();
 
 /* Wired HERE, immediately below the declaration, and not up with the other
@@ -3016,7 +3027,11 @@ function draw(res) {
     return;
   }
   const lm = res.landmarks[0];
-  if (gestureOn && gesture.see(lm)) {
+  /* The landmarks are normalised separately by width and height, so on a
+   * portrait phone one unit across is not one unit down. The gesture is a ratio
+   * of a sideways finger spread to an upright forearm, which without this is a
+   * ratio of two different units. */
+  if (gestureOn && gesture.see(lm, Date.now(), w / h)) {
     // Exactly what the button does, so there is one path into recording and
     // one out of it, and the gesture cannot drift away from the button.
     $("recBtn").click();
@@ -3525,14 +3540,24 @@ async function enrich(res, poses, fps, heightM, activity) {
    * gets kinematics and timing; a stationary one gets everything. */
   if (spec.travels && !res.travel?.stationary) return;
 
+  /* The reference curves load on their OWN, before anything to do with the
+   * force model.
+   *
+   * They were the first two lines inside the force-model try block, so on any
+   * build without data/force_model.json -- which is every public build, the
+   * file is not in the repo -- loadForceModel() threw on a 404 and loadNorms()
+   * never ran. The corpus is committed, public and unrelated to the surrogate,
+   * and it silently disappeared from every squat report because of a file it
+   * has nothing to do with. Two independent things, two independent loads. */
+  try { await loadNorms(); } catch (err) { console.warn("norms failed", err); }
+  try { await loadMomentArms(); } catch (err) { console.warn("moment arms failed", err); }
+
   // Muscle forces and joint reaction forces from the static-optimisation
   // surrogate. See forces.js. The self-test replays the network at its own
   // training mean: if the browser forward pass has drifted from the trained
   // weights, that shows up here rather than as a silently wrong number.
   try {
     const fm = await loadForceModel();
-    await loadMomentArms();
-    await loadNorms();
     const st = forceSelfTest(fm);
     if (!st.plausible) throw new Error(
       `force model self-test failed: ${st.peakMuscleBW.toFixed(1)} BW at the training mean`);

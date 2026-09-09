@@ -332,6 +332,29 @@ for (const [label, raw] of files) {
   }
 }
 
+
+/* --- the reference corpus must not depend on the force model -------------- *
+ *
+ * loadNorms() sat inside the try block that starts with loadForceModel(). The
+ * force model is not in the public repo, so on every deployed build that call
+ * threw on a 404 and the norms never loaded -- and the reference curves
+ * vanished from every squat report because of a file they have nothing to do
+ * with. The corpus is committed and public; the surrogate is neither. They load
+ * separately, and this fails if they are ever put back in the same basket.
+ */
+{
+  const whole = readFileSync("index.html", "utf8");
+  const from = whole.indexOf("const fm = await loadForceModel();");
+  const to = whole.indexOf("} catch (err) {", from);
+  if (from < 0 || to < from) fail("index.html: cannot find the force-model block");
+  else if (/loadNorms\(\)/.test(whole.slice(from, to))) {
+    fail("loadNorms() is inside the force-model try block: a build without the "
+         + "model loses the reference curves too");
+  } else {
+    console.log("ok    the reference corpus loads independently of the force model");
+  }
+}
+
 if (bad) {
   console.error(`\nFAIL  ${bad} wiring problem(s)`);
   process.exit(1);
