@@ -544,7 +544,17 @@
       <label for="lensSel" data-i18n="lens">Lens</label>
       <select id="lensSel"></select>
       <p class="note" style="margin:2px 0 0" data-i18n="lensNote">An ultra-wide lens fits your whole
-        body in from much closer. Zoom is set as wide as the camera allows.</p>
+        body in from much closer. Zoom starts as wide as the camera allows.</p>
+    </div>
+    <!-- Only shown when the open track actually reports a zoom range. A slider
+         that cannot move is worse than no slider. -->
+    <div id="zoomRow" class="hidden" style="margin-top:10px">
+      <label for="zoomSel"><span data-i18n="zoomLabel">Zoom</span>
+        <span class="sub" id="zoomOut"></span></label>
+      <input id="zoomSel" type="range" min="0" max="100" value="0" step="1">
+      <p class="note" style="margin:2px 0 0" data-i18n="zoomNote">Wider fits more in;
+        tighter puts more pixels on the body, which can help tracking when you are
+        far from the camera. It crops the sensor rather than adding detail.</p>
     </div>
     <button class="ghost" id="switchBtn" data-i18n="switchCamera">Switch camera</button>
     <button class="ghost" id="stopBtn" data-i18n="closeCamera">Close camera</button>
@@ -568,7 +578,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 81;
+window.BUILD = 82;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2839,16 +2849,72 @@ function frontFacing() {
 /** True while the picture on screen is flipped left-for-right. */
 let mirrored = true;
 
-/** Pull the zoom down to whatever the track's minimum is. */
-async function widenLens() {
+/* The zoom the athlete asked for, in the track's own units, or null for "as
+ * wide as this lens goes".
+ *
+ * Remembered across reopening the camera, because a track is bound to its
+ * device for life: switching lens, or stopping and starting, builds a new track
+ * that starts at the manufacturer's default. Without this, every restart threw
+ * the setting away and put the picture back to the widest -- which is exactly
+ * what "the camera only has one zoom level" looked like from the outside.
+ * Units are not comparable between lenses, so it is clamped, not carried
+ * blindly, when the range changes. */
+let zoomWanted = null;
+
+/** Set the open track's zoom: the athlete's choice, or the widest it offers. */
+async function applyZoom() {
   const track = stream?.getVideoTracks?.()[0];
   if (!track?.getCapabilities) return;
   try {
-    const cap = track.getCapabilities();
-    if (cap.zoom && Number.isFinite(cap.zoom.min)) {
-      await track.applyConstraints({ advanced: [{ zoom: cap.zoom.min }] });
-    }
+    const z = track.getCapabilities().zoom;
+    if (!z || !Number.isFinite(z.min)) return;
+    const want = zoomWanted == null ? z.min
+      : Math.min(z.max ?? z.min, Math.max(z.min, zoomWanted));
+    await track.applyConstraints({ advanced: [{ zoom: want }] });
   } catch { /* the browser does not do zoom; the picture is still a picture */ }
+}
+
+/** Backwards-compatible name: open as wide as the lens allows, or as asked. */
+const widenLens = applyZoom;
+
+/**
+ * Show the zoom slider, if this track has a zoom to slide.
+ *
+ * The values are the track's own -- some phones report 1 to 8, others 100 to
+ * 500 -- so the readout is relative to the widest this lens gives rather than
+ * pretending to be the 0.5x/1x/2x printed on the phone. Those markings belong
+ * to different CAMERAS, not to positions on one lens's zoom, and the lens
+ * picker above is what reaches them.
+ */
+function setupZoom() {
+  const row = $("zoomRow"), sel = $("zoomSel"), out = $("zoomOut");
+  const track = stream?.getVideoTracks?.()[0];
+  let z = null;
+  try { z = track?.getCapabilities?.().zoom || null; } catch { z = null; }
+  if (!z || !Number.isFinite(z.min) || !Number.isFinite(z.max) || z.max <= z.min) {
+    row.classList.add("hidden");
+    return;
+  }
+  const step = Number.isFinite(z.step) && z.step > 0 ? z.step : (z.max - z.min) / 100;
+  sel.min = String(z.min); sel.max = String(z.max); sel.step = String(step);
+  const current = (() => {
+    try { return track.getSettings().zoom; } catch { return undefined; }
+  })();
+  const now = Number.isFinite(current) ? current
+    : (zoomWanted == null ? z.min : zoomWanted);
+  sel.value = String(Math.min(z.max, Math.max(z.min, now)));
+  const paint = () => {
+    out.textContent = z.min > 0
+      ? tr("zoomTimes", { x: (+sel.value / z.min).toFixed(1) })
+      : String(+sel.value);
+  };
+  paint();
+  sel.oninput = async () => {
+    zoomWanted = +sel.value;
+    paint();
+    await applyZoom();
+  };
+  row.classList.remove("hidden");
 }
 
 /* Label the cameras and let them choose. Labels are blank until permission has
@@ -2871,6 +2937,9 @@ async function listLenses() {
   row.classList.remove("hidden");
   sel.onchange = async () => {
     lensId = sel.value;
+    /* A different camera has a different zoom range in different units, so the
+     * remembered value means nothing on it. Start that lens where it starts. */
+    zoomWanted = null;
     // Reopening is the only way to change camera: a track is bound to its
     // device for life.
     for (const t of stream?.getTracks?.() || []) t.stop();
@@ -2900,6 +2969,7 @@ async function startCamera() {
   video.classList.toggle("rear", !mirrored);
   await video.play();
   await widenLens();
+  setupZoom();
   await listLenses();
   $("stage").classList.add("on");
   $("controls").classList.remove("hidden");
@@ -2919,6 +2989,8 @@ function stopCamera() {
   $("startBtn").classList.remove("hidden");
   $("fileBtn").classList.remove("hidden");
   $("recBtn").textContent = tr("startRecording");
+  // The zoom slider belongs to a track that no longer exists.
+  $("zoomRow").classList.add("hidden");
   say(tr("sayCameraClosed"));
 }
 
@@ -3083,13 +3155,16 @@ $("switchBtn").onclick = async () => {
 async function startCameraQuiet() {
   // Switch camera resets the lens choice: the front camera does not have the
   // back camera's deviceId, and holding on to it would reopen the same lens.
+  // The zoom goes with it -- the front camera's units are not the back's.
   lensId = null;
+  zoomWanted = null;
   stream = await navigator.mediaDevices.getUserMedia({
     video: videoConstraints(), audio: false });
   video.srcObject = stream;
   mirrored = frontFacing();
   video.classList.toggle("rear", !mirrored);
   await widenLens();
+  setupZoom();
   await listLenses();
   await video.play();
 }
