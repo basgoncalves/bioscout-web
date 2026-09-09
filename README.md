@@ -31,17 +31,21 @@ http://localhost:8000`) and open the https address it gives you.
 
 ## What is not in this repository
 
-Three things are deliberately absent from the public build, and the app is
+Two things are deliberately absent from the public build, and the app is
 written to work without them:
 
 | Missing | Why | What degrades |
 |---|---|---|
-| `data/force_model.json` | The trained surrogate is the expensive part; anything the deployed site can fetch is downloadable by anyone. | Muscle forces and joint reaction forces are skipped; kinematics and moments are unaffected. |
-| `data/reference.json` | Port-test fixture, 1.4 MB, only needed where the numbers are being changed. | `?demo=1` says so; `tests/test_port.mjs` skips instead of failing. |
+| `data/reference.json` | One of its three cases is a recording of a research participant. Consent to record is not consent to publish. | `?demo=1` says so; `tests/test_port.mjs` skips instead of failing. |
 | `src/neck_gload.js` values | Unpublished BSc thesis results, which are their author's to publish first. | The 1-6 g neck panel does not render. |
 
-They live in `_private/`, which is gitignored. To develop with them, copy them
-back into place; do not commit them. `.gitignore` explains the reasoning at
+`data/force_model.json` used to be on this list and is now published. Muscle
+and joint contact forces cannot exist on a static site without a model the
+browser can fetch, and a model the browser can fetch is a model anyone can
+download; there is no third option, and the feature was judged worth the trade.
+
+The remaining items live in `_private/`, which is gitignored. To develop with
+them, copy them back into place; do not commit them. `.gitignore` explains the reasoning at
 the point where somebody would otherwise undo it.
 
 Note that removing a file from the working tree does not remove it from git

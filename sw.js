@@ -36,7 +36,7 @@
  * and the heavy version moves only when a vendored asset actually changes,
  * which is rarely. A shell bump can no longer cost anybody a 20 MB download.
  */
-const SHELL_CACHE = "bioscout-shell-v67";
+const SHELL_CACHE = "bioscout-shell-v68";
 const HEAVY_CACHE = "bioscout-heavy-v1";
 const KEEP = [SHELL_CACHE, HEAVY_CACHE];
 
@@ -46,6 +46,9 @@ const SHELL = ["./", "./index.html", "./formats.html", "./src/kinematics.js", ".
                "./assets/icons/icon-512.png", "./assets/icons/icon-maskable-512.png",
                "./assets/icons/apple-touch-icon.png", "./assets/icons/favicon.ico"];
 const HEAVY = [
+  // 1.4 MB and it changes only when the model is retrained: cache-first, like
+  // the pose model and the meshes, rather than re-fetched on every analysis.
+  "./data/force_model.json",
   "./assets/pose_landmarker_full.task",
   "./assets/vendor/vision_bundle.mjs",
   "./assets/vendor/three.module.min.js",
