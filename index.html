@@ -552,6 +552,7 @@
       <label for="zoomSel"><span data-i18n="zoomLabel">Zoom</span>
         <span class="sub" id="zoomOut"></span></label>
       <input id="zoomSel" type="range" min="0" max="100" value="0" step="1">
+      <p class="note" id="zoomRange" style="margin:2px 0 0"></p>
       <p class="note" style="margin:2px 0 0" data-i18n="zoomNote">Wider fits more in;
         tighter puts more pixels on the body, which can help tracking when you are
         far from the camera. It crops the sensor rather than adding detail.</p>
@@ -578,7 +579,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 82;
+window.BUILD = 83;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2870,7 +2871,15 @@ async function applyZoom() {
     if (!z || !Number.isFinite(z.min)) return;
     const want = zoomWanted == null ? z.min
       : Math.min(z.max ?? z.min, Math.max(z.min, zoomWanted));
-    await track.applyConstraints({ advanced: [{ zoom: want }] });
+    /* Plain first, `advanced` only as a fallback.
+     *
+     * A constraint inside `advanced` is a REQUEST: a browser that cannot
+     * satisfy it drops the whole advanced block and reports success, so a zoom
+     * that silently did nothing looked exactly like a zoom that worked. As a
+     * plain constraint it either applies or throws, and the throw is worth
+     * having. */
+    try { await track.applyConstraints({ zoom: want }); }
+    catch { await track.applyConstraints({ advanced: [{ zoom: want }] }); }
   } catch { /* the browser does not do zoom; the picture is still a picture */ }
 }
 
@@ -2903,12 +2912,30 @@ function setupZoom() {
   const now = Number.isFinite(current) ? current
     : (zoomWanted == null ? z.min : zoomWanted);
   sel.value = String(Math.min(z.max, Math.max(z.min, now)));
-  const paint = () => {
-    out.textContent = z.min > 0
-      ? tr("zoomTimes", { x: (+sel.value / z.min).toFixed(1) })
-      : String(+sel.value);
-  };
+  /* Show the camera's OWN number, not a number relative to itself.
+   *
+   * The readout used to divide by the minimum, so the far-left position always
+   * read "1.0x" -- on a phone whose ultra-wide starts at 0.5x it said 1.0x
+   * while sitting AT 0.5x, and the honest conclusion from that screen is that
+   * the app will not go below 1x. It was hiding the one number that answers
+   * the question.
+   *
+   * The units are not standardised. Chrome on Android usually reports a
+   * multiplier (0.5 to 8); some stacks report percent (100 to 500). Guess from
+   * the range rather than assume: a maximum at or under 20 is a multiplier, a
+   * minimum at or over 50 is percent, and anything else is left as the raw
+   * number rather than dressed up as a magnification it may not be. */
+  const asX = z.max <= 20 ? (v) => v
+    : z.min >= 50 ? (v) => v / 100
+    : null;
+  const fmt = (v) => (asX ? tr("zoomTimes", { x: asX(v).toFixed(1) })
+                          : tr("zoomRaw", { v: String(+v.toFixed(2)) }));
+  const paint = () => { out.textContent = fmt(+sel.value); };
   paint();
+  // What this lens can actually do, stated once under the slider, so "why can
+  // I not go wider" has an answer on screen instead of in a support thread.
+  $("zoomRange").textContent = tr("zoomRangeIs", {
+    lo: fmt(z.min), hi: fmt(z.max) });
   sel.oninput = async () => {
     zoomWanted = +sel.value;
     paint();
