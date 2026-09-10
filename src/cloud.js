@@ -17,6 +17,10 @@
  * Not synced: stored motion curves (hundreds of kB a set -- the set summaries
  * travel, the waveforms stay where they were recorded) and meal photos.
  *
+ * Posts are the one thing that is not private: a picture or clip of a set the
+ * person chose to post, with up to 42 characters. They live in their own
+ * table and storage bucket (supabase/schema.sql), never in `records`.
+ *
  * No SDK: GoTrue (auth) and PostgREST (tables) are plain HTTP, and a few
  * fetch calls are smaller than the client library and keep the app free of a
  * dependency. `fetch` is injectable so test_cloud.mjs runs without a network.
@@ -135,6 +139,28 @@ export function fromRows(rows, athlete) {
 }
 
 // --- HTTP ----------------------------------------------------------------------
+// --- posts (pure) --------------------------------------------------------------
+/** The storage bucket that holds posted pictures and clips (private). */
+export const BUCKET = "posts";
+/** A post's words. Counted the way Postgres counts them (code points), so an
+ *  emoji is one, and the server's char_length(body) <= 42 can never refuse
+ *  what the page let through. */
+export const CAPTION_MAX = 42;
+export function clampCaption(s) {
+  const cps = [...String(s ?? "").replace(/\s+/g, " ").trim()];
+  return cps.slice(0, CAPTION_MAX).join("").trim();
+}
+export function captionLength(s) { return [...String(s ?? "")].length; }
+const EXT = { "image/jpeg": "jpg", "image/png": "png", "video/mp4": "mp4", "video/webm": "webm" };
+/** Where a post's media goes: the owner's own folder (the storage policy and
+ *  the posts table both check the first segment), a time, and some noise so
+ *  two posts in one millisecond cannot collide. */
+export function mediaPath(uid, type, t = Date.now(), rand = Math.random) {
+  const ext = EXT[String(type || "").split(";")[0]] || "bin";
+  const noise = Math.floor(rand() * 36 ** 6).toString(36).padStart(6, "0");
+  return `${uid}/${t}-${noise}.${ext}`;
+}
+
 export class CloudError extends Error {
   constructor(code, message) { super(message || code); this.code = code; }
 }
@@ -146,11 +172,14 @@ export function makeCloud({ url, key, fetchImpl = globalThis.fetch?.bind(globalT
   async function call(path, { method = "GET", body, token, headers = {} } = {}) {
     let res;
     try {
+      // A Blob (a picture or a clip on its way to storage) goes up as it is,
+      // typed as itself; everything else is JSON.
+      const raw = typeof Blob !== "undefined" && body instanceof Blob;
       res = await fetchImpl(base + path, {
         method,
-        headers: { apikey: key, "Content-Type": "application/json",
+        headers: { apikey: key, "Content-Type": raw ? (body.type || "application/octet-stream") : "application/json",
                    ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
       });
     } catch (e) {
       throw new CloudError("offline", "No connection to the account server.");
@@ -249,9 +278,107 @@ export function makeCloud({ url, key, fetchImpl = globalThis.fetch?.bind(globalT
     },
 
     /** Delete the signed-in account: login, account row and every synced
-     *  record (public.delete_my_account on the server). Irreversible. */
+     *  record (public.delete_my_account on the server). Irreversible.
+     *
+     *  Posted pictures and clips go FIRST, from here: the database cannot
+     *  delete storage objects itself, and once the login is gone nobody can.
+     *  If that step fails the account is left alone, so it can be retried
+     *  rather than leaving media behind with no owner to remove it. */
     async deleteAccount(login) {
+      await this.removeAllMedia(login);
       await call("/rest/v1/rpc/delete_my_account", { method: "POST", token: login.access_token, body: {} });
+    },
+
+    /* ---- the feed: posts, their media, and who can see them ------------ */
+
+    /** Your own account row: username, display name, open/private. */
+    async account(login) {
+      const rows = await call(`/rest/v1/accounts?select=username,display_name,visibility&id=eq.${login.user.id}`,
+                              { token: login.access_token });
+      return (rows && rows[0]) || null;
+    },
+
+    /** "open": everyone signed in sees your posts. "private": only you, for now. */
+    async setVisibility(login, visibility) {
+      if (visibility !== "open" && visibility !== "private") throw new CloudError("bad_visibility");
+      await call(`/rest/v1/accounts?id=eq.${login.user.id}`, {
+        method: "PATCH", token: login.access_token, body: { visibility },
+        headers: { Prefer: "return=minimal" } });
+    },
+
+    /**
+     * Post a picture or clip with up to 42 characters.
+     * `blob` is the file, `kind` "image" | "video", `meta` a small summary of
+     * the set (movement, reps) the feed prints under it. The media is uploaded
+     * first; if the row then fails, the upload is taken back down.
+     */
+    async post(login, { blob, kind, body = "", meta = null }) {
+      const text = clampCaption(body);
+      if (!blob && !text) throw new CloudError("empty_post");
+      let path = null;
+      if (blob) {
+        path = mediaPath(login.user.id, blob.type, now());
+        await call(`/storage/v1/object/${BUCKET}/${path}`, {
+          method: "POST", token: login.access_token, body: blob,
+          headers: { "x-upsert": "false", "cache-control": "3600" } });
+      }
+      try {
+        const rows = await call("/rest/v1/posts", {
+          method: "POST", token: login.access_token,
+          body: { body: text, media_path: path, media_type: blob ? kind : null, meta },
+          headers: { Prefer: "return=representation" } });
+        return rows && rows[0];
+      } catch (e) {
+        if (path) { try { await this.removeMedia(login, [path]); } catch { /* best effort */ } }
+        throw e;
+      }
+    },
+
+    /**
+     * Newest posts you are allowed to see (yours, and open accounts'), with a
+     * short-lived link for each picture or clip. `before` is the created_at of
+     * the last post already shown, for the next page.
+     */
+    async feed(login, { before = null, limit = 20 } = {}) {
+      const q = "/rest/v1/posts?select=id,owner,body,media_path,media_type,meta,created_at,"
+        + "author:accounts(username,display_name)&order=created_at.desc"
+        + `&limit=${limit}` + (before ? `&created_at=lt.${encodeURIComponent(before)}` : "");
+      const posts = (await call(q, { token: login.access_token })) || [];
+      const paths = posts.map((p) => p.media_path).filter(Boolean);
+      if (paths.length) {
+        const signed = await call(`/storage/v1/object/sign/${BUCKET}`, {
+          method: "POST", token: login.access_token, body: { expiresIn: 3600, paths } });
+        const url = new Map((signed || []).filter((x) => x && x.signedURL)
+          .map((x) => [x.path, base + "/storage/v1" + x.signedURL]));
+        for (const p of posts) p.media_url = p.media_path ? url.get(p.media_path) || null : null;
+      }
+      return posts;
+    },
+
+    /** Take down one of your posts, and its picture or clip with it. */
+    async deletePost(login, post) {
+      await call(`/rest/v1/posts?id=eq.${encodeURIComponent(post.id)}`, {
+        method: "DELETE", token: login.access_token, headers: { Prefer: "return=minimal" } });
+      if (post.media_path) await this.removeMedia(login, [post.media_path]);
+    },
+
+    async removeMedia(login, paths) {
+      if (!paths.length) return;
+      await call(`/storage/v1/object/${BUCKET}`, {
+        method: "DELETE", token: login.access_token, body: { prefixes: paths } });
+    },
+
+    /** Everything in your media folder, e.g. before the account goes. */
+    async removeAllMedia(login) {
+      const uid = login.user.id;
+      for (let round = 0; round < 50; round++) {
+        const list = await call(`/storage/v1/object/list/${BUCKET}`, {
+          method: "POST", token: login.access_token,
+          body: { prefix: uid, limit: 100, offset: 0 } });
+        const names = (list || []).map((o) => o && o.name).filter(Boolean);
+        if (!names.length) return;
+        await this.removeMedia(login, names.map((n) => `${uid}/${n}`));
+      }
     },
 
     async pull(login, cursor = null) {

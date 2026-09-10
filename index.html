@@ -321,6 +321,21 @@ try {
   body.assessMode .trainOnly { display:none !important; }
   .daybox { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
   .accountBox { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:0 0 11px; }
+  .sharePreview { min-height:120px; display:flex; align-items:center; justify-content:center;
+                  background:#0f1317; border-radius:10px; overflow:hidden; }
+  .sharePreview img, .sharePreview video { display:block; width:100%; max-height:52vh; object-fit:contain; }
+  /* Not the camera preview: no absolute stage layout and no selfie flip. A
+   * clip is drawn the right way round already (sharepost.js). */
+  .sharePreview video, .post video { position:static; inset:auto; height:auto; transform:none; }
+  #shareDlg { width:min(440px, calc(100vw - 32px)); }
+  .post { border-top:1px solid var(--line); padding:12px 0; }
+  .post:first-child { border-top:0; padding-top:0; }
+  .postHead { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px; }
+  .postHead b { font-size:14px; }
+  .post img, .post video { display:block; width:100%; max-height:70vh; object-fit:contain;
+                           background:#0f1317; border-radius:10px; }
+  .postBody { margin:8px 0 2px; font-size:15px; overflow-wrap:anywhere; }
+  .postDel { width:auto; padding:4px 10px; font-size:12.5px; margin:6px 0 0; }
   button.linkish { background:none; border:0; padding:4px 0; margin:2px 0 0; width:auto;
                    color:var(--warn); font-size:13px; text-decoration:underline; cursor:pointer; }
   .dangerBox { border:1px solid var(--warn); border-radius:8px; padding:10px; margin-top:6px; }
@@ -494,6 +509,7 @@ try {
       <div id="whoName" class="whoName"></div>
       <div class="sub" id="whoSince"></div>
       <div class="whoBtns">
+        <button class="ghost" id="feedBtn" data-i18n="feed" hidden>Feed</button>
         <button class="ghost" id="settingsBtn" data-i18n="editProfile">Edit profile</button>
         <button class="ghost" id="switchUserBtn" data-i18n="switchAthlete">Switch athlete</button>
       </div>
@@ -581,6 +597,11 @@ try {
         <p class="sub" style="margin:0 0 8px" id="acctWho"></p>
         <label for="acctAthlete" data-i18n="acctAthlete">This athlete is me</label>
         <select id="acctAthlete"></select>
+        <label for="acctVisibility" style="margin-top:8px" data-i18n="acctVisibility">Who sees my posts</label>
+        <select id="acctVisibility">
+          <option value="private" data-i18n="visPrivate">Only me (private)</option>
+          <option value="open" data-i18n="visOpen">Everyone with an account (open)</option>
+        </select>
         <p class="sub" style="margin:6px 0 8px" id="acctStatus"></p>
         <div class="row" style="margin-bottom:6px">
           <button class="ghost" id="acctSync" style="margin:0;padding:9px" data-i18n="acctSync">Sync now</button>
@@ -744,7 +765,7 @@ try {
     <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="saveVideo" style="width:auto;margin:0">
-      <span data-i18n="keepVideo">Also keep the video in the export</span>
+      <span data-i18n="keepVideo">Keep the video (export and clips)</span>
     </label>
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
@@ -811,6 +832,34 @@ try {
 
   <div class="card hidden" id="trainingCard"></div>
   <div class="card hidden" id="results"></div>
+  <!-- Only for the take just analysed: its stills and video are in memory. -->
+  <button class="hidden" id="shareSetBtn" style="margin:0 0 14px" data-i18n="shareSet">Share this set</button>
+  <dialog id="shareDlg">
+    <h2 style="font-size:16px;margin:0 0 10px" data-i18n="shareSet">Share this set</h2>
+    <div class="tabs" id="shareTabs">
+      <button type="button" id="sharePicTab" data-i18n="sharePicture">Picture</button>
+      <button type="button" id="shareClipTab" data-i18n="shareClip">Clip</button>
+    </div>
+    <div class="sharePreview" id="sharePreview"></div>
+    <p class="sub" id="shareMsg" style="margin:6px 0 8px"></p>
+    <label for="shareCaption"><span data-i18n="shareCaption">Caption</span>
+      <span class="sub" id="shareCount"></span></label>
+    <input id="shareCaption" type="text" autocomplete="off" enterkeyhint="done">
+    <button id="shareGo" style="margin-top:10px" data-i18n="shareToApps">Share to other apps…</button>
+    <button class="ghost" id="sharePost" style="margin-top:8px" data-i18n="sharePostFeed">Post to my BioScout feed</button>
+    <p class="note" id="sharePostNote" style="margin:6px 0 0"></p>
+    <button class="ghost" id="shareClose" style="margin-top:10px" data-i18n="close">Close</button>
+  </dialog>
+  </section>
+
+  <!-- The feed: posts from you and from open accounts, newest first. -->
+  <section id="viewFeed" class="hidden">
+    <div class="card">
+      <h2 style="font-size:17px;margin:0 0 2px" data-i18n="feed">Feed</h2>
+      <p class="sub" style="margin:0 0 12px" data-i18n="feedSub">Posts from you and from open profiles, newest first.</p>
+      <div id="feedList"></div>
+      <button class="ghost hidden" id="feedMore" data-i18n="feedMore">Older posts</button>
+    </div>
   </section>
 </div>
 
@@ -827,7 +876,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 93;
+window.BUILD = 94;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -879,7 +928,10 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
 import { achievements, repEvents, newlyEarned, repUnit } from "./src/achievements.js";
 import { CLOUD } from "./src/cloud_config.js";
 import { makeCloud, syncOnce, loadState as cloudState, saveState as saveCloudState,
-         clearState as clearCloudState, USERNAME_RE } from "./src/cloud.js";
+         clearState as clearCloudState, USERNAME_RE, clampCaption, captionLength,
+         CAPTION_MAX } from "./src/cloud.js";
+import { stillKeeper, makePicture, makeClip, shareFacts, postMeta, pickType,
+         extFor } from "./src/sharepost.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
          collectDays, percentile } from "./src/dashboard.js";
@@ -956,6 +1008,12 @@ let landmarker = null, stream = null, running = false, recording = false;
 let muscleJoints = null;   // { muscleJoints: {name:[joints]}, byJoint: {joint:[names]} }
 let avatar = null, avatarBusy = false;
 let recorder = null, videoChunks = [], videoBlob = null;
+/* Sharing a set (sharepost.js). `stills` keeps a few small pictures a second
+ * while a live take records, so there is a picture to share without keeping
+ * any video; `shareSrc` is everything the share dialog needs about the take
+ * just analysed. Memory only -- the next take replaces both. */
+const stills = stillKeeper();
+let shareSrc = null, takeNo = 0, recT0 = 0, recKept = false, shareFile = null;
 let selectRep = null;   // set by render(), so the export can page through reps
 let shownItems = [];    // reps currently on screen, plus the mean if there is one
 
@@ -1457,6 +1515,289 @@ $("acctAthlete").onchange = (e) => {
   runSync();
 };
 $("settingsBtn").addEventListener("click", () => paintAccount());
+
+/* ---- sharing a set, posts and the feed ---------------------------------
+ * Share this set -> a picture (a frame at the best rep, skeleton on, a strip
+ * with what it was) or, when the video was kept, a clip of up to 15 s. Either
+ * goes to the phone's share sheet (Instagram, WhatsApp, ...) or, on a second
+ * tap, to the BioScout feed. Making them happens on the phone; the only thing
+ * that is ever uploaded is the one file the person posts. sharepost.js draws,
+ * cloud.js posts. */
+
+/** A login good for another minute, kept if it had to be refreshed. */
+async function freshLogin() {
+  const st = cloudState();
+  if (!cloud.enabled || !st.login) { const e = new Error("signed out"); e.code = "signed_out"; throw e; }
+  const login = await cloud.fresh(st.login);
+  if (login !== st.login) saveCloudState({ ...cloudState(), login });
+  return login;
+}
+
+/** The share button belongs to the take just analysed, and only if there is
+ *  something to make a picture from. */
+function canShare(res) {
+  return !!(shareSrc && res && shareSrc.res === res && res.reps.length
+            && (shareSrc.video || shareSrc.kept || shareSrc.stills.length));
+}
+
+let shareKind = "image", shareMedia = {}, shareUrls = [], shareAbort = null, shareFacts_ = null, shareVis = null;
+const shareMsg = (text, warn = false) => {
+  $("shareMsg").textContent = text || "";
+  $("shareMsg").classList.toggle("warn", !!warn);
+};
+function paintShareCount() {
+  const n = captionLength($("shareCaption").value);
+  $("shareCount").textContent = tr("shareCount", { n: Math.min(n, CAPTION_MAX), max: CAPTION_MAX });
+  $("shareCount").classList.toggle("warn", n > CAPTION_MAX);
+}
+$("shareCaption").oninput = () => {
+  // Cut at 42 as it is typed, counted the way the server counts.
+  const v = $("shareCaption").value;
+  if (captionLength(v) > CAPTION_MAX) $("shareCaption").value = [...v].slice(0, CAPTION_MAX).join("");
+  paintShareCount();
+};
+
+function paintShareButtons() {
+  const have = !!shareMedia[shareKind];
+  const signedIn = cloud.enabled && !!cloudState().login;
+  $("shareGo").disabled = !have;
+  $("sharePost").disabled = !have || !signedIn;
+  $("sharePost").hidden = !cloud.enabled;
+  $("sharePostNote").textContent = !cloud.enabled ? ""
+    : !signedIn ? tr("sharePostSignIn")
+    : shareVis === "open" ? tr("sharePostOpen")
+    : shareVis === "private" ? tr("sharePostPrivate") : tr("sharePostWho");
+}
+
+function showSharePreview(blob, kind) {
+  const box = $("sharePreview");
+  box.innerHTML = "";
+  if (!blob) return;
+  const url = URL.createObjectURL(blob);
+  shareUrls.push(url);
+  const el = document.createElement(kind === "image" ? "img" : "video");
+  el.src = url;
+  if (kind === "video") {
+    el.controls = true; el.loop = true; el.muted = true; el.playsInline = true; el.autoplay = true;
+  } else el.alt = tr("sharePicture");
+  box.appendChild(el);
+}
+
+async function pickShareKind(kind) {
+  shareKind = kind;
+  $("sharePicTab").setAttribute("aria-selected", kind === "image");
+  $("shareClipTab").setAttribute("aria-selected", kind === "video");
+  const src = shareSrc;
+  if (!src) return;
+  if (shareMedia[kind]) { showSharePreview(shareMedia[kind], kind); shareMsg(""); paintShareButtons(); return; }
+  $("sharePreview").innerHTML = "";
+  paintShareButtons();
+  if (kind === "video" && !src.video) {
+    // The clip needs the video, and the video is kept only when asked for.
+    // A kept video may still be on its way from the recorder: give it a moment.
+    if (src.kept) {
+      shareMsg(tr("shareMakingClip", { pct: 0 }));
+      for (let i = 0; i < 30 && !src.video; i++) await new Promise((r) => setTimeout(r, 100));
+    }
+    if (!src.video) { if (shareKind === kind) shareMsg(tr("shareClipNeedsVideo")); return; }
+  }
+  shareAbort?.abort();
+  const ctl = new AbortController();
+  shareAbort = ctl;
+  shareMsg(kind === "image" ? tr("shareMakingPic") : tr("shareMakingClip", { pct: 0 }));
+  try {
+    const blob = kind === "image"
+      ? await makePicture(src.res, src, shareFacts_)
+      : await makeClip(src.res, src, shareFacts_, {
+          signal: ctl.signal,
+          onProgress: (p) => { if (shareKind === "video" && !ctl.signal.aborted)
+            shareMsg(tr("shareMakingClip", { pct: Math.round(p * 100) })); } });
+    if (ctl.signal.aborted || !blob || shareSrc !== src) return;
+    shareMedia[kind] = blob;
+    if (shareKind === kind) { showSharePreview(blob, kind); shareMsg(""); }
+  } catch (e) {
+    if (!ctl.signal.aborted && shareKind === kind) shareMsg(tr("shareMakeFailed", { err: e.message || String(e) }), true);
+  } finally {
+    if (shareAbort === ctl) shareAbort = null;
+    paintShareButtons();
+  }
+}
+
+function closeShare() {
+  shareAbort?.abort(); shareAbort = null;
+  $("sharePreview").innerHTML = "";
+  for (const u of shareUrls) URL.revokeObjectURL(u);
+  shareUrls = [];
+}
+
+$("shareSetBtn").onclick = async () => {
+  if (!shareSrc) return;
+  shareMedia = {};
+  shareVis = null;
+  shareFacts_ = shareFacts(shareSrc.res, tr, { name: currentAthlete() || "" });
+  $("shareCaption").value = "";
+  $("shareCaption").placeholder = tr("shareCaptionPh");
+  paintShareCount();
+  shareMsg("");
+  $("shareDlg").showModal();
+  pickShareKind("image");
+  // Who will see a post, said before it is made rather than after.
+  if (cloud.enabled && cloudState().login) {
+    try { shareVis = (await cloud.account(await freshLogin()))?.visibility || null; }
+    catch { shareVis = null; }
+    paintShareButtons();
+  }
+};
+$("sharePicTab").onclick = () => pickShareKind("image");
+$("shareClipTab").onclick = () => pickShareKind("video");
+$("shareClose").onclick = () => $("shareDlg").close();
+$("shareDlg").addEventListener("close", closeShare);
+
+$("shareGo").onclick = async () => {
+  const blob = shareMedia[shareKind];
+  if (!blob) return;
+  const ext = shareKind === "image" ? "jpg" : extFor(blob.type);
+  const name = `bioscout-${shareSrc?.res.activity || "set"}-${new Date().toISOString().slice(0, 10)}.${ext}`;
+  const file = new File([blob], name, { type: blob.type });
+  const text = clampCaption($("shareCaption").value);
+  // Straight from the tap: the share sheet refuses a call that is not.
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], ...(text ? { text } : {}) });
+      shareMsg(tr("shareShared"));
+      return;
+    } catch (e) {
+      if (e && e.name === "AbortError") return;      // they changed their mind
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 10000);
+  shareMsg(tr("shareDownloaded"));
+};
+
+$("sharePost").onclick = async () => {
+  const blob = shareMedia[shareKind];
+  if (!blob || !shareSrc) return;
+  $("sharePost").disabled = true;
+  shareMsg(tr("sharePosting"));
+  try {
+    const login = await freshLogin();
+    await cloud.post(login, { blob, kind: shareKind, body: $("shareCaption").value,
+                              meta: postMeta(shareFacts_) });
+    shareMsg(tr(shareVis === "open" ? "sharePosted" : "sharePostedPrivate"));
+    toast(tr("sharePosted"));
+  } catch (e) {
+    shareMsg(e.code === "signed_out" ? tr("sharePostSignIn") : cloudErrText(e), true);
+  } finally {
+    paintShareButtons();
+  }
+};
+
+/* The account's open/private switch. Private is the default: until followers
+ * exist, a private account's posts are seen by nobody but its owner. */
+async function paintVisibility() {
+  if (!cloud.enabled || !cloudState().login) return;
+  try {
+    const a = await cloud.account(await freshLogin());
+    if (a && a.visibility) $("acctVisibility").value = a.visibility;
+  } catch { /* offline: the select keeps what it shows */ }
+}
+$("settingsBtn").addEventListener("click", () => paintVisibility());
+$("acctVisibility").onchange = async (e) => {
+  const want = e.target.value;
+  try {
+    await cloud.setVisibility(await freshLogin(), want);
+    paintAccount(tr(want === "open" ? "acctVisOpenSaved" : "acctVisPrivateSaved"));
+  } catch (err) {
+    paintAccount(cloudErrText(err), true);
+    paintVisibility();
+  }
+};
+
+/* The feed. Newest first, twenty at a time; links to pictures and clips are
+ * signed for an hour, so the page fetches them again when it is reopened. */
+let feedPosts = [], feedBusy = false;
+$("feedBtn").hidden = !cloud.enabled;
+$("feedBtn").onclick = () => { showView("viewFeed"); renderFeed(); };
+$("feedMore").onclick = () => renderFeed(true);
+
+function postHTML(p, me) {
+  const a = p.author || {};
+  const own = p.owner === me;
+  const who = own ? tr("feedYou")
+    : a.display_name || (a.username ? "@" + a.username : tr("feedSomeone"));
+  const when = new Date(p.created_at).toLocaleString([], { day: "numeric", month: "short",
+    hour: "2-digit", minute: "2-digit" });
+  const m = p.meta || {};
+  const bits = [];
+  // Only a movement this app knows is named: the row came off a server.
+  if (m.activity && ACTIVITIES[m.activity]) bits.push(tr(m.activity));
+  if (Number.isFinite(m.reps)) bits.push(tr(m.reps === 1 ? "shareRepN" : "shareRepsN", { n: m.reps }));
+  if (Number.isFinite(m.clean)) bits.push(tr("shareCleanN", { n: m.clean }));
+  if (Number.isFinite(m.loadKg) && m.loadKg) bits.push(`${m.loadKg > 0 ? "+" : ""}${m.loadKg} kg`);
+  if (Number.isFinite(m.bestCm)) bits.push(tr("shareBestJump", { cm: m.bestCm }));
+  const media = !p.media_url ? ""
+    : p.media_type === "video"
+      ? `<video src="${esc(p.media_url)}" controls playsinline muted loop preload="metadata"></video>`
+      : `<img src="${esc(p.media_url)}" loading="lazy" alt="">`;
+  return `<div class="post">
+    <div class="postHead"><b>${esc(who)}</b><span class="sub">${esc(when)}</span></div>
+    ${media}
+    ${p.body ? `<p class="postBody">${esc(p.body)}</p>` : ""}
+    ${bits.length ? `<p class="sub" style="margin:4px 0 0">${esc(bits.join(" · "))}</p>` : ""}
+    ${own ? `<button class="ghost postDel" data-post="${esc(p.id)}">${esc(tr("feedDelete"))}</button>` : ""}
+  </div>`;
+}
+
+async function renderFeed(more = false) {
+  const list = $("feedList");
+  if (!cloud.enabled || !cloudState().login) {
+    list.innerHTML = `<p class="note">${esc(tr("feedSignIn"))}</p>`;
+    $("feedMore").classList.add("hidden");
+    return;
+  }
+  if (feedBusy) return;
+  feedBusy = true;
+  if (!more) list.innerHTML = `<p class="sub">${esc(tr("feedLoading"))}</p>`;
+  try {
+    const login = await freshLogin();
+    const before = more && feedPosts.length ? feedPosts[feedPosts.length - 1].created_at : null;
+    const page = await cloud.feed(login, { before, limit: 20 });
+    feedPosts = more ? [...feedPosts, ...page] : page;
+    list.innerHTML = feedPosts.length ? feedPosts.map((p) => postHTML(p, login.user.id)).join("")
+      : `<p class="note">${esc(tr("feedEmpty"))}</p>`;
+    $("feedMore").classList.toggle("hidden", page.length < 20);
+    list.querySelectorAll("[data-post]").forEach((b) => {
+      b.onclick = async () => {
+        const post = feedPosts.find((x) => x.id === b.dataset.post);
+        if (!post) return;
+        // Two taps rather than a browser confirm(): the first one arms it.
+        if (!b.dataset.armed) {
+          b.dataset.armed = "1";
+          b.textContent = tr("feedDeleteSure");
+          b.classList.add("danger");
+          setTimeout(() => { if (b.isConnected) { delete b.dataset.armed;
+            b.textContent = tr("feedDelete"); b.classList.remove("danger"); } }, 4000);
+          return;
+        }
+        b.disabled = true;
+        try {
+          await cloud.deletePost(await freshLogin(), post);
+          feedPosts = feedPosts.filter((x) => x !== post);
+          b.closest(".post").remove();
+          toast(tr("feedDeleted"));
+        } catch (e) { b.disabled = false; toast(cloudErrText(e)); }
+      };
+    });
+  } catch (e) {
+    list.innerHTML = `<p class="note warn">${esc(tr("feedErr", { err: cloudErrText(e) }))}</p>`;
+  } finally {
+    feedBusy = false;
+  }
+}
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
   const st = cloudState();
@@ -2212,7 +2553,7 @@ $("mealShotFile").onchange = (e) => {
  * gets stored. The login screen writes to it rather than replacing it, so
  * there is still exactly one source of truth for the athlete.
  */
-const VIEWS = ["viewLogin", "viewDash", "viewCycle", "viewRecord", "viewAssess", "viewSession"];
+const VIEWS = ["viewLogin", "viewDash", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -2236,6 +2577,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewDash") renderDash();
   if (id === "viewCycle") renderCycle();
   if (id === "viewAssess") renderAssess();
+  if (id === "viewFeed") renderFeed();
 });
 
 $("navBack").onclick = () => history.back();
@@ -3873,6 +4215,7 @@ function loop() {
         avatar.update(res.landmarks?.[0], res.worldLandmarks?.[0],
                       video.videoWidth, video.videoHeight, mirrored);
       }
+      if (recording) stills.grab(video, ts);
       if (recording && res.landmarks && res.landmarks.length) {
         frames.push({ t: ts, lm: toNamed(res.landmarks[0], video.videoWidth, video.videoHeight) });
         // During a test the athlete needs the rep count, not the frame count.
@@ -4060,13 +4403,22 @@ $("recBtn").onclick = () => {
     framing.reset();
     gesture.reset();
     videoBlob = null; videoChunks = [];
+    takeNo++; shareSrc = null; shareFile = null;
+    stills.reset();
+    recT0 = performance.now();
+    recKept = false;
     // Opt-in, off by default. The recording is held in memory and only ever
-    // written to the user's own download; nothing is uploaded.
+    // written to the user's own download -- or, if they share a clip of the
+    // set and then choose to post it, that clip; nothing goes up on its own.
+    // mp4 where the browser can make it: it is what other apps accept.
     if ($("saveVideo").checked && stream && window.MediaRecorder) {
       try {
-        recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+        const type = pickType((t) => MediaRecorder.isTypeSupported(t));
+        recorder = new MediaRecorder(stream, type ? { mimeType: type } : {});
         recorder.ondataavailable = (e) => { if (e.data.size) videoChunks.push(e.data); };
         recorder.start();
+        recT0 = performance.now();      // video time 0, in frame time
+        recKept = true;
       } catch { recorder = null; }
     }
     $("recBtn").textContent = assessStep ? tr("assessStopTest") : tr("stopAndAnalyse");
@@ -4117,9 +4469,12 @@ $("recBtn").onclick = () => {
     $("recBtn").textContent = assessStep ? tr("assessStartTest") : tr("startRecording");
     $("hudRight").textContent = "";
     if (recorder && recorder.state !== "inactive") {
+      const take = takeNo;
       recorder.onstop = () => {
-        videoBlob = new Blob(videoChunks, { type: "video/webm" });
+        videoBlob = new Blob(videoChunks, { type: (recorder?.mimeType || "video/webm").split(";")[0] });
         recorder = null;
+        // The analysis may already be on screen: hand it the video for a clip.
+        if (shareSrc && shareSrc.take === take) shareSrc.video = videoBlob;
       };
       recorder.stop();
     }
@@ -4250,6 +4605,7 @@ function askTrim(file, dt, duration) {
 
 async function analyseVideoBlob(file, { trim = true } = {}) {
   say(tr("sayReadingVideo"));
+  takeNo++; shareSrc = null; shareFile = file; videoBlob = null;
   const v = document.createElement("video");
   v.src = URL.createObjectURL(file); v.muted = true; v.playsInline = true;
   await new Promise((r) => { v.onloadedmetadata = r; });
@@ -4399,6 +4755,13 @@ async function finish() {
         say(tr("setNotSaved", { err: e.message || String(e) }), true);
       }
     }
+    const live = !fromFile;
+    shareSrc = lastResult.reps.length ? {
+      res: lastResult, frames, fps, take: takeNo,
+      t0: live ? recT0 : 0, mirror: live ? mirrored : false,
+      stills: live ? stills.shots : [], video: live ? videoBlob : shareFile,
+      kept: live ? recKept : !!shareFile,
+    } : null;
     render(lastResult, fps);
     say(tr("sayAnalysed", { frames: frames.length, fps: fps.toFixed(1) }));
   } catch (err) {
@@ -5706,7 +6069,7 @@ async function exportZip(res, fps) {
 
     if (videoBlob && videoBlob.size) {
       note(`Adding video (${(videoBlob.size / 1e6).toFixed(1)} MB)…`);
-      files.push({ name: "video.webm", data: await blobBytes(videoBlob) });
+      files.push({ name: "video." + extFor(videoBlob.type), data: await blobBytes(videoBlob) });
     }
 
     const summary = {
@@ -5764,7 +6127,7 @@ repN/joint_metrics.csv   per joint: angle (deg, flexion positive, measured --
 repN/muscle_forces.csv   80 muscles, per frame, in newtons. SEE WARNING BELOW.
 plots/                   PNG of every chart shown in the app.
 session.json             summary and settings used.
-${videoBlob ? "video.webm              the recorded clip.\n" : ""}
+${videoBlob ? `video.${extFor(videoBlob.type).padEnd(4)}              the recorded clip.\n` : ""}
 WHAT TO TRUST
   Joint angles, range of motion, rep count and depth are measured.
   Joint moments are inverse dynamics from body mass; the ground reaction is
@@ -5997,6 +6360,7 @@ function wireRepEditor(root, sess, after) {
 
 function render(res, fps) {
   shownRes = res; shownFps = fps;
+  $("shareSetBtn").classList.toggle("hidden", !canShare(res));
   const el = $("results");
   el.classList.remove("hidden");
   const n = res.reps.length;
