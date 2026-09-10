@@ -15,11 +15,11 @@
 /** Muscle group -> the movements that train it, main ones first. */
 export const REGION_EXERCISES = {
   neck: ["neck"],
-  shoulders: ["dip", "pullup"],
-  chest: ["dip"],
+  shoulders: ["pushup", "dip", "pullup"],
+  chest: ["pushup", "dip"],
   back: ["pullup"],
   biceps: ["pullup"],
-  triceps: ["dip"],
+  triceps: ["pushup", "dip"],
   core: [],
   glutes: ["kickback", "squat", "slsquat"],
   quads: ["squat", "slsquat", "cmj", "sj"],

@@ -35,7 +35,7 @@ export const METRICS = ["angle", "vel", "moment", "power"];
 /* The tasks whose work is done by the arms. The jump shot has legs in it --
  * they are tracked and can be ticked -- but what a shooting coach is looking
  * at first is the elbow, so it opens there. */
-export const UPPER_BODY_TASKS = ["pullup", "dip", "jumpshot"];
+export const UPPER_BODY_TASKS = ["pullup", "dip", "pushup", "jumpshot"];
 export const isUpperBody = (activity) => UPPER_BODY_TASKS.includes(activity);
 /* The kick back is a hip exercise: the knee just rides along. */
 const HIP_TASKS = ["kickback"];
@@ -215,7 +215,7 @@ const LOWER = { knee: "knee_flex", hip: "hip_flex", ankle: "ankle_dorsi" };
 export function clipAngles(activity, spec, F, tracks, { ankleUsable = true } = {}) {
   const out = {};
   const put = (k, a) => { if (finiteSome(a)) out[k] = Array.from(a, Number); };
-  if (activity === "pullup" || activity === "dip") {
+  if (activity === "pullup" || activity === "dip" || activity === "pushup") {
     // buildFeatures keeps INCLUDED angles; flexion is 180 minus.
     put("elbow", F.elbow && F.elbow.map((v) => 180 - v));
     put("hip", F.hip && F.hip.map((v) => 180 - v));
@@ -295,6 +295,9 @@ export function repKinematics(angles, vels, bounds) {
 export function clipArmMoments(activity, tracks, pxPerM, massKg, fps,
                                { systemKg = massKg, smoothWin = 9 } = {}) {
   if (!isUpperBody(activity) || !tracks || !(pxPerM > 0)) return null;
+  // The push-up's feet carry part of the body, and this model hangs all of it
+  // from the hands: no arm moments rather than wrong ones.
+  if (activity === "pushup") return null;
   const arm = (t) => (t && t.sh && t.el && t.wr && t.hp ? {
     shoulder: toMetres(t.sh, pxPerM), elbow: toMetres(t.el, pxPerM),
     wrist: toMetres(t.wr, pxPerM), hip: toMetres(t.hp, pxPerM) } : null);
@@ -413,7 +416,7 @@ export function jmFromStored(rep, activity, kneeSign = -1) {
   const angles = {};
   const add = (k, a) => { if (finiteSome(a)) angles[k] = Array.from(a, Number); };
   const knee = (a) => a && a.map((v) => v * (kneeSign < 0 ? -1 : 1));
-  if (activity === "pullup" || activity === "dip") {
+  if (activity === "pullup" || activity === "dip" || activity === "pushup") {
     add("elbow", c.elbow_flex_r); add("shoulder", c.arm_flex_r);
     add("hip", c.hip_flexion_r); add("knee", c.knee_angle_r);
   } else {

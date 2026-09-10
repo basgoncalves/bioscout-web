@@ -377,6 +377,67 @@ export function findDipReps(F, cfg = DEFAULT_DIP_CFG) {
 }
 
 // ---------------------------------------------------------------------------
+// push-ups
+// ---------------------------------------------------------------------------
+/* A push-up is a dip done lying down, and the dip's rule reads it unchanged:
+ * lockout, shoulders lowered toward the hands while the elbows bend, back to
+ * lockout. Filmed from the side, the shoulders still fall and rise in the
+ * picture, and the elbow still has to fold for it to count.
+ *
+ * What must be added is the one thing that separates it from a dip: the body
+ * is horizontal. A dip is upright, a push-up lies along the floor, and without
+ * that check a dip clip picked as "push-up" would be measured as one. So most
+ * of the clip has to show the shoulder-hip line well away from vertical.
+ *
+ * Depth is reported from the SHOULDERS, not the hips. A push-up pivots about
+ * the toes, so the hips travel roughly half as far as the chest; reporting
+ * hip travel as depth would halve every rep.
+ *
+ * Arm moments are not computed: the model behind them hangs the whole body
+ * from the hands, and in a push-up the feet carry part of it. Angles,
+ * velocities and depth are what the camera can say here. */
+export const DEFAULT_PUSHUP_CFG = {
+  ...DEFAULT_DIP_CFG,
+  // Lying down the shoulders travel less of a torso length than in a dip.
+  minDropFrac: 0.15,
+  minRepFrames: 10,
+  minElbowFlexionDeg: 35,
+  // The shoulder-hip line at least this far from vertical, for this much of
+  // the clip. A plank is ~80-90 deg; an incline push-up against a bench is
+  // still well past 45.
+  minTrunkDeg: 50,
+  minLyingFrac: 0.6,
+};
+
+export const buildPushupFeatures = buildDipFeatures;
+
+/** Reps of a push-up: lockout, bottom, lockout -- refused when the body is
+ *  not lying down. */
+export function findPushupReps(F, cfg = DEFAULT_PUSHUP_CFG) {
+  const trunk = F.trunk || [];
+  const seen = trunk.filter(isNum);
+  const lying = seen.length ? seen.filter((v) => v >= cfg.minTrunkDeg).length / seen.length : 0;
+  if (lying < cfg.minLyingFrac) {
+    return { reps: [], drop: smooth(interpNan(F.drop), cfg.smoothWin), refused: "notLying" };
+  }
+  const r = findDipReps(F, cfg);
+  return { ...r, refused: r.reps.length ? null : (r.refused === "handsOverhead" ? r.refused : "noPushups") };
+}
+
+/** Push-up extras for one rep: shoulder travel (the depth) and how far the
+ *  body bent away from a straight line at the hip -- sagging or piking. */
+export function pushupMetrics(F, b, pxPerM) {
+  const [b0, , b1] = b;
+  const sh = interpNan(F.shoulder_cy).slice(b0, b1 + 1).filter(isNum);
+  const hip = interpNan(F.hip).slice(b0, b1 + 1).filter(isNum);
+  return {
+    depth_m: sh.length && pxPerM > 0 ? +((Math.max(...sh) - Math.min(...sh)) / pxPerM).toFixed(3) : null,
+    // F.hip is the included shoulder-hip-knee angle: 180 is a straight body.
+    body_bend_deg: hip.length ? +(180 - Math.min(...hip)).toFixed(1) : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // squats
 // ---------------------------------------------------------------------------
 export const DEFAULT_SQUAT_CFG = {
@@ -2314,6 +2375,12 @@ export const ACTIVITIES = {
     features: buildDipFeatures, findReps: findDipReps, coords: repCoordinates,
     reference: referencePositions, phases: ["eccentric_s", "concentric_s"],
   },
+  /* Lowered first, like a dip. */
+  pushup: {
+    label: "push-up", columns: DRIVEN_COORDS, defaultCfg: DEFAULT_PUSHUP_CFG,
+    features: buildPushupFeatures, findReps: findPushupReps, coords: repCoordinates,
+    reference: referencePositions, phases: ["eccentric_s", "concentric_s"],
+  },
   neck: {
     label: "neck movement", columns: NECK_DRIVEN_COORDS, defaultCfg: DEFAULT_NECK_CFG,
     features: buildNeckFeatures, findReps: findNeckReps,
@@ -2498,7 +2565,7 @@ export function trimToMovement(sig, rep, fps, { left = true, right = true } = {}
 function trimSignal(activity, F, found, i) {
   switch (activity) {
     case "pullup": return found.rise;
-    case "dip": return found.drop;
+    case "dip": case "pushup": return found.drop;
     case "squat": case "slsquat": return found.depth;
     case "sidestep": return found.depth;
     case "heelraise": {
@@ -2517,7 +2584,7 @@ function trimSignal(activity, F, found, i) {
 /** The joint whose resting angle says whether a rep started and finished
  *  properly: the elbow for the arm tasks, the (working) knee for squats. */
 function restJointSeries(activity, F, found, i) {
-  if (activity === "pullup" || activity === "dip") return interpNan(F.elbow).map((v) => 180 - v);
+  if (activity === "pullup" || activity === "dip" || activity === "pushup") return interpNan(F.elbow).map((v) => 180 - v);
   if (activity === "squat") return interpNan(F.knee_flex);
   if (activity === "slsquat") {
     const sd = found.stanceSide === "l" ? "l" : "r";
@@ -2677,6 +2744,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       s.elbow_clipped = rawElbow.length
         ? Math.max(...rawElbow) > capped + 0.5 : false;
       s.arm_flex_range_deg = Math.max(...coords.arm_flex_r) - Math.min(...coords.arm_flex_r);
+      if (activity === "pushup") Object.assign(s, pushupMetrics(F, b, pxPerM));
     }
     if (coords.pelvis_ty) {
       s.pelvis_travel_m = Math.max(...coords.pelvis_ty) - Math.min(...coords.pelvis_ty);

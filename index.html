@@ -70,6 +70,10 @@ try {
   .brand { display:flex; align-items:center; gap:10px; margin:4px 0 2px; }
   .brand img { width:34px; height:34px; flex:none; }
   .brand h1 { margin:0; }
+  a.brandReload { display:flex; align-items:center; gap:10px; color:inherit; text-decoration:none;
+                  cursor:pointer; border-radius:8px; -webkit-tap-highlight-color:transparent; }
+  a.brandReload:hover h1 { color:var(--accent); }
+  a.brandReload:active { opacity:.6; }
   .brand a { margin:0; text-decoration:none; font-size:12.5px; }
   .brand a:hover { color:var(--accent); }
   .sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
@@ -554,8 +558,12 @@ try {
     <button class="ghost" id="navHome" data-i18n="home">Home</button>
   </div>
   <div class="brand">
-    <img src="assets/icons/logo.png" alt="" width="34" height="34">
-    <h1>BioScout Web</h1>
+    <!-- The logo and name reload the page: the quick way to pick up an update
+         without hunting for the browser's own reload (hidden in an installed app). -->
+    <a href="./" id="brandReload" class="brandReload" title="Reload to get the latest version">
+      <img src="assets/icons/logo.png" alt="" width="34" height="34">
+      <h1>BioScout Web</h1>
+    </a>
     <a href="#" id="termsLinkBtn" class="note" style="margin-left:auto" data-i18n="termsLink">Terms</a>
   </div>
   <div class="appearance">
@@ -863,6 +871,7 @@ try {
           <option value="auto" data-i18n="auto">Detect automatically</option>
           <option value="pullup" data-i18n="pullup">Pull-up</option>
           <option value="dip" data-i18n="dip">Dip</option>
+          <option value="pushup" data-i18n="pushup">Push-up</option>
           <option value="jumpshot" data-i18n="jumpshot">Basketball jump shot</option>
           <option value="squat" data-i18n="squat">Squat</option>
           <option value="cmj" data-i18n="cmj">Countermovement jump</option>
@@ -2348,6 +2357,7 @@ function applyLayout() {
   b.innerHTML = lay === "desktop" ? ICON_DESKTOP : ICON_PHONE;
   b.title = tr(lay === "desktop" ? "layoutDesktop" : "layoutPhone");
   b.setAttribute("aria-label", tr(lay === "desktop" ? "toPhone" : "toDesktop"));
+  $("brandReload").title = tr("reloadTitle");      // here: runs at boot and on a language change
 }
 $("layoutToggle").onclick = () => {
   try { localStorage.setItem(LKEY_LAYOUT, readLayout() === "desktop" ? "phone" : "desktop"); } catch { /* per visit */ }
@@ -3143,6 +3153,17 @@ $("chatBtn").onclick = () => { showView("viewChat"); chat.open(); };
 /* Escape must not silently dismiss this one -- "I agree" is the only exit,
  * so a first-time visit can't be skipped by tapping outside or hitting Esc. */
 $("termsDlg").addEventListener("cancel", (e) => e.preventDefault());
+/* Logo and name: reload, after asking the service worker to look for a new
+ * version first, so a pushed update is what comes back up. The shell is
+ * fetched network-first, so the reload itself brings the new files. */
+$("brandReload").onclick = async (e) => {
+  e.preventDefault();
+  try {
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if (reg) await Promise.race([reg.update(), new Promise((r) => setTimeout(r, 1500))]);
+  } catch { /* offline or no worker: reload anyway */ }
+  location.reload();
+};
 $("termsLinkBtn").onclick = (e) => { e.preventDefault(); $("termsDlg").showModal(); };
 $("termsAgreeBtn").onclick = () => { acceptTerms(); $("termsDlg").close(); };
 
@@ -5708,7 +5729,11 @@ async function enrich(res, poses, fps, heightM, activity) {
   // surrogate. See forces.js. The self-test replays the network at its own
   // training mean: if the browser forward pass has drifted from the trained
   // weights, that shows up here rather than as a silently wrong number.
-  try {
+  // Not for push-ups: the surrogate learnt upright legs carrying the body, and
+  // a body lying on hands and toes is nothing it has seen -- no forces rather
+  // than invented ones.
+  if (activity === "pushup") { /* no muscle or joint forces for this task */ }
+  else try {
     const fm = await loadForceModel();
     const st = forceSelfTest(fm);
     if (!st.plausible) throw new Error(
@@ -7176,6 +7201,8 @@ function render(res, fps) {
         tr("feetNotInFrame", { pct: ((res.footCoverage ?? 0) * 100).toFixed(0) })}</p>`
       : res.refused === "handsOverhead" ? `<p class="note banner">${tr("handsOverheadNotDip")}</p>`
       : res.refused === "noDips" ? `<p class="note banner">${tr("noDipsFound")}</p>`
+      : res.refused === "notLying" ? `<p class="note banner">${tr("pushupNotLying")}</p>`
+      : res.refused === "noPushups" ? `<p class="note banner">${tr("noPushupsFound")}</p>`
       : res.refused === "noShots" ? `<p class="note banner">${tr("noShotsFound")}</p>`
       : res.refused === "noHeelRaises" ? `<p class="note banner">${tr("noHeelRaises")}</p>`
       : res.refused === "noKickbacks" ? `<p class="note banner">${tr("noKickbacks")}</p>`
@@ -7285,7 +7312,9 @@ function render(res, fps) {
    * code below this point, and a separate early return for each task would have
    * duplicated the markup while duplicating none of that. */
   const isShot = res.activity === "jumpshot";
-  const isDip = res.activity === "dip";
+  // Push-ups share the dip's table: lowered first, elbow, shoulder, depth.
+  const isDip = res.activity === "dip" || res.activity === "pushup";
+  const depthKey = res.activity === "pushup" ? "depth_m" : "pelvis_travel_m";
   const isSL = res.activity === "slsquat";
   const isRun = res.activity === "run" || res.activity === "walk";
   const isSide = res.activity === "sidestep";
@@ -7356,7 +7385,7 @@ function render(res, fps) {
       <td>${nn(r.eccentric_s)}</td><td>${nn(r.concentric_s)}</td>
       <td>${nn(r.elbow_flex_max_deg, 0)}°</td>
       <td>${nn(r.arm_flex_range_deg, 0)}°</td>
-      <td>${nn(r.pelvis_travel_m)}</td></tr>`).join("");
+      <td>${nn(r[depthKey])}</td></tr>`).join("");
 
   /* The shot table, with the one thing the camera cannot answer left to the
    * athlete. A tap is two buttons rather than a toggle because an untapped
@@ -7521,7 +7550,7 @@ function render(res, fps) {
          <td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
          <td>${ms("elbow_flex_max_deg", 0)}°</td>
          <td>${ms("arm_flex_range_deg", 0)}°</td>
-         <td>${ms("pelvis_travel_m")}</td></tr>`
+         <td>${ms(depthKey)}</td></tr>`
     : isSL
     ? `<tr class="meanrow"><td>${tr("mean")}</td><td>—</td>
          <td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>

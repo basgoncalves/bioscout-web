@@ -28,7 +28,7 @@ export const MILESTONES = [10, 100, 500, 1000];
 
 /* The order the Movement list uses. A task not listed here (a movement added
  * later) still gets its badges, after these. */
-export const TASK_ORDER = ["squat", "slsquat", "pullup", "dip", "kickback", "heelraise",
+export const TASK_ORDER = ["squat", "slsquat", "pullup", "dip", "pushup", "kickback", "heelraise",
   "cmj", "sj", "jumpshot", "sidestep", "run", "walk", "neck"];
 
 /**

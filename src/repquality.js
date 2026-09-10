@@ -108,6 +108,18 @@ const RULES = {
       vsBest("travel", r.pelvis_travel_m, ctx.best((q) => q.pelvis_travel_m)),
     ];
   },
+  /* Push-up. Chest down to a right angle at the elbow, lockout at the top,
+   * the body kept in a line (sagging or piking at the hip), and depth against
+   * the set's best. */
+  pushup(r, ctx) {
+    const ends = restEnds(r, r.coords && r.coords.elbow_flex_r);
+    return [
+      bar("depthArm", r.elbow_flex_max_deg, 90, 75),
+      ends && bar("lockout", Math.max(...ends), 25, 45, false),
+      bar("bodyLine", r.body_bend_deg, 15, 30, false),
+      vsBest("travel", r.depth_m, ctx.best((q) => q.depth_m)),
+    ];
+  },
   /* Squat. 90 deg of knee flexion is roughly thighs parallel; standing tall
    * between reps; depth against the set's best. */
   squat(r, ctx) {
@@ -218,4 +230,4 @@ export function gradeReps(res) {
 /** Every note code the rules can produce -- for the translation test. */
 export const NOTE_CODES = ["lockout", "top", "travel", "swing", "depthArm", "depthKnee",
   "standUp", "height", "wrongJump", "implausible", "kneeBent", "tempo", "release",
-  "releaseElbow", "load", "trunk"];
+  "releaseElbow", "load", "trunk", "bodyLine"];

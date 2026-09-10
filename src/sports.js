@@ -13,7 +13,7 @@
  * have none, and show every movement.
  */
 export const SPORTS = {
-  strength: ["squat", "slsquat", "pullup", "dip", "kickback", "heelraise", "cmj", "sj", "neck"],
+  strength: ["squat", "slsquat", "pullup", "dip", "pushup", "kickback", "heelraise", "cmj", "sj", "neck"],
   basketball: ["jumpshot", "cmj", "sj", "sidestep", "run", "walk"],
 };
 

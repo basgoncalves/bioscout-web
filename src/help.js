@@ -61,6 +61,8 @@ const MOVES = {
   pullup: ["pull up", "pullup", "chin up", "chinup", "elevacao na barra", "elevacoes na barra",
            "elevacoes", "barra fixa", "klimmzug", "klimmzuge", "klimmzuege"],
   dip: ["dip", "dips", "fundo", "fundos"],
+  pushup: ["push up", "pushup", "push ups", "pushups", "press up", "flexao", "flexoes",
+           "liegestutz", "liegestuetz", "liegestutze", "liegestuetze"],
   kickback: ["kick back", "kickback", "coice", "coices", "glute kick"],
   heelraise: ["heel raise", "calf raise", "tip toe", "tiptoe", "elevacoes do calcanhar",
               "elevacao do calcanhar", "calcanhar", "pontas dos pes", "fersenheben",

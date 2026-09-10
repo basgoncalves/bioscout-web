@@ -1207,6 +1207,14 @@ function summariseRep(r, activity) {
      * untapped attempt has no outcome, and a make percentage computed over
      * untapped shots would be a number invented out of silence. */
     o.made = r.made ?? null;
+  } else if (activity === "pushup") {
+    // Depth from the shoulders (the hips travel half as far), and how far the
+    // body bent at the hip -- the plank line.
+    o.elbow_flex_max_deg = r.elbow_flex_max_deg;
+    o.depth_m = r.depth_m != null ? +(+r.depth_m).toFixed(3) : null;
+    o.body_bend_deg = r.body_bend_deg ?? null;
+    o.down_s = +r.eccentric_s?.toFixed(2);
+    o.up_s = +r.concentric_s?.toFixed(2);
   } else if (activity === "dip") {
     // The depth is the travel, named for what it is in this movement. Down
     // before up, because that is the order a dip happens in.
@@ -1311,6 +1319,10 @@ export function summariseSession(session) {
                 trend("knee_flex_max_deg", "Peak knee flexion", "°", true),
                 trend("up_s", "Concentric time", "s", false),
                 trend("peak_knee_Nm", "Peak knee moment", "N·m", false));
+  } else if (activity === "pushup" || activity === "dip") {
+    trends.push(trend("depth_m", "Depth", "m", true),
+                trend("elbow_flex_max_deg", "Peak elbow flexion", "°", true),
+                trend("up_s", "Concentric time", "s", false));
   } else if (activity === "pullup") {
     trends.push(trend("travel_m", "Body travel", "m", true),
                 trend("elbow_flex_max_deg", "Peak elbow flexion", "°", true),
