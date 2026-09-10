@@ -248,6 +248,12 @@ export function makeCloud({ url, key, fetchImpl = globalThis.fetch?.bind(globalT
       return login.expires_at - now() > 60e3 ? login : this.refresh(login);
     },
 
+    /** Delete the signed-in account: login, account row and every synced
+     *  record (public.delete_my_account on the server). Irreversible. */
+    async deleteAccount(login) {
+      await call("/rest/v1/rpc/delete_my_account", { method: "POST", token: login.access_token, body: {} });
+    },
+
     async pull(login, cursor = null) {
       const rows = [];
       let c = cursor;

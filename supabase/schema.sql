@@ -90,3 +90,22 @@ create policy "own account: update" on public.accounts for update to authenticat
 drop policy if exists "own records" on public.records;
 create policy "own records" on public.records for all to authenticated
   using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
+
+-- Delete my account: the signed-in person removes their login, their account
+-- row and every synced record, in one call from the app (both app stores
+-- require in-app deletion for apps that let people create an account).
+-- Security definer because a user cannot delete from auth.users themselves;
+-- it only ever touches auth.uid(), the caller.
+create or replace function public.delete_my_account() returns void
+language plpgsql security definer set search_path = '' as $$
+declare uid uuid := auth.uid();
+begin
+  if uid is null then
+    raise exception 'not signed in' using errcode = '28000';
+  end if;
+  delete from public.records  where owner = uid;
+  delete from public.accounts where id = uid;
+  delete from auth.users      where id = uid;
+end $$;
+revoke execute on function public.delete_my_account() from public, anon;
+grant execute on function public.delete_my_account() to authenticated;

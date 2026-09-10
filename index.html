@@ -321,6 +321,12 @@ try {
   body.assessMode .trainOnly { display:none !important; }
   .daybox { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
   .accountBox { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:0 0 11px; }
+  button.linkish { background:none; border:0; padding:4px 0; margin:2px 0 0; width:auto;
+                   color:var(--warn); font-size:13px; text-decoration:underline; cursor:pointer; }
+  .dangerBox { border:1px solid var(--warn); border-radius:8px; padding:10px; margin-top:6px; }
+  button.danger { background:var(--warn); color:#fff; border-color:var(--warn); }
+  label.chk { display:flex; gap:8px; align-items:flex-start; font-size:13px; }
+  label.chk input { width:auto; margin-top:2px; }
   /* Achievements: four medals per movement. Metal colours with dark ink read
      the same in light and dark themes, so there is no dark variant. */
   .achRow { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 10px;
@@ -580,6 +586,21 @@ try {
           <button class="ghost" id="acctSync" style="margin:0;padding:9px" data-i18n="acctSync">Sync now</button>
           <button class="ghost" id="acctSignOut" style="margin:0;padding:9px" data-i18n="acctSignOut">Sign out</button>
         </div>
+        <button type="button" class="linkish" id="acctDeleteOpen" data-i18n="acctDelete">Delete my account</button>
+        <!-- Two steps and the password again: this cannot be undone, and a
+             phone left unlocked should not be enough to do it. -->
+        <div id="acctDeleteBox" class="dangerBox" hidden>
+          <p class="note" style="margin:0 0 8px" data-i18n-html="noteDeleteAccount">Deleting your account.</p>
+          <label for="acctDeletePass" data-i18n="acctDeletePass">Your password, to confirm</label>
+          <input id="acctDeletePass" type="password" autocomplete="current-password">
+          <label class="chk" style="margin:8px 0"><input type="checkbox" id="acctDeleteLocal">
+            <span id="acctDeleteLocalLabel"></span></label>
+          <p class="sub warn" id="acctDeleteMsg" style="margin:0 0 6px" hidden></p>
+          <div class="row">
+            <button class="danger" id="acctDeleteGo" style="margin:0;padding:9px" data-i18n="acctDeleteGo">Delete permanently</button>
+            <button class="ghost" id="acctDeleteCancel" style="margin:0;padding:9px" data-i18n="cancel">Cancel</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="row" style="margin-bottom:6px">
@@ -806,7 +827,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 92;
+window.BUILD = 93;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -853,7 +874,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listCardio, mergeCardio, latestCardioAt,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
-         saveCurves, getCurves, curveIndices, setRepOutcome, setRepRemoved, listLedger }
+         saveCurves, getCurves, curveIndices, setRepOutcome, setRepRemoved, listLedger, eraseAthlete }
        from "./src/profiles.js";
 import { achievements, repEvents, newlyEarned, repUnit } from "./src/achievements.js";
 import { CLOUD } from "./src/cloud_config.js";
@@ -1304,6 +1325,10 @@ async function runSync({ quiet = false } = {}) {
   if (!quiet) paintAccount();
   try {
     const r = await syncOnce(cloud, st, { exportAll, importAll });
+    // Signed out or deleted while this sync was on the wire: do not bring
+    // the login back by saving the state it started with.
+    const now = cloudState();
+    if (!now.login || now.userId !== st.userId) { syncing = false; paintAccount(); return; }
     saveCloudState(r.state);
     if (r.pulled) {
       refreshProfiles($("profile").value || lastUsedProfile()?.name || "");
@@ -1376,6 +1401,54 @@ $("acctSignOut").onclick = async () => {
   // instead of re-downloading the history.
   delete st.login; saveCloudState(st);
   paintAccount(tr("acctSignedOutOk"));
+};
+/* Delete my account. The password is checked by signing in again with it
+ * (a fresh login is also what the server call runs as), then the server
+ * erases login, account and every synced record. What stays on this device
+ * is the person's choice: by default it stays, as with signing out. */
+function deleteBox(open) {
+  $("acctDeleteBox").hidden = !open;
+  $("acctDeleteOpen").hidden = open;
+  $("acctDeletePass").value = "";
+  $("acctDeleteLocal").checked = false;
+  $("acctDeleteMsg").hidden = true;
+  if (open) {
+    $("acctDeleteLocalLabel").textContent = tr("acctDeleteLocal", { name: cloudState().athlete || "?" });
+    $("acctDeletePass").focus();
+  }
+}
+$("acctDeleteOpen").onclick = () => deleteBox(true);
+$("acctDeleteCancel").onclick = () => deleteBox(false);
+$("acctDeleteGo").onclick = async () => {
+  const st = cloudState();
+  const pw = $("acctDeletePass").value;
+  const fail = (text) => { $("acctDeleteMsg").textContent = text; $("acctDeleteMsg").hidden = false; };
+  if (!st.login) return;
+  if (!pw) { fail(tr("acctDeletePass")); return; }
+  $("acctDeleteGo").disabled = true;
+  try {
+    const who = st.login.user.email;
+    const fresh = await cloud.signIn(who, pw);
+    if (fresh.user.id !== st.login.user.id) throw new Error("account mismatch");
+    await cloud.deleteAccount(fresh);
+    clearTimeout(syncTimer);
+    clearCloudState();
+    let erased = false;
+    if ($("acctDeleteLocal").checked && st.athlete) {
+      const { photos } = eraseAthlete(st.athlete);
+      for (const m of photos) { try { await delPhoto(photoId(m.at, m.profile)); } catch { /* gone */ } }
+      erased = true;
+      refreshProfiles(lastUsedProfile()?.name || "");
+    }
+    deleteBox(false);
+    paintAccount(tr(erased ? "acctDeletedAll" : "acctDeleted"));
+    toast(tr(erased ? "acctDeletedAll" : "acctDeleted"));
+    if (erased) { $("settingsDlg").close(); showView("viewLogin"); renderLogin(); }
+  } catch (e) {
+    fail(e.code === "invalid_credentials" ? tr("acctBadPassword") : cloudErrText(e));
+  } finally {
+    $("acctDeleteGo").disabled = false;
+  }
 };
 $("acctAthlete").onchange = (e) => {
   const st = cloudState();

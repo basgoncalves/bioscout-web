@@ -56,6 +56,13 @@ async function fakeFetch(url, init) {
     users.set(email, { id: "uid-" + body.username, password: body.password, meta: { username: body.username } });
     return J(200, { ok: true });
   }
+  if (u.pathname === "/rest/v1/rpc/delete_my_account") {
+    const owner = tokenOf.get(auth);
+    if (!owner) return J(401, { message: "JWT expired" });
+    for (const [k, r] of rows) if (r.owner === owner) rows.delete(k);
+    for (const [email, x] of users) if (x.id === owner) users.delete(email);
+    return J(204, null);
+  }
   if (u.pathname === "/rest/v1/records") {
     const owner = tokenOf.get(auth);
     if (!owner) return J(401, { message: "JWT expired" });
@@ -168,6 +175,30 @@ ok(cloud.emailFor("someone@Mail.com") === "someone@mail.com" && cloud.emailFor("
   try { await cloud.fromRedirect("#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid"); }
   catch (e) { code = e.code; }
   ok(code === "otp_expired", "an expired link says so", code);
+}
+
+// --- delete my account ---------------------------------------------------
+{
+  on("phone");
+  const before = [...rows.values()].length;
+  const l = await cloud.signIn("bas_g", "hunter22!");
+  await cloud.deleteAccount(l);
+  ok(before > 0 && ![...rows.values()].length, "deleting the account removes every synced record", `${before} -> ${rows.size}`);
+  let gone = null;
+  try { await cloud.signIn("bas_g", "hunter22!"); } catch (e) { gone = e.code; }
+  ok(gone === "invalid_credentials", "and the login no longer works");
+  ok(P.listMeals().some((m) => m.profile === "Bas") || P.listSleep().some((x) => x.profile === "Bas"),
+     "the phone's own copy is untouched by the account deletion");
+  // Optional: forget the athlete on this device too.
+  P.addWeight({ profile: "Bas", kg: 83 });
+  P.addWeight({ profile: "Guest", kg: 70 });
+  const r = P.eraseAthlete("Bas");
+  const left = JSON.stringify(P.exportAll());
+  ok(!P.getProfile("Bas") && !P.getSession() && !P.listSleep().length && !P.listWeights().some((w) => w.profile === "Bas"),
+     "erasing the athlete removes their profile, session and logs", JSON.stringify(r));
+  ok(P.getProfile("Guest") && P.listWeights().some((w) => w.profile === "Guest") && P.listMeals().some((m) => m.profile === "Guest"),
+     "and leaves the other athlete alone");
+  ok(!/"profile":"Bas"/.test(left) && !/"p":"Bas"/.test(left), "nothing of Bas is left in an export");
 }
 
 if (fails) { console.log(`\n${fails} check(s) FAILED`); process.exit(1); }

@@ -321,6 +321,15 @@ export function importAssessments(list) {
   return added;
 }
 
+/** Forget one athlete's assessments on this device: filed ones and any in
+ *  progress (profiles.js eraseAthlete). */
+export function eraseAssessments(profile) {
+  const kept = readHistory().filter((a) => a.profile !== profile);
+  try { localStorage.setItem(HKEY, JSON.stringify(kept)); } catch { /* private window */ }
+  const cur = read();
+  if (cur && cur.profile === profile) write(null);
+}
+
 export function listAssessments(profile = null) {
   const all = readHistory();
   return profile == null ? all : all.filter((a) => a.profile === profile);

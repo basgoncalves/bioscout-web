@@ -14,7 +14,7 @@
  */
 import { UNITS } from "./foods.js";
 import { groupPeaks } from "./muscle_groups.js";
-import { listAssessments, importAssessments } from "./assess.js";
+import { listAssessments, importAssessments, eraseAssessments } from "./assess.js";
 import { DRINKS, DRINK_KINDS } from "./water.js";
 import { sessionReps } from "./achievements.js";
 import { stamp, IDENTITY, mergeTombs, mergeRecords, tombIndex, buried } from "./syncmeta.js";
@@ -745,6 +745,46 @@ export function curveIndices(sessionStarted) {
   return Object.keys(read(CKEY, {}))
     .filter((k) => k.startsWith(sessionStarted + "|"))
     .map((k) => +k.split("|")[1]);
+}
+
+// --- erasing one athlete -----------------------------------------------------
+/**
+ * Remove everything this device holds for one athlete: the profile, sessions
+ * (open and archived) and their curves, meals, diary, weights, cycle, sleep,
+ * vitals, water, coffee, cardio, lifetime ledger and filed assessments.
+ * Other athletes on the device are untouched.
+ *
+ * For "delete my account" with "also from this device" ticked. Unlike a delete,
+ * this leaves NO tombstones: it is not a change to sync, it is this device
+ * forgetting someone. Meal photos are in IndexedDB; the caller removes them
+ * (the returned `photos` are their meal ids, see media.js photoId).
+ */
+export function eraseAthlete(name) {
+  if (!name) return { photos: [] };
+  const mine = (x) => x && x.profile === name;
+  const photos = listMeals().filter((m) => mine(m) && m.photo).map((m) => ({ at: m.at, profile: name }));
+  const store = listProfiles();
+  store.profiles = store.profiles.filter((p) => p.name !== name);
+  if (store.lastUsed === name) store.lastUsed = store.profiles[0]?.name ?? null;
+  write(PKEY, store);
+  const open = getSession();
+  const gone = new Set();
+  if (mine(open)) { gone.add(open.started); clearSession(); }
+  const arch = listArchive();
+  for (const s of arch) if (mine(s)) gone.add(s.started);
+  write(AKEY, arch.filter((s) => !mine(s)));
+  const curves = read(CKEY, {});
+  for (const k of Object.keys(curves)) if (gone.has(k.split("|")[0])) delete curves[k];
+  write(CKEY, curves);
+  for (const key of [MKEY, DKEY, WKEY, CYKEY, SLKEY, VKEY, WAKEY, COKEY, CDKEY]) {
+    const list = read(key, []);
+    if (Array.isArray(list)) write(key, list.filter((x) => !mine(x)));
+  }
+  write(LKEY, listLedger().filter((e) => e.p !== name));
+  write(TKEY, listDeleted().filter((t) => !(t.k === "profiles" ? t.id === name
+                                                                 : String(t.id).startsWith(`${name}|`))));
+  eraseAssessments(name);
+  return { photos };
 }
 
 // --- export and import -----------------------------------------------------
