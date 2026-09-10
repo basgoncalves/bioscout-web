@@ -1667,6 +1667,13 @@ export function buildHeelRaiseFeatures(poses) {
   }
   F._lo = lo; F._n = n; F._scale = nanmedian(F.foot_len_l) || 1;
   F._coverage = frames.length / n;
+  /* Everything else a per-leg task reads -- the floor, the pelvis, the trunk,
+   * each leg's hip and ankle -- from the squat feature set. Without these,
+   * analyse() threw on the first line that asked for them (the reference
+   * positions) and a heel-raise recording ended in "Analysis failed". The
+   * heel-raise columns above win where the names overlap. */
+  const S = buildSquatFeatures(poses);
+  for (const [k, v] of Object.entries(S)) if (!(k in F)) F[k] = v;
   return F;
 }
 
@@ -1895,6 +1902,236 @@ export function sidestepMetrics(F, rep, fps, pxPerM, midX) {
     back_s: +((t1 - pk) / fps).toFixed(3),
     knee_flex_at_plant_deg: isNum(knee[pk]) ? +knee[pk].toFixed(1) : null,
     trunk_lean_at_plant_deg: isNum(lean[pk]) ? +lean[pk].toFixed(1) : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// glute kick back
+// ---------------------------------------------------------------------------
+/* The glute kick back: one leg driven back into hip extension and returned,
+ * on all fours or standing (cable, band, bodyweight). Filmed SIDE-ON, like
+ * every other sagittal task here.
+ *
+ * The hip angle has to be SIGNED, which none of the other tasks needed. The
+ * squat's hip flexion is 180 minus the included angle shoulder-hip-knee, and
+ * an included angle cannot go past straight: a thigh 20 degrees behind the
+ * trunk line reads the same as a thigh 20 degrees in front of it. For a squat
+ * that never matters -- the thigh is always in front. For a kick back the top
+ * of the rep IS the thigh behind the trunk, and an unsigned angle would fold
+ * the best part of every rep back onto itself: the harder the kick, the
+ * smaller the number.
+ *
+ * So the angle is measured from the trunk line continued through the hip (the
+ * thigh's position in quiet standing) to the thigh, positive toward the way
+ * the athlete faces: flexion positive, extension negative -- the same
+ * convention as the other hip curves, just allowed to go below zero. On all
+ * fours the start of a rep is about +90 (knee under the hip); a thigh level
+ * with the back is 0; above that is extension.
+ *
+ * The rep signal is the hip's excursion from where that leg rests, in
+ * degrees. Degrees and not a length: the athlete sets up at whatever distance
+ * from the camera, and an angle does not care. */
+
+/** Which way the athlete faces in the image: +1 toward larger x, -1 toward
+ *  smaller. The nose against the ears first -- that holds on all fours and
+ *  standing alike -- then the shoulders against the hips (on all fours the
+ *  head end is the shoulder end), then +1. */
+export function facingSign(poses) {
+  const votes = [];
+  for (const lm of Object.values(poses)) {
+    const ear = mid(lm.left_ear, lm.right_ear);
+    if (lm.nose && ear && isNum(lm.nose[0]) && isNum(ear[0])) votes.push(lm.nose[0] - ear[0]);
+  }
+  let m = votes.length ? nanmedian(votes) : NaN;
+  if (!(Math.abs(m) > 1e-6)) {
+    const d = [];
+    for (const lm of Object.values(poses)) {
+      const sh = mid(lm.left_shoulder, lm.right_shoulder);
+      const hp = mid(lm.left_hip, lm.right_hip);
+      if (sh && hp) d.push(sh[0] - hp[0]);
+    }
+    m = d.length ? nanmedian(d) : NaN;
+  }
+  return m < 0 ? -1 : 1;
+}
+
+/** Signed hip flexion, degrees: from the trunk line continued through the hip
+ *  to the thigh, positive in the facing direction. NaN where a landmark is
+ *  missing. */
+export function hipFlexSigned(sh, hp, kn, facing) {
+  if (!sh || !hp || !kn) return NaN;
+  // Angle of a vector measured from straight DOWN the image, positive toward
+  // the facing direction. y grows downward, so "down" is +y.
+  const ang = (vx, vy) => Math.atan2(facing * vx, vy);
+  const neutral = ang(hp[0] - sh[0], hp[1] - sh[1]);   // trunk line, continued
+  const thigh = ang(kn[0] - hp[0], kn[1] - hp[1]);
+  let d = thigh - neutral;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return (d * 180) / Math.PI;
+}
+
+export function buildKickbackFeatures(poses) {
+  const F = buildSquatFeatures(poses);
+  const facing = facingSign(poses);
+  const frames = Object.keys(poses).map(Number).sort((a, b) => a - b);
+  const lo = F._lo;
+  F.trunk_pitch = new Array(F._n).fill(NaN);
+  for (const fi of frames) {
+    const i = fi - lo, lm = poses[fi];
+    const sh = mid(lm.left_shoulder, lm.right_shoulder);
+    const hp = mid(lm.left_hip, lm.right_hip);
+    // Per side, the trunk is the shoulder-hip midline: one side's shoulder is
+    // often hidden side-on, and a leg does not have a trunk of its own.
+    F.hip_flex_l[i] = hipFlexSigned(sh, lm.left_hip, lm.left_knee, facing);
+    F.hip_flex_r[i] = hipFlexSigned(sh, lm.right_hip, lm.right_knee, facing);
+    F.hip_flex[i] = nanmean([F.hip_flex_l[i], F.hip_flex_r[i]]);
+    // Trunk pitch: forward lean from vertical, degrees, in the facing
+    // direction. About 0 standing, about 90 on all fours. What matters for a
+    // kick back is how much it CHANGES during a rep -- the lower back arching
+    // or the hips rolling to find range the hip did not produce.
+    if (sh && hp) {
+      F.trunk_pitch[i] = (Math.atan2(facing * (sh[0] - hp[0]), hp[1] - sh[1]) * 180) / Math.PI;
+    }
+  }
+  // Each leg's excursion from where it rests: the 80th percentile of its hip
+  // flexion, i.e. its usual, more flexed, starting position -- the kicks are
+  // the minority of the clip, so they cannot drag it.
+  for (const sd of ["l", "r"]) {
+    const h = F["hip_flex_" + sd];
+    const rest = nanpercentile(h, 80);
+    F["kick_" + sd] = h.map((v) => rest - v);
+    F["_hipRest_" + sd] = rest;
+  }
+  F._facing = facing;
+  return F;
+}
+
+export const DEFAULT_KICKBACK_CFG = {
+  // Twenty degrees of hip travel is the floor for a rep. A standing kick back
+  // done well only travels 25-35 degrees (from neutral into extension); on
+  // all fours it is closer to 90. A lower bar would count the working leg
+  // settling between reps.
+  minExcursionDeg: 20,
+  minRepFrames: 8,
+  smoothWin: 5,
+};
+
+/* One rep is one kick and return of one leg: trough to peak to trough of that
+ * leg's excursion. Both legs are searched, and each rep carries its side, so a
+ * set that alternates legs, or does all of one then all of the other, is
+ * counted per leg from one clip -- as the heel raise is.
+ *
+ * Side-on, the far leg is half hidden and the pose model sometimes paints it
+ * onto the near one. Two legs "kicking" at the same moment is that, not a
+ * double kick, so where a left and a right rep peak inside each other's
+ * windows only the larger is kept. */
+export function findKickbackReps(F, cfg = DEFAULT_KICKBACK_CFG) {
+  const sig = {};
+  const perSide = (sd) => {
+    const y = smooth(interpNan(F["kick_" + sd]), cfg.smoothWin);
+    sig[sd] = y;
+    const peaks = localMaxima(y, cfg.minRepFrames, cfg.minExcursionDeg);
+    const out = [];
+    for (let k = 0; k < peaks.length; k++) {
+      const pk = peaks[k];
+      const left = k > 0 ? peaks[k - 1] : 0;
+      const right = k < peaks.length - 1 ? peaks[k + 1] : F._n - 1;
+      const t0 = pk > left ? argmin(y, left, pk) : left;
+      const t1 = right > pk ? argmin(y, pk, right) : right;
+      if (t1 - t0 < cfg.minRepFrames) continue;
+      if (pk - t0 < 2 || t1 - pk < 2) continue;
+      // The excursion has to be a movement away from AND back: a leg that
+      // starts a clip extended and never comes back is not a rep.
+      if (y[pk] - Math.max(y[t0], y[t1]) < cfg.minExcursionDeg) continue;
+      out.push([t0, pk, t1]);
+    }
+    return out;
+  };
+  const l = perSide("l"), r = perSide("r");
+  let tagged = [...l.map((b) => ({ b, sd: "l" })), ...r.map((b) => ({ b, sd: "r" }))];
+  const excursion = (t) => sig[t.sd][t.b[1]] - Math.min(sig[t.sd][t.b[0]], sig[t.sd][t.b[2]]);
+  /* "At the same moment" means the upper halves of the two kicks overlap --
+   * not the trough-to-trough windows, which on an alternating set run from
+   * one leg's kick right through the other leg's and would make every
+   * alternate rep look like a ghost. */
+  const core = (t) => {
+    const y = sig[t.sd], half = y[t.b[1]] - 0.5 * excursion(t);
+    let a = t.b[1], z = t.b[1];
+    while (a > t.b[0] && y[a - 1] > half) a--;
+    while (z < t.b[2] && y[z + 1] > half) z++;
+    return [a, z];
+  };
+  const drop = new Set();
+  for (const a of tagged) {
+    for (const b of tagged) {
+      if (a === b || a.sd === b.sd || drop.has(a) || drop.has(b)) continue;
+      const [a0, a1] = core(a), [b0, b1] = core(b);
+      if (a0 <= b1 && b0 <= a1) drop.add(excursion(a) >= excursion(b) ? b : a);
+    }
+  }
+  tagged = tagged.filter((t) => !drop.has(t)).sort((p, q) => p.b[0] - q.b[0]);
+  if (!tagged.length) {
+    return { reps: [], repSides: [], sideReps: { l: [], r: [] }, depth: sig.l, kick: sig,
+             refused: "noKickbacks" };
+  }
+  return { reps: tagged.map((t) => t.b), repSides: tagged.map((t) => t.sd),
+           sideReps: { l: tagged.filter((t) => t.sd === "l").map((t) => t.b),
+                       r: tagged.filter((t) => t.sd === "r").map((t) => t.b) },
+           depth: sig.l, kick: sig };
+}
+
+/** Per-rep numbers for a kick back, from the working leg. */
+export function kickbackMetrics(F, rep, fps, sd) {
+  const [t0, pk, t1] = rep;
+  const hip = interpNan(F["hip_flex_" + sd]).slice(t0, t1 + 1).filter(isNum);
+  const knee = interpNan(F["knee_flex_" + sd]);
+  const pitch = interpNan(F.trunk_pitch).slice(t0, t1 + 1).filter(isNum);
+  const r1 = (v) => (isNum(v) ? +v.toFixed(1) : null);
+  return {
+    stance_side: sd,                 // the WORKING leg, as for the heel raise
+    // Extension positive here, because that is the number a kick back is
+    // judged on. It is negative when the thigh never got past the trunk line
+    // -- on all fours, a kick that stops below the level of the back.
+    hip_ext_max_deg: hip.length ? r1(-Math.min(...hip)) : null,
+    hip_range_deg: hip.length ? r1(Math.max(...hip) - Math.min(...hip)) : null,
+    knee_flex_at_top_deg: r1(knee[pk]),
+    trunk_motion_deg: pitch.length ? r1(Math.max(...pitch) - Math.min(...pitch)) : null,
+  };
+}
+
+/* Kick back coordinates. The per-leg set, with the pelvis pitched by the trunk
+ * so an all-fours clip drives a model on all fours rather than a standing one
+ * with its legs swung up; hip flexion is already relative to the trunk. The
+ * pelvis height is taken from the floor under the athlete (knees and feet on
+ * all fours), not from the ankle, which on all fours is in the air. */
+export function kickbackRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
+                                       { model = "gpk", ankleValid = true } = {}) {
+  const [t0, , t1] = rep, lo = F._lo;
+  const sl = (a) => interpNan(a).slice(t0, t1 + 1);
+  const hipY = sl(F.hip_cy), hipX = sl(F.hip_cx);
+  const times = [], z = [];
+  for (let i = t0; i <= t1; i++) { times.push((lo + i) / fps); z.push(0); }
+  const sign = KNEE_SIGN[model] ?? -1;
+  const kneeOf = (sd) => clipArr(sl(F["knee_flex_" + sd]), 0, 145).map((v) => sign * v);
+  const hipOf = (sd) => clipArr(sl(F["hip_flex_" + sd]), -40, 130);
+  const ankOf = (sd) => (ankleValid
+    ? clipArr(sl(F["ankle_dorsi_" + sd]), -40, 40)
+    : sl(F["ankle_dorsi_" + sd]).map(() => 0));
+  return {
+    times,
+    coords: {
+      // OpenSim's pelvis_tilt is positive tipping backwards, so a forward
+      // lean is negative.
+      pelvis_tilt: clipArr(sl(F.trunk_pitch).map((v) => -v), -100, 30),
+      pelvis_tx: z,
+      pelvis_ty: hipY.map((y) => Math.max(0, (F._floorY - y) / pxPerM)),
+      pelvis_tz: hipX.map((x) => (x - midX) / pxPerM),
+      hip_flexion_r: hipOf("r"), hip_flexion_l: hipOf("l"),
+      knee_angle_r: kneeOf("r"), knee_angle_l: kneeOf("l"),
+      ankle_angle_r: ankOf("r"), ankle_angle_l: ankOf("l"),
+      lumbar_extension: z,
+    },
   };
 }
 
@@ -2159,6 +2396,18 @@ export const ACTIVITIES = {
     coords: squatRepCoordinates, reference: jumpReferencePositions,
     phases: ["load_s", "follow_s"], shot: true,
   },
+  /* Glute kick back. Per leg, like the heel raise: one clip, each rep tagged
+   * with the leg that kicked. `openChain` because the working leg is in the
+   * air -- there is no ground reaction under it to derive a moment from, and
+   * the muscle-force surrogate was trained on standing, weight-bearing tasks,
+   * so both are left out rather than guessed (see enrich in index.html). */
+  kickback: {
+    label: "glute kick back", perLeg: true, kickback: true, openChain: true,
+    columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_KICKBACK_CFG,
+    features: buildKickbackFeatures, findReps: findKickbackReps,
+    coords: kickbackRepCoordinates, reference: squatReferencePositions,
+    phases: ["kick_s", "return_s"],
+  },
   sidestep: {
     label: "side step", perLeg: true, travels: true, frontalTask: true,
     columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_SIDESTEP_CFG,
@@ -2257,6 +2506,10 @@ function trimSignal(activity, F, found, i) {
       return smooth(interpNan(F["lift_" + sd]), 3);
     }
     case "jumpshot": return found.rise;
+    case "kickback": {
+      const sd = found.repSides ? found.repSides[i] : "l";
+      return found.kick ? found.kick[sd] : null;
+    }
     default: return null;
   }
 }
@@ -2398,6 +2651,12 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       }
       if (activity === "sidestep") {
         Object.assign(s, sidestepMetrics(F, b, fps, pxPerM, found.midX ?? refB));
+      }
+      if (spec.heelRaise) {
+        Object.assign(s, heelRaiseMetrics(F, b, fps, found.repSides ? found.repSides[i] : "l"));
+      }
+      if (spec.kickback) {
+        Object.assign(s, kickbackMetrics(F, b, fps, found.repSides ? found.repSides[i] : "l"));
       }
     } else {
       /* The peak is taken from the MEASUREMENT, not from the exported column.

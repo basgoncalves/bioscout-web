@@ -200,6 +200,17 @@
   button.mk { display:inline-block; width:32px; padding:5px 0; margin:0 3px 0 0;
               font-size:13px; line-height:1.1; }
   button.mk.on { border-color:var(--accent); color:var(--accent); font-weight:700; }
+  /* Taking a rep out of a set, and putting it back. Small and grey: it is a
+   * correction, not something to press by accident on every row. */
+  td:has(> button.rmrep) { white-space:nowrap; }
+  button.rmrep { display:inline-block; width:auto; margin:0 0 0 4px; padding:0 5px;
+                 font-size:13px; line-height:1.5; color:var(--muted); vertical-align:middle; }
+  button.rsrep, button.repchip { display:inline-block; width:auto; margin:3px 4px 3px 0;
+                 padding:4px 9px; font-size:12.5px; line-height:1.3; }
+  button.repchip.out { text-decoration:line-through; color:var(--muted); }
+  details.repedit { margin-top:10px; font-size:13px; }
+  details.repedit summary { cursor:pointer; color:var(--muted); }
+  .repset { margin:8px 0 0; }
   .infoDot { display:inline-flex; align-items:center; justify-content:center;
              width:16px; height:16px; margin-left:7px; border-radius:50%;
              border:1px solid var(--line); background:var(--bg); color:var(--muted);
@@ -489,6 +500,7 @@
           <option value="sj" data-i18n="sj">Squat jump</option>
           <option value="slsquat" data-i18n="slsquat">Single-leg squat</option>
           <option value="heelraise" data-i18n="heelraise">Heel raises (tip-toe)</option>
+          <option value="kickback" data-i18n="kickback">Glute kick back</option>
           <option value="walk" data-i18n="walk">Walking</option>
           <option value="run" data-i18n="run">Running</option>
           <option value="sidestep" data-i18n="sidestep">Side step</option>
@@ -595,7 +607,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 83;
+window.BUILD = 84;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -634,7 +646,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listCardio, mergeCardio, latestCardioAt,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
-         saveCurves, getCurves, curveIndices, setRepOutcome }
+         saveCurves, getCurves, curveIndices, setRepOutcome, setRepRemoved }
        from "./src/profiles.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML, weightFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
@@ -1030,6 +1042,13 @@ $("delProfileBtn").onclick = () => {
  * language the page started in for the rest of the session. */
 const PEAK_VARS = {
   depth_m:            { label: "Depth", unit: "m", dp: 2 },
+  // Per-leg isolation tasks, first so a kick-back session opens on its range.
+  heel_lift:          { label: "Heel lift (foot lengths)", unit: "", dp: 2 },
+  hip_range_deg:      { label: "Hip range", unit: "°", dp: 0 },
+  hip_ext_max_deg:    { label: "Peak hip extension", unit: "°", dp: 0 },
+  trunk_motion_deg:   { label: "Trunk movement", unit: "°", dp: 0 },
+  kick_s:             { label: "Kick time", unit: "s", dp: 2 },
+  return_s:           { label: "Return time", unit: "s", dp: 2 },
   height_flight_m:    { label: "Jump height (flight time)", unit: "m", dp: 3 },
   height_com_m:       { label: "Jump height (hip rise)", unit: "m", dp: 3 },
   flight_s:           { label: "Flight time", unit: "s", dp: 3 },
@@ -1121,6 +1140,10 @@ function varSpec(key) {
 const UNIT_KEYS = { "steps/min": "unit_spm", "\u00d7BW": "unit_bw" };
 
 let peakVar = null;      // survives re-renders of the training card
+// Whether the session tables' "remove or restore reps" list is open. Up here,
+// not beside repEditorHTML: renderTraining() runs at boot, long before that
+// point of the module has been reached, and a `let` read early throws.
+let repEditOpen = false;
 // A past session opened read-only from the day view -- its own state so
 // switching charts there never disturbs the live session's peakVar.
 let sessionViewSess = null;
@@ -2059,6 +2082,7 @@ function renderTraining() {
       <tbody>${rows}</tbody></table>
     <div id="peakChartBox" style="margin-top:10px">${
       peakVar ? setChart(series, peakVar, pairSeries) : ""}</div>
+    ${repEditorHTML(sess)}
     <button id="summaryBtn" style="margin-top:10px">${tr("finishSummarise")}</button>
     <button class="ghost" id="newSessionBtn" style="margin-top:8px">${tr("newSession")}</button>
     <div id="summaryBox"></div>`;
@@ -2072,6 +2096,7 @@ function renderTraining() {
       kept: tr(kept === 1 ? "nPastSession" : "nPastSessions", { n: kept }) }));
   };
   $("summaryBtn").onclick = () => renderSummary();
+  wireRepEditor(card, sess, renderTraining);
   renderDash();          // keeps the dashboard current behind the record view
   const pv = $("peakVar");
   if (pv) pv.onchange = () => {
@@ -2545,8 +2570,14 @@ function renderSessionView() {
         <tbody>${t}</tbody></table>
         <p class="note">${tr("noteChangeFirstLast")}</p>`
         : `<p class="note">${tr("noteNotEnoughSets")}</p>`}` : ""}
+    ${repEditorHTML(sess)}
     ${sess.sets.some((x) => x.activity === "neck") ? neckLoadHTML() : ""}`;
 
+  wireRepEditor(card, sess, () => {
+    sessionViewSess = findSession(sess.started) || sess;
+    renderSessionView();
+    renderDash();
+  });
   const pv = $("sessionPeakVar");
   if (pv) pv.onchange = () => { sessionViewVar = pv.value; renderSessionView(); };
 }
@@ -3579,6 +3610,7 @@ async function finish() {
         const set = addSet(lastResult, fps, { profile: $("profile").value || null,
                                              assess: assessStep });
         lastResult.setIndex = set.index;
+        lastResult.sessionStarted = getSession()?.started ?? null;
         pageSets.push({ index: set.index, res: lastResult, fps });
         const sess = getSession();
         if (sess) saveCurves(sess.started, set.index, lastResult);
@@ -3719,6 +3751,11 @@ async function enrich(res, poses, fps, heightM, activity) {
    * pixel-to-metre scale exactly as the ground reaction does. A travelling clip
    * gets kinematics and timing; a stationary one gets everything. */
   if (spec.travels && !res.travel?.stationary) return;
+  /* An open-chain task -- the kick back -- has no ground reaction under the
+   * working leg, and its posture (on all fours, or one leg swinging free) is
+   * nothing like the standing, weight-bearing tasks the muscle surrogate was
+   * trained on. Its angles and timing stand; forces are not guessed. */
+  if (spec.openChain) return;
 
   /* The reference curves load on their OWN, before anything to do with the
    * force model.
@@ -3792,7 +3829,7 @@ function viewNote(res) {
   const bits = [];
   const spec = ACTIVITIES[res.activity] || {};
   const sagittal = res.activity === "squat" || spec.jump || res.activity === "slsquat"
-                   || spec.gait;
+                   || spec.gait || spec.kickback;
   if (sagittal && (v.view === "frontal" || v.view === "oblique")) {
     bits.push(tr("viewNotSagittal", { view: tr("view_" + v.view),
                                       frontality: v.frontality }));
@@ -3827,6 +3864,7 @@ function viewNote(res) {
   if (res.activity === "slsquat" && res.refused === "bothFeetDown") {
     bits.push(tr("bothFeetDown"));
   }
+  if (spec.kickback) bits.push(tr("kickbackNoKinetics"));
   return bits.length
     ? `<p class="note banner">${bits.join(" ")}</p>` : "";
 }
@@ -4648,6 +4686,7 @@ function momentPanel(rep, res) {
 }
 
 function forcePanel(rep, res) {
+  if (res && ACTIVITIES[res.activity]?.openChain) return "";   // see enrich()
   if (!rep.forces || !rep.forces.length) {
     if (res && res.restored) return `<p class="note">${tr("noteForcesNotKept")}</p>`;
     return res && res.forcesUnavailable
@@ -5027,7 +5066,8 @@ function wireSetSwitcher() {
       const sess = getSession();
       const c = sess && getCurves(sess.started, want);
       if (!c) return;
-      hit = { index: want, fps: c.fps || 30, res: { ...c, restored: true } };
+      hit = { index: want, fps: c.fps || 30,
+              res: { ...c, restored: true, sessionStarted: sess.started } };
     }
     viewingSet = hit.index;
     render(hit.res, hit.fps);
@@ -5069,6 +5109,123 @@ function qualitySummary(c) {
     <p class="note" style="margin-top:2px">${tr("qExplain")}</p>`;
 }
 
+/* ---- taking a rep out ----------------------------------------------------
+ * A rep tracked wrong -- counted when it should not have been, or measured
+ * off a glitch -- can be taken out of its set with the x on its row, and put
+ * back from the line under the table. It leaves the counts, the mean, the
+ * grades (which compare against the set's best), the curves and the exports;
+ * on a logged set it leaves the stored set too (profiles.js setRepRemoved),
+ * so the session table, trends and day view follow. Nothing is deleted:
+ * the rep sits in `removedReps` until it is restored. */
+const byRep = (a, b) => a.rep - b.rep;
+function rmBtn(r) {
+  return `<button class="ghost rmrep" data-rep="${r.rep}" title="${esc(tr("removeRep"))}"
+    aria-label="${esc(tr("removeRep"))} ${r.rep}">\u00d7</button>`;
+}
+function removedLine(res) {
+  const out = res.removedReps || [];
+  if (!out.length) return "";
+  return `<p class="note" style="margin-top:8px">${tr("removedReps")} ${out.map((r) =>
+    `<button class="ghost rsrep" data-rep="${r.rep}" title="${esc(tr("restoreRep"))}">${
+      tr("repN", { n: r.rep })} \u21ba</button>`).join("")}</p>`;
+}
+/** Move one rep of an analysed set between `reps` and `removedReps`, in
+ *  memory and -- when the set was logged -- in storage. */
+function moveRep(res, rep, remove) {
+  const from = remove ? res.reps : (res.removedReps || []);
+  const i = from.findIndex((r) => r.rep === rep);
+  if (i < 0) return false;
+  const [hit] = from.splice(i, 1);
+  if (remove) (res.removedReps || (res.removedReps = [])).push(hit);
+  else res.reps.push(hit);
+  res.reps.sort(byRep);
+  if (res.removedReps) res.removedReps.sort(byRep);
+  return true;
+}
+/** Storage first, then every copy of the same set this page holds. */
+function toggleStoredRep(sessionStarted, setIndex, rep, remove) {
+  const set = setRepRemoved(sessionStarted, setIndex, rep, remove);
+  if (!set) return null;
+  for (const ps of pageSets) {
+    if (ps.index === setIndex && ps.res.sessionStarted === sessionStarted) {
+      moveRep(ps.res, rep, remove);
+    }
+  }
+  /* An assessment test is filed as a copy of its set. Keep the open
+   * assessment's copy in step, or the report would still count the rep. */
+  if (set.assess) {
+    try {
+      const a = getAssess(currentAthlete());
+      const t = a && a.tests && a.tests[set.assess];
+      if (t && t.at === set.at && t.index === set.index) {
+        putAssessTest(set.assess, set, currentAthlete());
+      }
+    } catch (e) { console.warn("assessment copy not updated", e); }
+  }
+  return set;
+}
+function wireRepRemoval(el, res, fps) {
+  const act = (rep, remove) => {
+    const logged = res.setIndex != null && res.sessionStarted;
+    if (logged) {
+      const set = toggleStoredRep(res.sessionStarted, res.setIndex, rep, remove);
+      // Not in storage any more (a set from a session since cleared): still
+      // correct what is on screen.
+      if (!set || !pageSets.some((p) => p.res === res)) moveRep(res, rep, remove);
+      renderTraining();
+    } else {
+      moveRep(res, rep, remove);
+    }
+    render(res, fps);
+    say(tr(remove ? "sayRepRemoved" : "sayRepRestored", { n: rep }));
+  };
+  el.querySelectorAll("button.rmrep").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); act(+b.dataset.rep, true); };
+  });
+  el.querySelectorAll("button.rsrep").forEach((b) => {
+    b.onclick = () => act(+b.dataset.rep, false);
+  });
+}
+
+/* The same, from the session tables: every set's reps as chips, tap one to
+ * take it out or put it back. This is what reaches a set whose curves are no
+ * longer on the device, and the sets of sessions already filed. */
+function repEditorHTML(sess) {
+  if (!sess || !sess.sets.some((x) => (x.perRep || []).length || (x.removedReps || []).length)) return "";
+  const chip = (x, r, out) => `<button class="ghost repchip${out ? " out" : ""}"
+      data-set="${x.index}" data-rep="${r.rep}" data-out="${out ? 1 : 0}"
+      title="${esc(tr(out ? "restoreRep" : "removeRep"))}">${tr("repN", { n: r.rep })}${
+      r.stance_side ? " " + (r.stance_side === "l" ? tr("leftShort") : tr("rightShort")) : ""}${
+      out ? " \u21ba" : " \u00d7"}</button>`;
+  const rows = sess.sets.map((x) => {
+    const all = [...(x.perRep || []).map((r) => [r, false]),
+                 ...(x.removedReps || []).map((r) => [r, true])]
+      .sort((a, b) => a[0].rep - b[0].rep);
+    if (!all.length) return "";
+    return `<div class="repset"><b>${tr("setLabel", { n: x.index })}</b> · ${tr(x.activity)}<br>${
+      all.map(([r, out]) => chip(x, r, out)).join("")}</div>`;
+  }).join("");
+  return `<details class="repedit"${repEditOpen ? " open" : ""}>
+      <summary>${tr("editReps")}</summary>
+      <p class="note" style="margin:6px 0 0">${tr("editRepsNote")}</p>${rows}</details>`;
+}
+function wireRepEditor(root, sess, after) {
+  const det = root.querySelector("details.repedit");
+  if (det) det.ontoggle = () => { repEditOpen = det.open; };
+  root.querySelectorAll("button.repchip").forEach((b) => {
+    b.onclick = () => {
+      const remove = b.dataset.out !== "1";
+      const set = toggleStoredRep(sess.started, +b.dataset.set, +b.dataset.rep, remove);
+      if (!set) return;
+      say(tr(remove ? "sayRepRemoved" : "sayRepRestored", { n: +b.dataset.rep }));
+      // The results card, if it is showing this very set, redraws too.
+      if (shownRes && shownRes.sessionStarted === sess.started
+          && shownRes.setIndex === set.index) render(shownRes, shownFps);
+      after();
+    };
+  });
+}
+
 function render(res, fps) {
   shownRes = res; shownFps = fps;
   const el = $("results");
@@ -5077,17 +5234,21 @@ function render(res, fps) {
   const isSquat = res.activity === "squat";
 
   if (!n) {
-    el.innerHTML = `<h1 style="font-size:17px">${tr("noRepsFound", { activity: tr(res.activity) })}</h1>
+    el.innerHTML = `<h1 style="font-size:17px">${(res.removedReps || []).length
+        ? tr("allRepsRemoved") : tr("noRepsFound", { activity: tr(res.activity) })}</h1>
       ${res.refused === "feet" ? `<p class="note banner">${
         tr("feetNotInFrame", { pct: ((res.footCoverage ?? 0) * 100).toFixed(0) })}</p>`
       : res.refused === "handsOverhead" ? `<p class="note banner">${tr("handsOverheadNotDip")}</p>`
       : res.refused === "noDips" ? `<p class="note banner">${tr("noDipsFound")}</p>`
       : res.refused === "noShots" ? `<p class="note banner">${tr("noShotsFound")}</p>`
       : res.refused === "noHeelRaises" ? `<p class="note banner">${tr("noHeelRaises")}</p>`
+      : res.refused === "noKickbacks" ? `<p class="note banner">${tr("noKickbacks")}</p>`
       : res.refused === "noStrides" ? `<p class="note banner">${
           tr(res.activity === "walk" ? "noStridesWalk" : "noStrides")}</p>`
+      : (res.removedReps || []).length ? ""
       : `<p class="note">${tr("noteCoverage", {
-          pct: (res.coverage * 100).toFixed(0) })}</p>`}`;
+          pct: (res.coverage * 100).toFixed(0) })}</p>`}${removedLine(res)}`;
+    wireRepRemoval(el, res, fps);
     return;
   }
 
@@ -5097,7 +5258,7 @@ function render(res, fps) {
   const isNeck = res.activity === "neck";
   if (isNeck) {
     const nrows = res.reps.map((r) =>
-      `<tr><td>${r.rep}${qDot(r)}</td><td>${r.out_s.toFixed(2)}</td><td>${r.back_s.toFixed(2)}</td>
+      `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td><td>${r.out_s.toFixed(2)}</td><td>${r.back_s.toFixed(2)}</td>
        <td>${r.flexion_extension_range_deg}°</td><td>${r.lateral_bend_range_deg}°</td>
        <td>${r.rotation_range_deg}°</td></tr>`).join("");
     el.innerHTML = `
@@ -5116,6 +5277,7 @@ function render(res, fps) {
         <th>${tr("colBack")}</th><th>${tr("colFlexExt")}</th>
         <th>${tr("colSideBend")}</th><th>${tr("colRotation")}</th></tr></thead>
         <tbody>${nrows}</tbody></table>
+      ${removedLine(res)}
       ${qualitySummary(qCounts)}
       <div class="tabs" id="repTabs" style="margin-top:14px"></div>
       <div id="chartBox"></div>
@@ -5152,6 +5314,7 @@ function render(res, fps) {
     }
     selN(0);
     wireSetSwitcher();
+    wireRepRemoval(el, res, fps);
     $("zipBtn").onclick = () => exportZip(res, fps);
     $("dlBtn").onclick = () => {
       const txt = writeMot("joint_angles", ACTIVITIES.neck.columns,
@@ -5167,7 +5330,7 @@ function render(res, fps) {
 
   const isJump = !!ACTIVITIES[res.activity].jump;
   const cm = (v, dp = 1) => (v == null ? "—" : (v * 100).toFixed(dp));
-  const jumpRows = !isJump ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
+  const jumpRows = !isJump ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
       <td>${r.flight_s == null ? "—" : r.flight_s.toFixed(3)}</td>
       <td${r.implausible ? ' style="color:var(--warn)"' : ""}>${
         r.height_flight_m == null ? "—" : cm(r.height_flight_m) +
@@ -5193,12 +5356,12 @@ function render(res, fps) {
   const nn = (v, d = 2) => (v == null ? "—" : v.toFixed(d));
   const sideName = (sd) => (sd === "l" ? tr("left") : sd === "r" ? tr("right") : "—");
 
-  const slRows = !isSL ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
+  const slRows = !isSL ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
       <td>${sideName(r.stance_side)}</td>
       <td>${nn(r.eccentric_s)}</td><td>${nn(r.concentric_s)}</td>
       <td>${nn(r.stance_knee_flex_max_deg, 0)}°</td>
       <td>${nn(r.knee_asymmetry_deg, 0)}°</td></tr>`).join("");
-  const runRows = !isRun ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
+  const runRows = !isRun ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
       <td>${sideName(r.stance_side)}</td>
       <td>${nn(r.stride_s, 3)}</td><td>${nn(r.contact_s, 3)}</td>
       <td>${nn(r.flight_s, 3)}</td><td>${nn(r.duty_factor, 2)}</td>
@@ -5209,7 +5372,25 @@ function render(res, fps) {
    * those rows are the strides of ONE foot (the cycle the charts and the
    * ensemble mean are built on), and hanging a left-right comparison off them
    * would imply the other foot's strides are in there too. */
-  const rs = isRun ? res.runSummary : null;
+  let rs = isRun ? res.runSummary : null;
+  /* With strides taken out, each foot's means are recomputed from the strides
+   * that are left; the bout itself (its time and step count) is what the
+   * camera saw and stays. */
+  if (rs && (res.removedReps || []).length) {
+    const foot = (sd) => {
+      const mine = res.reps.filter((r) => r.stance_side === sd);
+      if (!mine.length) return null;
+      const m = (k) => {
+        const v = mine.map((r) => r[k]).filter((x) => Number.isFinite(x));
+        return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+      };
+      return { strides: mine.length, stride_s: m("stride_s"), contact_s: m("contact_s"),
+               flight_s: m("flight_s"), duty_factor: m("duty_factor"),
+               cadence_spm: m("cadence_spm") };
+    };
+    rs = { ...rs, left: foot("l"), right: foot("r") };
+    rs.strides = (rs.left?.strides || 0) + (rs.right?.strides || 0);
+  }
   const footRow = (key, m) => (!m ? "" : `<tr><td>${tr(key)}</td>
       <td>${nn(m.strides, 0)}</td><td>${nn(m.stride_s, 3)}</td>
       <td>${nn(m.contact_s, 3)}</td><td>${nn(m.flight_s, 3)}</td>
@@ -5235,7 +5416,7 @@ function render(res, fps) {
    * under a heading that says "up", which for a dip is the second half of the
    * rep -- so every athlete's descent would appear in the column headed with
    * the opposite word, and the numbers would be right while the table lied. */
-  const dipRows = !isDip ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
+  const dipRows = !isDip ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
       <td>${nn(r.eccentric_s)}</td><td>${nn(r.concentric_s)}</td>
       <td>${nn(r.elbow_flex_max_deg, 0)}°</td>
       <td>${nn(r.arm_flex_range_deg, 0)}°</td>
@@ -5251,14 +5432,29 @@ function render(res, fps) {
         data-made="1" title="${esc(tr("shotMade"))}">\u25cf</button>
       <button class="ghost mk${r.made === false ? " on" : ""}" data-rep="${r.rep}"
         data-made="0" title="${esc(tr("shotMissed"))}">\u25cb</button></td>`;
-  const shotRows = !isShot ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
+  const shotRows = !isShot ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
       <td>${nn(r.release_height_m)}</td>
       <td>${nn(r.apex_offset_s, 2)}</td>
       <td>${nn(r.release_elbow_deg, 0)}\u00b0</td>
       <td>${nn(r.knee_flex_at_dip_deg, 0)}\u00b0</td>
       ${madeCell(r)}</tr>`).join("");
 
-  const sideRows = !isSide ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
+  /* Kick back and heel raise: per leg, so the leg is the second column, as it
+   * is for a single-leg squat. The heel raise had no row of its own and fell
+   * through to the pull-up's, which read fields it does not have. */
+  const isKick = res.activity === "kickback";
+  const isHR = res.activity === "heelraise";
+  const kickRows = !isKick ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
+      <td>${sideName(r.stance_side)}</td>
+      <td>${nn(r.kick_s)}</td><td>${nn(r.return_s)}</td>
+      <td>${nn(r.hip_ext_max_deg, 0)}°</td>
+      <td>${nn(r.hip_range_deg, 0)}°</td></tr>`).join("");
+  const hrRows = !isHR ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
+      <td>${sideName(r.stance_side)}</td>
+      <td>${nn(r.up_s)}</td><td>${nn(r.down_s)}</td>
+      <td>${nn(r.heel_lift, 2)}</td></tr>`).join("");
+
+  const sideRows = !isSide ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
       <td>${sideName(r.plant_side)}</td>
       <td>${nn(r.out_s)}</td><td>${nn(r.back_s)}</td>
       <td>${nn(r.excursion_m)}</td>
@@ -5276,10 +5472,10 @@ function render(res, fps) {
    * above jumpRows, and left in place here. Lazy is not an optimisation here;
    * it is what makes the mistake impossible to make again. */
   const rows = () => res.reps.map((r) => isSquat
-    ? `<tr><td>${r.rep}${qDot(r)}</td><td>${r.eccentric_s.toFixed(2)}</td><td>${r.concentric_s.toFixed(2)}</td>
+    ? `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td><td>${r.eccentric_s.toFixed(2)}</td><td>${r.concentric_s.toFixed(2)}</td>
          <td>${r.knee_flex_max_deg.toFixed(0)}°</td><td>${r.hip_flex_max_deg.toFixed(0)}°</td>
          <td>${r.depth_m.toFixed(2)}</td></tr>`
-    : `<tr><td>${r.rep}${qDot(r)}</td><td>${r.concentric_s.toFixed(2)}</td><td>${r.eccentric_s.toFixed(2)}</td>
+    : `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td><td>${r.concentric_s.toFixed(2)}</td><td>${r.eccentric_s.toFixed(2)}</td>
          <td>${r.elbow_flex_max_deg.toFixed(0)}°</td><td>${r.arm_flex_range_deg.toFixed(0)}°</td>
          <td>${r.pelvis_travel_m.toFixed(2)}</td></tr>`).join("");
   const head = isShot
@@ -5296,6 +5492,12 @@ function render(res, fps) {
     ? `<tr><th>${tr("stride")}</th><th>${tr("colFoot")}</th><th>${tr("strideS")}</th>
         <th>${tr("contactS")}</th><th>${tr("flightS")}</th><th>${tr("dutyFactor")}</th>
         <th>${tr("cadence")}</th></tr>`
+    : isKick
+    ? `<tr><th>${tr("rep")}</th><th>${tr("legCol")}</th><th>${tr("kickS")}</th>
+        <th>${tr("returnS")}</th><th>${tr("hipExtTop")}</th><th>${tr("hipRange")}</th></tr>`
+    : isHR
+    ? `<tr><th>${tr("rep")}</th><th>${tr("colFoot")}</th><th>${tr("up")}</th>
+        <th>${tr("down")}</th><th>${tr("heelLiftCol")}</th></tr>`
     : isSide
     ? `<tr><th>${tr("step")}</th><th>${tr("plantSide")}</th><th>${tr("outS")}</th>
         <th>${tr("backS")}</th><th>${tr("excursionM")}</th><th>${tr("kneeAtPlant")}</th></tr>`
@@ -5350,7 +5552,22 @@ function render(res, fps) {
     if (mean && (lefts.length > 1 || rights.length > 1)) cycles.push(mean);
     if (res.whole) cycles.push(res.whole);
   }
+  /* A per-leg set that used both legs gets a mean curve PER LEG as well: a
+   * mean of a left kick and a right kick is neither leg. The table's mean row
+   * stays over every rep, as the single-leg squat's does. */
+  const legMeans = [];
+  if ((isKick || isHR) && meanRep) {
+    for (const sd of ["l", "r"]) {
+      const mine = res.reps.filter((r) => r.stance_side === sd);
+      if (!mine.length || mine.length === res.reps.length) continue;
+      const m = ensembleRep(mine);
+      if (m) { m.stance_side = sd; legMeans.push(m); }
+    }
+    const sides = new Set(res.reps.map((r) => r.stance_side));
+    if (sides.size === 1) meanRep.stance_side = res.reps[0].stance_side;
+  }
   const items = isRun ? cycles
+                      : legMeans.length ? [...res.reps, ...legMeans]
                       : meanRep ? [...res.reps, meanRep] : res.reps;
   shownItems = items;
   // Mean +- SD across the reps, on the same row shape as the reps above it.
@@ -5378,6 +5595,15 @@ function render(res, fps) {
     // where a left row and a right row can be read against each other. This
     // branch was already unreachable (meanRep is null for gait) and referred to
     // a list that no longer exists.
+    : isKick
+    ? `<tr class="meanrow"><td>${tr("mean")}</td><td>—</td>
+         <td>${ms("kick_s")}</td><td>${ms("return_s")}</td>
+         <td>${ms("hip_ext_max_deg", 0)}°</td>
+         <td>${ms("hip_range_deg", 0)}°</td></tr>`
+    : isHR
+    ? `<tr class="meanrow"><td>${tr("mean")}</td><td>—</td>
+         <td>${ms("up_s")}</td><td>${ms("down_s")}</td>
+         <td>${ms("heel_lift")}</td></tr>`
     : isSide
     ? `<tr class="meanrow"><td>${tr("mean")}</td><td>—</td>
          <td>${ms("out_s")}</td><td>${ms("back_s")}</td>
@@ -5410,7 +5636,9 @@ function render(res, fps) {
     ${setSwitcher(res)}
     <table><thead>${head}</thead><tbody>${
       isShot ? shotRows : isDip ? dipRows : isSL ? slRows : isRun ? runRows
+             : isKick ? kickRows : isHR ? hrRows
              : isSide ? sideRows : isJump ? jumpRows : rows()}${meanRow}</tbody></table>
+    ${removedLine(res)}
     ${qualitySummary(qCounts)}
     <div id="shotSummaryBox">${isShot ? shotSummary(res) : ""}</div>
     ${runPanel}
@@ -5455,7 +5683,7 @@ function render(res, fps) {
           : r.stance_side ? tr("meanOfNSide", { n: r.nReps,
                                                 side: sideName(r.stance_side) })
                           : tr("meanOfN", { n: r.nReps }))
-      : (isRun && r.stance_side
+      : ((isRun || isKick || isHR) && r.stance_side
           ? tr("repNSide", { n: r.rep, side: sideName(r.stance_side) })
           : tr("repN", { n: r.rep }));
     addTabDot(b, r);
@@ -5464,6 +5692,7 @@ function render(res, fps) {
   });
   selectRep = select;
   wireSetSwitcher();
+  wireRepRemoval(el, res, fps);
   function select(i) {
     [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
     /* Angles and angular velocity, one plot each with the task's joints

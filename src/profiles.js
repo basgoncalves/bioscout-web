@@ -463,6 +463,39 @@ export function latestCardioAt(profile = null) {
 const r3 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(3) : 0));
 const r2 = (a) => Array.from(a, (v) => (Number.isFinite(v) ? +v.toFixed(2) : 0));
 
+/** One rep as saveCurves stores it. */
+function curveRep(rp) {
+  const o = { rep: rp.rep, bounds: rp.bounds, times: r3(rp.times), coords: {} };
+  for (const [k, v] of Object.entries(rp.coords || {})) o.coords[k] = r3(v);
+  if (rp.dyn) {
+    o.dyn = {};
+    for (const [k, v] of Object.entries(rp.dyn)) {
+      o.dyn[k] = Array.isArray(v) || ArrayBuffer.isView(v) ? r2(v) : v;
+    }
+  }
+  // Per-joint angle / velocity / moment / power (jointmetrics.js). Kept so
+  // a restored set shows the same four plots, arm moments included --
+  // they cannot be rebuilt from the .mot columns alone.
+  if (rp.jm) {
+    o.jm = {};
+    for (const [k, v] of Object.entries(rp.jm)) {
+      if (Array.isArray(v) || ArrayBuffer.isView(v)) o.jm[k] = r2(v);
+    }
+  }
+  for (const [k, v] of Object.entries(rp)) {
+    /* Strings as well as numbers.
+     *
+     * `stance_side` is the only string a rep carries, and dropping it made
+     * a restored run a set of strides that belong to no foot: the panels
+     * are built by pairing each left cycle with its right, so a reloaded
+     * running set came back with no curves at all. Coordinate and moment
+     * arrays are handled above; everything else scalar is small. */
+    if (typeof v === "number" || typeof v === "boolean"
+        || (typeof v === "string" && v.length <= 40)) o[k] = v;
+  }
+  return o;
+}
+
 /** Everything a chart needs, and nothing it does not. Muscle forces are left
  *  out on purpose: they are 80 traces per frame, an order of magnitude more
  *  than all the rest together, and the app can say so rather than not store
@@ -479,38 +512,12 @@ export function saveCurves(sessionStarted, index, result) {
     coverage: result.coverage, pxPerM: result.pxPerM, view: result.view,
     fps: result.fps,
     setIndex: index,
-    reps: result.reps.map((rp) => {
-      const o = { rep: rp.rep, bounds: rp.bounds, times: r3(rp.times), coords: {} };
-      for (const [k, v] of Object.entries(rp.coords || {})) o.coords[k] = r3(v);
-      if (rp.dyn) {
-        o.dyn = {};
-        for (const [k, v] of Object.entries(rp.dyn)) {
-          o.dyn[k] = Array.isArray(v) || ArrayBuffer.isView(v) ? r2(v) : v;
-        }
-      }
-      // Per-joint angle / velocity / moment / power (jointmetrics.js). Kept so
-      // a restored set shows the same four plots, arm moments included --
-      // they cannot be rebuilt from the .mot columns alone.
-      if (rp.jm) {
-        o.jm = {};
-        for (const [k, v] of Object.entries(rp.jm)) {
-          if (Array.isArray(v) || ArrayBuffer.isView(v)) o.jm[k] = r2(v);
-        }
-      }
-      for (const [k, v] of Object.entries(rp)) {
-        /* Strings as well as numbers.
-         *
-         * `stance_side` is the only string a rep carries, and dropping it made
-         * a restored run a set of strides that belong to no foot: the panels
-         * are built by pairing each left cycle with its right, so a reloaded
-         * running set came back with no curves at all. Coordinate and moment
-         * arrays are handled above; everything else scalar is small. */
-        if (typeof v === "number" || typeof v === "boolean"
-            || (typeof v === "string" && v.length <= 40)) o[k] = v;
-      }
-      return o;
-    }),
+    reps: result.reps.map(curveRep),
+    // Reps the athlete took out (setRepRemoved). Kept whole, so putting one
+    // back restores its curves as well as its row.
+    removedReps: (result.removedReps || []).map(curveRep),
   };
+  if (!store[key].removedReps.length) delete store[key].removedReps;
   /* The whole-trial curve, if the analysis made one.
    *
    * It is the same size as all the reps put together, so it roughly doubles
@@ -765,6 +772,61 @@ export function setRepOutcome(setIndex, rep, made) {
   return true;
 }
 
+/**
+ * Take a rep out of a stored set, or put it back.
+ *
+ * For a rep that was tracked wrong -- a half-rep the detector counted, the
+ * athlete stepping off, a pose-model glitch -- which would otherwise sit in
+ * every mean, trend and chart built from the set. `removed` true takes it
+ * out; false restores it.
+ *
+ * The rep is MOVED, not flagged: from `perRep` to `removedReps` on the set,
+ * and from `reps` to `removedReps` in the stored curves. Everything that
+ * reads a set -- the session table, the trends, the day view, exports, the
+ * assessment report -- reads `perRep` and `reps`, so a removed rep is out of
+ * all of them without any of them having to know removal exists; and nothing
+ * is thrown away, so a mis-tap is one tap to undo. `set.reps` (the count)
+ * follows.
+ *
+ * Works on the open session and on archived ones: `sessionStarted` is the
+ * identity, as everywhere else. Returns the updated set, or null when there
+ * was nothing to move.
+ */
+export function setRepRemoved(sessionStarted, setIndex, rep, removed = true) {
+  const live = getSession();
+  let sess = live && live.started === sessionStarted ? live : null;
+  let arch = null;
+  if (!sess) {
+    arch = listArchive();
+    sess = arch.find((x) => x.started === sessionStarted) || null;
+  }
+  const set = sess && sess.sets.find((x) => x.index === setIndex);
+  if (!set) return null;
+  const move = (holder, fromKey, toKey) => {
+    const from = holder[fromKey] || [], i = from.findIndex((x) => x.rep === rep);
+    if (i < 0) return false;
+    const to = holder[toKey] || (holder[toKey] = []);
+    to.push(from.splice(i, 1)[0]);
+    to.sort((a, b) => a.rep - b.rep);
+    holder[fromKey] = from;
+    for (const k of [fromKey, toKey]) {
+      if (k === "removedReps" && !holder[k].length) delete holder[k];
+    }
+    return true;
+  };
+  if (!move(set, removed ? "perRep" : "removedReps", removed ? "removedReps" : "perRep")) {
+    return null;
+  }
+  set.reps = set.perRep.length;
+  if (arch) write(AKEY, arch); else write(SKEY, sess);
+  const store = read(CKEY, {});
+  const c = store[`${sessionStarted}|${setIndex}`];
+  if (c && move(c, removed ? "reps" : "removedReps", removed ? "removedReps" : "reps")) {
+    write(CKEY, store);
+  }
+  return set;
+}
+
 /** Now, moved onto the session's calendar day. Same clock time, so the sets of
  *  a back-dated session still read in the order they were recorded. */
 function onSessionDay(started) {
@@ -880,6 +942,14 @@ function summariseRep(r, activity) {
     o.heel_lift = r.heel_lift ?? null;
     o.up_s = r.up_s ?? null;
     o.down_s = r.down_s ?? null;
+  } else if (activity === "kickback") {
+    // The leg that kicked, and what its hip did. Extension positive.
+    o.stance_side = r.stance_side ?? null;
+    o.hip_ext_max_deg = r.hip_ext_max_deg ?? null;
+    o.hip_range_deg = r.hip_range_deg ?? null;
+    o.trunk_motion_deg = r.trunk_motion_deg ?? null;
+    o.kick_s = r.kick_s != null ? +r.kick_s.toFixed(2) : null;
+    o.return_s = r.return_s != null ? +r.return_s.toFixed(2) : null;
   } else if (activity === "run" || activity === "walk") {
     // Which foot the stride belongs to. Without it a gait recording cannot be
     // split left from right, which is most of what the assessment reads.
@@ -967,6 +1037,13 @@ export function summariseSession(session) {
                 trend("contact_s", "Ground contact time", "s", false),
                 trend("flight_s", "Flight time", "s", true),
                 trend("duty_factor", "Duty factor", "", false));
+  } else if (activity === "kickback") {
+    // Range shrinking and the trunk starting to help are what fatigue looks
+    // like in a kick back.
+    trends.push(trend("hip_range_deg", "Hip range", "°", true),
+                trend("hip_ext_max_deg", "Peak hip extension", "°", true),
+                trend("trunk_motion_deg", "Trunk movement", "°", false),
+                trend("kick_s", "Kick time", "s", false));
   } else if (activity === "sidestep") {
     trends.push(trend("excursion_m", "Lateral excursion", "m", true),
                 trend("out_s", "Time out", "s", false),

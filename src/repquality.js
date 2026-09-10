@@ -146,6 +146,18 @@ const RULES = {
    * same foot, since the two feet may legitimately differ. */
   walk: (r, ctx) => strideChecks(r, ctx),
   run: (r, ctx) => strideChecks(r, ctx),
+  /* Glute kick back: range of the hip against your best on that leg, and the
+   * trunk holding still -- the usual way a kick back cheats is the lower back
+   * arching or the pelvis rolling, which moves the thigh without the hip
+   * extending. 10 deg of trunk pitch over a rep is within what a pose model
+   * wobbles; 20 is a visible compensation. */
+  kickback(r, ctx) {
+    return [
+      vsBest("travel", r.hip_range_deg,
+             ctx.best((q) => (q.stance_side === r.stance_side ? q.hip_range_deg : null))),
+      bar("trunk", r.trunk_motion_deg, 10, 20, false),
+    ];
+  },
   sidestep(r, ctx) {
     return [vsBest("travel", r.excursion_m, ctx.best((q) => q.excursion_m))];
   },
@@ -206,4 +218,4 @@ export function gradeReps(res) {
 /** Every note code the rules can produce -- for the translation test. */
 export const NOTE_CODES = ["lockout", "top", "travel", "swing", "depthArm", "depthKnee",
   "standUp", "height", "wrongJump", "implausible", "kneeBent", "tempo", "release",
-  "releaseElbow", "load"];
+  "releaseElbow", "load", "trunk"];

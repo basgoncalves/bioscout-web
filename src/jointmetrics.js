@@ -37,12 +37,17 @@ export const METRICS = ["angle", "vel", "moment", "power"];
  * at first is the elbow, so it opens there. */
 export const UPPER_BODY_TASKS = ["pullup", "dip", "jumpshot"];
 export const isUpperBody = (activity) => UPPER_BODY_TASKS.includes(activity);
-export const defaultJoint = (activity) => (isUpperBody(activity) ? "elbow" : "knee");
+/* The kick back is a hip exercise: the knee just rides along. */
+const HIP_TASKS = ["kickback"];
+export const defaultJoint = (activity) => (isUpperBody(activity) ? "elbow"
+  : HIP_TASKS.includes(activity) ? "hip" : "knee");
 
 /** Display order: the task's default joint first, then top to bottom. */
 export function jointOrder(activity) {
   return isUpperBody(activity)
     ? ["elbow", "shoulder", "hip", "knee", "ankle"]
+    : HIP_TASKS.includes(activity)
+    ? ["hip", "knee", "ankle", "shoulder", "elbow"]
     : ["knee", "hip", "ankle", "shoulder", "elbow"];
 }
 
