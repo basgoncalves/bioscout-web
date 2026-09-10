@@ -597,6 +597,109 @@ export async function makeSessionCard(facts) {
   return new Promise((r) => cv.toBlob(r, "image/jpeg", 0.92));
 }
 
+/* ---- a physical assessment, as a card ----------------------------------
+ * What the assessment page itself says, and no more: the score with its band
+ * and its parts, and which tests were recorded. The same caveat the page
+ * carries goes on the card, because a card travels without the page. */
+
+/** What an assessment card says. `report` is assessReport(); `ids` the
+ *  protocol's test ids in order; `when` the date filed (or now). */
+export function assessFacts(report, ids, tr, { name = "", when = null } = {}) {
+  const done = new Set((report.done || []).map((d) => d.id));
+  const short = new Set((report.short || []).map((d) => d.id));
+  const d = new Date(when || Date.now());
+  return {
+    name: String(name || "").slice(0, 28),
+    title: tr("assess"),
+    date: d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", year: "numeric" }),
+    score: Number.isFinite(report.score) ? report.score : null,
+    band: report.band ? tr("assessBand_" + report.band) : tr("assessNothingYet"),
+    parts: (report.parts || []).map((p) => ({ label: tr("assessPart_" + p.id), score: p.score })),
+    tests: ids.map((id) => ({ id, title: tr("assessTest_" + id),
+                              state: !done.has(id) ? "missing" : short.has(id) ? "short" : "done" })),
+    labels: { score: tr("assessScore"), done: tr("cardAssessDone", { n: done.size, total: ids.length }),
+              caveat: tr("cardAssessCaveat"), short: tr("cardAssessShort") },
+  };
+}
+
+/** The small summary stored with a posted assessment card. */
+export function assessMeta(f) {
+  return { kind: "assessment", score: f.score,
+           tests: f.tests.filter((t) => t.state !== "missing").map((t) => t.id).slice(0, 8) };
+}
+
+export function drawAssessCard(ctx, f) {
+  const W = PIC.w, H = PIC.h;
+  const INK2 = "#e9edf1", MUT = "#8b97a3", ACC = "#49b39b", WARN = "#e08a4a", CARDBG = "#161b21";
+  ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = CARDBG;
+  const r = 44, x0 = 48, y0 = 48, w = W - 96, h = H - 96;
+  ctx.beginPath();
+  ctx.moveTo(x0 + r, y0); ctx.arcTo(x0 + w, y0, x0 + w, y0 + h, r); ctx.arcTo(x0 + w, y0 + h, x0, y0 + h, r);
+  ctx.arcTo(x0, y0 + h, x0, y0, r); ctx.arcTo(x0, y0, x0 + w, y0, r); ctx.closePath(); ctx.fill();
+  const L = 104, R = W - 104;
+  ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+  ctx.fillStyle = MUT; ctx.font = "600 30px system-ui, sans-serif"; ctx.fillText("BIOSCOUT", L, 148);
+  ctx.fillStyle = INK2; ctx.font = "700 64px system-ui, sans-serif";
+  ctx.fillText(fitText(ctx, f.title, R - L), L, 232);
+  ctx.fillStyle = MUT; ctx.font = "500 34px system-ui, sans-serif";
+  ctx.fillText(fitText(ctx, [f.name, f.date].filter(Boolean).join("  ·  "), R - L), L, 286);
+
+  // The score as a ring, the way the page draws it.
+  const cx = L + 130, cy = 470, rad = 118;
+  ctx.lineWidth = 22; ctx.lineCap = "round";
+  ctx.strokeStyle = "rgba(255,255,255,.12)";
+  ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.stroke();
+  if (f.score != null) {
+    ctx.strokeStyle = f.score >= 70 ? ACC : WARN;
+    ctx.beginPath(); ctx.arc(cx, cy, rad, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (f.score / 100)); ctx.stroke();
+  }
+  ctx.textAlign = "center"; ctx.fillStyle = INK2; ctx.font = "700 96px system-ui, sans-serif";
+  ctx.fillText(f.score != null ? String(f.score) : "—", cx, cy + 34);
+  ctx.textAlign = "left";
+  const tx = cx + rad + 60;
+  ctx.fillStyle = INK2; ctx.font = "600 40px system-ui, sans-serif";
+  ctx.fillText(fitText(ctx, f.labels.score, R - tx), tx, cy - 40);
+  ctx.fillStyle = MUT; ctx.font = "500 32px system-ui, sans-serif";
+  ctx.fillText(fitText(ctx, f.band, R - tx), tx, cy + 6);
+  f.parts.slice(0, 2).forEach((p, i) => {
+    ctx.fillText(fitText(ctx, `${p.label}: ${p.score}`, R - tx), tx, cy + 52 + i * 42);
+  });
+
+  ctx.fillStyle = MUT; ctx.font = "600 28px system-ui, sans-serif";
+  ctx.fillText(f.labels.done, L, 700);
+  let y = 770;
+  for (const t of f.tests.slice(0, 6)) {
+    const col = t.state === "done" ? ACC : t.state === "short" ? WARN : "rgba(255,255,255,.25)";
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(L + 16, y - 12, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = t.state === "missing" ? MUT : INK2; ctx.font = "600 38px system-ui, sans-serif";
+    ctx.fillText(fitText(ctx, t.title, (R - L) * 0.7), L + 50, y);
+    if (t.state === "short") {
+      ctx.textAlign = "right"; ctx.fillStyle = WARN; ctx.font = "500 30px system-ui, sans-serif";
+      ctx.fillText(f.labels.short, R, y); ctx.textAlign = "left";
+    }
+    y += 68;
+  }
+  // The caveat in full, wrapped -- cutting it short would cut the point.
+  ctx.fillStyle = MUT; ctx.font = "500 26px system-ui, sans-serif";
+  const lines = [];
+  let line = "";
+  for (const word of String(f.labels.caveat).split(/\s+/)) {
+    const next = line ? line + " " + word : word;
+    if (ctx.measureText(next).width > R - L && line) { lines.push(line); line = word; } else line = next;
+  }
+  if (line) lines.push(line);
+  lines.slice(0, 3).forEach((ln, i) => ctx.fillText(ln, L, H - 150 - (Math.min(lines.length, 3) - 1 - i) * 34));
+  ctx.fillText("A physics-informed, AI-powered bio tracker", L, H - 110);
+}
+
+export async function makeAssessCard(facts) {
+  const cv = document.createElement("canvas");
+  cv.width = PIC.w; cv.height = PIC.h;
+  drawAssessCard(cv.getContext("2d"), facts);
+  return new Promise((r) => cv.toBlob(r, "image/jpeg", 0.92));
+}
+
 /* ---- a picture or video from the phone, for a post --------------------- */
 
 export const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;

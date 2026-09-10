@@ -126,5 +126,21 @@ ok(extFor("video/mp4") === "mp4" && extFor("video/webm;codecs=vp9") === "webm", 
      "and not a type the bucket refuses");
 }
 
+/* ---- the assessment card --------------------------------------------- */
+{
+  const { assessFacts, assessMeta } = await import("../src/sharepost.js");
+  const tr = (k, v) => k + (v ? JSON.stringify(v) : "");
+  const report = { score: 78, band: "typical", parts: [{ id: "symmetry", score: 80 }, { id: "magnitude", score: 76 }],
+                   done: [{ id: "gait" }, { id: "squat" }], short: [{ id: "squat" }], missing: [{ id: "cmj" }] };
+  const f = assessFacts(report, ["gait", "squat", "cmj"], tr, { name: "Bas", when: "2026-09-10T10:00:00Z" });
+  ok(f.score === 78 && f.parts.length === 2, "the card carries the score and its parts");
+  ok(f.tests.map((t) => t.state).join() === "done,short,missing", "each test says done, short or missing");
+  const m = assessMeta(f);
+  ok(m.kind === "assessment" && m.tests.join() === "gait,squat" && m.score === 78,
+     "the post's meta: score and the tests recorded, nothing else");
+  ok(assessFacts({ score: null, done: [], parts: [] }, ["gait"], tr).score === null,
+     "no score yet stays no score, never a zero");
+}
+
 if (bad) { console.log(`\n${bad} check(s) FAILED`); process.exit(1); }
 console.log("\nAll checks passed");

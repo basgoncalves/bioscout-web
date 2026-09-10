@@ -1,5 +1,13 @@
 /**
- * reaction.js -- a simple visual reaction-time test, done with one finger.
+ * reaction.js -- finger reaction-time tests: three games, no camera.
+ *
+ *   simple  the pad turns green, tap. Pure speed of a single response.
+ *   choice  left or right lights up, tap that side. A decision on top of the
+ *           response, so it is slower than simple; wrong-side taps are errors.
+ *   gonogo  green means tap, a red cross means DON'T. Speed plus holding back;
+ *           a tap on the cross is an error (the number that matters most here).
+ *
+ * The rest of this header is about the simple game, and holds for all three.
  *
  * No camera. The pad goes from "wait" to green after a random pause, and the
  * athlete taps (or clicks, or presses Space) as fast as they can. Five counted
@@ -19,6 +27,32 @@
  */
 
 export const TRIALS = 5;
+
+/* How many stimuli each game shows. Choice is balanced left/right; go/no-go
+ * is 7 go to 3 no-go, the usual ~70/30 that keeps "go" the habit to resist. */
+export const GAMES = {
+  simple: { go: 5 },
+  choice: { left: 4, right: 4 },
+  gonogo: { go: 7, nogo: 3 },
+};
+export const GAME_IDS = Object.keys(GAMES);
+
+/** The order of stimuli for one run: shuffled, and never opening on a
+ *  no-go (the first thing a person sees should be the thing to do). */
+export function sequence(game, rand = Math.random) {
+  const g = GAMES[game] || GAMES.simple;
+  const out = [];
+  for (const [kind, n] of Object.entries(g)) for (let i = 0; i < n; i++) out.push(kind);
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  if (out[0] === "nogo") {
+    const k = out.findIndex((x) => x !== "nogo");
+    if (k > 0) [out[0], out[k]] = [out[k], out[0]];
+  }
+  return out;
+}
 /* The random pause before green. Long enough and variable enough that it
  * cannot be timed by rhythm; not so long that attention drifts. */
 export const FORE_MIN_MS = 1500, FORE_MAX_MS = 4000;
@@ -58,6 +92,9 @@ function dayKey(iso) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+/** A stored test's game; tests from before there were games are "simple". */
+export const gameOf = (e) => (e && GAMES[e.game] ? e.game : "simple");
+
 /** One athlete's tests grouped by day, each day's tests oldest first. */
 export function collectReaction(entries, profile = null) {
   const days = new Map();
@@ -67,7 +104,7 @@ export function collectReaction(entries, profile = null) {
     const s = summarise(e.trials);
     if (!key || !s) continue;
     if (!days.has(key)) days.set(key, []);
-    days.get(key).push({ ...e, ...s });
+    days.get(key).push({ ...e, ...s, game: gameOf(e) });
   }
   for (const list of days.values()) list.sort((a, b) => String(a.at).localeCompare(String(b.at)));
   return days;
@@ -75,13 +112,14 @@ export function collectReaction(entries, profile = null) {
 
 /**
  * The athlete's usual time: the median of each test's median over the last
- * `n` days, on the given input only (touch against touch, mouse against
- * mouse). Null when there is nothing to compare with.
+ * `n` days, on the given input and game only (touch against touch, choice
+ * against choice). Null when there is nothing to compare with.
  */
-export function reactionTrend(entries, input, n = 30, today = new Date()) {
+export function reactionTrend(entries, input, n = 30, today = new Date(), game = "simple") {
   const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - n + 1).getTime();
   const meds = (entries || [])
-    .filter((e) => (!input || e.input === input) && new Date(e.at).getTime() >= from)
+    .filter((e) => (!input || e.input === input) && gameOf(e) === game
+                   && new Date(e.at).getTime() >= from)
     .map((e) => summarise(e.trials)?.median).filter(Number.isFinite);
   const s = summarise(meds);
   return s ? { median: s.median, tests: s.n } : null;

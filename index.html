@@ -127,10 +127,24 @@ try {
            outline:none; }
   .rtPad .big { font-size:40px; font-weight:700; line-height:1.1; font-variant-numeric:tabular-nums; }
   .rtPad .small { font-size:14px; color:var(--muted); margin-top:6px; }
-  .rtPad.wait { background:#8f2f2a; border-color:#8f2f2a; color:#fff; }
+  /* Waiting is neutral grey, not red: red is the go/no-go "don't tap". */
+  .rtPad.wait { background:#3b414c; border-color:#3b414c; color:#fff; }
   .rtPad.go { background:#1f9d55; border-color:#1f9d55; color:#fff; }
+  .rtPad.nogo { background:#b3262d; border-color:#b3262d; color:#fff; }
+  .rtPad.nogo .big { font-size:72px; }
   .rtPad.early { background:#b4540f; border-color:#b4540f; color:#fff; }
-  .rtPad.wait .small, .rtPad.go .small, .rtPad.early .small { color:rgba(255,255,255,.85); }
+  .rtPad.wait .small, .rtPad.go .small, .rtPad.early .small, .rtPad.nogo .small { color:rgba(255,255,255,.85); }
+  /* Choice: two halves; the lit one turns green with its arrow. */
+  .rtPad.choice { position:relative; flex-direction:row; padding:0; overflow:hidden; }
+  .rtPad.choice .rtHalf { flex:1; height:100%; display:flex; align-items:center; justify-content:center; }
+  .rtPad.choice .rtHalf + .rtHalf { border-left:2px dashed rgba(127,127,127,.35); }
+  .rtPad.choice.go { background:var(--bg); border-color:var(--line); color:var(--ink); }
+  .rtPad.choice .rtHalf.lit { background:#1f9d55; color:#fff; }
+  .rtPad.choice .rtHalf.lit .big { font-size:64px; }
+  .rtPad.choice .rtOver { position:absolute; inset:0; display:flex; flex-direction:column;
+                          align-items:center; justify-content:center; pointer-events:none; }
+  .rtPad.choice.go .rtOver { display:none; }
+  .rtDots span.bad { color:var(--warn); border-color:var(--warn); }
   .rtDots { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; min-height:26px; }
   .rtDots span { font-size:12.5px; padding:3px 8px; border-radius:999px; border:1px solid var(--line);
                  font-variant-numeric:tabular-nums; color:var(--muted); }
@@ -799,10 +813,9 @@ try {
   <section id="viewReaction" class="hidden">
     <div class="card" id="reactionCard">
       <h2 style="font-size:17px;margin:0 0 2px" data-i18n="rtTitle">Reaction time</h2>
-      <p class="sub" style="margin:0" data-i18n="rtHow">When the pad turns green, tap it as fast as you can.</p>
-      <div class="rtPad" id="rtPad" role="button" tabindex="0">
-        <div class="big" id="rtBig"></div><div class="small" id="rtSmall"></div>
-      </div>
+      <div class="seg rtGames" id="rtGames" role="tablist" style="margin:8px 0 6px"></div>
+      <p class="sub" style="margin:0" id="rtHow"></p>
+      <div class="rtPad" id="rtPad" role="button" tabindex="0"></div>
       <div class="rtDots" id="rtDots"></div>
       <div id="rtResult"></div>
       <p class="note" style="margin:10px 0 0" data-i18n="rtCaveat">The time includes your screen's and touchscreen's own delay.</p>
@@ -884,6 +897,7 @@ try {
     </label>
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
+    <button class="ghost trainOnly" id="setupReactionBtn" data-i18n="rtInSession">Reaction time test (no camera)</button>
     <div id="linkRow" class="hidden" style="margin-top:11px">
       <label for="linkUrl" data-i18n="videoLink">Video link</label>
       <input id="linkUrl" type="url" placeholder="https://youtube.com/shorts/…" autocomplete="off" inputmode="url">
@@ -1075,6 +1089,7 @@ import { makeCloud, syncOnce, loadState as cloudState, saveState as saveCloudSta
          CAPTION_MAX } from "./src/cloud.js";
 import { stillKeeper, makePicture, makeClip, shareFacts, postMeta, pickType,
          extFor, sessionFacts, sessionMeta, makeSessionCard, checkUpload, toJpeg,
+         assessFacts, assessMeta, makeAssessCard,
          UPLOAD_MAX_BYTES } from "./src/sharepost.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
@@ -1086,8 +1101,8 @@ import { DEFAULT_TAGS, liveTags, toggleTag, stepTag, quickMoodAt } from "./src/d
 import { collectWeights, weightNear } from "./src/weight.js";
 import { collectCups } from "./src/water.js";
 import { groupFriends, relationTo, searchTerm } from "./src/friends.js";
-import { TRIALS as RT_TRIALS, foreperiod, classify as rtClassify, summarise as rtSummarise,
-         reactionTrend } from "./src/reaction.js";
+import { foreperiod, classify as rtClassify, summarise as rtSummarise,
+         reactionTrend, sequence, GAMES, GAME_IDS, gameOf } from "./src/reaction.js";
 import { SPORT_IDS, allowedIn } from "./src/sports.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
@@ -1842,6 +1857,19 @@ function shareSession(sess) {
   }, tr("shareSession"));
 }
 
+/** Share a physical assessment -- the one in progress or a filed one -- as a card. */
+function shareAssessment(report, when = null, name = null) {
+  const facts = assessFacts(report, ASSESS_TESTS.map((t) => t.id), tr,
+                            { name: name || currentAthlete() || "", when });
+  openShare({
+    hasClip: false,
+    image: () => makeAssessCard(facts),
+    video: () => null, videoWait: () => false,
+    meta: assessMeta(facts),
+    stem: `bioscout-assessment`,
+  }, tr("shareAssess"));
+}
+
 $("sharePicTab").onclick = () => pickShareKind("image");
 $("shareClipTab").onclick = () => pickShareKind("video");
 $("shareClose").onclick = () => $("shareDlg").close();
@@ -2156,6 +2184,10 @@ function postHTML(p, me) {
     if (Number.isFinite(m.sets)) bits.push(tr(m.sets === 1 ? "nSet" : "nSets", { n: m.sets }));
     const acts = (Array.isArray(m.activities) ? m.activities : []).filter((a) => ACTIVITIES[a]);
     if (acts.length) bits.push(acts.map((a) => tr(a)).join(", "));
+  }
+  if (m.kind === "assessment") {
+    bits.push(tr("feedAssessment"));
+    if (Number.isFinite(m.score)) bits.push(tr("feedScore", { n: m.score }));
   }
   if (m.activity && ACTIVITIES[m.activity]) bits.push(tr(m.activity));
   if (Number.isFinite(m.reps)) bits.push(tr(m.reps === 1 ? "shareRepN" : "shareRepsN", { n: m.reps }));
@@ -3245,74 +3277,147 @@ function myReaction() {
   return listReaction().filter((v) => v.profile === who);
 }
 
-/* --- reaction time: the finger test ---------------------------------------
- * The pad cycles idle -> wait (random 1.5-4 s) -> go -> result, five counted
- * trials. Timing: the green is recorded at the animation frame that paints it
- * (the rAF timestamp), the tap by its event timeStamp -- both on the same
- * high-resolution clock -- and pointerdown rather than click, which on a
- * phone can fire late. A tap during the wait is a false start and the trial
- * is repeated; see reaction.js for what counts. */
-const rt = { state: "idle", trials: [], falseStarts: 0, misses: 0, onset: null,
-             timer: null, input: null, saved: null };
-function rtSet(state, big, small = "") {
+/* --- reaction time: three finger games -------------------------------------
+ * simple (tap on green), choice (tap the side that lights up) and go/no-go
+ * (tap on green, hold back on the red cross). One engine: a shuffled list of
+ * stimuli (reaction.js sequence()), a random pause before each, and a tap
+ * judged against what was shown. Timing: the stimulus is stamped at the
+ * animation frame that paints it (rAF timestamp) and the tap by its event
+ * timeStamp -- the same high-resolution clock -- on pointerdown, not click.
+ * A tap during the pause is a false start and repeats that stimulus. */
+const RT_GAME_KEY = "bioscout.rtgame.v1";
+const NOGO_MS = 1200;           // how long a red cross stays up
+const rt = { game: "simple", seq: [], idx: 0, state: "idle", trials: [], falseStarts: 0,
+             misses: 0, errors: 0, onset: null, timer: null, input: null, session: null };
+function rtGame() {
+  let g = null;
+  try { g = localStorage.getItem(RT_GAME_KEY); } catch { /* none */ }
+  return GAME_IDS.includes(g) ? g : "simple";
+}
+const rtStim = () => rt.seq[rt.idx];
+function rtSet(state, big, small = "", side = null) {
   rt.state = state;
-  $("rtPad").className = "rtPad " + state;
-  $("rtBig").textContent = big;
-  $("rtSmall").textContent = small;
+  const pad = $("rtPad");
+  pad.className = "rtPad " + state + (rt.game === "choice" ? " choice" : "");
+  if (rt.game === "choice") {
+    // Two halves; the lit one carries the arrow.
+    pad.innerHTML = ["left", "right"].map((s) =>
+      `<div class="rtHalf${side === s ? " lit" : ""}" data-side="${s}">${
+        side === s ? `<div class="big">${s === "left" ? "←" : "→"}</div>` : ""}</div>`).join("")
+      + `<div class="rtOver"><div class="big">${esc(big)}</div><div class="small">${esc(small)}</div></div>`;
+  } else {
+    pad.innerHTML = `<div class="big">${esc(big)}</div><div class="small">${esc(small)}</div>`;
+  }
 }
 function rtDots() {
-  $("rtDots").innerHTML = Array.from({ length: RT_TRIALS }, (_, i) =>
-    `<span class="${i < rt.trials.length ? "done" : ""}">${
-      i < rt.trials.length ? esc(tr("rtMs", { ms: Math.round(rt.trials[i]) })) : i + 1}</span>`).join("");
+  const n = rt.seq.length;
+  $("rtDots").innerHTML = Array.from({ length: n }, (_, i) => {
+    const r = rt.results ? rt.results[i] : null;
+    const txt = !r ? String(i + 1) : r.ms != null ? tr("rtMs", { ms: Math.round(r.ms) })
+      : r.kind === "held" ? "✓" : "✕";
+    return `<span class="${r ? (r.kind === "ok" || r.kind === "held" ? "done" : "bad") : ""}">${esc(txt)}</span>`;
+  }).join("");
+}
+function rtGamesHTML() {
+  return GAME_IDS.map((g) => `<button type="button" class="ghost${g === rt.game ? " on" : ""}" data-game="${g}">${
+    esc(tr("rtGame_" + g))}</button>`).join("");
 }
 function rtReset() {
   clearTimeout(rt.timer);
-  Object.assign(rt, { trials: [], falseStarts: 0, misses: 0, onset: null, timer: null, input: null, saved: null });
-  rtSet("idle", tr("rtTapToStart"), tr("rtNTrials", { n: RT_TRIALS }));
+  rt.game = rtGame();
+  Object.assign(rt, { seq: sequence(rt.game), idx: 0, trials: [], results: [], falseStarts: 0,
+                      misses: 0, errors: 0, onset: null, timer: null, input: null });
+  $("rtGames").innerHTML = rtGamesHTML();
+  $("rtGames").querySelectorAll("button[data-game]").forEach((b) => {
+    b.onclick = () => {
+      try { localStorage.setItem(RT_GAME_KEY, b.dataset.game); } catch { /* per visit */ }
+      rtReset(); rtHistory();
+    };
+  });
+  $("rtHow").textContent = tr("rtHow_" + rt.game);
+  rtSet("idle", tr("rtTapToStart"), tr("rtNTrials", { n: rt.seq.length }));
   rtDots();
   $("rtResult").innerHTML = "";
+}
+function rtNextOrFinish() {
+  rt.idx++;
+  rtDots();
+  if (rt.idx >= rt.seq.length) { rtFinish(); return; }
+  rt.timer = setTimeout(rtWait, 900);
 }
 function rtWait() {
   clearTimeout(rt.timer);
   rt.onset = null;
-  rtSet("wait", tr("rtWait"), tr("rtTrialOf", { i: rt.trials.length + 1, n: RT_TRIALS }));
+  rtSet("wait", tr("rtWait"), tr("rtTrialOf", { i: rt.idx + 1, n: rt.seq.length }));
   rt.timer = setTimeout(() => {
     // The class change and the timestamp belong to the same frame.
     requestAnimationFrame((ts) => {
       if (rt.state !== "wait") return;
-      rtSet("go", tr("rtGo"));
+      const s = rtStim();
+      if (s === "nogo") rtSet("nogo", "✕", tr("rtDontTap"));
+      else if (s === "left" || s === "right") rtSet("go", "", "", s);
+      else rtSet("go", tr("rtGo"));
       rt.onset = ts;
-      rt.timer = setTimeout(() => {           // nobody tapped: a missed trial
-        if (rt.state !== "go") return;
-        rt.misses++;
-        rtSet("early", tr("rtTooSlow"), tr("rtAgainSoon"));
-        rt.timer = setTimeout(rtWait, 1200);
-      }, 1500 + 100);
+      rt.timer = setTimeout(() => {
+        if (rt.state !== "go" && rt.state !== "nogo") return;
+        if (rt.state === "nogo") {                 // held back: correct
+          rt.results[rt.idx] = { kind: "held" };
+          rtSet("result", "✓", tr("rtHeld"));
+          rtNextOrFinish();
+          return;
+        }
+        rt.misses++;                               // nobody tapped the green
+        if (rt.game === "simple") {                // simple repeats it
+          rtSet("early", tr("rtTooSlow"), tr("rtAgainSoon"));
+          rt.timer = setTimeout(rtWait, 1200);
+        } else {
+          rt.results[rt.idx] = { kind: "slow" };
+          rtSet("early", tr("rtTooSlow"));
+          rtNextOrFinish();
+        }
+      }, s === "nogo" ? NOGO_MS : 1500 + 100);
     });
   }, foreperiod());
 }
 function rtFinish() {
   clearTimeout(rt.timer);
   const s = rtSummarise(rt.trials);
-  const rec = addReaction({ profile: currentAthlete(), trials: rt.trials, falseStarts: rt.falseStarts,
-                            misses: rt.misses, input: rt.input });
-  rt.saved = rec;
-  rtSet("done", tr("rtMs", { ms: s.median }), tr("rtYourMedian"));
   const inputName = rt.input ? tr("rtInput_" + rt.input) : "";
+  if (!s || s.n < 3) {
+    // Too few correct taps to say anything: said, and nothing filed.
+    rtSet("done", "—", tr("rtTooFew"));
+    $("rtResult").innerHTML = rtResultButtons();
+    wireRtResult();
+    return;
+  }
+  addReaction({ profile: currentAthlete(), trials: rt.trials, falseStarts: rt.falseStarts,
+                misses: rt.misses, errors: rt.errors, input: rt.input, game: rt.game,
+                session: rt.session });
+  rtSet("done", tr("rtMs", { ms: s.median }), tr("rtYourMedian"));
+  const faults = rt.game === "choice" ? tr("rtFaultsChoice", { early: rt.falseStarts, wrong: rt.errors, slow: rt.misses })
+    : rt.game === "gonogo" ? tr("rtFaultsGonogo", { early: rt.falseStarts, wrong: rt.errors,
+                                                    nogo: GAMES.gonogo.nogo, slow: rt.misses })
+    : tr("rtFaults", { early: rt.falseStarts, slow: rt.misses });
   $("rtResult").innerHTML = `<p style="margin:10px 0 0;text-align:center">${esc(tr("rtSummary", {
       median: s.median, best: s.best, mean: s.mean, sd: s.sd }))}</p>
-    <p class="sub" style="margin:4px 0 0;text-align:center">${esc(tr("rtFaults", {
-      early: rt.falseStarts, slow: rt.misses }))}${inputName ? " · " + esc(inputName) : ""}</p>
-    <div class="row" style="margin-top:10px">
-      <button type="button" id="rtAgain" style="margin:0">${esc(tr("rtAgain"))}</button>
-      <button type="button" class="ghost" id="rtDone" style="margin:0">${esc(tr("rtDone"))}</button>
-    </div>`;
-  $("rtAgain").onclick = rtReset;
-  $("rtDone").onclick = () => goHome();
+    <p class="sub" style="margin:4px 0 0;text-align:center">${esc(faults)}${inputName ? " · " + esc(inputName) : ""}</p>
+    ${rtResultButtons()}`;
+  wireRtResult();
   rtHistory();
 }
-function rtPress(stamp, input) {
-  if (rt.state === "idle") { rt.input = input; rtDots(); rtWait(); return; }
+function rtResultButtons() {
+  return `<div class="row" style="margin-top:10px">
+      <button type="button" id="rtAgain" style="margin:0">${esc(tr("rtAgain"))}</button>
+      <button type="button" class="ghost" id="rtDone" style="margin:0">${esc(tr(rt.session ? "rtBackToSession" : "rtDone"))}</button>
+    </div>`;
+}
+function wireRtResult() {
+  $("rtAgain").onclick = rtReset;
+  // From a training session, Done goes back to the recorder it came from.
+  $("rtDone").onclick = () => (rt.session ? history.back() : goHome());
+}
+function rtPress(stamp, input, side = null) {
+  if (rt.state === "idle") { rt.input = input; rtWait(); return; }
   if (rt.state === "wait") {
     clearTimeout(rt.timer);
     rt.falseStarts++;
@@ -3320,64 +3425,98 @@ function rtPress(stamp, input) {
     rt.timer = setTimeout(rtWait, 1200);
     return;
   }
-  if (rt.state !== "go" || rt.onset === null) return;
+  if ((rt.state !== "go" && rt.state !== "nogo") || rt.onset === null) return;
   clearTimeout(rt.timer);
   const ms = stamp - rt.onset;
-  const kind = rtClassify(ms);
-  if (kind === "early") {                    // under 100 ms: a guess
+  const stim = rtStim();
+  if (rtClassify(ms) === "early") {            // under 100 ms: a guess, whatever was shown
     rt.falseStarts++;
     rtSet("early", tr("rtTooSoon"), tr("rtAgainSoon"));
     rt.timer = setTimeout(rtWait, 1200);
     return;
   }
-  if (kind === "slow") {
+  if (stim === "nogo") {                        // tapped the cross
+    rt.errors++;
+    rt.results[rt.idx] = { kind: "wrong" };
+    rtSet("early", "✕", tr("rtShouldHold"));
+    rtNextOrFinish();
+    return;
+  }
+  if ((stim === "left" || stim === "right") && side && side !== stim) {
+    rt.errors++;
+    rt.results[rt.idx] = { kind: "wrong" };
+    rtSet("early", tr("rtWrongSide"));
+    rtNextOrFinish();
+    return;
+  }
+  if (rtClassify(ms) === "slow") {
     rt.misses++;
-    rtSet("early", tr("rtTooSlow"), tr("rtAgainSoon"));
-    rt.timer = setTimeout(rtWait, 1200);
+    if (rt.game === "simple") {
+      rtSet("early", tr("rtTooSlow"), tr("rtAgainSoon"));
+      rt.timer = setTimeout(rtWait, 1200);
+    } else {
+      rt.results[rt.idx] = { kind: "slow" };
+      rtSet("early", tr("rtTooSlow"));
+      rtNextOrFinish();
+    }
     return;
   }
   rt.trials.push(ms);
-  rtDots();
-  if (rt.trials.length >= RT_TRIALS) { rtFinish(); return; }
-  rtSet("result", tr("rtMs", { ms: Math.round(ms) }), tr("rtNext"));
-  rt.timer = setTimeout(rtWait, 900);
+  rt.results[rt.idx] = { kind: "ok", ms };
+  if (rt.idx + 1 < rt.seq.length) rtSet("result", tr("rtMs", { ms: Math.round(ms) }), tr("rtNext"));
+  rtNextOrFinish();
 }
 $("rtPad").addEventListener("pointerdown", (e) => {
   e.preventDefault();
-  rtPress(e.timeStamp, e.pointerType === "mouse" ? "mouse" : e.pointerType === "pen" ? "pen" : "touch");
+  const box = $("rtPad").getBoundingClientRect();
+  const side = e.clientX < box.left + box.width / 2 ? "left" : "right";
+  rtPress(e.timeStamp, e.pointerType === "mouse" ? "mouse" : e.pointerType === "pen" ? "pen" : "touch", side);
 });
 document.addEventListener("keydown", (e) => {
   if ($("viewReaction").classList.contains("hidden") || e.repeat) return;
-  if (e.code !== "Space" && e.key !== " " && e.key !== "Enter") return;
   if (rt.state === "done") return;          // Enter on a result button stays a button press
+  let side = null;
+  if (e.key === "ArrowLeft" || e.key === "f" || e.key === "F") side = "left";
+  else if (e.key === "ArrowRight" || e.key === "j" || e.key === "J") side = "right";
+  else if (!(e.code === "Space" || e.key === " " || e.key === "Enter")) return;
+  if (rt.game === "choice" && !side && rt.state !== "idle") return;   // choice wants a side
   e.preventDefault();
-  rtPress(e.timeStamp, "key");
+  rtPress(e.timeStamp, "key", side);
 });
 function rtHistory() {
   const mine = myReaction().slice().reverse();
   if (!mine.length) { $("rtHistory").innerHTML = ""; return; }
-  const last = mine[0];
-  const usual = reactionTrend(myReaction(), last.input, 30);
+  const last = mine.find((x) => gameOf(x) === rt.game) || mine[0];
+  const usual = reactionTrend(myReaction(), last.input, 30, new Date(), rt.game);
   const rows = mine.slice(0, 20).map((x) => {
     const s = rtSummarise(x.trials);
     const when = new Date(x.at).toLocaleString([], { day: "numeric", month: "short",
                                                      hour: "2-digit", minute: "2-digit" });
-    return `<tr><td>${esc(when)}</td><td style="text-align:right">${s ? s.median : "—"}</td>
-      <td style="text-align:right">${s ? s.best : "—"}</td><td>${esc(x.input ? tr("rtInput_" + x.input) : "")}</td>
+    return `<tr><td>${esc(when)}</td><td>${esc(tr("rtGame_" + gameOf(x)))}</td>
+      <td style="text-align:right">${s ? s.median : "—"}</td>
+      <td style="text-align:right">${s ? s.best : "—"}</td>
+      <td style="text-align:right">${gameOf(x) === "simple" ? "" : (x.errors || 0)}</td>
+      <td>${esc(x.input ? tr("rtInput_" + x.input) : "")}</td>
       <td style="width:1%"><button type="button" class="linky rtDel" data-at="${esc(x.at)}"
         aria-label="${esc(tr("delete"))}">×</button></td></tr>`;
   }).join("");
   $("rtHistory").innerHTML = `<div style="font-weight:600">${esc(tr("rtHistory"))}</div>
-    ${usual && usual.tests > 1 ? `<p class="sub" style="margin:2px 0 6px">${esc(tr("rtUsual", {
-      ms: usual.median, n: usual.tests, input: last.input ? tr("rtInput_" + last.input) : "" }))}</p>` : ""}
-    <table><thead><tr><th>${esc(tr("rtWhen"))}</th><th style="text-align:right">${esc(tr("rtMedianH"))}</th>
-      <th style="text-align:right">${esc(tr("rtBestH"))}</th><th>${esc(tr("rtInputH"))}</th><th></th></tr></thead>
-      <tbody>${rows}</tbody></table>`;
+    ${usual && usual.tests > 1 ? `<p class="sub" style="margin:2px 0 6px">${esc(tr("rtUsualGame", {
+      game: tr("rtGame_" + rt.game), ms: usual.median, n: usual.tests,
+      input: last.input ? tr("rtInput_" + last.input) : "" }))}</p>` : ""}
+    <div style="overflow-x:auto"><table><thead><tr><th>${esc(tr("rtWhen"))}</th><th>${esc(tr("rtGameH"))}</th>
+      <th style="text-align:right">${esc(tr("rtMedianH"))}</th>
+      <th style="text-align:right">${esc(tr("rtBestH"))}</th>
+      <th style="text-align:right">${esc(tr("rtErrorsH"))}</th><th>${esc(tr("rtInputH"))}</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
   $("rtHistory").querySelectorAll("button.rtDel").forEach((b) => {
     b.onclick = () => { deleteReaction(b.dataset.at, currentAthlete()); rtHistory(); };
   });
 }
-function openReaction(push = true) {
+/** Open the games. `session`: the training session's `started` when opened
+ *  from the recorder, so the test is filed with that session. */
+function openReaction(push = true, session = null) {
+  rt.session = session;
   if (push) showView("viewReaction");
   rtReset();
   rtHistory();
@@ -3932,6 +4071,8 @@ function renderAssess() {
       <button type="button" class="ghost" id="assessReactionBtn" style="margin:0">${esc(tr("rtStart"))}</button>
     </div>
     <div id="assessReportBox" style="margin-top:12px">${assessReportHTML(report)}</div>
+    ${report.done.length ? `<button type="button" class="ghost" id="assessShareBtn" style="margin-top:12px">${
+      esc(tr("shareAssess"))}</button>` : ""}
     <button type="button" id="assessFinishBtn" style="margin-top:12px">${
       esc(tr("assessFinish"))}</button>
     <p class="note" style="margin:6px 0 0">${esc(report.done.length
@@ -3983,6 +4124,7 @@ function renderAssess() {
     };
   });
   if ($("assessReactionBtn")) $("assessReactionBtn").onclick = () => openReaction();
+  if ($("assessShareBtn")) $("assessShareBtn").onclick = () => shareAssessment(report);
   $("assessRestartBtn").onclick = () => {
     clearAssess(); startAssess(currentAthlete()); renderAssess();
   };
@@ -4019,8 +4161,11 @@ function openPastAssessment(a) {
     ${a.attendanceOnly
       ? `<p class="note">${esc(tr("assessAttendanceOnlyLong"))}</p>`
       : assessReportHTML(report)}
+    ${a.attendanceOnly ? "" : `<button type="button" id="assessShareBtn" style="margin-top:12px">${
+      esc(tr("shareAssess"))}</button>`}
     <button type="button" class="ghost" id="assessBackBtn" style="margin-top:12px">${
       esc(tr("assessBackToCurrent"))}</button>`;
+  if ($("assessShareBtn")) $("assessShareBtn").onclick = () => shareAssessment(report, a.finished, a.profile);
   $("assessBackBtn").onclick = () => renderAssess();
 }
 
@@ -4307,6 +4452,17 @@ function renderSessionView() {
         <tbody>${t}</tbody></table>
         <p class="note">${tr("noteChangeFirstLast")}</p>`
         : `<p class="note">${tr("noteNotEnoughSets")}</p>`}` : ""}
+    ${(() => {
+      /* Reaction tests done during this session (from the recorder's button). */
+      const rts = myReaction().filter((x) => x.session === sess.started);
+      if (!rts.length) return "";
+      return `<h2 style="font-size:15px;margin:14px 0 4px">${esc(tr("rtTitle"))}</h2>` + rts.map((x) => {
+        const m = rtSummarise(x.trials);
+        return `<p class="sub" style="margin:2px 0 0">${esc(new Date(x.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}
+          · ${esc(tr("rtGame_" + gameOf(x)))} · ${esc(tr("rtMedianMs", { ms: m ? m.median : "—" }))}
+          · ${esc(tr("rtBestMs", { ms: m ? m.best : "—" }))}</p>`;
+      }).join("");
+    })()}
     ${sess.sets.length ? `<button id="sessionShareBtn" style="margin:14px 0 4px">${tr("shareSession")}</button>` : ""}
     ${repEditorHTML(sess)}
     ${sess.sets.some((x) => x.activity === "neck") ? neckLoadHTML() : ""}`;
@@ -5126,6 +5282,10 @@ $("recBtn").onclick = () => {
 };
 
 // --- video file ------------------------------------------------------------
+$("setupReactionBtn").onclick = () => {
+  const sess = getSession() || newSession(currentAthlete());
+  openReaction(true, sess.started);
+};
 $("fileBtn").onclick = () => $("fileInput").click();
 $("fileInput").onchange = async (e) => {
   const file = e.target.files[0];

@@ -395,15 +395,18 @@ export function achievementsHTML(list) {
     <p class="sub" style="margin:8px 0 0">${esc(tr("achNote"))}</p></div>`;
 }
 
-function dayHTML(day, key) {
+function dayHTML(day, key, reactionLines = "") {
   const btns = `<div class="row" style="margin-top:10px">
       <button id="newTrainingBtn" style="margin:0">${esc(tr("newTrainingSession"))}</button>
       <button type="button" class="ghost" id="trainImport" style="margin:0;padding:9px">${esc(tr("import"))}</button>
     </div>
-    <button type="button" class="ghost" id="assessBtn" style="margin-top:8px">${esc(tr("assess"))}</button>`;
+    <div class="row" style="margin-top:8px">
+      <button type="button" class="ghost" id="assessBtn" style="margin:0">${esc(tr("assess"))}</button>
+      <button type="button" class="ghost" id="reactionBtn" style="margin:0">${esc(tr("rtTitle"))}</button>
+    </div>`;
   if (!day) {
     return `<div class="daybox"><div style="font-weight:600">${esc(tr("modeTraining"))}</div>
-      <p class="sub" style="margin:6px 0 0">${esc(tr("noTrainingThatDay"))}</p>${btns}</div>`;
+      ${reactionLines || `<p class="sub" style="margin:6px 0 0">${esc(tr("noTrainingThatDay"))}</p>`}${btns}</div>`;
   }
   const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   // One row per SESSION, not per set: a set is a trial inside a session and
@@ -467,7 +470,7 @@ function dayHTML(day, key) {
     <table><thead><tr><th>${esc(tr("time"))}</th><th>${esc(tr("movement"))}</th>
       <th>${esc(tr("sets"))}</th><th>${esc(tr("reps"))}</th></tr></thead>
       <tbody>${rows}</tbody></table>
-    <p class="sub" style="margin:8px 0 0">${esc(tr("tapSessionHint"))}</p>` : ""}${cardioBlock}${btns}
+    <p class="sub" style="margin:8px 0 0">${esc(tr("tapSessionHint"))}</p>` : ""}${cardioBlock}${reactionLines}${btns}
   </div>`;
 }
 
@@ -865,29 +868,26 @@ function vitalsHTML(vitalsDays, key, todayKey, trend) {
   </div>`;
 }
 
-/** Reaction time for the day: each finger test's median, and the athlete's
- *  usual time on the same input. The test itself is its own screen
- *  (index.html, #viewReaction). */
-function reactionHTML(entries, key, today) {
+/** The day's reaction-time tests, as lines under the day's training: each
+ *  test's game and median, and the usual time for the latest game on the
+ *  same input. The games themselves are their own screen (#viewReaction). */
+function reactionLinesHTML(entries, key, today) {
   const list = collectReaction(entries).get(key) || [];
+  if (!list.length) return "";
   const inputOf = (i) => i ? tr("rtInput_" + i) : "";
   const rows = list.map((t) => {
     const time = new Date(t.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    return `<p class="sub" style="margin:4px 0 0"><b>${esc(time)}</b> · ${esc(tr("rtMedianMs", { ms: t.median }))}
-      · ${esc(tr("rtBestMs", { ms: t.best }))}${t.input ? " · " + esc(inputOf(t.input)) : ""}</p>`;
+    return `<p class="sub" style="margin:3px 0 0"><b>${esc(time)}</b> · ${esc(tr("rtGame_" + t.game))}
+      · ${esc(tr("rtMedianMs", { ms: t.median }))} · ${esc(tr("rtBestMs", { ms: t.best }))}${
+      t.game !== "simple" ? " · " + esc(tr("rtErrorsN", { n: t.errors || 0 })) : ""}${
+      t.input ? " · " + esc(inputOf(t.input)) : ""}</p>`;
   }).join("");
-  const last = (entries || []).length ? entries[entries.length - 1] : null;
-  const trend = last ? reactionTrend(entries, last.input, 30, today) : null;
+  const last = list[list.length - 1];
+  const trend = reactionTrend(entries, last.input, 30, today, last.game);
   const trendLine = trend && trend.tests > 1
-    ? `<p class="sub" style="margin:2px 0 0">${esc(tr("rtUsual", { ms: trend.median, n: trend.tests,
-        input: inputOf(last.input) }))}</p>`
-    : "";
-  return `<div class="daybox">
-    <div style="font-weight:600">${esc(tr("rtTitle"))}</div>
-    ${trendLine}
-    ${rows || `<p class="sub" style="margin:6px 0 0">${esc(tr("rtNoneThatDay"))}</p>`}
-    <button type="button" class="ghost" id="reactionBtn" style="margin-top:8px">${esc(tr("rtStart"))}</button>
-  </div>`;
+    ? `<p class="sub" style="margin:3px 0 0">${esc(tr("rtUsualGame", { game: tr("rtGame_" + last.game),
+        ms: trend.median, n: trend.tests, input: inputOf(last.input) }))}</p>` : "";
+  return `<div style="font-weight:600;margin-top:12px">${esc(tr("rtTitle"))}</div>${rows}${trendLine}`;
 }
 
 /* ---- the cycle view ---------------------------------------------------- */
@@ -1330,14 +1330,14 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     </div><div class="dashRight">
     <div class="dayHead2">${esc(localeDay(view.selected)
       .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>
-    ${dayHTML(days.get(view.selected), view.selected)}
+    ${dayHTML(days.get(view.selected), view.selected,
+              reactionLinesHTML(view.reaction || [], view.selected, today))}
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey, waterDays.get(view.selected),
                 coffeeDays.get(view.selected))}
     ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey,
                 moodTrend(diaryDays, 30, today))}
     ${sleepHTML(sleepDays, view.selected, todayKey, meanSleep(sleepDays, 14, today))}
     ${vitalsHTML(vitalsDays, view.selected, todayKey, meanSteps(vitalsDays, 14, today))}
-    ${reactionHTML(view.reaction || [], view.selected, today)}
     ${cycleHTML(cycleDays, view.selected, todayKey)}
     </div></div>
     ${volumeHTML(days, today)}

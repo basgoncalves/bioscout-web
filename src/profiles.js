@@ -612,13 +612,19 @@ export function listReaction() {
 }
 
 export function addReaction({ profile = null, at = null, trials = [], falseStarts = 0,
-                              misses = 0, input = null }) {
+                              misses = 0, errors = 0, input = null, game = "simple",
+                              session = null }) {
   const t = (trials || []).map((x) => Math.round(+x)).filter((x) => Number.isFinite(x) && x > 0);
   if (!t.length) return null;
   const rec = { at: at || new Date().toISOString(), profile, trials: t,
                 falseStarts: Math.max(0, Math.round(+falseStarts) || 0),
                 misses: Math.max(0, Math.round(+misses) || 0),
                 input: ["touch", "mouse", "pen", "key"].includes(input) ? input : null,
+                // Which game (reaction.js GAMES), wrong-side taps / taps on the
+                // cross, and the training session it was done in, if any.
+                game: ["simple", "choice", "gonogo"].includes(game) ? game : "simple",
+                errors: Math.max(0, Math.round(+errors) || 0),
+                session: session ? String(session).slice(0, 40) : null,
                 u: stamp() };
   const all = listReaction().filter((x) => !(x.at === rec.at && x.profile === profile));
   all.push(rec);

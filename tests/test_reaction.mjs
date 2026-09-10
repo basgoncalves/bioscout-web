@@ -6,7 +6,7 @@
  */
 process.env.TZ = process.env.TZ || "Europe/Vienna";
 import { TRIALS, foreperiod, classify, summarise, collectReaction, reactionTrend,
-         FORE_MIN_MS, FORE_MAX_MS } from "../src/reaction.js";
+         FORE_MIN_MS, FORE_MAX_MS, sequence, GAMES, gameOf } from "../src/reaction.js";
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {
@@ -47,6 +47,34 @@ ok(summarise([]) === null && summarise([NaN, -3]) === null, "nothing counted is 
   const t = reactionTrend(all, "touch", 30, today);
   ok(t.tests === 2 && t.median === 280, "the usual time: same input only, last 30 days", JSON.stringify(t));
   ok(reactionTrend(all, "pen", 30, today) === null, "no tests on that input: nothing to compare");
+}
+
+/* ---- the three games ---------------------------------------------------- */
+{
+  let seed = 7;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const count = (a, k) => a.filter((x) => x === k).length;
+  const c = sequence("choice", rand);
+  ok(c.length === 8 && count(c, "left") === 4 && count(c, "right") === 4, "choice: four left, four right");
+  let neverFirst = true;
+  for (let i = 0; i < 200; i++) {
+    const g = sequence("gonogo", rand);
+    if (g[0] === "nogo" || g.length !== 10 || count(g, "nogo") !== 3) neverFirst = false;
+  }
+  ok(neverFirst, "go/no-go: 7 go, 3 no-go, and it never opens on a no-go");
+  ok(sequence("simple").every((x) => x === "go") && sequence("simple").length === GAMES.simple.go,
+     "simple: five greens");
+  ok(sequence("nonsense").length === 5, "an unknown game falls back to simple");
+  ok(gameOf({}) === "simple" && gameOf({ game: "choice" }) === "choice",
+     "tests from before the games read as simple");
+  const today = new Date(2026, 8, 10);
+  const all = [
+    { at: "2026-09-10T08:00:00.000Z", trials: [250, 260, 270], input: "touch" },
+    { at: "2026-09-10T09:00:00.000Z", trials: [400, 410, 420], input: "touch", game: "choice" },
+    { at: "2026-09-09T09:00:00.000Z", trials: [380, 390, 400], input: "touch", game: "choice" },
+  ];
+  const t = reactionTrend(all, "touch", 30, today, "choice");
+  ok(t.tests === 2 && t.median === 400, "the usual time compares choice with choice only", JSON.stringify(t));
 }
 
 console.log(bad ? `\n${bad} check(s) failed` : "\nAll checks passed");
