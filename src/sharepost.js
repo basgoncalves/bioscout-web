@@ -494,3 +494,134 @@ export async function makeClip(res, src, facts, { onProgress = () => {}, signal 
   if (signal && signal.aborted) return null;
   return new Blob(chunks, { type: (type || "video/webm").split(";")[0] });
 }
+
+/* ---- a whole session, as a card ----------------------------------------
+ * For sessions already filed: their video and stills are long gone (they
+ * were never kept), so what can be shared is what was logged -- sets, reps,
+ * movements -- drawn as a card, the way the monthly card is. */
+
+/** What a session card says. `sess` is a stored session ({started, sport,
+ *  sets: [{index, activity, reps, addedKg, assistKg, at}]}). */
+export function sessionFacts(sess, tr, { name = "" } = {}) {
+  const sets = (sess && sess.sets) || [];
+  const rows = [];
+  const by = new Map();
+  for (const s of sets) {
+    let r = by.get(s.activity);
+    if (!r) { r = { activity: s.activity, title: tr(s.activity), sets: 0, reps: 0, loadKg: 0 }; by.set(s.activity, r); rows.push(r); }
+    r.sets++;
+    r.reps += Number(s.reps) || 0;
+    const load = (Number(s.addedKg) || 0) - (Number(s.assistKg) || 0);
+    if (load > r.loadKg) r.loadKg = Math.round(load * 10) / 10;
+  }
+  const reps = rows.reduce((a, r) => a + r.reps, 0);
+  const when = new Date((sets[0] && sets[0].at) || sess?.started || Date.now());
+  const first = sets.length ? new Date(sets[0].at).getTime() : NaN;
+  const last = sets.length ? new Date(sets[sets.length - 1].at).getTime() : NaN;
+  const minutes = sets.length > 1 && last > first ? Math.round((last - first) / 60000) : null;
+  return {
+    name: String(name || sess?.profile || "").slice(0, 28),
+    sport: sess && sess.sport ? tr("sport_" + sess.sport) : "",
+    date: when.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", year: "numeric" }),
+    sets: sets.length, reps, minutes,
+    perSet: sets.map((s) => Number(s.reps) || 0),
+    rows,
+    rowText: (r) => tr(r.sets === 1 ? "nSet" : "nSets", { n: r.sets }) + " · "
+                  + tr(r.reps === 1 ? "nRep" : "nRepsCount", { n: r.reps }),
+    labels: { sets: tr("cardSets"), reps: tr("cardReps"), minutes: tr("cardMinutes"),
+              moves: tr("cardMovements"), perSet: tr("cardRepsPerSet"),
+              more: (n) => tr("cardMore", { n }) },
+  };
+}
+
+/** The small summary stored with a posted session card. */
+export function sessionMeta(f) {
+  return { kind: "session", sets: f.sets, reps: f.reps,
+           activities: f.rows.map((r) => r.activity).slice(0, 8) };
+}
+
+export function drawSessionCard(ctx, f) {
+  const W = PIC.w, H = PIC.h;
+  const INK2 = "#e9edf1", MUT = "#8b97a3", ACC = "#49b39b", CARDBG = "#161b21";
+  ctx.fillStyle = BG; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = CARDBG;
+  const r = 44, x0 = 48, y0 = 48, w = W - 96, h = H - 96;
+  ctx.beginPath();
+  ctx.moveTo(x0 + r, y0); ctx.arcTo(x0 + w, y0, x0 + w, y0 + h, r); ctx.arcTo(x0 + w, y0 + h, x0, y0 + h, r);
+  ctx.arcTo(x0, y0 + h, x0, y0, r); ctx.arcTo(x0, y0, x0 + w, y0, r); ctx.closePath(); ctx.fill();
+  const L = 104, R = W - 104;
+  ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+  ctx.fillStyle = MUT; ctx.font = "600 30px system-ui, sans-serif"; ctx.fillText("BIOSCOUT", L, 148);
+  ctx.fillStyle = INK2; ctx.font = "700 72px system-ui, sans-serif";
+  ctx.fillText(fitText(ctx, f.name || f.sport || "", R - L), L, 240);
+  ctx.fillStyle = MUT; ctx.font = "500 34px system-ui, sans-serif";
+  ctx.fillText(fitText(ctx, [f.sport, f.date].filter(Boolean).join("  ·  "), R - L), L, 294);
+
+  const tiles = [[f.sets, f.labels.sets], [f.reps, f.labels.reps],
+                 f.minutes != null ? [f.minutes, f.labels.minutes] : [f.rows.length, f.labels.moves]];
+  tiles.forEach(([v, label], i) => {
+    const x = L + i * 292;
+    ctx.fillStyle = INK2; ctx.font = "700 96px system-ui, sans-serif"; ctx.fillText(String(v), x, 450);
+    ctx.fillStyle = MUT; ctx.font = "500 30px system-ui, sans-serif"; ctx.fillText(label, x, 496);
+  });
+
+  ctx.fillStyle = MUT; ctx.font = "600 28px system-ui, sans-serif"; ctx.fillText(f.labels.perSet, L, 586);
+  const n = Math.max(1, f.perSet.length), top = Math.max(1, ...f.perSet), bw = (R - L) / n;
+  f.perSet.forEach((v, i) => {
+    const bh = Math.max(4, Math.round((v / top) * 150));
+    ctx.fillStyle = ACC;
+    ctx.fillRect(Math.round(L + i * bw + bw * 0.12), 770 - bh, Math.max(2, Math.round(bw * 0.76)), bh);
+  });
+
+  let y = 870;
+  const show = f.rows.slice(0, f.rows.length > 5 ? 4 : 5);
+  for (const row of show) {
+    ctx.textAlign = "left"; ctx.fillStyle = INK2; ctx.font = "600 38px system-ui, sans-serif";
+    ctx.fillText(fitText(ctx, row.title + (row.loadKg ? `  +${row.loadKg} kg` : ""), (R - L) * 0.55), L, y);
+    ctx.textAlign = "right"; ctx.fillStyle = MUT; ctx.font = "500 32px system-ui, sans-serif";
+    ctx.fillText(f.rowText(row), R, y);
+    y += 70;
+  }
+  if (f.rows.length > show.length) {
+    ctx.textAlign = "left"; ctx.fillStyle = MUT; ctx.font = "500 30px system-ui, sans-serif";
+    ctx.fillText(f.labels.more(f.rows.length - show.length), L, y);
+  }
+  ctx.textAlign = "left"; ctx.fillStyle = MUT; ctx.font = "500 26px system-ui, sans-serif";
+  ctx.fillText("A physics-informed, AI-powered bio tracker", L, H - 110);
+}
+
+export async function makeSessionCard(facts) {
+  const cv = document.createElement("canvas");
+  cv.width = PIC.w; cv.height = PIC.h;
+  drawSessionCard(cv.getContext("2d"), facts);
+  return new Promise((r) => cv.toBlob(r, "image/jpeg", 0.92));
+}
+
+/* ---- a picture or video from the phone, for a post --------------------- */
+
+export const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+export const UPLOAD_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
+/** Can this file be posted as it is? Pictures always can (they are
+ *  re-encoded first); a video must be a type the bucket takes and fit. */
+export function checkUpload(file) {
+  const type = String(file && file.type || "");
+  if (type.startsWith("image/")) return { ok: true, kind: "image" };
+  if (!type.startsWith("video/")) return { ok: false, reason: "type" };
+  if (!UPLOAD_VIDEO_TYPES.includes(type.split(";")[0])) return { ok: false, reason: "type" };
+  if (file.size > UPLOAD_MAX_BYTES) return { ok: false, reason: "size" };
+  return { ok: true, kind: "video" };
+}
+
+/** A photo as a JPEG no longer than `edge` px: a feed does not need 12 MP,
+ *  and re-encoding also turns HEIC (iPhone) into something every browser shows. */
+export async function toJpeg(file, edge = 1440, quality = 0.86) {
+  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const k = Math.min(1, edge / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement("canvas");
+  cv.width = Math.max(1, Math.round(bmp.width * k)); cv.height = Math.max(1, Math.round(bmp.height * k));
+  cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height);
+  bmp.close?.();
+  const out = await new Promise((r) => cv.toBlob(r, "image/jpeg", quality));
+  if (!out) throw new Error("could not encode the picture");
+  return out;
+}

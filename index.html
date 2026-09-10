@@ -327,7 +327,7 @@ try {
   /* Not the camera preview: no absolute stage layout and no selfie flip. A
    * clip is drawn the right way round already (sharepost.js). */
   .sharePreview video, .post video { position:static; inset:auto; height:auto; transform:none; }
-  #shareDlg { width:min(440px, calc(100vw - 32px)); }
+  #shareDlg, #postDlg { width:min(440px, calc(100vw - 32px)); }
   .post { border-top:1px solid var(--line); padding:12px 0; }
   .post:first-child { border-top:0; padding-top:0; }
   .postHead { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px; }
@@ -834,8 +834,9 @@ try {
   <div class="card hidden" id="results"></div>
   <!-- Only for the take just analysed: its stills and video are in memory. -->
   <button class="hidden" id="shareSetBtn" style="margin:0 0 14px" data-i18n="shareSet">Share this set</button>
+  </section>
   <dialog id="shareDlg">
-    <h2 style="font-size:16px;margin:0 0 10px" data-i18n="shareSet">Share this set</h2>
+    <h2 style="font-size:16px;margin:0 0 10px" id="shareTitle">Share this set</h2>
     <div class="tabs" id="shareTabs">
       <button type="button" id="sharePicTab" data-i18n="sharePicture">Picture</button>
       <button type="button" id="shareClipTab" data-i18n="shareClip">Clip</button>
@@ -850,17 +851,33 @@ try {
     <p class="note" id="sharePostNote" style="margin:6px 0 0"></p>
     <button class="ghost" id="shareClose" style="margin-top:10px" data-i18n="close">Close</button>
   </dialog>
-  </section>
 
   <!-- The feed: posts from you and from open accounts, newest first. -->
   <section id="viewFeed" class="hidden">
     <div class="card">
       <h2 style="font-size:17px;margin:0 0 2px" data-i18n="feed">Feed</h2>
       <p class="sub" style="margin:0 0 12px" data-i18n="feedSub">Posts from you and from open profiles, newest first.</p>
+      <button id="feedPostBtn" style="margin:0 0 14px" data-i18n="postNew">New post</button>
       <div id="feedList"></div>
       <button class="ghost hidden" id="feedMore" data-i18n="feedMore">Older posts</button>
     </div>
   </section>
+  <dialog id="postDlg">
+    <h2 style="font-size:16px;margin:0 0 10px" data-i18n="postNew">New post</h2>
+    <label for="postCaption"><span data-i18n="postWords">What's up?</span>
+      <span class="sub" id="postCount"></span></label>
+    <input id="postCaption" type="text" autocomplete="off" enterkeyhint="done">
+    <div class="sharePreview" id="postPreview" style="margin-top:10px" hidden></div>
+    <input id="postFile" type="file" accept="image/*,video/*" class="hidden">
+    <div class="row" style="margin-top:10px">
+      <button class="ghost" id="postPick" style="margin:0;padding:9px" data-i18n="postPick">Add a photo or video</button>
+      <button class="ghost" id="postClear" style="margin:0;padding:9px" data-i18n="postRemove" hidden>Remove</button>
+    </div>
+    <p class="sub" id="postMsg" style="margin:6px 0 0"></p>
+    <button id="postGo" style="margin-top:10px" data-i18n="postGo">Post</button>
+    <p class="note" id="postNote" style="margin:6px 0 0"></p>
+    <button class="ghost" id="postClose" style="margin-top:10px" data-i18n="close">Close</button>
+  </dialog>
 </div>
 
 <script>
@@ -876,7 +893,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 94;
+window.BUILD = 95;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -931,7 +948,8 @@ import { makeCloud, syncOnce, loadState as cloudState, saveState as saveCloudSta
          clearState as clearCloudState, USERNAME_RE, clampCaption, captionLength,
          CAPTION_MAX } from "./src/cloud.js";
 import { stillKeeper, makePicture, makeClip, shareFacts, postMeta, pickType,
-         extFor } from "./src/sharepost.js";
+         extFor, sessionFacts, sessionMeta, makeSessionCard, checkUpload, toJpeg,
+         UPLOAD_MAX_BYTES } from "./src/sharepost.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
          collectDays, percentile } from "./src/dashboard.js";
@@ -1540,7 +1558,14 @@ function canShare(res) {
             && (shareSrc.video || shareSrc.kept || shareSrc.stills.length));
 }
 
-let shareKind = "image", shareMedia = {}, shareUrls = [], shareAbort = null, shareFacts_ = null, shareVis = null;
+/* One dialog for everything shareable. A "job" says how to make each kind:
+ *   image: () => Promise<Blob>             always there
+ *   video: ({signal, onProgress}) => ...   null when there is no clip to make
+ *   videoWait: () => bool                  a kept video still on its way
+ *   meta, stem                             what a post carries, the file name
+ * A fresh set's job makes the frame picture and the overlay clip; a filed
+ * session's job makes the session card and has no clip. */
+let shareJob = null, shareKind = "image", shareMedia = {}, shareUrls = [], shareAbort = null, shareVis = null;
 const shareMsg = (text, warn = false) => {
   $("shareMsg").textContent = text || "";
   $("shareMsg").classList.toggle("warn", !!warn);
@@ -1550,27 +1575,32 @@ function paintShareCount() {
   $("shareCount").textContent = tr("shareCount", { n: Math.min(n, CAPTION_MAX), max: CAPTION_MAX });
   $("shareCount").classList.toggle("warn", n > CAPTION_MAX);
 }
-$("shareCaption").oninput = () => {
-  // Cut at 42 as it is typed, counted the way the server counts.
-  const v = $("shareCaption").value;
-  if (captionLength(v) > CAPTION_MAX) $("shareCaption").value = [...v].slice(0, CAPTION_MAX).join("");
-  paintShareCount();
-};
+// Cut at 42 as it is typed, counted the way the server counts.
+function capInput(el, after) {
+  el.oninput = () => {
+    if (captionLength(el.value) > CAPTION_MAX) el.value = [...el.value].slice(0, CAPTION_MAX).join("");
+    after();
+  };
+}
+capInput($("shareCaption"), paintShareCount);
 
+function postNote() {
+  const signedIn = cloud.enabled && !!cloudState().login;
+  return !cloud.enabled ? ""
+    : !signedIn ? tr("sharePostSignIn")
+    : shareVis === "open" ? tr("sharePostOpen")
+    : shareVis === "private" ? tr("sharePostPrivate") : tr("sharePostWho");
+}
 function paintShareButtons() {
   const have = !!shareMedia[shareKind];
   const signedIn = cloud.enabled && !!cloudState().login;
   $("shareGo").disabled = !have;
   $("sharePost").disabled = !have || !signedIn;
   $("sharePost").hidden = !cloud.enabled;
-  $("sharePostNote").textContent = !cloud.enabled ? ""
-    : !signedIn ? tr("sharePostSignIn")
-    : shareVis === "open" ? tr("sharePostOpen")
-    : shareVis === "private" ? tr("sharePostPrivate") : tr("sharePostWho");
+  $("sharePostNote").textContent = postNote();
 }
 
-function showSharePreview(blob, kind) {
-  const box = $("sharePreview");
+function showSharePreview(blob, kind, box = $("sharePreview")) {
   box.innerHTML = "";
   if (!blob) return;
   const url = URL.createObjectURL(blob);
@@ -1584,35 +1614,33 @@ function showSharePreview(blob, kind) {
 }
 
 async function pickShareKind(kind) {
+  const job = shareJob;
+  if (!job) return;
   shareKind = kind;
   $("sharePicTab").setAttribute("aria-selected", kind === "image");
   $("shareClipTab").setAttribute("aria-selected", kind === "video");
-  const src = shareSrc;
-  if (!src) return;
   if (shareMedia[kind]) { showSharePreview(shareMedia[kind], kind); shareMsg(""); paintShareButtons(); return; }
   $("sharePreview").innerHTML = "";
   paintShareButtons();
-  if (kind === "video" && !src.video) {
+  if (kind === "video" && !job.video()) {
     // The clip needs the video, and the video is kept only when asked for.
     // A kept video may still be on its way from the recorder: give it a moment.
-    if (src.kept) {
+    if (job.videoWait()) {
       shareMsg(tr("shareMakingClip", { pct: 0 }));
-      for (let i = 0; i < 30 && !src.video; i++) await new Promise((r) => setTimeout(r, 100));
+      for (let i = 0; i < 30 && !job.video(); i++) await new Promise((r) => setTimeout(r, 100));
     }
-    if (!src.video) { if (shareKind === kind) shareMsg(tr("shareClipNeedsVideo")); return; }
+    if (!job.video()) { if (shareKind === kind) shareMsg(tr("shareClipNeedsVideo")); return; }
   }
   shareAbort?.abort();
   const ctl = new AbortController();
   shareAbort = ctl;
   shareMsg(kind === "image" ? tr("shareMakingPic") : tr("shareMakingClip", { pct: 0 }));
   try {
-    const blob = kind === "image"
-      ? await makePicture(src.res, src, shareFacts_)
-      : await makeClip(src.res, src, shareFacts_, {
-          signal: ctl.signal,
+    const blob = kind === "image" ? await job.image()
+      : await job.video()({ signal: ctl.signal,
           onProgress: (p) => { if (shareKind === "video" && !ctl.signal.aborted)
             shareMsg(tr("shareMakingClip", { pct: Math.round(p * 100) })); } });
-    if (ctl.signal.aborted || !blob || shareSrc !== src) return;
+    if (ctl.signal.aborted || !blob || shareJob !== job) return;
     shareMedia[kind] = blob;
     if (shareKind === kind) { showSharePreview(blob, kind); shareMsg(""); }
   } catch (e) {
@@ -1628,46 +1656,74 @@ function closeShare() {
   $("sharePreview").innerHTML = "";
   for (const u of shareUrls) URL.revokeObjectURL(u);
   shareUrls = [];
+  shareJob = null;
 }
 
-$("shareSetBtn").onclick = async () => {
-  if (!shareSrc) return;
-  shareMedia = {};
+/** Who will see a post, said before it is made rather than after. */
+async function fetchVisibility(after) {
   shareVis = null;
-  shareFacts_ = shareFacts(shareSrc.res, tr, { name: currentAthlete() || "" });
+  if (!cloud.enabled || !cloudState().login) return;
+  try { shareVis = (await cloud.account(await freshLogin()))?.visibility || null; }
+  catch { shareVis = null; }
+  after();
+}
+
+function openShare(job, title) {
+  shareJob = job;
+  shareMedia = {};
+  $("shareTitle").textContent = title;
+  $("shareTabs").hidden = !job.hasClip;
   $("shareCaption").value = "";
   $("shareCaption").placeholder = tr("shareCaptionPh");
   paintShareCount();
   shareMsg("");
   $("shareDlg").showModal();
   pickShareKind("image");
-  // Who will see a post, said before it is made rather than after.
-  if (cloud.enabled && cloudState().login) {
-    try { shareVis = (await cloud.account(await freshLogin()))?.visibility || null; }
-    catch { shareVis = null; }
-    paintShareButtons();
-  }
+  fetchVisibility(paintShareButtons);
+}
+
+/** The set just analysed: frame + skeleton picture, overlay clip. */
+$("shareSetBtn").onclick = () => {
+  const src = shareSrc;
+  if (!src) return;
+  const facts = shareFacts(src.res, tr, { name: currentAthlete() || "" });
+  openShare({
+    hasClip: true,
+    image: () => makePicture(src.res, src, facts),
+    video: () => (src.video ? (opts) => makeClip(src.res, src, facts, opts) : null),
+    videoWait: () => src.kept && !src.video,
+    meta: postMeta(facts),
+    stem: `bioscout-${src.res.activity || "set"}`,
+  }, tr("shareSet"));
 };
+
+/** A filed session: a card of what was logged (its video was never kept). */
+function shareSession(sess) {
+  const facts = sessionFacts(sess, tr, { name: sess.profile || currentAthlete() || "" });
+  openShare({
+    hasClip: false,
+    image: () => makeSessionCard(facts),
+    video: () => null, videoWait: () => false,
+    meta: sessionMeta(facts),
+    stem: `bioscout-session`,
+  }, tr("shareSession"));
+}
+
 $("sharePicTab").onclick = () => pickShareKind("image");
 $("shareClipTab").onclick = () => pickShareKind("video");
 $("shareClose").onclick = () => $("shareDlg").close();
 $("shareDlg").addEventListener("close", closeShare);
 
-$("shareGo").onclick = async () => {
-  const blob = shareMedia[shareKind];
-  if (!blob) return;
-  const ext = shareKind === "image" ? "jpg" : extFor(blob.type);
-  const name = `bioscout-${shareSrc?.res.activity || "set"}-${new Date().toISOString().slice(0, 10)}.${ext}`;
+/** Hand a file to the phone's share sheet, or download it where there is none. */
+async function shareOut(blob, name, text) {
   const file = new File([blob], name, { type: blob.type });
-  const text = clampCaption($("shareCaption").value);
   // Straight from the tap: the share sheet refuses a call that is not.
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({ files: [file], ...(text ? { text } : {}) });
-      shareMsg(tr("shareShared"));
-      return;
+      return "shared";
     } catch (e) {
-      if (e && e.name === "AbortError") return;      // they changed their mind
+      if (e && e.name === "AbortError") return "cancelled";   // they changed their mind
     }
   }
   const url = URL.createObjectURL(blob);
@@ -1675,24 +1731,107 @@ $("shareGo").onclick = async () => {
   a.href = url; a.download = name;
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 10000);
-  shareMsg(tr("shareDownloaded"));
+  return "downloaded";
+}
+$("shareGo").onclick = async () => {
+  const blob = shareMedia[shareKind];
+  if (!blob || !shareJob) return;
+  const ext = shareKind === "image" ? "jpg" : extFor(blob.type);
+  const name = `${shareJob.stem}-${new Date().toISOString().slice(0, 10)}.${ext}`;
+  const what = await shareOut(blob, name, clampCaption($("shareCaption").value));
+  if (what === "shared") shareMsg(tr("shareShared"));
+  if (what === "downloaded") shareMsg(tr("shareDownloaded"));
 };
 
 $("sharePost").onclick = async () => {
   const blob = shareMedia[shareKind];
-  if (!blob || !shareSrc) return;
+  if (!blob || !shareJob) return;
   $("sharePost").disabled = true;
   shareMsg(tr("sharePosting"));
   try {
     const login = await freshLogin();
-    await cloud.post(login, { blob, kind: shareKind, body: $("shareCaption").value,
-                              meta: postMeta(shareFacts_) });
+    await cloud.post(login, { blob, kind: shareKind, body: $("shareCaption").value, meta: shareJob.meta });
     shareMsg(tr(shareVis === "open" ? "sharePosted" : "sharePostedPrivate"));
     toast(tr("sharePosted"));
   } catch (e) {
     shareMsg(e.code === "signed_out" ? tr("sharePostSignIn") : cloudErrText(e), true);
   } finally {
     paintShareButtons();
+  }
+};
+
+/* New post, from the feed: words, and a picture or video from the phone if
+ * wanted. A picture is re-encoded to a 1440 px JPEG first (a feed does not
+ * need 12 MP, and an iPhone's HEIC becomes something every browser shows); a
+ * video goes up as it is, if it fits. */
+let postFile = null, postKind = null;
+// Called with no message it keeps the one showing: the visibility lookup
+// repaints when it lands and must not wipe an error said a moment before.
+function paintPostDlg(msg, warn = false) {
+  const n = captionLength($("postCaption").value);
+  $("postCount").textContent = tr("shareCount", { n: Math.min(n, CAPTION_MAX), max: CAPTION_MAX });
+  $("postGo").disabled = !(postFile || clampCaption($("postCaption").value));
+  $("postClear").hidden = !postFile;
+  $("postPick").textContent = tr(postFile ? "postPickOther" : "postPick");
+  if (msg !== undefined) {
+    $("postMsg").textContent = msg;
+    $("postMsg").classList.toggle("warn", !!warn);
+  }
+  $("postNote").textContent = postNote();
+}
+capInput($("postCaption"), () => paintPostDlg());
+$("feedPostBtn").onclick = () => {
+  postFile = null; postKind = null;
+  $("postCaption").value = "";
+  $("postPreview").innerHTML = "";
+  $("postPreview").hidden = true;
+  $("postDlg").showModal();
+  paintPostDlg("");
+  fetchVisibility(() => paintPostDlg());
+};
+$("postPick").onclick = () => $("postFile").click();
+$("postClear").onclick = () => { postFile = null; $("postPreview").innerHTML = ""; $("postPreview").hidden = true; paintPostDlg(""); };
+$("postFile").onchange = async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  const chk = checkUpload(f);
+  if (!chk.ok) {
+    paintPostDlg(tr(chk.reason === "size" ? "postTooBig" : "postWrongType",
+                    { mb: Math.round(UPLOAD_MAX_BYTES / 1048576) }), true);
+    return;
+  }
+  try {
+    paintPostDlg(chk.kind === "image" ? tr("shareMakingPic") : "");
+    postFile = chk.kind === "image" ? await toJpeg(f) : f;
+    postKind = chk.kind;
+    $("postPreview").hidden = false;
+    showSharePreview(postFile, postKind, $("postPreview"));
+    paintPostDlg("");
+  } catch (err) {
+    postFile = null;
+    paintPostDlg(tr("shareMakeFailed", { err: err.message || String(err) }), true);
+  }
+};
+$("postClose").onclick = () => $("postDlg").close();
+$("postDlg").addEventListener("close", () => {
+  $("postPreview").innerHTML = "";
+  for (const u of shareUrls) URL.revokeObjectURL(u);
+  shareUrls = [];
+  postFile = null;
+});
+$("postGo").onclick = async () => {
+  const body = $("postCaption").value;
+  if (!postFile && !clampCaption(body)) return;
+  $("postGo").disabled = true;
+  paintPostDlg(tr("sharePosting"));
+  try {
+    await cloud.post(await freshLogin(), { blob: postFile, kind: postKind, body });
+    $("postDlg").close();
+    toast(tr("sharePosted"));
+    renderFeed();
+  } catch (e) {
+    paintPostDlg(e.code === "signed_out" ? tr("sharePostSignIn") : cloudErrText(e), true);
   }
 };
 
@@ -1734,6 +1873,12 @@ function postHTML(p, me) {
   const m = p.meta || {};
   const bits = [];
   // Only a movement this app knows is named: the row came off a server.
+  if (m.kind === "session") {
+    bits.push(tr("feedSession"));
+    if (Number.isFinite(m.sets)) bits.push(tr(m.sets === 1 ? "nSet" : "nSets", { n: m.sets }));
+    const acts = (Array.isArray(m.activities) ? m.activities : []).filter((a) => ACTIVITIES[a]);
+    if (acts.length) bits.push(acts.map((a) => tr(a)).join(", "));
+  }
   if (m.activity && ACTIVITIES[m.activity]) bits.push(tr(m.activity));
   if (Number.isFinite(m.reps)) bits.push(tr(m.reps === 1 ? "shareRepN" : "shareRepsN", { n: m.reps }));
   if (Number.isFinite(m.clean)) bits.push(tr("shareCleanN", { n: m.clean }));
@@ -3671,8 +3816,10 @@ function renderSessionView() {
         <tbody>${t}</tbody></table>
         <p class="note">${tr("noteChangeFirstLast")}</p>`
         : `<p class="note">${tr("noteNotEnoughSets")}</p>`}` : ""}
+    <button id="sessionShareBtn" style="margin:14px 0 4px">${tr("shareSession")}</button>
     ${repEditorHTML(sess)}
     ${sess.sets.some((x) => x.activity === "neck") ? neckLoadHTML() : ""}`;
+  $("sessionShareBtn").onclick = () => shareSession(sess);
 
   wireRepEditor(card, sess, () => {
     sessionViewSess = findSession(sess.started) || sess;

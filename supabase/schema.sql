@@ -152,10 +152,11 @@ create policy "posts: write own" on public.posts for insert to authenticated
 create policy "posts: delete own" on public.posts for delete to authenticated
   using (owner = (select auth.uid()));
 
--- The bucket: private (no public URLs), 25 MB a file, pictures and clips only.
+-- The bucket: private (no public URLs), 25 MB a file, pictures and clips only
+-- (quicktime: an iPhone video picked from the gallery for a post).
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('posts', 'posts', false, 26214400,
-        array['image/jpeg', 'image/png', 'video/mp4', 'video/webm'])
+        array['image/jpeg', 'image/png', 'video/mp4', 'video/webm', 'video/quicktime'])
 on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit,
                                allowed_mime_types = excluded.allowed_mime_types;
 

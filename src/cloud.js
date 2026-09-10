@@ -151,7 +151,8 @@ export function clampCaption(s) {
   return cps.slice(0, CAPTION_MAX).join("").trim();
 }
 export function captionLength(s) { return [...String(s ?? "")].length; }
-const EXT = { "image/jpeg": "jpg", "image/png": "png", "video/mp4": "mp4", "video/webm": "webm" };
+const EXT = { "image/jpeg": "jpg", "image/png": "png", "video/mp4": "mp4", "video/webm": "webm",
+              "video/quicktime": "mov" };
 /** Where a post's media goes: the owner's own folder (the storage policy and
  *  the posts table both check the first segment), a time, and some noise so
  *  two posts in one millisecond cannot collide. */

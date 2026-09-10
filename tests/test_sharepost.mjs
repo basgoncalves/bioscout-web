@@ -9,7 +9,8 @@
  *   node tests/test_sharepost.mjs
  */
 import { frameTime, pickRep, shareMoment, nearestIndex, repTimes, clipWindow, repsDoneAt,
-         fitRect, pickType, extFor, shareFacts, postMeta, CLIP_MAX_MS } from "../src/sharepost.js";
+         fitRect, pickType, extFor, shareFacts, postMeta, CLIP_MAX_MS,
+         sessionFacts, sessionMeta, checkUpload, UPLOAD_MAX_BYTES } from "../src/sharepost.js";
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {
@@ -96,6 +97,33 @@ ok(extFor("video/mp4") === "mp4" && extFor("video/webm;codecs=vp9") === "webm", 
   ok(g.clean === null && g.bestCm === null && g.loadKg === 20, "ungraded reps claim no clean count; load is said");
   const z = shareFacts({ activity: "squat", reps: [{ quality: "poor" }] }, tr);
   ok(z.clean === 0 && z.cleanLabel === "" && !("clean" in postMeta(z)), "no clean reps: the picture and the post say nothing, not \"0 clean\"");
+}
+
+{
+  // A filed session as a card: grouped by movement in the order done.
+  const sess = { started: "2026-09-10T10:00:00.000Z", profile: "Bas", sport: "strength", sets: [
+    { index: 1, activity: "pullup", reps: 4, at: "2026-09-10T10:17:00.000Z" },
+    { index: 2, activity: "pullup", reps: 6, assistKg: 45, at: "2026-09-10T10:19:00.000Z" },
+    { index: 3, activity: "dip", reps: 8, addedKg: 10, at: "2026-09-10T10:23:00.000Z" },
+    { index: 4, activity: "pullup", reps: 7, at: "2026-09-10T10:31:00.000Z" }] };
+  const f = sessionFacts(sess, tr);
+  ok(f.sets === 4 && f.reps === 25 && f.minutes === 14, "sets, reps, first to last set in minutes", `${f.sets} ${f.reps} ${f.minutes}`);
+  ok(f.rows.length === 2 && f.rows[0].activity === "pullup" && f.rows[0].sets === 3 && f.rows[0].reps === 17,
+     "one row per movement, in the order first done");
+  ok(f.rows[0].loadKg === 0 && f.rows[1].loadKg === 10, "assistance is not shown as load; added load is");
+  ok(f.perSet.join() === "4,6,8,7" && f.name === "Bas" && f.sport === "sport_strength", "reps per set, name, sport");
+  ok(sessionFacts({ sets: [sess.sets[0]] }, tr).minutes === null, "one set has no duration to claim");
+  const m = sessionMeta(f);
+  ok(m.kind === "session" && m.sets === 4 && m.reps === 25 && m.activities.join() === "pullup,dip",
+     "a posted session carries counts and movements only", JSON.stringify(m));
+}
+{
+  const F = (type, size = 1000) => ({ type, size });
+  ok(checkUpload(F("image/heic", 9e6)).kind === "image", "any picture (it is re-encoded), even a big HEIC");
+  ok(checkUpload(F("video/quicktime")).kind === "video" && checkUpload(F("video/mp4")).ok, "phone videos go up as they are");
+  ok(checkUpload(F("video/mp4", UPLOAD_MAX_BYTES + 1)).reason === "size", "but not over 25 MB");
+  ok(checkUpload(F("video/x-msvideo")).reason === "type" && checkUpload(F("application/pdf")).reason === "type",
+     "and not a type the bucket refuses");
 }
 
 if (bad) { console.log(`\n${bad} check(s) FAILED`); process.exit(1); }
