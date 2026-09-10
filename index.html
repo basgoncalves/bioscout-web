@@ -206,6 +206,12 @@ try {
   dialog { border:1px solid var(--line); border-radius:14px; background:var(--card);
            color:var(--ink); padding:16px; width:min(92vw,420px); }
   dialog::backdrop { background:rgba(0,0,0,.55); }
+  /* The terms are a page long now: they scroll inside the dialog, and the
+     I agree button stays in view under them. */
+  #termsDlg .termsText { max-height:min(62vh,560px); overflow-y:auto; margin:0 0 12px;
+                         padding-right:4px; line-height:1.5; }
+  #termsDlg .termsText a { color:var(--accent); }
+  #termsDlg .termsText:focus { outline:none; }  /* focused as the scroller when the dialog opens */
   /* Water: ten glasses between a - and a + */
   .waterHead { display:flex; justify-content:space-between; align-items:baseline; }
   .water { display:flex; align-items:center; gap:6px; margin-top:6px; }
@@ -549,16 +555,7 @@ try {
 
   <dialog id="termsDlg">
     <h2 style="font-size:16px;margin:0 0 10px" data-i18n="termsTitle">Terms &amp; privacy</h2>
-    <p class="note" style="margin:0 0 14px" data-i18n-html="termsBody">BioScout runs entirely on this
-      device. Any video you record is processed on-device for pose analysis and is
-      <b>never uploaded anywhere</b>; profiles, sessions, meals and every other reading
-      are stored only in this browser's local storage, with no account and no server
-      behind it. That also means clearing this browser's data, or uninstalling the app,
-      erases everything -- export your data first if you want to keep it.<br><br>
-      BioScout is not a medical device and does not diagnose, treat, or give medical
-      advice. It estimates joint loads and movement metrics from video for training
-      feedback only; use it at your own risk and check with a professional for
-      anything health-related. The app is provided as-is, with no warranty.</p>
+    <div class="termsText note" data-i18n-html="termsBody"><b>What BioScout is.</b> A training tool that estimates movement and joint-load figures from phone video. It is <b>not a medical device</b>: it does not diagnose, treat or give medical advice, and its numbers are estimates. Use it at your own risk and ask a professional about anything health-related. It is made by one person, Bas Goncalves, and provided as it is, without warranty.<br><br><b>Without an account</b> everything stays on this device. Videos are analysed here and never uploaded; profiles and logs live in this browser's storage, so clearing it or uninstalling the app deletes them. Export your data if you want to keep it.<br><br><b>With an account</b> (optional), the athlete you mark as you is also kept in your account on servers in the EU (Supabase, Frankfurt) so your devices can sync: training sessions and their summaries, meals, diary and mood, sleep, weight, vitals, water and coffee, cycle, assessments, reaction tests and imported activities. Some of this is health data; by creating an account and syncing you agree to it being stored for that purpose. Only you can read it. Videos, motion curves and meal photos are not uploaded.<br><br><b>The feed.</b> A post is a picture or short clip you choose plus up to 42 characters, shown with your username. If your account is <b>open</b>, anyone signed in to BioScout can see your posts; if it is <b>private</b>, only you and your friends can. <b>Friends</b> are mutual (one asks, the other accepts) and see your posts and name, never your logs. Anyone signed in can find you by your username, which is chosen once and cannot be changed. Post only what you have the right to share, never other people without their consent, and nothing illegal, hateful or sexual; posts and accounts that break this can be removed. You keep the rights to what you post and let BioScout show it in the app.<br><br><b>Your data, your choice.</b> Export it any time (Edit profile → Export), correct it in the app, and delete your account with everything in it, posts included (Edit profile → Account → Delete my account) — which also withdraws your consent. Questions or requests: basilio.goncalves7@gmail.com. You can also complain to the Austrian Data Protection Authority (dsb.gv.at).<br><br><b>Age.</b> You must be at least 14 to create an account; younger athletes need a parent or guardian to agree for them.<br><br><b>Also:</b> Help &amp; chat runs on this device and is not stored; "Talk to a professional" opens your own email or WhatsApp. Strava and video-link imports go through a helper on your own computer. Nothing is sold, and there are no ads or trackers. When these terms change, the app asks you to agree again. <a href="./privacy.html" target="_blank" rel="noopener">Full privacy notice</a></div>
     <button class="ghost" id="termsAgreeBtn" data-i18n="termsAgree">I agree</button>
   </dialog>
 
@@ -1020,7 +1017,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 97;
+window.BUILD = 98;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
