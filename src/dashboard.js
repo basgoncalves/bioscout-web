@@ -1228,10 +1228,10 @@ function diaryHTML(day, key, todayKey, trend) {
   </div>`;
 }
 
+/* No mood picker here any more (Bas, 2026-09-10): the day's mood is the row of
+ * faces on the Diary card itself, one tap and no entry. An entry is tags and a
+ * note. Older entries that carry a mood still count toward the day's mood. */
 export function diaryFormHTML(key, todayKey, tags, draft = { tags: [], levels: {} }) {
-  const picker = MOODS.map((m) =>
-    `<button type="button" class="moodBtn m${m.v}" data-mood="${m.v}"
-       aria-label="${esc(tr(m.key))}">${esc(tr(m.key))}</button>`).join("");
 
   // Unchosen tags stay chips. Chosen ones get a stepper, on their own row
   // where the − and + are big enough to hit and the number is readable --
@@ -1252,8 +1252,6 @@ export function diaryFormHTML(key, todayKey, tags, draft = { tags: [], levels: {
   }).join("");
 
   return `
-    <label style="margin-top:10px">${esc(tr("overall"))}</label>
-    <div class="moods">${picker}</div>
     ${steppers ? `<div class="steps">${steppers}</div>` : ""}
     <div class="chips" style="margin-top:8px">${chips}
       <button type="button" class="chip addTag" id="tagAdd">+</button></div>

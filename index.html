@@ -3076,15 +3076,6 @@ function wireDiaryForm(key) {
     openAdd("diary");
     $("diaryNote").value = note;
   };
-  body.querySelectorAll("button.moodBtn").forEach((b) => {
-    b.classList.toggle("on", +b.dataset.mood === draft.mood);
-    b.onclick = () => {
-      // Tapping the chosen level again clears it: a diary you cannot un-answer
-      // is one people stop being honest in.
-      draft.mood = draft.mood === +b.dataset.mood ? null : +b.dataset.mood;
-      redraw();
-    };
-  });
   body.querySelectorAll("button.tagBtn").forEach((b) => {
     b.onclick = () => {
       const next = stepTag(draft.tags, draft.levels, b.dataset.tag, 1);
