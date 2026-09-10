@@ -14,6 +14,10 @@ try {
   var th = JSON.parse(localStorage.getItem("bioscout.theme.v1") || "{}");
   if (th.mode === "light" || th.mode === "dark") document.documentElement.dataset.theme = th.mode;
   if (th.palette) document.documentElement.dataset.palette = th.palette;
+  /* Phone or desktop layout: the saved choice, else by the window's width. */
+  var lay = localStorage.getItem("bioscout.layout.v1");
+  if (lay !== "phone" && lay !== "desktop") lay = window.innerWidth >= 1100 ? "desktop" : "phone";
+  document.documentElement.dataset.layout = lay;
 } catch (e) {}
 </script>
 <link rel="icon" href="assets/icons/favicon.ico" sizes="any">
@@ -88,6 +92,49 @@ try {
   .appearance { display:flex; justify-content:flex-end; align-items:center; gap:8px;
                 flex-wrap:wrap; margin:-6px 0 4px; }
   button.themeToggle { width:34px; height:30px; padding:0; margin:0; font-size:16px; line-height:1; }
+  button.layoutToggle { width:34px; height:30px; padding:0; margin:0; line-height:0; }
+  button.layoutToggle svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.7;
+                            stroke-linejoin:round; stroke-linecap:round; }
+  /* The toggle only where a desktop layout has room to be one. */
+  @media (max-width: 759px) { button.layoutToggle { display:none; } }
+  .dayHead2 { display:none; }
+  /* Desktop layout: a wider page, and the dashboard in two columns -- the
+     month (summary, calendar, weight) on the left, kept in view while the
+     selected day's sections scroll on the right. The DOM order is the phone
+     order, so nothing moves on a phone. */
+  @media (min-width: 760px) {
+    :root[data-layout="desktop"] .wrap { max-width:1200px; padding:20px 28px 48px; }
+    :root[data-layout="desktop"] .dashCols { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,6fr);
+                                             gap:28px; align-items:start; }
+    :root[data-layout="desktop"] .dashLeft { position:sticky; top:12px; }
+    :root[data-layout="desktop"] .dayHead2 { display:block; font-weight:600; font-size:17px; margin:0 0 4px; }
+    :root[data-layout="desktop"] .dashRight > .daybox:first-of-type,
+    :root[data-layout="desktop"] .dashRight > .dayHead2 + * { margin-top:0; }
+    /* Everything that is not the dashboard stays a readable column. */
+    :root[data-layout="desktop"] section:not(#viewDash) { max-width:880px; margin:0 auto; }
+    :root[data-layout="desktop"] dialog { width:min(92vw,560px); }
+    :root[data-layout="desktop"] .whoBtns { max-width:720px; }
+    :root[data-layout="desktop"] #dayHead { display:none; }
+    /* Back and Home as a small row, not two full-width bars across a wide page. */
+    :root[data-layout="desktop"] #navBar:not(.hidden) { display:flex; gap:8px; }
+    :root[data-layout="desktop"] #navBar button { width:auto; margin:0; padding:8px 16px; font-size:14px; }
+  }
+  /* Reaction time: one big pad */
+  .rtPad { user-select:none; -webkit-user-select:none; touch-action:none; cursor:pointer;
+           height:max(260px, 46vh); border-radius:18px; display:flex; flex-direction:column;
+           align-items:center; justify-content:center; text-align:center; padding:16px;
+           background:var(--bg); border:2px solid var(--line); color:var(--ink); margin:10px 0 8px;
+           outline:none; }
+  .rtPad .big { font-size:40px; font-weight:700; line-height:1.1; font-variant-numeric:tabular-nums; }
+  .rtPad .small { font-size:14px; color:var(--muted); margin-top:6px; }
+  .rtPad.wait { background:#8f2f2a; border-color:#8f2f2a; color:#fff; }
+  .rtPad.go { background:#1f9d55; border-color:#1f9d55; color:#fff; }
+  .rtPad.early { background:#b4540f; border-color:#b4540f; color:#fff; }
+  .rtPad.wait .small, .rtPad.go .small, .rtPad.early .small { color:rgba(255,255,255,.85); }
+  .rtDots { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; min-height:26px; }
+  .rtDots span { font-size:12.5px; padding:3px 8px; border-radius:999px; border:1px solid var(--line);
+                 font-variant-numeric:tabular-nums; color:var(--muted); }
+  .rtDots span.done { color:var(--ink); border-color:var(--accent); }
   .swatches { display:flex; gap:5px; }
   button.swatch { width:22px; height:22px; padding:0; margin:0; border-radius:50%;
                   border:2px solid transparent; box-shadow:0 0 0 1px var(--line); }
@@ -492,6 +539,7 @@ try {
     <a href="#" id="termsLinkBtn" class="note" style="margin-left:auto" data-i18n="termsLink">Terms</a>
   </div>
   <div class="appearance">
+    <button type="button" class="ghost layoutToggle" id="layoutToggle"></button>
     <button type="button" class="ghost themeToggle" id="themeToggle"></button>
     <div class="swatches" id="swatches" role="radiogroup"></div>
     <select id="lang" style="width:auto;padding:5px 8px;font-size:12.5px;margin:0"></select>
@@ -750,6 +798,20 @@ try {
     </dialog>
   </section>
 
+  <section id="viewReaction" class="hidden">
+    <div class="card" id="reactionCard">
+      <h2 style="font-size:17px;margin:0 0 2px" data-i18n="rtTitle">Reaction time</h2>
+      <p class="sub" style="margin:0" data-i18n="rtHow">When the pad turns green, tap it as fast as you can.</p>
+      <div class="rtPad" id="rtPad" role="button" tabindex="0">
+        <div class="big" id="rtBig"></div><div class="small" id="rtSmall"></div>
+      </div>
+      <div class="rtDots" id="rtDots"></div>
+      <div id="rtResult"></div>
+      <p class="note" style="margin:10px 0 0" data-i18n="rtCaveat">The time includes your screen's and touchscreen's own delay.</p>
+      <div id="rtHistory" style="margin-top:12px"></div>
+    </div>
+  </section>
+
   <section id="viewCycle" class="hidden">
     <div class="card" id="cycleCard"></div>
   </section>
@@ -993,6 +1055,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
          listSleep, setSleep, clearSleep,
          listVitals, setVitals, clearVitals, bpPair, listWater, listCoffee, setDrink,
+         listReaction, addReaction, deleteReaction,
          listCardio, mergeCardio, latestCardioAt,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
@@ -1016,6 +1079,8 @@ import { probe as probeStrava, authorise as authoriseStrava,
 import { DEFAULT_TAGS, liveTags, toggleTag, stepTag, quickMoodAt } from "./src/diary.js";
 import { collectWeights, weightNear } from "./src/weight.js";
 import { collectCups } from "./src/water.js";
+import { TRIALS as RT_TRIALS, foreperiod, classify as rtClassify, summarise as rtSummarise,
+         reactionTrend } from "./src/reaction.js";
 import { SPORT_IDS, allowedIn } from "./src/sports.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
@@ -1338,6 +1403,7 @@ function applyStaticI18n() {
     if (!setLang(sel.value)) return;
     applyStaticI18n();
     applyTheme();                        // its labels are translated too
+    applyLayout();
     refreshDerived();
     renderTraining();
     // Re-render exactly what is on screen, if anything is.
@@ -2078,6 +2144,33 @@ function saveTheme(patch) {
 $("themeToggle").onclick = () => saveTheme({ mode: isDark() ? "light" : "dark" });
 if (darkMQ && darkMQ.addEventListener) darkMQ.addEventListener("change", applyTheme);
 
+/* ---- phone / desktop layout ---------------------------------------------
+ * Same rule as light/dark: with no choice made it follows the window (wide
+ * means desktop), and a tap on the toggle makes it explicit. The icon shows
+ * what the page IS. Only the arrangement changes -- the DOM is the phone's. */
+const LKEY_LAYOUT = "bioscout.layout.v1";
+const wideMQ = window.matchMedia ? window.matchMedia("(min-width: 1100px)") : null;
+function readLayout() {
+  let v = null;
+  try { v = localStorage.getItem(LKEY_LAYOUT); } catch { /* none */ }
+  return v === "phone" || v === "desktop" ? v : (wideMQ && wideMQ.matches ? "desktop" : "phone");
+}
+const ICON_PHONE = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>`;
+const ICON_DESKTOP = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12.5" rx="1.5"/><path d="M9 20.5h6M12 16.5v4"/></svg>`;
+function applyLayout() {
+  const lay = readLayout();
+  document.documentElement.dataset.layout = lay;
+  const b = $("layoutToggle");
+  b.innerHTML = lay === "desktop" ? ICON_DESKTOP : ICON_PHONE;
+  b.title = tr(lay === "desktop" ? "layoutDesktop" : "layoutPhone");
+  b.setAttribute("aria-label", tr(lay === "desktop" ? "toPhone" : "toDesktop"));
+}
+$("layoutToggle").onclick = () => {
+  try { localStorage.setItem(LKEY_LAYOUT, readLayout() === "desktop" ? "phone" : "desktop"); } catch { /* per visit */ }
+  applyLayout();
+};
+if (wideMQ && wideMQ.addEventListener) wideMQ.addEventListener("change", applyLayout);
+
 /* Which per-set measure the training table and its chart show. Keys are the
  * fields profiles.js stores per rep, so anything summarised there can be
  * plotted without touching this list twice.
@@ -2758,7 +2851,7 @@ $("mealShotFile").onchange = (e) => {
  * gets stored. The login screen writes to it rather than replacing it, so
  * there is still exactly one source of truth for the athlete.
  */
-const VIEWS = ["viewLogin", "viewDash", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat"];
+const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -2782,6 +2875,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewDash") renderDash();
   if (id === "viewCycle") renderCycle();
   if (id === "viewAssess") renderAssess();
+  if (id === "viewReaction") openReaction(false);
   if (id === "viewFeed") renderFeed();
   if (id === "viewChat") chat.open();
 });
@@ -2993,6 +3087,149 @@ function myCoffee() {
   return listCoffee().filter((v) => v.profile === who);
 }
 
+function myReaction() {
+  const who = currentAthlete();
+  return listReaction().filter((v) => v.profile === who);
+}
+
+/* --- reaction time: the finger test ---------------------------------------
+ * The pad cycles idle -> wait (random 1.5-4 s) -> go -> result, five counted
+ * trials. Timing: the green is recorded at the animation frame that paints it
+ * (the rAF timestamp), the tap by its event timeStamp -- both on the same
+ * high-resolution clock -- and pointerdown rather than click, which on a
+ * phone can fire late. A tap during the wait is a false start and the trial
+ * is repeated; see reaction.js for what counts. */
+const rt = { state: "idle", trials: [], falseStarts: 0, misses: 0, onset: null,
+             timer: null, input: null, saved: null };
+function rtSet(state, big, small = "") {
+  rt.state = state;
+  $("rtPad").className = "rtPad " + state;
+  $("rtBig").textContent = big;
+  $("rtSmall").textContent = small;
+}
+function rtDots() {
+  $("rtDots").innerHTML = Array.from({ length: RT_TRIALS }, (_, i) =>
+    `<span class="${i < rt.trials.length ? "done" : ""}">${
+      i < rt.trials.length ? esc(tr("rtMs", { ms: Math.round(rt.trials[i]) })) : i + 1}</span>`).join("");
+}
+function rtReset() {
+  clearTimeout(rt.timer);
+  Object.assign(rt, { trials: [], falseStarts: 0, misses: 0, onset: null, timer: null, input: null, saved: null });
+  rtSet("idle", tr("rtTapToStart"), tr("rtNTrials", { n: RT_TRIALS }));
+  rtDots();
+  $("rtResult").innerHTML = "";
+}
+function rtWait() {
+  clearTimeout(rt.timer);
+  rt.onset = null;
+  rtSet("wait", tr("rtWait"), tr("rtTrialOf", { i: rt.trials.length + 1, n: RT_TRIALS }));
+  rt.timer = setTimeout(() => {
+    // The class change and the timestamp belong to the same frame.
+    requestAnimationFrame((ts) => {
+      if (rt.state !== "wait") return;
+      rtSet("go", tr("rtGo"));
+      rt.onset = ts;
+      rt.timer = setTimeout(() => {           // nobody tapped: a missed trial
+        if (rt.state !== "go") return;
+        rt.misses++;
+        rtSet("early", tr("rtTooSlow"), tr("rtAgainSoon"));
+        rt.timer = setTimeout(rtWait, 1200);
+      }, 1500 + 100);
+    });
+  }, foreperiod());
+}
+function rtFinish() {
+  clearTimeout(rt.timer);
+  const s = rtSummarise(rt.trials);
+  const rec = addReaction({ profile: currentAthlete(), trials: rt.trials, falseStarts: rt.falseStarts,
+                            misses: rt.misses, input: rt.input });
+  rt.saved = rec;
+  rtSet("done", tr("rtMs", { ms: s.median }), tr("rtYourMedian"));
+  const inputName = rt.input ? tr("rtInput_" + rt.input) : "";
+  $("rtResult").innerHTML = `<p style="margin:10px 0 0;text-align:center">${esc(tr("rtSummary", {
+      median: s.median, best: s.best, mean: s.mean, sd: s.sd }))}</p>
+    <p class="sub" style="margin:4px 0 0;text-align:center">${esc(tr("rtFaults", {
+      early: rt.falseStarts, slow: rt.misses }))}${inputName ? " · " + esc(inputName) : ""}</p>
+    <div class="row" style="margin-top:10px">
+      <button type="button" id="rtAgain" style="margin:0">${esc(tr("rtAgain"))}</button>
+      <button type="button" class="ghost" id="rtDone" style="margin:0">${esc(tr("rtDone"))}</button>
+    </div>`;
+  $("rtAgain").onclick = rtReset;
+  $("rtDone").onclick = () => goHome();
+  rtHistory();
+}
+function rtPress(stamp, input) {
+  if (rt.state === "idle") { rt.input = input; rtDots(); rtWait(); return; }
+  if (rt.state === "wait") {
+    clearTimeout(rt.timer);
+    rt.falseStarts++;
+    rtSet("early", tr("rtTooSoon"), tr("rtAgainSoon"));
+    rt.timer = setTimeout(rtWait, 1200);
+    return;
+  }
+  if (rt.state !== "go" || rt.onset === null) return;
+  clearTimeout(rt.timer);
+  const ms = stamp - rt.onset;
+  const kind = rtClassify(ms);
+  if (kind === "early") {                    // under 100 ms: a guess
+    rt.falseStarts++;
+    rtSet("early", tr("rtTooSoon"), tr("rtAgainSoon"));
+    rt.timer = setTimeout(rtWait, 1200);
+    return;
+  }
+  if (kind === "slow") {
+    rt.misses++;
+    rtSet("early", tr("rtTooSlow"), tr("rtAgainSoon"));
+    rt.timer = setTimeout(rtWait, 1200);
+    return;
+  }
+  rt.trials.push(ms);
+  rtDots();
+  if (rt.trials.length >= RT_TRIALS) { rtFinish(); return; }
+  rtSet("result", tr("rtMs", { ms: Math.round(ms) }), tr("rtNext"));
+  rt.timer = setTimeout(rtWait, 900);
+}
+$("rtPad").addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  rtPress(e.timeStamp, e.pointerType === "mouse" ? "mouse" : e.pointerType === "pen" ? "pen" : "touch");
+});
+document.addEventListener("keydown", (e) => {
+  if ($("viewReaction").classList.contains("hidden") || e.repeat) return;
+  if (e.code !== "Space" && e.key !== " " && e.key !== "Enter") return;
+  if (rt.state === "done") return;          // Enter on a result button stays a button press
+  e.preventDefault();
+  rtPress(e.timeStamp, "key");
+});
+function rtHistory() {
+  const mine = myReaction().slice().reverse();
+  if (!mine.length) { $("rtHistory").innerHTML = ""; return; }
+  const last = mine[0];
+  const usual = reactionTrend(myReaction(), last.input, 30);
+  const rows = mine.slice(0, 20).map((x) => {
+    const s = rtSummarise(x.trials);
+    const when = new Date(x.at).toLocaleString([], { day: "numeric", month: "short",
+                                                     hour: "2-digit", minute: "2-digit" });
+    return `<tr><td>${esc(when)}</td><td style="text-align:right">${s ? s.median : "—"}</td>
+      <td style="text-align:right">${s ? s.best : "—"}</td><td>${esc(x.input ? tr("rtInput_" + x.input) : "")}</td>
+      <td style="width:1%"><button type="button" class="linky rtDel" data-at="${esc(x.at)}"
+        aria-label="${esc(tr("delete"))}">×</button></td></tr>`;
+  }).join("");
+  $("rtHistory").innerHTML = `<div style="font-weight:600">${esc(tr("rtHistory"))}</div>
+    ${usual && usual.tests > 1 ? `<p class="sub" style="margin:2px 0 6px">${esc(tr("rtUsual", {
+      ms: usual.median, n: usual.tests, input: last.input ? tr("rtInput_" + last.input) : "" }))}</p>` : ""}
+    <table><thead><tr><th>${esc(tr("rtWhen"))}</th><th style="text-align:right">${esc(tr("rtMedianH"))}</th>
+      <th style="text-align:right">${esc(tr("rtBestH"))}</th><th>${esc(tr("rtInputH"))}</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  $("rtHistory").querySelectorAll("button.rtDel").forEach((b) => {
+    b.onclick = () => { deleteReaction(b.dataset.at, currentAthlete()); rtHistory(); };
+  });
+}
+function openReaction(push = true) {
+  if (push) showView("viewReaction");
+  rtReset();
+  rtHistory();
+}
+
 function myCardio() {
   const who = currentAthlete();
   return listCardio().filter((c) => c.profile === who);
@@ -3152,7 +3389,8 @@ function renderDash(fromSync = false) {
   // Height comes from the profile; weight comes from the log, carried forward.
   const prof = getProfile(currentAthlete());
   const view = { ...dashView, heightM: prof?.heightM ?? null, sex: prof?.sex ?? null,
-                 ageY: prof?.ageY ?? null, achievements: myAchievements() };
+                 ageY: prof?.ageY ?? null, achievements: myAchievements(),
+                 reaction: myReaction() };
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
                                    myWeights(), myCycle(), mySleep(), myVitals(),
                                    myCardio(), myWater(), myCoffee(), view);
@@ -3227,6 +3465,7 @@ function renderDash(fromSync = false) {
   if ($("trainImport")) $("trainImport").onclick = () => $("importProfilesFile").click();
   if ($("assessBtn")) $("assessBtn").onclick = () => openAssess();
   if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);
+  if ($("reactionBtn")) $("reactionBtn").onclick = () => openReaction();
   if ($("sleepSave")) $("sleepSave").onclick = () => {
     if (!setSleep({ profile: currentAthlete(), at: atOnDay(dashView.selected),
                     bed: $("sleepBed").value, wake: $("sleepWake").value })) {
@@ -4117,6 +4356,7 @@ if (lastUsedProfile()) applyProfile(lastUsedProfile());
 renderTraining();
 // Here, not beside its definition: it uses esc(), declared further down.
 applyTheme();
+applyLayout();
 renderLogin();
 
 /* A reload is not a fresh visit: the browser keeps the current history

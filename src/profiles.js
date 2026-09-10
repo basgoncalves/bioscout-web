@@ -31,6 +31,7 @@ const SLKEY = "bioscout.sleep.v1";
 const VKEY = "bioscout.vitals.v1";
 const WAKEY = "bioscout.water.v1";
 const COKEY = "bioscout.coffee.v1";
+const RXKEY = "bioscout.reaction.v1";
 const DRINK_KEY = { water: WAKEY, coffee: COKEY };
 const CDKEY = "bioscout.cardio.v1";
 const LKEY = "bioscout.ledger.v1";
@@ -596,6 +597,41 @@ export const setWater = ({ profile = null, at, glasses }) =>
 export const setCoffee = ({ profile = null, at, cups }) =>
   setDrink({ kind: "coffee", profile, at, n: cups });
 
+// --- reaction time (finger test) ---------------------------------------------
+/* One record per test, keyed by its time like a meal: a day can hold a
+ * morning and an evening test. Only the raw counted trials are kept (plus
+ * what went wrong and how the taps came in); median and best are derived in
+ * reaction.js, so a better summary later applies to old tests too.
+ * Local and in the export file; not in the cloud sync yet (the server's
+ * list of record kinds does not include it). */
+const REACTION_MAX = 2000;
+
+export function listReaction() {
+  const v = read(RXKEY, []);
+  return Array.isArray(v) ? v : [];
+}
+
+export function addReaction({ profile = null, at = null, trials = [], falseStarts = 0,
+                              misses = 0, input = null }) {
+  const t = (trials || []).map((x) => Math.round(+x)).filter((x) => Number.isFinite(x) && x > 0);
+  if (!t.length) return null;
+  const rec = { at: at || new Date().toISOString(), profile, trials: t,
+                falseStarts: Math.max(0, Math.round(+falseStarts) || 0),
+                misses: Math.max(0, Math.round(+misses) || 0),
+                input: ["touch", "mouse", "pen", "key"].includes(input) ? input : null,
+                u: stamp() };
+  const all = listReaction().filter((x) => !(x.at === rec.at && x.profile === profile));
+  all.push(rec);
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  unbury("reaction", rec);
+  write(RXKEY, all.slice(-REACTION_MAX));
+  return rec;
+}
+
+export function deleteReaction(at, profile = null) {
+  return dropAndBury(RXKEY, "reaction", listReaction(), (x) => x.at === at && x.profile === profile);
+}
+
 // --- cardio (imported endurance activities) ---------------------------------
 /* Keyed on the SOURCE's own id, not on the day: a day can hold a commute ride
  * and an evening run, and re-importing must recognise both rather than
@@ -796,7 +832,7 @@ export function eraseAthlete(name) {
   const curves = read(CKEY, {});
   for (const k of Object.keys(curves)) if (gone.has(k.split("|")[0])) delete curves[k];
   write(CKEY, curves);
-  for (const key of [MKEY, DKEY, WKEY, CYKEY, SLKEY, VKEY, WAKEY, COKEY, CDKEY]) {
+  for (const key of [MKEY, DKEY, WKEY, CYKEY, SLKEY, VKEY, WAKEY, COKEY, CDKEY, RXKEY]) {
     const list = read(key, []);
     if (Array.isArray(list)) write(key, list.filter((x) => !mine(x)));
   }
@@ -831,6 +867,7 @@ export function exportAll() {
     vitals: listVitals(),
     water: listWater(),
     coffee: listCoffee(),
+    reaction: listReaction(),
     cardio: listCardio(),
     /* Filed assessments travel with everything else.
      *
@@ -866,7 +903,7 @@ export function importAll(data) {
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
                    sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
                    weightsAdded: 0, cycleAdded: 0, sleepAdded: 0, vitalsAdded: 0,
-                   waterAdded: 0, coffeeAdded: 0, cardioAdded: 0, assessmentsAdded: 0,
+                   waterAdded: 0, coffeeAdded: 0, reactionAdded: 0, cardioAdded: 0, assessmentsAdded: 0,
                    ledgerAdded: 0, recordsUpdated: 0, recordsRemoved: 0 };
   report.assessmentsAdded = importAssessments(data.assessments);
 
@@ -955,6 +992,7 @@ export function importAll(data) {
     ["vitals", VKEY, listVitals, VITALS_MAX, "vitalsAdded"],
     ...DRINK_KINDS.map((k) => [k, DRINK_KEY[k], () => listDrink(k), DRINK_MAX, k + "Added"]),
     ["cardio", CDKEY, listCardio, CARDIO_MAX, "cardioAdded"],
+    ["reaction", RXKEY, listReaction, REACTION_MAX, "reactionAdded"],
   ];
   for (const [kind, key, list, max, field] of stores) {
     const r = merge(kind, list(), data[kind]);

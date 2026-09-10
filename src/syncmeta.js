@@ -43,6 +43,7 @@ export const IDENTITY = {
   vitals: (x) => `${who(x)}|${day(x.at)}`,
   water: (x) => `${who(x)}|${day(x.at)}`,
   coffee: (x) => `${who(x)}|${day(x.at)}`,
+  reaction: (x) => `${who(x)}|${x.at}`,
   cardio: (x) => `${who(x)}|${x.id}`,
   profiles: (x) => String(x.name),
   sessions: (x) => String(x.started),

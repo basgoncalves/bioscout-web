@@ -30,6 +30,7 @@ import { itemKcal, mealKcal, describe, UNITS } from "./foods.js";
 import { collectSleep, meanSleep, duration as sleepMins, fmt as fmtSleep } from "./sleep.js";
 import { collectVitals, meanSteps } from "./vitals.js";
 import { collectWater, collectCoffee, fmtVolume, DRINKS } from "./water.js";
+import { collectReaction, reactionTrend } from "./reaction.js";
 import { collectCardio, fmtDuration, fmtDistance, pace } from "./cardio.js";
 import { rate, scoreColour } from "./health.js";
 import { MILESTONES, badgeCount, repUnit } from "./achievements.js";
@@ -864,6 +865,31 @@ function vitalsHTML(vitalsDays, key, todayKey, trend) {
   </div>`;
 }
 
+/** Reaction time for the day: each finger test's median, and the athlete's
+ *  usual time on the same input. The test itself is its own screen
+ *  (index.html, #viewReaction). */
+function reactionHTML(entries, key, today) {
+  const list = collectReaction(entries).get(key) || [];
+  const inputOf = (i) => i ? tr("rtInput_" + i) : "";
+  const rows = list.map((t) => {
+    const time = new Date(t.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return `<p class="sub" style="margin:4px 0 0"><b>${esc(time)}</b> · ${esc(tr("rtMedianMs", { ms: t.median }))}
+      · ${esc(tr("rtBestMs", { ms: t.best }))}${t.input ? " · " + esc(inputOf(t.input)) : ""}</p>`;
+  }).join("");
+  const last = (entries || []).length ? entries[entries.length - 1] : null;
+  const trend = last ? reactionTrend(entries, last.input, 30, today) : null;
+  const trendLine = trend && trend.tests > 1
+    ? `<p class="sub" style="margin:2px 0 0">${esc(tr("rtUsual", { ms: trend.median, n: trend.tests,
+        input: inputOf(last.input) }))}</p>`
+    : "";
+  return `<div class="daybox">
+    <div style="font-weight:600">${esc(tr("rtTitle"))}</div>
+    ${trendLine}
+    ${rows || `<p class="sub" style="margin:6px 0 0">${esc(tr("rtNoneThatDay"))}</p>`}
+    <button type="button" class="ghost" id="reactionBtn" style="margin-top:8px">${esc(tr("rtStart"))}</button>
+  </div>`;
+}
+
 /* ---- the cycle view ---------------------------------------------------- */
 
 /**
@@ -1293,6 +1319,7 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     ${healthHTML({ heightM: view.heightM, weightKg: nowW ? nowW.kg : null,
                    sex: view.sex, ageY: view.ageY })}
     ${intakeHTML(mealDays, wts, view.year, view.month)}
+    <div class="dashCols"><div class="dashLeft">
     <div id="dayHead">
       <div style="font-weight:600">${esc(localeDay(view.selected)
         .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>
@@ -1300,6 +1327,9 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     ${calendarHTML({ meals: mealDays, diary: diaryDays, sleep: sleepDays, vitals: vitalsDays }[mode] || days,
                    view.year, view.month, view.selected, todayKey, mode)}
     ${weightDayHTML(wts, view.selected, todayKey, view.weightRange)}
+    </div><div class="dashRight">
+    <div class="dayHead2">${esc(localeDay(view.selected)
+      .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>
     ${dayHTML(days.get(view.selected), view.selected)}
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey, waterDays.get(view.selected),
                 coffeeDays.get(view.selected))}
@@ -1307,7 +1337,9 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
                 moodTrend(diaryDays, 30, today))}
     ${sleepHTML(sleepDays, view.selected, todayKey, meanSleep(sleepDays, 14, today))}
     ${vitalsHTML(vitalsDays, view.selected, todayKey, meanSteps(vitalsDays, 14, today))}
+    ${reactionHTML(view.reaction || [], view.selected, today)}
     ${cycleHTML(cycleDays, view.selected, todayKey)}
+    </div></div>
     ${volumeHTML(days, today)}
     ${achievementsHTML(view.achievements || null)}
     <div class="daybox">
