@@ -4,8 +4,11 @@
  *   simple  the pad turns green, tap. Pure speed of a single response.
  *   choice  left or right lights up, tap that side. A decision on top of the
  *           response, so it is slower than simple; wrong-side taps are errors.
- *   gonogo  green means tap, a red cross means DON'T. Speed plus holding back;
- *           a tap on the cross is an error (the number that matters most here).
+ *   colour  the pad is four coloured squares; a colour's NAME appears and the
+ *           athlete taps that colour. Reading, finding and tapping: the
+ *           slowest of the three, and wrong-colour taps are errors.
+ *   gonogo  (retired from the page 2026-09-10, replaced by colour; kept here
+ *           so tests already filed as go/no-go still read as what they were.)
  *
  * The rest of this header is about the simple game, and holds for all three.
  *
@@ -30,12 +33,15 @@ export const TRIALS = 5;
 
 /* How many stimuli each game shows. Choice is balanced left/right; go/no-go
  * is 7 go to 3 no-go, the usual ~70/30 that keeps "go" the habit to resist. */
+export const COLOURS = ["red", "blue", "green", "yellow"];
 export const GAMES = {
   simple: { go: 5 },
   choice: { left: 4, right: 4 },
+  colour: { red: 2, blue: 2, green: 2, yellow: 2 },
   gonogo: { go: 7, nogo: 3 },
 };
-export const GAME_IDS = Object.keys(GAMES);
+/** The games the page offers, in tab order. */
+export const GAME_IDS = ["simple", "choice", "colour"];
 
 /** The order of stimuli for one run: shuffled, and never opening on a
  *  no-go (the first thing a person sees should be the thing to do). */
@@ -46,6 +52,16 @@ export function sequence(game, rand = Math.random) {
   for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
     [out[i], out[j]] = [out[j], out[i]];
+  }
+  // Colour: the same colour twice in a row is a free hint -- the finger is
+  // already there. Re-deal until no two neighbours match (a handful of tries).
+  if (game === "colour") {
+    for (let tries = 0; tries < 50 && out.some((c, i) => i && c === out[i - 1]); tries++) {
+      for (let i = out.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [out[i], out[j]] = [out[j], out[i]];
+      }
+    }
   }
   if (out[0] === "nogo") {
     const k = out.findIndex((x) => x !== "nogo");

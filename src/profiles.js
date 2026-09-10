@@ -622,7 +622,7 @@ export function addReaction({ profile = null, at = null, trials = [], falseStart
                 input: ["touch", "mouse", "pen", "key"].includes(input) ? input : null,
                 // Which game (reaction.js GAMES), wrong-side taps / taps on the
                 // cross, and the training session it was done in, if any.
-                game: ["simple", "choice", "gonogo"].includes(game) ? game : "simple",
+                game: ["simple", "choice", "colour", "gonogo"].includes(game) ? game : "simple",
                 errors: Math.max(0, Math.round(+errors) || 0),
                 session: session ? String(session).slice(0, 40) : null,
                 u: stamp() };

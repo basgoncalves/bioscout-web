@@ -6,7 +6,7 @@
  */
 process.env.TZ = process.env.TZ || "Europe/Vienna";
 import { TRIALS, foreperiod, classify, summarise, collectReaction, reactionTrend,
-         FORE_MIN_MS, FORE_MAX_MS, sequence, GAMES, gameOf } from "../src/reaction.js";
+         FORE_MIN_MS, FORE_MAX_MS, sequence, GAMES, GAME_IDS, gameOf } from "../src/reaction.js";
 
 let bad = 0;
 const ok = (cond, label, detail = "") => {
@@ -62,6 +62,15 @@ ok(summarise([]) === null && summarise([NaN, -3]) === null, "nothing counted is 
     if (g[0] === "nogo" || g.length !== 10 || count(g, "nogo") !== 3) neverFirst = false;
   }
   ok(neverFirst, "go/no-go: 7 go, 3 no-go, and it never opens on a no-go");
+  let colourOk = true;
+  for (let i = 0; i < 200; i++) {
+    const q = sequence("colour", rand);
+    if (q.length !== 8 || ["red", "blue", "green", "yellow"].some((c) => count(q, c) !== 2)
+        || q.some((c, k) => k && c === q[k - 1])) colourOk = false;
+  }
+  ok(colourOk, "colour: two of each of four colours, never the same one twice in a row");
+  ok(GAME_IDS.join() === "simple,choice,colour", "the page offers tap, left/right and colour");
+  ok(gameOf({ game: "gonogo" }) === "gonogo", "a filed go/no-go test still reads as go/no-go");
   ok(sequence("simple").every((x) => x === "go") && sequence("simple").length === GAMES.simple.go,
      "simple: five greens");
   ok(sequence("nonsense").length === 5, "an unknown game falls back to simple");
