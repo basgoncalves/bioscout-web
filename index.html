@@ -746,7 +746,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 89;
+window.BUILD = 90;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2341,11 +2341,8 @@ function renderDash() {
   if ($("waterPlus")) $("waterPlus").onclick = () => waterStep(1);
   if ($("waterMinus")) $("waterMinus").onclick = () => waterStep(-1);
   if ($("vitalsImport")) $("vitalsImport").onclick = () => $("importProfilesFile").click();
-  /* An assessment filed on the day being looked at, offered on the day being
-   * looked at. The calendar already outlines those days in red, which tells
-   * the athlete something happened without giving them any way to read it --
-   * and the list on the assessment screen is somewhere they have no reason to
-   * go looking. */
+  /* Assessments on the dashboard. A filed one is read from its red row in the
+   * Training section (openSessionRow); only an unfiled one is flagged here. */
   (() => {
     /* An assessment with tests in it but not filed is the state that has been
      * losing people's work: the recordings are in the training log, the
@@ -2367,29 +2364,12 @@ function renderDash() {
       $("assessOpenUnfiled").onclick = () => openAssess();
     }
 
-    const filed = listAssessments(currentAthlete())
-      .filter((a) => a.finished && dayKey(new Date(a.finished)) === dashView.selected);
-    if (!filed.length) return;
-    const box = document.createElement("div");
-    box.className = "daybox";
-    box.innerHTML = `<div style="font-weight:600">${esc(tr("assess"))}</div>
-      ${filed.map((a, i) => `<button type="button" class="ghost filedAssess"
-        data-at="${esc(a.finished)}" style="margin:8px 0 0">${
-        esc(new Date(a.finished).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-            + " \u2014 " + (a.attendanceOnly ? tr("assessAttendanceOnly")
-              : tr("assessFiledTests", { n: a.recorded.length, total: ASSESS_TESTS.length })))}</button>`).join("")}`;
-    card.appendChild(box);
-    box.querySelectorAll("button.filedAssess").forEach((b) => {
-      b.onclick = () => {
-        const a = listAssessments(currentAthlete()).find((x) => x.finished === b.dataset.at);
-        if (!a) return;
-        showView("viewAssess");
-        openPastAssessment(a);
-      };
-    });
+    /* Filed assessments are no longer listed down here as buttons: the red
+     * "Physical assessment" row in the Training section opens the report
+     * itself (see openSessionRow), where the athlete is already looking. */
   })();
   card.querySelectorAll("tr.sessionRow[data-session]").forEach((row) => {
-    row.onclick = () => openSessionView(row.dataset.session);
+    row.onclick = () => openSessionRow(row.dataset.session);
   });
 
 }
@@ -2517,6 +2497,35 @@ function renderTraining() {
         ? peakCell(hit, sp, byP && st ? byP[st.index] : null) : "—";
     });
   };
+}
+
+/* A row in the day's Training table. An ordinary session opens its session
+ * page; an assessment (the red row) opens its REPORT -- the filed assessment
+ * whose tests are this session's sets, else the one filed that day. One
+ * still in progress opens the assessment page, where it can be finished. */
+function assessmentForSession(started) {
+  const sess = findSession(started);
+  if (!sess) return null;
+  const ats = new Set((sess.sets || []).map((x) => x.at));
+  const mine = listAssessments(currentAthlete()).filter((a) => a.finished);
+  const bySet = mine.filter((a) => Object.values(a.tests || {}).some((t) => t && ats.has(t.at)));
+  if (bySet.length) return bySet[bySet.length - 1];
+  const day = dayKey(new Date(sess.sets?.[0]?.at || started));
+  const sameDay = mine.filter((a) => dayKey(new Date(a.finished)) === day);
+  return sameDay.length ? sameDay[sameDay.length - 1] : null;
+}
+function openSessionRow(started) {
+  const sess = findSession(started);
+  if (sess && (sess.sets || []).some((x) => x.assess)) {
+    const a = assessmentForSession(started);
+    if (a) { showView("viewAssess"); openPastAssessment(a); return; }
+    const open = getAssess(currentAthlete());
+    const ats = new Set(sess.sets.map((x) => x.at));
+    if (open && Object.values(open.tests || {}).some((t) => t && ats.has(t.at))) {
+      openAssess(); return;
+    }
+  }
+  openSessionView(started);
 }
 
 /** The session an id (its own `started` timestamp) names -- the live one if
