@@ -31,6 +31,8 @@ import { collectSleep, meanSleep, duration as sleepMins, fmt as fmtSleep } from 
 import { collectVitals, meanSteps } from "./vitals.js";
 import { collectWater, collectCoffee, fmtVolume, DRINKS } from "./water.js";
 import { collectReaction, reactionTrend } from "./reaction.js";
+import { SUMMARY_CHARTS, SUMMARY_WINDOWS, windowDays, timeOfDay, intensity, weekdayVolume,
+         movementMix, restGaps } from "./trainsummary.js";
 import { collectCardio, fmtDuration, fmtDistance, pace } from "./cardio.js";
 import { rate, scoreColour } from "./health.js";
 import { MILESTONES, badgeCount, repUnit } from "./achievements.js";
@@ -356,6 +358,110 @@ function volumeHTML(days, today) {
   }).join("");
   return `<div class="vol"><div class="sub" style="margin:14px 0 4px">${
     esc(tr("weeklyVolume"))}</div><div class="vbars">${bars}</div></div>`;
+}
+
+/* ---- training summary ----------------------------------------------------
+ * One chart at a time, picked from a list, over the last week or month
+ * (trainsummary.js does the counting). Small inline SVG in the page's own
+ * colours, so it follows light/dark and the accent. Every chart says what it
+ * rests on, and one with nothing to show says so instead of drawing an empty
+ * frame. */
+const SVG_W = 320, SVG_H = 150, PADL = 8, PADR = 8, PADT = 10, PADB = 24;
+const svgWrap = (inner, h = SVG_H) =>
+  `<svg class="sumChart" viewBox="0 0 ${SVG_W} ${h}" role="img" preserveAspectRatio="none">${inner}</svg>`;
+const axisText = (x, y, t, anchor = "middle") =>
+  `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="10" fill="var(--muted)">${esc(t)}</text>`;
+
+/** Vertical bars with a label under each; `labels` may skip some (""). */
+function barsSVG(values, labels, { highlight = -1 } = {}) {
+  const n = values.length, max = Math.max(1, ...values);
+  const w = (SVG_W - PADL - PADR) / n, ch = SVG_H - PADT - PADB;
+  let out = `<line x1="${PADL}" x2="${SVG_W - PADR}" y1="${SVG_H - PADB}" y2="${SVG_H - PADB}" stroke="var(--line)"/>`;
+  values.forEach((v, i) => {
+    const h = v ? Math.max(2, (ch * v) / max) : 0;
+    const x = PADL + i * w + w * 0.14;
+    out += `<rect x="${x.toFixed(1)}" y="${(SVG_H - PADB - h).toFixed(1)}" width="${(w * 0.72).toFixed(1)}"
+      height="${h.toFixed(1)}" rx="2" fill="var(--accent)" opacity="${i === highlight ? 1 : 0.75}"><title>${v}</title></rect>`;
+    if (labels[i]) out += axisText(PADL + i * w + w / 2, SVG_H - 8, labels[i]);
+  });
+  return svgWrap(out);
+}
+
+function timeSVG(t) {
+  const cw = SVG_W - PADL - PADR, ch = SVG_H - PADT - PADB, base = SVG_H - PADB;
+  const pts = t.curve.map((v, i) => [PADL + (cw * i) / (t.curve.length - 1), base - v * ch]);
+  const line = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("");
+  const area = `${line}L${PADL + cw},${base}L${PADL},${base}Z`;
+  let out = `<path d="${area}" fill="var(--accent)" opacity=".22"/><path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>`;
+  out += `<line x1="${PADL}" x2="${SVG_W - PADR}" y1="${base}" y2="${base}" stroke="var(--line)"/>`;
+  for (const h of [0, 6, 12, 18, 24]) out += axisText(PADL + (cw * h) / 24, SVG_H - 8, `${String(h).padStart(2, "0")}:00`,
+    h === 0 ? "start" : h === 24 ? "end" : "middle");
+  const px = PADL + (cw * t.peak) / 24;
+  out += `<line x1="${px.toFixed(1)}" x2="${px.toFixed(1)}" y1="${PADT}" y2="${base}" stroke="var(--ink)" stroke-dasharray="3 3" opacity=".5"/>`;
+  return svgWrap(out);
+}
+
+const hhmm = (h) => {
+  const m = Math.round(h * 60) % (24 * 60);
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+};
+
+/* The window ends on the selected day -- today unless another day is picked --
+ * so a past month can be looked back on by picking a day in it. */
+function summaryHTML(days, wts, view) {
+  const chart = SUMMARY_CHARTS.includes(view.summaryChart) ? view.summaryChart : "weight";
+  const win = SUMMARY_WINDOWS[view.summaryWin] ? view.summaryWin : "month";
+  const n = SUMMARY_WINDOWS[win];
+  const today = localeDay(view.selected);
+  const list = windowDays(days, n, today);
+  const empty = (key) => `<p class="sub" style="margin:8px 0 0">${esc(tr(key))}</p>`;
+  let body = "";
+  if (chart === "weight") {
+    body = weightChartSVG(weightWindow(wts, view.selected, n));
+  } else if (chart === "time") {
+    const t = timeOfDay(list);
+    body = !t.n ? empty("sumNone") : timeSVG(t)
+      + `<p class="sub" style="margin:4px 0 0">${esc(tr("sumTimePeak", { time: hhmm(t.peak), n: t.n }))}</p>`;
+  } else if (chart === "intensity") {
+    const x = intensity(list);
+    const labels = x.bins.map((_, i) => (i % 5 === 0 ? `${((i * x.binW)).toFixed(1).replace(/\.0$/, "")}×` : ""));
+    body = !x.n ? empty("sumNoLoad") : barsSVG(x.bins, labels)
+      + `<p class="sub" style="margin:4px 0 0">${esc(tr("sumIntensity", { mean: x.mean.toFixed(2), n: x.n }))}${
+        x.skipped ? " " + esc(tr("sumSkipped", { n: x.skipped })) : ""}</p>
+      <p class="note" style="margin:2px 0 0">${esc(tr("sumIntensityHow"))}</p>`;
+  } else if (chart === "weekday") {
+    const w = weekdayVolume(list);
+    const useMin = !w.reps.some(Boolean) && w.minutes.some(Boolean);
+    const vals = useMin ? w.minutes : w.reps;
+    const names = Array.from({ length: 7 }, (_, i) =>
+      new Date(2024, 0, 1 + i).toLocaleDateString([], { weekday: "short" }));
+    const top = vals.indexOf(Math.max(...vals));
+    body = !vals.some(Boolean) ? empty("sumNone") : barsSVG(vals, names, { highlight: top })
+      + `<p class="sub" style="margin:4px 0 0">${esc(tr(useMin ? "sumWeekdayMin" : "sumWeekday",
+          { day: new Date(2024, 0, 1 + top).toLocaleDateString([], { weekday: "long" }), n: vals[top] }))}</p>`;
+  } else if (chart === "movements") {
+    const m = movementMix(list);
+    const max = Math.max(1, ...m.map((r) => r.reps));
+    body = !m.length ? empty("sumNone") : `<div class="sumRows">${m.slice(0, 8).map((r) =>
+      `<div class="sumRow"><span class="sumName">${esc(tr(r.activity))}</span>
+        <span class="sumBar"><i style="width:${Math.max(3, Math.round((100 * r.reps) / max))}%"></i></span>
+        <span class="sumVal">${esc(tr(r.reps === 1 ? "nRep" : "nRepsCount", { n: r.reps }))}</span></div>`).join("")}</div>`;
+  } else if (chart === "rest") {
+    const r = restGaps(days, n, today);
+    body = !r.n ? empty("sumNoRest") : barsSVG(r.bins, ["1", "2", "3", "4", "5", "6", "7+"])
+      + `<p class="sub" style="margin:4px 0 0">${esc(tr("sumRest", { mean: r.mean.toFixed(1), n: r.n }))}</p>
+      <p class="note" style="margin:2px 0 0">${esc(tr("sumRestHow"))}</p>`;
+  }
+  const opts = SUMMARY_CHARTS.map((c) =>
+    `<option value="${c}"${c === chart ? " selected" : ""}>${esc(tr("sumChart_" + c))}</option>`).join("");
+  const wins = Object.keys(SUMMARY_WINDOWS).map((k) =>
+    `<button type="button" class="ghost sumWin${k === win ? " on" : ""}" data-win="${k}" aria-pressed="${k === win}">${esc(tr("sumWin_" + k))}</button>`).join("");
+  return `<div class="daybox" id="sumBox">
+    <div style="font-weight:600">${esc(tr("sumTitle"))}</div>
+    <select id="sumChart" aria-label="${esc(tr("sumTitle"))}" style="width:100%;margin:6px 0 6px">${opts}</select>
+    <div class="seg" role="group" style="margin:0 0 4px">${wins}</div>
+    ${body}
+  </div>`;
 }
 
 /**
@@ -1189,7 +1295,6 @@ export function weightSourceText(near) {
             { kg, date: shortDay(near.day), n: nDays(Math.abs(near.offset)) });
 }
 
-export const WEIGHT_RANGES = { week: 7, month: 30, year: 365 };
 
 /**
  * The timeline, as an inline SVG: a step line (a weight holds until the next
@@ -1246,15 +1351,14 @@ const daysFrom = (a, b) => {
 };
 
 /** The weight section of the day view: what was logged that day (or what is
- *  standing from before), a stepper to log it, and the timeline. */
-function weightDayHTML(wts, key, todayKey, range) {
-  const r = WEIGHT_RANGES[range] ? range : "month";
+ *  standing from before) and a stepper to log it. The timeline is one of the
+ *  charts in the trends box just above it (summaryHTML). */
+function weightDayHTML(wts, key, todayKey) {
   const near = weightNear(wts, key);
   const on = near && near.offset === 0;
   const line = on ? tr("weightOnThisDay", { kg: near.kg.toFixed(1) })
     : near ? `${tr("noWeightThatDay")} · ${weightSourceText(near)}`
     : tr("noWeightYet");
-  const win = weightWindow(wts, key, WEIGHT_RANGES[r]);
   return `<div class="daybox" id="weightBox">
     <div style="font-weight:600">${esc(tr("weightTitle"))}</div>
     <p class="sub" style="margin:4px 0 8px">${esc(line)}</p>
@@ -1263,11 +1367,6 @@ function weightDayHTML(wts, key, todayKey, range) {
       <button type="button" class="ghost" id="weightDaySave" style="margin:0;padding:9px;flex:0 0 auto;width:auto">${
         esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
     </div>
-    <div class="seg" role="group" aria-label="${esc(tr("weightTimeline"))}" style="margin-top:10px">
-      ${Object.keys(WEIGHT_RANGES).map((k) => `<button type="button" class="ghost wrange${k === r ? " on" : ""}"
-        data-range="${k}" aria-pressed="${k === r}">${esc(tr("range_" + k))}</button>`).join("")}
-    </div>
-    ${weightChartSVG(win)}
   </div>`;
 }
 
@@ -1326,7 +1425,8 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     </div>
     ${calendarHTML({ meals: mealDays, diary: diaryDays, sleep: sleepDays, vitals: vitalsDays }[mode] || days,
                    view.year, view.month, view.selected, todayKey, mode)}
-    ${weightDayHTML(wts, view.selected, todayKey, view.weightRange)}
+    ${summaryHTML(days, wts, view)}
+    ${weightDayHTML(wts, view.selected, todayKey)}
     </div><div class="dashRight">
     <div class="dayHead2">${esc(localeDay(view.selected)
       .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>

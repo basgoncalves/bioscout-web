@@ -463,6 +463,14 @@ try {
   .avatar.big { width:64px; height:64px; font-size:26px; }
   .avatar.mid { width:44px; height:44px; font-size:18px; }
   .postWho { display:flex; align-items:center; gap:8px; min-width:0; }
+  /* Training summary charts */
+  svg.sumChart { width:100%; height:150px; display:block; margin-top:4px; overflow:visible; }
+  .sumRows { margin-top:6px; }
+  .sumRow { display:flex; align-items:center; gap:8px; padding:3px 0; font-size:13px; }
+  .sumName { width:34%; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sumBar { flex:1; height:10px; background:var(--line); border-radius:5px; overflow:hidden; }
+  .sumBar i { display:block; height:100%; background:var(--accent); border-radius:5px; }
+  .sumVal { width:22%; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
   .post .postHead img.avatar { width:32px; height:32px; max-height:none; border-radius:50%;
                                object-fit:cover; margin:0; background:none; }
   .whoTop { display:flex; align-items:center; gap:10px; }
@@ -1154,7 +1162,7 @@ import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
          dayOfCycle } from "./src/cycle.js";
 import { densityFor, foodNames, describe, mealKcal, toGrams, unitStep } from "./src/foods.js";
-import { CARD, cardStats, drawCard, shareCard } from "./src/share.js";
+import { CARD, cardStats, drawCard, shareCard, shareText, APP_URL } from "./src/share.js";
 import { collectMeals } from "./src/dashboard.js";
 import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 // Imported as `tr`, not `t`: chart() and lineChart() both use `t` for the
@@ -1947,7 +1955,9 @@ $("shareGo").onclick = async () => {
   if (!blob || !shareJob) return;
   const ext = shareKind === "image" ? "jpg" : extFor(blob.type);
   const name = `${shareJob.stem}-${new Date().toISOString().slice(0, 10)}.${ext}`;
-  const what = await shareOut(blob, name, clampCaption($("shareCaption").value));
+  // Outside the app the picture travels alone, so the link goes with it.
+  const what = await shareOut(blob, name,
+    shareText(clampCaption($("shareCaption").value), tr("shareLink", { url: APP_URL })));
   if (what === "shared") shareMsg(tr("shareShared"));
   if (what === "downloaded") shareMsg(tr("shareDownloaded"));
 };
@@ -2828,7 +2838,8 @@ async function shareMonth() {
     const blob = await new Promise((r) => c.toBlob(r, "image/png"));
     if (!blob) { say(tr("shareFailed"), true); return; }
 
-    const what = await shareCard(blob, `bioscout-${s.stamp}.png`, tr("shareTitle"));
+    const what = await shareCard(blob, `bioscout-${s.stamp}.png`, tr("shareTitle"),
+      shareText("", tr("shareLink", { url: APP_URL })));
     if (what === "downloaded") say(tr("shareSaved"));
   } catch (err) {
     say(tr("shareFailed") + " " + err.message, true);
@@ -3748,7 +3759,10 @@ function defaultDashView() {
   // date more often than not.
   const pick = dayKey(new Date());
   const [y, m] = pick.split("-").map(Number);
-  return { year: y, month: m - 1, selected: pick, mode: "training" };
+  let sum = {};
+  try { sum = JSON.parse(localStorage.getItem("bioscout.summary.v1") || "{}") || {}; } catch { /* none */ }
+  return { year: y, month: m - 1, selected: pick, mode: "training",
+           summaryChart: sum.chart || "weight", summaryWin: sum.win || "month" };
 }
 
 /* --- Strava, through the local helper -------------------------------------
@@ -3891,6 +3905,18 @@ function renderDash(fromSync = false) {
     b.onclick = () => { dashView = { ...dashView, selected: b.dataset.day }; renderDash(); };
   });
 
+  /* Trends: which chart (weight, training times, ...) and over what window,
+   * remembered on this device. */
+  const saveSum = () => {
+    try { localStorage.setItem("bioscout.summary.v1", JSON.stringify({
+      chart: dashView.summaryChart, win: dashView.summaryWin })); } catch { /* per visit */ }
+  };
+  if ($("sumChart")) $("sumChart").onchange = (e) => {
+    dashView = { ...dashView, summaryChart: e.target.value }; saveSum(); renderDash();
+  };
+  card.querySelectorAll("button.sumWin").forEach((b) => {
+    b.onclick = () => { dashView = { ...dashView, summaryWin: b.dataset.win }; saveSum(); renderDash(); };
+  });
   if ($("dashMode")) $("dashMode").onchange = (e) => {
     dashView = { ...dashView, mode: e.target.value };
     renderDash();
@@ -3941,9 +3967,6 @@ function renderDash(fromSync = false) {
     say(tr("weightSaved", { kg: kg.toFixed(1), date: shortDate(dashView.selected) }));
     renderDash();
   };
-  card.querySelectorAll("button.wrange").forEach((b) => {
-    b.onclick = () => { dashView = { ...dashView, weightRange: b.dataset.range }; renderDash(); };
-  });
   if ($("trainImport")) $("trainImport").onclick = () => $("importProfilesFile").click();
   if ($("assessBtn")) $("assessBtn").onclick = () => openAssess();
   if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);

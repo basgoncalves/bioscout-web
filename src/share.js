@@ -15,6 +15,23 @@
 /** Instagram's portrait aspect, which is what a share sheet mostly feeds. */
 export const CARD = { w: 1080, h: 1350 };
 
+/** Where the app lives -- sent along with anything shared outside it, so the
+ * person who gets the picture on WhatsApp can open BioScout from it. */
+export const APP_URL = "https://basgoncalves.github.io/bioscout-web/";
+
+/**
+ * The words that go with a shared picture: the caption, then a line with the
+ * link. The link rides in `text` rather than `url` because with a file
+ * attached several apps (WhatsApp among them) keep the text and drop the url.
+ * The link line is not repeated when the caption already has the link.
+ */
+export function shareText(caption, linkLine) {
+  const c = String(caption || "").trim();
+  const l = String(linkLine || "").trim();
+  if (!l || c.includes(APP_URL)) return c;
+  return c ? `${c}\n\n${l}` : l;
+}
+
 const round = (n, d = 0) => (Number.isFinite(n) ? +n.toFixed(d) : null);
 
 /**
@@ -185,11 +202,11 @@ function roundRect(ctx, x, y, w, h, r) {
  * mostly lack -- so the fallback is a download, which gets to the same place
  * with one more tap rather than failing.
  */
-export async function shareCard(blob, filename, title) {
+export async function shareCard(blob, filename, title, text = "") {
   const file = new File([blob], filename, { type: "image/png" });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
-      await navigator.share({ files: [file], title });
+      await navigator.share({ files: [file], title, ...(text ? { text } : {}) });
       return "shared";
     } catch (err) {
       // AbortError is the person changing their mind, not a failure.

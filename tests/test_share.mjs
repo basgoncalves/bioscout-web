@@ -7,7 +7,7 @@
  *
  *   node test_share.mjs
  */
-import { cardStats, volumeBars, fitName, CARD } from "../src/share.js";
+import { cardStats, volumeBars, fitName, CARD, shareText, APP_URL } from "../src/share.js";
 import { collectDays, collectMeals } from "../src/dashboard.js";
 
 let bad = 0;
@@ -72,5 +72,13 @@ ok(fitName("Bartholomew Fitzgerald").endsWith("\u2026"), "and says it was cut");
 
 ok(CARD.w === 1080 && CARD.h === 1350, "portrait, which is what a share sheet feeds");
 
+// The link that goes with a picture shared outside the app.
+{
+  const line = `Tracked with BioScout: ${APP_URL}`;
+  ok(shareText("Leg day", line) === `Leg day\n\n${line}`, "the caption, then the link");
+  ok(shareText("", line) === line, "no caption: just the link");
+  ok(shareText(`see ${APP_URL}`, line) === `see ${APP_URL}`, "a caption with the link already is not given it twice");
+  ok(APP_URL.startsWith("https://"), "the link is https");
+}
 console.log(bad ? `\nFAIL  ${bad} check(s)` : "\nALL CHECKS PASSED");
 process.exit(bad ? 1 : 0);
