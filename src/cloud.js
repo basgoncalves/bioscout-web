@@ -299,12 +299,59 @@ export function makeCloud({ url, key, fetchImpl = globalThis.fetch?.bind(globalT
       return (rows && rows[0]) || null;
     },
 
-    /** "open": everyone signed in sees your posts. "private": only you, for now. */
+    /** "open": everyone signed in sees your posts. "private": you and your friends. */
     async setVisibility(login, visibility) {
       if (visibility !== "open" && visibility !== "private") throw new CloudError("bad_visibility");
       await call(`/rest/v1/accounts?id=eq.${login.user.id}`, {
         method: "PATCH", token: login.access_token, body: { visibility },
         headers: { Prefer: "return=minimal" } });
+    },
+
+    /* ---- usernames and friends (public.friendships, functions in schema.sql) ---- */
+
+    /** Choose a username, once (the server refuses a change). */
+    async setUsername(login, username) {
+      const name = String(username || "").trim().replace(/^@/, "").toLowerCase();
+      if (!USERNAME_RE.test(name)) throw new CloudError("bad_username");
+      try {
+        await call(`/rest/v1/accounts?id=eq.${login.user.id}`, {
+          method: "PATCH", token: login.access_token, body: { username: name },
+          headers: { Prefer: "return=minimal" } });
+      } catch (e) {
+        if (e.code === "23505") throw new CloudError("username_taken");     // unique violation
+        throw e;
+      }
+      return name;
+    },
+
+    /** Accounts whose username starts with `q` (2+ characters), not you. */
+    async searchUsers(login, q) {
+      return (await call("/rest/v1/rpc/search_accounts", {
+        method: "POST", token: login.access_token, body: { q: String(q || "") } })) || [];
+    },
+
+    /** Everyone you are linked to: {id, username, display_name, status, outgoing, since}. */
+    async friends(login) {
+      return (await call("/rest/v1/rpc/my_friends", {
+        method: "POST", token: login.access_token, body: {} })) || [];
+    },
+
+    /** Ask someone by username. Returns sent | accepted | already_sent |
+     *  already_friends | not_found | self | too_many. */
+    async requestFriend(login, username) {
+      return call("/rest/v1/rpc/request_friend", {
+        method: "POST", token: login.access_token, body: { p_username: String(username || "") } });
+    },
+
+    async respondFriend(login, otherId, accept) {
+      await call("/rest/v1/rpc/respond_friend", {
+        method: "POST", token: login.access_token, body: { p_other: otherId, p_accept: !!accept } });
+    },
+
+    /** Unfriend, or take back a request you sent -- or decline one sent to you. */
+    async removeFriend(login, otherId) {
+      await call("/rest/v1/rpc/remove_friend", {
+        method: "POST", token: login.access_token, body: { p_other: otherId } });
     },
 
     /**

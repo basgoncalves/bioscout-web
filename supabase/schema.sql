@@ -23,8 +23,8 @@ create table if not exists public.accounts (
 create table if not exists public.records (
   owner      uuid not null default auth.uid() references auth.users (id) on delete cascade,
   kind       text not null check (kind in ('meals','diary','weights','cycle','sleep','vitals',
-                                           'water','coffee','cardio','profiles','sessions',
-                                           'ledger','assessments')),
+                                           'water','coffee','cardio','reaction','profiles',
+                                           'sessions','ledger','assessments')),
   rid        text not null check (char_length(rid) <= 200),
   data       jsonb,                                   -- null for a deletion
   u          text not null,                           -- device's last-write time, ISO
@@ -120,8 +120,7 @@ grant execute on function public.delete_my_account() to authenticated;
 -- <owner uuid>/..., so the folder name alone says whose it is.
 --
 -- Who sees a post: its owner always; everyone signed in when the owner's
--- account is open. A private account's posts are seen by nobody else until
--- followers exist (stage 3). Health records never come here -- a post carries
+-- account is open; and friends (see the end of this file), private or not. Health records never come here -- a post carries
 -- only what the person chose to put on it.
 
 create table if not exists public.posts (
@@ -172,3 +171,192 @@ create policy "posts media: upload own" on storage.objects for insert to authent
   with check (bucket_id = 'posts' and (storage.foldername(name))[1] = (select auth.uid())::text);
 create policy "posts media: delete own" on storage.objects for delete to authenticated
   using (bucket_id = 'posts' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+-- ============================================================================
+-- Friends, a username for everyone, and reaction tests in the sync.
+--
+-- Friends are mutual: one person asks, the other accepts. A friend sees your
+-- posts (and their pictures and clips) even when your account is private, and
+-- sees your username and display name. Nothing else: `records` -- every
+-- health and training log -- stays owner-only, friends or not.
+--
+-- The table is only ever changed through the functions below (security
+-- definer, each acting for auth.uid() alone), so the rules -- one row per
+-- pair, only the person asked can accept, either can end it -- live in one
+-- place instead of in four RLS policies.
+
+-- Reaction-time tests (src/reaction.js) sync like any other record.
+alter table public.records drop constraint if exists records_kind_check;
+alter table public.records add constraint records_kind_check
+  check (kind in ('meals','diary','weights','cycle','sleep','vitals','water','coffee','cardio',
+                  'reaction','profiles','sessions','ledger','assessments'));
+
+-- A username is chosen once. Username-password logins sign in WITH it
+-- (<name>@users.bioscout.invalid), so changing it would lock them out; and a
+-- handle people found you by should not quietly become someone else's.
+create or replace function public.accounts_username_once() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  if old.username is not null and new.username is distinct from old.username then
+    raise exception 'username cannot be changed' using errcode = '42501';
+  end if;
+  new.username := lower(new.username);
+  return new;
+end $$;
+revoke execute on function public.accounts_username_once() from public, anon, authenticated;
+drop trigger if exists accounts_username_once on public.accounts;
+create trigger accounts_username_once before update on public.accounts
+  for each row execute function public.accounts_username_once();
+
+create table if not exists public.friendships (
+  requester   uuid not null references public.accounts (id) on delete cascade,
+  addressee   uuid not null references public.accounts (id) on delete cascade,
+  status      text not null default 'pending' check (status in ('pending', 'accepted')),
+  created_at  timestamptz not null default now(),
+  accepted_at timestamptz,
+  primary key (requester, addressee),
+  check (requester <> addressee)
+);
+-- One row per PAIR, whichever of the two asked.
+create unique index if not exists friendships_pair
+  on public.friendships (least(requester, addressee), greatest(requester, addressee));
+create index if not exists friendships_addressee on public.friendships (addressee);
+
+alter table public.friendships enable row level security;
+drop policy if exists "friendships: read own" on public.friendships;
+create policy "friendships: read own" on public.friendships for select to authenticated
+  using (requester = (select auth.uid()) or addressee = (select auth.uid()));
+-- No insert/update/delete policies: changes go through the functions below.
+
+-- Is `other` my friend (accepted)? Used by the posts and media policies.
+create or replace function public.is_friend(other uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.friendships f
+                 where f.status = 'accepted'
+                   and ((f.requester = (select auth.uid()) and f.addressee = other)
+                     or (f.addressee = (select auth.uid()) and f.requester = other)));
+$$;
+-- Any link, a request either way included: enough to see each other's name.
+create or replace function public.is_linked(other uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.friendships f
+                 where (f.requester = (select auth.uid()) and f.addressee = other)
+                    or (f.addressee = (select auth.uid()) and f.requester = other));
+$$;
+revoke execute on function public.is_friend(uuid) from public, anon;
+revoke execute on function public.is_linked(uuid) from public, anon;
+grant execute on function public.is_friend(uuid) to authenticated;
+grant execute on function public.is_linked(uuid) to authenticated;
+
+-- Names: your own, open accounts', and anyone you are linked to.
+drop policy if exists "own or open account: read" on public.accounts;
+create policy "own or open account: read" on public.accounts for select to authenticated
+  using (id = (select auth.uid()) or visibility = 'open' or public.is_linked(id));
+
+-- Posts: your own, open accounts', and your friends'.
+drop policy if exists "posts: read own or open" on public.posts;
+create policy "posts: read own or open" on public.posts for select to authenticated
+  using (owner = (select auth.uid())
+         or exists (select 1 from public.accounts a where a.id = posts.owner and a.visibility = 'open')
+         or public.is_friend(owner));
+
+drop policy if exists "posts media: read own or open" on storage.objects;
+create policy "posts media: read own or open" on storage.objects for select to authenticated
+  using (bucket_id = 'posts' and (
+           (storage.foldername(name))[1] = (select auth.uid())::text
+           or exists (select 1 from public.accounts a
+                      where a.id::text = (storage.foldername(name))[1]
+                        and (a.visibility = 'open' or public.is_friend(a.id)))));
+
+-- Search by username: the start of a handle, two characters at least, twenty
+-- results. Returns only the handle and display name -- the two things a
+-- person needs to recognise someone -- whatever the account's visibility.
+create or replace function public.search_accounts(q text)
+returns table (id uuid, username text, display_name text)
+language plpgsql stable security definer set search_path = '' as $$
+declare s text := lower(trim(both from coalesce(q, '')));
+begin
+  if (select auth.uid()) is null then raise exception 'not signed in' using errcode = '28000'; end if;
+  s := ltrim(s, '@');
+  if char_length(s) < 2 then return; end if;
+  return query
+    select a.id, a.username, a.display_name from public.accounts a
+    where a.username is not null and left(a.username, char_length(s)) = s
+      and a.id <> (select auth.uid())
+    order by a.username limit 20;
+end $$;
+
+-- Ask someone by username. If they had already asked you, this accepts.
+-- Returns what happened: sent | accepted | already_sent | already_friends |
+-- not_found | self | too_many.
+create or replace function public.request_friend(p_username text) returns text
+language plpgsql security definer set search_path = '' as $$
+declare me uuid := (select auth.uid()); them uuid; st text; req uuid;
+begin
+  if me is null then raise exception 'not signed in' using errcode = '28000'; end if;
+  select a.id into them from public.accounts a
+   where a.username = lower(ltrim(trim(both from coalesce(p_username, '')), '@'));
+  if them is null then return 'not_found'; end if;
+  if them = me then return 'self'; end if;
+  select f.status, f.requester into st, req from public.friendships f
+   where (f.requester = me and f.addressee = them) or (f.requester = them and f.addressee = me);
+  if st = 'accepted' then return 'already_friends'; end if;
+  if st = 'pending' and req = me then return 'already_sent'; end if;
+  if st = 'pending' and req = them then
+    update public.friendships set status = 'accepted', accepted_at = now()
+     where requester = them and addressee = me;
+    return 'accepted';
+  end if;
+  if (select count(*) from public.friendships f where f.requester = me and f.status = 'pending') >= 100 then
+    return 'too_many';
+  end if;
+  insert into public.friendships (requester, addressee) values (me, them);
+  return 'sent';
+end $$;
+
+-- Accept (or decline) a request someone sent you.
+create or replace function public.respond_friend(p_other uuid, p_accept boolean) returns void
+language plpgsql security definer set search_path = '' as $$
+declare me uuid := (select auth.uid());
+begin
+  if me is null then raise exception 'not signed in' using errcode = '28000'; end if;
+  if p_accept then
+    update public.friendships set status = 'accepted', accepted_at = now()
+     where requester = p_other and addressee = me and status = 'pending';
+  else
+    delete from public.friendships where requester = p_other and addressee = me and status = 'pending';
+  end if;
+end $$;
+
+-- End it from either side: unfriend, or take back a request you sent.
+create or replace function public.remove_friend(p_other uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare me uuid := (select auth.uid());
+begin
+  if me is null then raise exception 'not signed in' using errcode = '28000'; end if;
+  delete from public.friendships
+   where (requester = me and addressee = p_other) or (requester = p_other and addressee = me);
+end $$;
+
+-- Everyone you are linked to, with the state of the link.
+create or replace function public.my_friends()
+returns table (id uuid, username text, display_name text, status text, outgoing boolean, since timestamptz)
+language sql stable security definer set search_path = '' as $$
+  select a.id, a.username, a.display_name, f.status, f.requester = (select auth.uid()),
+         coalesce(f.accepted_at, f.created_at)
+  from public.friendships f
+  join public.accounts a on a.id = case when f.requester = (select auth.uid()) then f.addressee else f.requester end
+  where (select auth.uid()) in (f.requester, f.addressee)
+  order by f.status, a.username;
+$$;
+
+revoke execute on function public.search_accounts(text) from public, anon;
+revoke execute on function public.request_friend(text) from public, anon;
+revoke execute on function public.respond_friend(uuid, boolean) from public, anon;
+revoke execute on function public.remove_friend(uuid) from public, anon;
+revoke execute on function public.my_friends() from public, anon;
+grant execute on function public.search_accounts(text) to authenticated;
+grant execute on function public.request_friend(text) to authenticated;
+grant execute on function public.respond_friend(uuid, boolean) to authenticated;
+grant execute on function public.remove_friend(uuid) to authenticated;
+grant execute on function public.my_friends() to authenticated;

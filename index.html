@@ -596,6 +596,7 @@ try {
       <div class="sub" id="whoSince"></div>
       <div class="whoBtns">
         <button class="ghost" id="feedBtn" data-i18n="feed" hidden>Feed</button>
+        <button class="ghost" id="friendsBtn" data-i18n="friends" hidden>Friends</button>
         <button class="ghost" id="settingsBtn" data-i18n="editProfile">Edit profile</button>
         <button class="ghost" id="switchUserBtn" data-i18n="switchAthlete">Switch athlete</button>
         <button class="ghost" id="chatBtn" data-i18n="chat_open">Help &amp; chat</button>
@@ -971,6 +972,14 @@ try {
   </dialog>
 
   <!-- The feed: posts from you and from open accounts, newest first. -->
+  <section id="viewFriends" class="hidden">
+    <div class="card">
+      <h2 style="font-size:17px;margin:0 0 2px" data-i18n="friends">Friends</h2>
+      <p class="sub" style="margin:0 0 12px" data-i18n="friendsSub">Friends see your posts, even when your profile is private.</p>
+      <div id="friendsBody"></div>
+    </div>
+  </section>
+
   <section id="viewFeed" class="hidden">
     <div class="card">
       <h2 style="font-size:17px;margin:0 0 2px" data-i18n="feed">Feed</h2>
@@ -1079,6 +1088,7 @@ import { probe as probeStrava, authorise as authoriseStrava,
 import { DEFAULT_TAGS, liveTags, toggleTag, stepTag, quickMoodAt } from "./src/diary.js";
 import { collectWeights, weightNear } from "./src/weight.js";
 import { collectCups } from "./src/water.js";
+import { groupFriends, relationTo, searchTerm } from "./src/friends.js";
 import { TRIALS as RT_TRIALS, foreperiod, classify as rtClassify, summarise as rtSummarise,
          reactionTrend } from "./src/reaction.js";
 import { SPORT_IDS, allowedIn } from "./src/sports.js";
@@ -1488,7 +1498,8 @@ let syncing = false, syncTimer = null;
 function cloudErrText(e) {
   const map = { offline: "acctOffline", invalid_credentials: "acctBadLogin", username_taken: "acctTaken",
                 bad_username: "acctBadUsername", weak_password: "acctWeakPass", user_already_exists: "acctTaken",
-                email_not_confirmed: "acctConfirmFirst", signed_out: "acctSignedOut" };
+                email_not_confirmed: "acctConfirmFirst", signed_out: "acctSignedOut",
+                PGRST202: "friendsNotReady", "42501": "friendsNameFixed" };
   return map[e && e.code] ? tr(map[e.code]) : tr("acctErr", { err: (e && e.message) || String(e) });
 }
 
@@ -1988,6 +1999,150 @@ let feedPosts = [], feedBusy = false;
 $("feedBtn").hidden = !cloud.enabled;
 $("feedBtn").onclick = () => { showView("viewFeed"); renderFeed(); };
 $("feedMore").onclick = () => renderFeed(true);
+
+/* ---- friends -------------------------------------------------------------
+ * Find people by username, ask, accept. Mutual: a friend sees your posts even
+ * when your profile is private -- and nothing from your logs, ever (records
+ * stay owner-only on the server). Everyone needs a username to be found; an
+ * email sign-up picks one here, once. */
+let friendRows = [], friendSearchTimer = null, friendMe = null;
+$("friendsBtn").hidden = !cloud.enabled;
+$("friendsBtn").onclick = () => { showView("viewFriends"); renderFriends(); };
+
+function friendName(r) {
+  return `<b>@${esc(r.username || "?")}</b>${r.display_name ? ` <span class="sub">${esc(r.display_name)}</span>` : ""}`;
+}
+function friendRow(r, buttons) {
+  return `<div class="erow" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)">
+    <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${friendName(r)}</div>${buttons}</div>`;
+}
+const fBtn = (act, id, label, ghost = true) =>
+  `<button type="button" class="${ghost ? "ghost " : ""}fAct" data-act="${act}" data-id="${esc(id)}"
+     style="width:auto;margin:0;padding:7px 12px;font-size:13.5px">${esc(label)}</button>`;
+
+function friendsMsg(text, warn = false) {
+  const el = $("friendsMsg");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("warn", !!warn);
+}
+
+async function renderFriends() {
+  const body = $("friendsBody");
+  if (!cloud.enabled || !cloudState().login) {
+    body.innerHTML = `<p class="note">${esc(tr("friendsSignIn"))}</p>`;
+    return;
+  }
+  body.innerHTML = `<p class="sub">${esc(tr("feedLoading"))}</p>`;
+  try {
+    const login = await freshLogin();
+    const [acct, rows] = await Promise.all([cloud.account(login), cloud.friends(login)]);
+    friendMe = acct;
+    friendRows = rows;
+    paintFriends();
+  } catch (e) {
+    body.innerHTML = `<p class="note warn">${esc(cloudErrText(e))}</p>`;
+  }
+}
+
+function paintFriends() {
+  const g = groupFriends(friendRows);
+  const me = friendMe && friendMe.username;
+  const nameBox = me
+    ? `<p style="margin:0 0 12px">${esc(tr("friendsYouAre"))} <b>@${esc(me)}</b></p>`
+    : `<div class="daybox" style="margin:0 0 12px;border-color:var(--accent)">
+        <div style="font-weight:600">${esc(tr("friendsPickName"))}</div>
+        <p class="sub" style="margin:2px 0 8px">${esc(tr("friendsPickNameHint"))}</p>
+        <div class="row" style="margin:0">
+          <input id="friendsName" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"
+                 placeholder="${esc(tr("friendsNamePh"))}">
+          <button type="button" id="friendsNameSave" style="margin:0;flex:0 0 auto;width:auto;padding:9px 16px">${
+            esc(tr("friendsNameSave"))}</button>
+        </div></div>`;
+  const list = (title, rows, buttons) => rows.length
+    ? `<div style="font-weight:600;margin-top:14px">${esc(title)} <span class="sub">${rows.length}</span></div>
+       ${rows.map((r) => friendRow(r, buttons(r))).join("")}` : "";
+  $("friendsBody").innerHTML = `${nameBox}
+    <label for="friendSearch">${esc(tr("friendsSearch"))}</label>
+    <input id="friendSearch" type="search" autocomplete="off" autocapitalize="off" spellcheck="false"
+           placeholder="${esc(tr("friendsSearchPh"))}">
+    <div id="friendResults"></div>
+    <p class="sub" id="friendsMsg" style="margin:6px 0 0"></p>
+    ${list(tr("friendsIncoming"), g.incoming, (r) => fBtn("accept", r.id, tr("friendsAccept"), false)
+                                                   + fBtn("decline", r.id, tr("friendsDecline")))}
+    ${list(tr("friendsList"), g.friends, (r) => fBtn("remove", r.id, tr("friendsRemove")))}
+    ${list(tr("friendsSent"), g.outgoing, (r) => fBtn("cancel", r.id, tr("friendsCancel")))}
+    ${!g.friends.length && !g.incoming.length && !g.outgoing.length
+      ? `<p class="note" style="margin-top:14px">${esc(tr("friendsNone"))}</p>` : ""}`;
+
+  if ($("friendsNameSave")) $("friendsNameSave").onclick = async () => {
+    try {
+      const name = await cloud.setUsername(await freshLogin(), $("friendsName").value);
+      friendMe = { ...(friendMe || {}), username: name };
+      paintFriends();
+      toast(tr("friendsNameSaved", { name }));
+    } catch (e) { friendsMsg(cloudErrText(e), true); }
+  };
+  $("friendSearch").oninput = () => {
+    clearTimeout(friendSearchTimer);
+    friendSearchTimer = setTimeout(runFriendSearch, 300);
+  };
+  wireFriendButtons($("friendsBody"));
+}
+
+async function runFriendSearch() {
+  const box = $("friendResults");
+  if (!box) return;
+  const q = searchTerm($("friendSearch").value);
+  if (!q) { box.innerHTML = ""; return; }
+  try {
+    const found = await cloud.searchUsers(await freshLogin(), q);
+    if (searchTerm($("friendSearch")?.value) !== q) return;      // typed on since
+    box.innerHTML = found.length ? found.map((r) => {
+      const rel = relationTo(r.id, friendRows);
+      const btn = rel === "friend" ? `<span class="sub">${esc(tr("friendsAlready"))}</span>`
+        : rel === "sent" ? `<span class="sub">${esc(tr("friendsRequested"))}</span>`
+        : rel === "incoming" ? fBtn("accept", r.id, tr("friendsAccept"), false)
+        : fBtn("add", r.username, tr("friendsAdd"), false);
+      return friendRow(r, btn);
+    }).join("") : `<p class="sub" style="margin:6px 0 0">${esc(tr("friendsNoMatch", { q }))}</p>`;
+    wireFriendButtons(box);
+  } catch (e) { friendsMsg(cloudErrText(e), true); }
+}
+
+function wireFriendButtons(root) {
+  root.querySelectorAll("button.fAct").forEach((b) => {
+    b.onclick = async () => {
+      const act = b.dataset.act, id = b.dataset.id;
+      // Ending a friendship takes two taps, like deleting a post.
+      if ((act === "remove") && !b.dataset.armed) {
+        b.dataset.armed = "1";
+        b.textContent = tr("friendsRemoveSure");
+        b.classList.add("danger");
+        setTimeout(() => { if (b.isConnected) { delete b.dataset.armed;
+          b.textContent = tr("friendsRemove"); b.classList.remove("danger"); } }, 4000);
+        return;
+      }
+      b.disabled = true;
+      try {
+        const login = await freshLogin();
+        if (act === "add") {
+          const r = await cloud.requestFriend(login, id);
+          const msg = { sent: "friendsSentTo", accepted: "friendsNowFriends", already_sent: "friendsRequested",
+                        already_friends: "friendsAlready", not_found: "friendsNotFound",
+                        self: "friendsSelf", too_many: "friendsTooMany" }[r] || "friendsSentTo";
+          toast(tr(msg, { name: id }));
+        } else if (act === "accept") await cloud.respondFriend(login, id, true);
+        else if (act === "decline") await cloud.respondFriend(login, id, false);
+        else await cloud.removeFriend(login, id);
+        friendRows = await cloud.friends(login);
+        const q = $("friendSearch") ? $("friendSearch").value : "";
+        paintFriends();
+        if (q) { $("friendSearch").value = q; runFriendSearch(); }
+      } catch (e) { b.disabled = false; friendsMsg(cloudErrText(e), true); }
+    };
+  });
+}
 
 function postHTML(p, me) {
   const a = p.author || {};
@@ -2851,7 +3006,7 @@ $("mealShotFile").onchange = (e) => {
  * gets stored. The login screen writes to it rather than replacing it, so
  * there is still exactly one source of truth for the athlete.
  */
-const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat"];
+const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -2876,6 +3031,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewCycle") renderCycle();
   if (id === "viewAssess") renderAssess();
   if (id === "viewReaction") openReaction(false);
+  if (id === "viewFriends") renderFriends();
   if (id === "viewFeed") renderFeed();
   if (id === "viewChat") chat.open();
 });
@@ -3773,6 +3929,11 @@ function renderAssess() {
         esc(tr("assessFinish"))}</button>
     </div>` : ""}
     ${steps}
+    <div class="daybox">
+      <div style="font-weight:600">${esc(tr("rtTitle"))} <span class="sub">· ${esc(tr("rtNoCamera"))}</span></div>
+      <p class="sub" style="margin:2px 0 8px">${esc(tr("rtAssessHint"))}</p>
+      <button type="button" class="ghost" id="assessReactionBtn" style="margin:0">${esc(tr("rtStart"))}</button>
+    </div>
     <div id="assessReportBox" style="margin-top:12px">${assessReportHTML(report)}</div>
     <button type="button" id="assessFinishBtn" style="margin-top:12px">${
       esc(tr("assessFinish"))}</button>
@@ -3824,6 +3985,7 @@ function renderAssess() {
       if (a) openPastAssessment(a);
     };
   });
+  if ($("assessReactionBtn")) $("assessReactionBtn").onclick = () => openReaction();
   $("assessRestartBtn").onclick = () => {
     clearAssess(); startAssess(currentAthlete()); renderAssess();
   };
