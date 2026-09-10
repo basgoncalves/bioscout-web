@@ -45,6 +45,11 @@ async function fakeFetch(url, init) {
     const t = "tok" + Math.random(); tokenOf.set(t, tokenOf.get(body.refresh_token.slice(1)));
     return J(200, { access_token: t, refresh_token: "r" + t, expires_in: 3600, user: {} });
   }
+  if (u.pathname === "/auth/v1/user") {
+    const id = tokenOf.get(auth) || (auth === "linktoken" ? "uid-link" : null);
+    if (!id) return J(401, { message: "invalid JWT" });
+    return J(200, { id, email: "link@example.com", user_metadata: {} });
+  }
   if (u.pathname === "/functions/v1/signup-username") {
     const email = `${body.username}@${C.USERNAME_DOMAIN}`;
     if (users.has(email)) return J(409, { code: "username_taken", message: "That username is taken" });
@@ -153,6 +158,17 @@ try { await cloud.signIn("bas_g", "nope"); } catch (e) { bad = e.code; }
 ok(bad === "invalid_credentials", "a wrong password is refused", bad);
 ok(cloud.emailFor("someone@Mail.com") === "someone@mail.com" && cloud.emailFor("Bas_G") === "bas_g@" + C.USERNAME_DOMAIN,
    "email and username logins map to the right address");
+
+// --- back from a confirmation email -----------------------------------------
+{
+  const l = await cloud.fromRedirect("#access_token=linktoken&expires_in=3600&refresh_token=rt&token_type=bearer&type=signup");
+  ok(l && l.user.id === "uid-link" && l.refresh_token === "rt", "a confirmation link's tokens become a login");
+  ok(await cloud.fromRedirect("#viewDash") === null, "an ordinary hash is not a login");
+  let code = null;
+  try { await cloud.fromRedirect("#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid"); }
+  catch (e) { code = e.code; }
+  ok(code === "otp_expired", "an expired link says so", code);
+}
 
 if (fails) { console.log(`\n${fails} check(s) FAILED`); process.exit(1); }
 console.log("\nAll checks passed");

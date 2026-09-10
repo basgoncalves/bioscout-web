@@ -193,9 +193,33 @@ export function makeCloud({ url, key, fetchImpl = globalThis.fetch?.bind(globalT
 
     /** Email sign-up. Returns a login if the project does not ask for email
      *  confirmation, otherwise null: the person confirms, then signs in. */
-    async signUpEmail(email, password) {
-      const r = await call("/auth/v1/signup", { method: "POST", body: { email: emailFor(email), password } });
+    async signUpEmail(email, password, redirectTo = null) {
+      // redirect_to: where the confirmation link lands. Honoured only if the
+      // project allows the address (Auth -> URL Configuration); otherwise the
+      // project's Site URL is used.
+      const q = redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : "";
+      const r = await call("/auth/v1/signup" + q, { method: "POST", body: { email: emailFor(email), password } });
       return r && r.access_token ? keep(r) : null;
+    },
+
+    /**
+     * The login carried back by a confirmation link. The server confirms the
+     * address and then redirects to the app with the tokens in the URL hash
+     * (#access_token=...&refresh_token=...); this turns them into a login.
+     * Returns null for a hash without tokens; throws the link's own error
+     * (an expired or already-used link) when there is one.
+     */
+    async fromRedirect(hash) {
+      const h = new URLSearchParams(String(hash || "").replace(/^#/, ""));
+      if (h.get("error") || h.get("error_code")) {
+        throw new CloudError(h.get("error_code") || h.get("error"),
+                             (h.get("error_description") || "").replace(/\+/g, " "));
+      }
+      const access = h.get("access_token");
+      if (!access) return null;
+      const user = await call("/auth/v1/user", { token: access });
+      return keep({ access_token: access, refresh_token: h.get("refresh_token"),
+                    expires_in: h.get("expires_in"), user });
     },
 
     /** Username sign-up. Done by the `signup-username` edge function, which

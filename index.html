@@ -806,7 +806,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 91;
+window.BUILD = 92;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -825,6 +825,14 @@ setTimeout(function () {
 }, 8000);
 </script>
 <script type="module">
+// Read before anything else touches the address bar: showView() rewrites the
+// hash (#viewDash), and a confirmation link's login arrives in the hash.
+const BOOT_HASH = location.hash;
+// ...and a login in the address bar is a credential: out of it, and out of
+// this history entry, at once.
+if (/(access_token|error_code)=/.test(BOOT_HASH)) {
+  history.replaceState(null, "", location.pathname + location.search);
+}
 import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          buildSquatFeatures, buildJumpFeatures, computePxPerM,
          jointPositionsM } from "./src/kinematics.js";
@@ -1350,7 +1358,7 @@ $("acctSignUp").onclick = async () => {
   if (pw.length < 8) { paintAccount(tr("acctWeakPass"), true); return; }
   try {
     if (id.includes("@")) {
-      const login = await cloud.signUpEmail(id, pw);
+      const login = await cloud.signUpEmail(id, pw, location.origin + location.pathname);
       if (!login) { paintAccount(tr("acctConfirmEmail", { email: id })); return; }
       await afterLogin(login);
     } else {
@@ -1383,6 +1391,24 @@ document.addEventListener("visibilitychange", () => {
 });
 setInterval(() => { if (!document.hidden) runSync({ quiet: true }); }, 60e3);
 setTimeout(() => runSync({ quiet: true }), 2500);
+
+/* Back from a confirmation email: the link confirmed the address on the
+ * server and landed here with the login in the URL hash. Take it, drop it
+ * from the address bar (it is a credential), and carry on signed in. */
+// After the rest of the module has run (the handler uses functions defined
+// further down): a timer, like the first sync above.
+setTimeout(async () => {
+  if (!cloud.enabled || !/(access_token|error_code|error)=/.test(BOOT_HASH)) return;
+  const hash = BOOT_HASH;
+  try {
+    const login = await cloud.fromRedirect(hash);
+    if (!login) return;
+    await afterLogin(login);
+    toast(tr("acctConfirmedIn"));
+  } catch (e) {
+    toast(e.code === "otp_expired" ? tr("acctLinkExpired") : cloudErrText(e));
+  }
+}, 300);
 
 /* ---- appearance ----------------------------------------------------------
  * Light or dark, and one of five colour schemes (the accent colour -- buttons,
@@ -2271,7 +2297,17 @@ function myAchievements() {
 /* A badge earned by the set just saved is said once, in a note that clears
  * itself: the status line under the camera is rewritten a moment later by
  * "analysed", and a badge said there would never be seen. */
-let achToastTimer = null;
+var achToastTimer = null;   // var: toast() can run from the boot-time redirect handler
+/** A short note at the foot of the screen that clears itself. */
+function toast(text) {
+  const el = $("achToast");
+  if (!el) return;
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(achToastTimer);
+  achToastTimer = setTimeout(() => { el.hidden = true; }, 7000);
+  el.onclick = () => { el.hidden = true; };
+}
 function announceBadges(got) {
   const el = $("achToast");
   if (!el || !got.length) return;
