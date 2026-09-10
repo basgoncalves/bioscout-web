@@ -869,6 +869,17 @@ const EN = {
   "bm_quads": "Quadriceps",
   "bm_hamstrings": "Hamstrings",
   "bm_calves": "Calves",
+  // --- appearance (2026-09-10) ---
+  "themeLight": "Light mode",
+  "themeDark": "Dark mode",
+  "toLight": "Switch to light mode",
+  "toDark": "Switch to dark mode",
+  "colourScheme": "Colour scheme",
+  "pal_teal": "Teal",
+  "pal_blue": "Blue",
+  "pal_violet": "Violet",
+  "pal_rose": "Rose",
+  "pal_amber": "Amber",
 };
 
 const PT = {
@@ -1716,6 +1727,17 @@ const PT = {
   "bm_quads": "Quadr\u00edceps",
   "bm_hamstrings": "Isquiotibiais",
   "bm_calves": "G\u00e9meos",
+  // --- appearance (2026-09-10) ---
+  "themeLight": "Modo claro",
+  "themeDark": "Modo escuro",
+  "toLight": "Mudar para modo claro",
+  "toDark": "Mudar para modo escuro",
+  "colourScheme": "Esquema de cores",
+  "pal_teal": "Verde-azulado",
+  "pal_blue": "Azul",
+  "pal_violet": "Violeta",
+  "pal_rose": "Rosa",
+  "pal_amber": "\u00c2mbar",
 };
 
 const DE = {
@@ -2562,6 +2584,17 @@ const DE = {
   "bm_quads": "Quadrizeps",
   "bm_hamstrings": "Beinbeuger",
   "bm_calves": "Waden",
+  // --- appearance (2026-09-10) ---
+  "themeLight": "Heller Modus",
+  "themeDark": "Dunkler Modus",
+  "toLight": "Zum hellen Modus wechseln",
+  "toDark": "Zum dunklen Modus wechseln",
+  "colourScheme": "Farbschema",
+  "pal_teal": "Petrol",
+  "pal_blue": "Blau",
+  "pal_violet": "Violett",
+  "pal_rose": "Ros\u00e9",
+  "pal_amber": "Bernstein",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };

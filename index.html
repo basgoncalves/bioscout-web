@@ -6,6 +6,16 @@
 <meta name="theme-color" content="#1c4a48">
 <title>BioScout Web — a physics-informed, AI-powered bio tracker</title>
 <link rel="manifest" href="manifest.webmanifest">
+<script>
+/* Appearance, applied before the first paint so a light-mode choice does not
+ * flash dark (or the reverse) while the page loads. The full logic, and the
+ * controls, are applyTheme() in the module below. */
+try {
+  var th = JSON.parse(localStorage.getItem("bioscout.theme.v1") || "{}");
+  if (th.mode === "light" || th.mode === "dark") document.documentElement.dataset.theme = th.mode;
+  if (th.palette) document.documentElement.dataset.palette = th.palette;
+} catch (e) {}
+</script>
 <link rel="icon" href="assets/icons/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="assets/icons/icon-192.png">
 <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
@@ -15,13 +25,38 @@
     --line:#e2e5ea; --accent:#2d706c; --warn:#b4540f; --good:#1d7a45;
     --bmBase:#e6e8ec; --bmPart:#c9ced7;
     --shadow:0 1px 3px rgba(0,0,0,.07), 0 6px 20px rgba(0,0,0,.05);
+    color-scheme:light;
   }
+  /* Dark: from the system, unless the page is told otherwise (the sun/moon
+   * toggle sets data-theme on <html>; see applyTheme). */
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#111318; --card:#191c22; --ink:#eceef2; --muted:#9aa1ae;
+    :root:not([data-theme="light"]) { --bg:#111318; --card:#191c22; --ink:#eceef2; --muted:#9aa1ae;
             --line:#2a2e37; --accent:#4fa79e; --warn:#e08a4a; --good:#4fbd7d;
             --bmBase:#262a32; --bmPart:#474e5c;
-            --shadow:0 1px 3px rgba(0,0,0,.4); }
+            --shadow:0 1px 3px rgba(0,0,0,.4); color-scheme:dark; }
   }
+  :root[data-theme="dark"] { --bg:#111318; --card:#191c22; --ink:#eceef2; --muted:#9aa1ae;
+            --line:#2a2e37; --accent:#4fa79e; --warn:#e08a4a; --good:#4fbd7d;
+            --bmBase:#262a32; --bmPart:#474e5c;
+            --shadow:0 1px 3px rgba(0,0,0,.4); color-scheme:dark; }
+  /* Colour schemes: the accent, in a light and a dark shade (data-palette). */
+  :root[data-palette="teal"] { --accent:#2d706c; }
+  :root[data-palette="blue"] { --accent:#2759b8; }
+  :root[data-palette="violet"] { --accent:#6a45bf; }
+  :root[data-palette="rose"] { --accent:#b0385f; }
+  :root[data-palette="amber"] { --accent:#8f5f00; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"])[data-palette="teal"] { --accent:#4fa79e; }
+    :root:not([data-theme="light"])[data-palette="blue"] { --accent:#6c9cf0; }
+    :root:not([data-theme="light"])[data-palette="violet"] { --accent:#a48be6; }
+    :root:not([data-theme="light"])[data-palette="rose"] { --accent:#e57b9f; }
+    :root:not([data-theme="light"])[data-palette="amber"] { --accent:#c68f2a; }
+  }
+  :root[data-theme="dark"][data-palette="teal"] { --accent:#4fa79e; }
+  :root[data-theme="dark"][data-palette="blue"] { --accent:#6c9cf0; }
+  :root[data-theme="dark"][data-palette="violet"] { --accent:#a48be6; }
+  :root[data-theme="dark"][data-palette="rose"] { --accent:#e57b9f; }
+  :root[data-theme="dark"][data-palette="amber"] { --accent:#c68f2a; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   body { margin:0; background:var(--bg); color:var(--ink);
          font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
@@ -49,6 +84,14 @@
                  font-weight:500; }
   button.good { background:var(--good); color:#fff; }
   button.sportBtn { padding:18px; font-size:17px; }
+  /* Appearance: light/dark toggle and the five colour swatches. */
+  .appearance { display:flex; justify-content:flex-end; align-items:center; gap:8px;
+                flex-wrap:wrap; margin:-6px 0 4px; }
+  button.themeToggle { width:34px; height:30px; padding:0; margin:0; font-size:16px; line-height:1; }
+  .swatches { display:flex; gap:5px; }
+  button.swatch { width:22px; height:22px; padding:0; margin:0; border-radius:50%;
+                  border:2px solid transparent; box-shadow:0 0 0 1px var(--line); }
+  button.swatch.on { border-color:var(--card); box-shadow:0 0 0 2px var(--ink); }
   /* The body map (bodymap.js) */
   svg.bodymap { width:100%; max-width:340px; height:auto; display:block; margin:0 auto; }
   svg.bodymap g.bm-base { fill:var(--bmBase); }
@@ -337,7 +380,9 @@
     <h1>BioScout Web</h1>
     <a href="#" id="termsLinkBtn" class="note" style="margin-left:auto" data-i18n="termsLink">Terms</a>
   </div>
-  <div style="display:flex;justify-content:flex-end;margin:-6px 0 4px">
+  <div class="appearance">
+    <button type="button" class="ghost themeToggle" id="themeToggle"></button>
+    <div class="swatches" id="swatches" role="radiogroup"></div>
     <select id="lang" style="width:auto;padding:5px 8px;font-size:12.5px;margin:0"></select>
   </div>
   <p class="sub"><span data-i18n="tagline">A physics-informed, AI-powered bio tracker.</span>
@@ -632,7 +677,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 88;
+window.BUILD = 89;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -996,6 +1041,7 @@ function applyStaticI18n() {
   sel.onchange = () => {
     if (!setLang(sel.value)) return;
     applyStaticI18n();
+    applyTheme();                        // its labels are translated too
     refreshDerived();
     renderTraining();
     // Re-render exactly what is on screen, if anything is.
@@ -1059,6 +1105,55 @@ $("delProfileBtn").onclick = () => {
   refreshProfiles("");
   say(tr("profileDeleted", { name: n }));
 };
+
+/* ---- appearance ----------------------------------------------------------
+ * Light or dark, and one of five colour schemes (the accent colour -- buttons,
+ * selections, links, plot highlights). Stored per device, like the language.
+ * With no choice made the page follows the phone's own light/dark setting;
+ * the first tap on the toggle makes it explicit. Data colours in the charts
+ * (left/right, series) are not part of the scheme: they mean something. */
+const TKEY_THEME = "bioscout.theme.v1";
+const PALETTES = {"teal": {"light": "#2d706c", "dark": "#4fa79e"}, "blue": {"light": "#2759b8", "dark": "#6c9cf0"}, "violet": {"light": "#6a45bf", "dark": "#a48be6"}, "rose": {"light": "#b0385f", "dark": "#e57b9f"}, "amber": {"light": "#8f5f00", "dark": "#c68f2a"}};
+const darkMQ = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+function readTheme() {
+  try { return JSON.parse(localStorage.getItem(TKEY_THEME) || "{}") || {}; } catch { return {}; }
+}
+function isDark(th = readTheme()) {
+  return th.mode === "dark" || (th.mode !== "light" && !!(darkMQ && darkMQ.matches));
+}
+function applyTheme() {
+  const th = readTheme();
+  const root = document.documentElement;
+  if (th.mode === "light" || th.mode === "dark") root.dataset.theme = th.mode;
+  else delete root.dataset.theme;
+  const pal = PALETTES[th.palette] ? th.palette : "teal";
+  root.dataset.palette = pal;
+  const dark = isDark(th);
+  const tg = $("themeToggle");
+  // The icon shows what the page IS: a sun in light mode, a moon in dark.
+  tg.textContent = dark ? "\u263e" : "\u2600";
+  tg.title = tr(dark ? "themeDark" : "themeLight");
+  tg.setAttribute("aria-label", tr(dark ? "toLight" : "toDark"));
+  $("swatches").setAttribute("aria-label", tr("colourScheme"));
+  $("swatches").innerHTML = Object.entries(PALETTES).map(([k, c]) =>
+    `<button type="button" class="swatch${k === pal ? " on" : ""}" data-palette="${k}"
+       role="radio" aria-checked="${k === pal}" title="${esc(tr("pal_" + k))}"
+       aria-label="${esc(tr("pal_" + k))}" style="background:${dark ? c.dark : c.light}"></button>`).join("");
+  $("swatches").querySelectorAll("button.swatch").forEach((b) => {
+    b.onclick = () => saveTheme({ palette: b.dataset.palette });
+  });
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = dark ? "#111318" : (PALETTES[pal].light);
+}
+function saveTheme(patch) {
+  const th = { ...readTheme(), ...patch };
+  try { localStorage.setItem(TKEY_THEME, JSON.stringify(th)); } catch { /* per-visit only */ }
+  applyTheme();
+  // Plots that read colours at draw time pick the new ones up on redraw.
+  if (shownRes && !$("results").classList.contains("hidden")) render(shownRes, shownFps);
+}
+$("themeToggle").onclick = () => saveTheme({ mode: isDark() ? "light" : "dark" });
+if (darkMQ && darkMQ.addEventListener) darkMQ.addEventListener("change", applyTheme);
 
 /* Which per-set measure the training table and its chart show. Keys are the
  * fields profiles.js stores per rep, so anything summarised there can be
@@ -2926,6 +3021,8 @@ refreshProfiles(lastUsedProfile()?.name || "");
 queueMicrotask(refreshDerived);
 if (lastUsedProfile()) applyProfile(lastUsedProfile());
 renderTraining();
+// Here, not beside its definition: it uses esc(), declared further down.
+applyTheme();
 renderLogin();
 
 /* A reload is not a fresh visit: the browser keeps the current history
