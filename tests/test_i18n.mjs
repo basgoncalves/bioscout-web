@@ -62,10 +62,12 @@ const asked = new Set();
 for (const mm of html.matchAll(/\btr\(\s*"([A-Za-z0-9_.]+)"/g)) asked.add(mm[1]);
 for (const mm of html.matchAll(/data-i18n(?:-html)?="([A-Za-z0-9_.]+)"/g)) asked.add(mm[1]);
 // Keys built at runtime from data rather than written out literally.
+// qn_ keys are built from repquality.js NOTE_CODES; test_rep_quality.mjs checks
+// every one exists in all three languages.
 // The assess_ prefixes are built from ASSESS_TESTS ids and the score bands;
 // test_assess.mjs checks that every one of those concrete keys exists, which
 // is the coverage this pattern would otherwise lose.
-const DYNAMIC = /^(cond_|why_|view_|var_|assessHow_|assessTest_|assessBand_|assessPart_|hudFrame_|assessBadFraming_|series_)/;
+const DYNAMIC = /^(cond_|why_|view_|var_|assessHow_|assessTest_|assessBand_|assessPart_|hudFrame_|assessBadFraming_|series_|qn_)/;
 m.setLang("en");
 // Membership, not t() -- a key whose English value happens to equal its name
 // ("years") is present, and t() cannot tell that from a miss.

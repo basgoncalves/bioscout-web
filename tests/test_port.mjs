@@ -46,8 +46,11 @@ const ref = JSON.parse(fs.readFileSync("data/reference.json", "utf8"));
 for (const caseName of Object.keys(ref.cases)) {
   const c = ref.cases[caseName];
   console.log(`\n${caseName}  (${c.activity}, ${Object.keys(c.poses).length} frames)`);
+  // Uncropped: the Python pipeline splits reps trough to trough and does not
+  // trim them to the movement, so parity is checked on the detector's own
+  // windows. The browser's crop is covered by test_rep_quality.mjs.
   const got = analyse(c.poses, c.fps, { heightM: c.height_m, activity: c.activity,
-                                        osimModel: c.osim_model || "gpk" });
+                                        osimModel: c.osim_model || "gpk", trim: false });
   const vOk = JSON.stringify(got.view) === JSON.stringify(c.view);
   if (!vOk) failures.push(`${caseName}: view ${JSON.stringify(got.view)} vs ${JSON.stringify(c.view)}`);
   console.log(`  [${vOk ? "OK  " : "FAIL"}] camera view                   ${JSON.stringify(got.view)}`);

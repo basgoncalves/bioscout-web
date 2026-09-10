@@ -2168,8 +2168,113 @@ export const ACTIVITIES = {
   },
 };
 
+/* ---- cropping a rep to the movement ----------------------------------------
+ *
+ * The detectors split the clip at the LOWEST point between one rep's peak and
+ * the next: a pull-up runs from the bottom before it to the bottom after it.
+ * That is right when reps follow each other without a pause, and wrong the
+ * moment anyone rests. The argmin of a flat dead hang is whichever frame of it
+ * happened to be noisiest, so rep 1 of a real set carried three seconds of
+ * hanging, the tail of the athlete's setup, and a phase time of "3.69 s up"
+ * that was mostly standing still; rep 4 carried a half-pull the counter had
+ * rightly refused. Every curve, table value and moment computed from those
+ * windows inherited the mess.
+ *
+ * So each rep is cut down to where its own progress signal (shoulder rise,
+ * dip depth, squat depth, heel lift, hand height) leaves its resting level on
+ * the way in and first returns to it on the way out -- walking outward from
+ * the peak, so a second partial movement after the return is never reached.
+ * A rest is found by stillness, scaled to the rep's own excursion so it holds
+ * at any camera distance (details in the function). A tenth of a second
+ * either side is kept so the start and the finish are in the picture. A rep
+ * is never widened, only narrowed. */
+export function trimToMovement(sig, rep, fps, { left = true, right = true } = {}) {
+  const [b0, mid, b1] = rep;
+  if (!sig || !(mid > b0) || !(b1 > mid)) return rep;
+  const at = (i) => (isNum(sig[i]) ? sig[i] : NaN);
+  const peak = at(mid);
+  if (!isNum(peak)) return rep;
+  let lo0 = Infinity, lo1 = Infinity;
+  for (let i = b0; i <= mid; i++) if (isNum(sig[i]) && sig[i] < lo0) lo0 = sig[i];
+  for (let i = mid; i <= b1; i++) if (isNum(sig[i]) && sig[i] < lo1) lo1 = sig[i];
+  const pad = Math.max(1, Math.round(0.10 * fps));
+  let s = b0, e = b1;
+  /* Walking outward from the peak, each side, in two steps.
+   *
+   *   1. Off the top: past any pause at the peak (a chin held over the bar,
+   *      a held bottom of a squat) until the signal is clearly on its way
+   *      down -- half the excursion.
+   *   2. On through the movement for as long as it keeps MOVING, and stop at
+   *      the first stillness that lasts more than a quarter of a second, or
+   *      at the resting floor. The stop is the start of that stillness.
+   *
+   * A level threshold alone ("back to within a tenth of the bottom") was the
+   * first version, and it walked straight through a rest taken partway up --
+   * an athlete re-gripping on bent arms before the next pull -- because that
+   * rest is nowhere near the bottom. It also stopped late on the way in: by
+   * the time the signal crosses a tenth of the excursion the pull is well
+   * under way (the elbow was already 35-50 degrees bent). Stillness is what
+   * a rest actually is, wherever it happens.
+   *
+   * "Moving" means faster than 1% of the excursion per 1/30 s -- a rep
+   * taking about three seconds end to end -- so a slow drift in a dead hang
+   * reads as still. */
+  const slope = 0.01 * 30 / fps;
+  const maxStill = Math.max(2, Math.round(0.25 * fps));
+  const walk = (from, step, stopAt, lo) => {
+    const A = peak - lo;
+    let i = from;
+    while (i !== stopAt && at(i) > peak - 0.5 * A) i += step;          // step 1
+    let still = 0;
+    while (i !== stopAt) {                                              // step 2
+      const nxt = at(i + step);
+      if (!(nxt > lo + 0.02 * A)) break;
+      if (nxt < at(i) - slope * A) still = 0;
+      else if (++still > maxStill) { i -= step * (still - 1); break; }
+      i += step;
+    }
+    return i;
+  };
+  if (left && peak > lo0) s = Math.max(b0, walk(mid, -1, b0, lo0) - pad);
+  if (right && peak > lo1) e = Math.min(b1, walk(mid, +1, b1, lo1) + pad);
+  if (mid - s < 3) s = Math.max(b0, mid - 3);
+  if (e - mid < 3) e = Math.min(b1, mid + 3);
+  return [s, mid, e];
+}
+
+/** The signal each task's reps are cut on, oriented so the rep's middle bound
+ *  is its maximum -- or null for the tasks whose windows are already defined
+ *  by events (jumps: movement onset to landing; gait: contact to contact;
+ *  neck: already cut to the excursion). */
+function trimSignal(activity, F, found, i) {
+  switch (activity) {
+    case "pullup": return found.rise;
+    case "dip": return found.drop;
+    case "squat": case "slsquat": return found.depth;
+    case "sidestep": return found.depth;
+    case "heelraise": {
+      const sd = found.repSides ? found.repSides[i] : "l";
+      return smooth(interpNan(F["lift_" + sd]), 3);
+    }
+    case "jumpshot": return found.rise;
+    default: return null;
+  }
+}
+
+/** The joint whose resting angle says whether a rep started and finished
+ *  properly: the elbow for the arm tasks, the (working) knee for squats. */
+function restJointSeries(activity, F, found, i) {
+  if (activity === "pullup" || activity === "dip") return interpNan(F.elbow).map((v) => 180 - v);
+  if (activity === "squat") return interpNan(F.knee_flex);
+  if (activity === "slsquat") {
+    const sd = found.stanceSide === "l" ? "l" : "r";
+    return F["knee_flex_" + sd] ? interpNan(F["knee_flex_" + sd]) : null;
+  }
+  return null;
+}
+
 export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
-                                      cfg = null, osimModel = "gpk" } = {}) {
+                                      cfg = null, osimModel = "gpk", trim = true } = {}) {
   const spec = ACTIVITIES[activity];
   if (!spec) throw new Error(`unknown activity ${activity}`);
   const conf = cfg || spec.defaultCfg;
@@ -2180,7 +2285,18 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   const [refA, refB] = spec.reference(F);
   F._fps = fps;          // the jump detector sizes its floor window in seconds
   const found = spec.findReps(F, conf);
-  const bounds = found.reps;
+  // Cut every rep down to the movement (see trimToMovement). `trim: false` is
+  // for test_port.mjs, which checks the detector against the Python pipeline
+  // -- that pipeline does not crop, and the parity it guards is the detector's.
+  // The shot keeps
+  // its follow-through: the hand coming down after release is part of the
+  // shot, so only the wait before the dip is trimmed.
+  const bounds = found.reps.map((b, i) => {
+    const sig = trimSignal(activity, F, found, i);
+    return sig && trim ? trimToMovement(sig, b, fps, { right: activity !== "jumpshot" }) : b;
+  });
+  found.untrimmed = found.reps;
+  found.reps = bounds;
   const view = viewQuality(poses);
 
   const reps = bounds.map((b, i) => {
@@ -2196,6 +2312,20 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       rep: i + 1, times, coords, bounds: b,
       duration_s: (b1 - b0) / fps,
     };
+    /* The main joint at rest just before and just after the rep, from the
+     * stretch the crop removed. "Did you start from straight arms" is a
+     * question about the hang BEFORE the pull, which the cropped window --
+     * starting as the pull starts -- no longer contains. The 20th percentile,
+     * so one frame of tracking glitch cannot pass or fail it on its own. */
+    const restJoint = restJointSeries(activity, F, found, i);
+    const full = (found.untrimmed || [])[i];
+    if (restJoint && full) {
+      const pad = Math.max(1, Math.round(0.10 * fps));
+      const seg = (a, z) => restJoint.slice(Math.max(0, a), Math.max(a + 1, z + 1)).filter(isNum);
+      const pb = seg(full[0], b0 + pad), pa = seg(b1 - pad, full[2]);
+      if (pb.length) s.rest_before_deg = +nanpercentile(pb, 20).toFixed(1);
+      if (pa.length) s.rest_after_deg = +nanpercentile(pa, 20).toFixed(1);
+    }
     if (spec.jump) {
       const jm = jumpMetrics(F, b, fps, pxPerM, conf);
       if (jm) {

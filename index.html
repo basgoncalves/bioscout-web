@@ -283,6 +283,13 @@
   .jmpick label.on { border-color:var(--accent); }
   .jmpick input { width:auto; margin:0; padding:0; }
   .jmpeaks { font-size:12px; color:var(--muted); margin-top:4px; }
+  .qdot { display:inline-block; width:9px; height:9px; border-radius:50%;
+          margin-left:6px; vertical-align:middle; }
+  .q-clean { background:var(--good); }
+  .q-acceptable { background:#d9a21b; }
+  .q-poor { background:var(--warn); }
+  .qline { font-size:13px; margin:2px 0 10px; }
+  .qsum { margin:8px 0 0; font-size:13px; }
 </style>
 </head>
 <body>
@@ -611,6 +618,7 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          buildSquatFeatures, buildJumpFeatures, computePxPerM,
          jointPositionsM } from "./src/kinematics.js";
 import { inverseDynamics } from "./src/dynamics.js";
+import { gradeReps } from "./src/repquality.js";
 import { isUpperBody, defaultJoint, clipAngles, clipVelocities,
          repKinematics, clipArmMoments, armMomentsForRep, addPower, jointOptions,
          armTracks,
@@ -4904,6 +4912,8 @@ async function exportZip(res, fps) {
         rep: r.rep, duration_s: +r.duration_s.toFixed(3),
         // Every joint that has a moment -- the arms' on the arm tasks, the
         // legs' where the inverse dynamics ran.
+        quality: r.quality || null,
+        quality_notes: (r.qualityNotes || []).map((q) => `${q.code}:${q.v}`),
         peak_moments_Nm: jmPeaks(r.jm, "moment"),
         peak_power_W: jmPeaks(r.jm, "power"),
       })),
@@ -5030,6 +5040,35 @@ function wireSetSwitcher() {
 // it meant the results table stayed English when the language was switched.
 let shownRes = null, shownFps = 30;
 
+/* ---- rep quality on the page ----------------------------------------------
+ * A dot per rep in the table and on its tab, one summary line under the table,
+ * and on the rep's own view the reasons it was not clean. The reasons are the
+ * point: a red dot says "something was wrong", the line says what to fix. */
+const Q_GRADE = { clean: "qGrade_clean", acceptable: "qGrade_acceptable", poor: "qGrade_poor" };
+function qDot(r) {
+  return r && r.quality
+    ? `<i class="qdot q-${r.quality}" title="${tr(Q_GRADE[r.quality])}"></i>` : "";
+}
+function addTabDot(btn, r) {
+  if (!r || !r.quality || r.isMean) return;
+  const d = document.createElement("i");
+  d.className = "qdot q-" + r.quality;
+  btn.appendChild(d);
+}
+function qualityLine(r) {
+  if (!r || !r.quality || r.isMean) return "";
+  const notes = (r.qualityNotes || []).map((q) => tr("qn_" + q.code, { v: q.v }));
+  return `<p class="qline"><i class="qdot q-${r.quality}" style="margin:0 6px 0 0"></i><b>${
+    tr(Q_GRADE[r.quality])}</b>${notes.length ? " — " + notes.join("; ") : ""}</p>`;
+}
+function qualitySummary(c) {
+  if (!c || !(c.clean + c.acceptable + c.poor)) return "";
+  return `<p class="qsum">${["clean", "acceptable", "poor"].map((g) =>
+      `<span style="white-space:nowrap"><i class="qdot q-${g}" style="margin:0 5px 0 0"></i>${
+        c[g]} ${tr(Q_GRADE[g])}</span>`).join(" &nbsp;·&nbsp; ")}</p>
+    <p class="note" style="margin-top:2px">${tr("qExplain")}</p>`;
+}
+
 function render(res, fps) {
   shownRes = res; shownFps = fps;
   const el = $("results");
@@ -5052,10 +5091,13 @@ function render(res, fps) {
     return;
   }
 
+  /* Clean / acceptable / poor for every rep (repquality.js), graded here so a
+   * restored set is graded by the same rules as a fresh one. */
+  const qCounts = gradeReps(res);
   const isNeck = res.activity === "neck";
   if (isNeck) {
     const nrows = res.reps.map((r) =>
-      `<tr><td>${r.rep}</td><td>${r.out_s.toFixed(2)}</td><td>${r.back_s.toFixed(2)}</td>
+      `<tr><td>${r.rep}${qDot(r)}</td><td>${r.out_s.toFixed(2)}</td><td>${r.back_s.toFixed(2)}</td>
        <td>${r.flexion_extension_range_deg}°</td><td>${r.lateral_bend_range_deg}°</td>
        <td>${r.rotation_range_deg}°</td></tr>`).join("");
     el.innerHTML = `
@@ -5074,6 +5116,7 @@ function render(res, fps) {
         <th>${tr("colBack")}</th><th>${tr("colFlexExt")}</th>
         <th>${tr("colSideBend")}</th><th>${tr("colRotation")}</th></tr></thead>
         <tbody>${nrows}</tbody></table>
+      ${qualitySummary(qCounts)}
       <div class="tabs" id="repTabs" style="margin-top:14px"></div>
       <div id="chartBox"></div>
       <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMotOnly")}</button>
@@ -5089,6 +5132,7 @@ function render(res, fps) {
       b.textContent = r.isMean
         ? (r.soloRep ? tr("soloRepTab") : tr("meanOfN", { n: r.nReps }))
         : tr("repN", { n: r.rep });
+      addTabDot(b, r);
       b.onclick = () => selN(i);
       tabsN.appendChild(b);
     });
@@ -5100,7 +5144,7 @@ function render(res, fps) {
       const sd = r.sd && r.sd.coords;
       const sumSd = (a, b2) => (sd && sd[a] && sd[b2]
         ? sd[a].map((v, k) => Math.hypot(v, sd[b2][k])) : null);
-      $("chartBox").innerHTML = lineChart(t, [
+      $("chartBox").innerHTML = qualityLine(r) + lineChart(t, [
         ["flexion / extension", sum("pitch1", "pitch2")],
         ["lateral bend", sum("roll1", "roll2")],
         ["rotation", sum("yaw1", "yaw2")]], "deg", null,
@@ -5123,7 +5167,7 @@ function render(res, fps) {
 
   const isJump = !!ACTIVITIES[res.activity].jump;
   const cm = (v, dp = 1) => (v == null ? "—" : (v * 100).toFixed(dp));
-  const jumpRows = !isJump ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+  const jumpRows = !isJump ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
       <td>${r.flight_s == null ? "—" : r.flight_s.toFixed(3)}</td>
       <td${r.implausible ? ' style="color:var(--warn)"' : ""}>${
         r.height_flight_m == null ? "—" : cm(r.height_flight_m) +
@@ -5149,12 +5193,12 @@ function render(res, fps) {
   const nn = (v, d = 2) => (v == null ? "—" : v.toFixed(d));
   const sideName = (sd) => (sd === "l" ? tr("left") : sd === "r" ? tr("right") : "—");
 
-  const slRows = !isSL ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+  const slRows = !isSL ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
       <td>${sideName(r.stance_side)}</td>
       <td>${nn(r.eccentric_s)}</td><td>${nn(r.concentric_s)}</td>
       <td>${nn(r.stance_knee_flex_max_deg, 0)}°</td>
       <td>${nn(r.knee_asymmetry_deg, 0)}°</td></tr>`).join("");
-  const runRows = !isRun ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+  const runRows = !isRun ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
       <td>${sideName(r.stance_side)}</td>
       <td>${nn(r.stride_s, 3)}</td><td>${nn(r.contact_s, 3)}</td>
       <td>${nn(r.flight_s, 3)}</td><td>${nn(r.duty_factor, 2)}</td>
@@ -5191,7 +5235,7 @@ function render(res, fps) {
    * under a heading that says "up", which for a dip is the second half of the
    * rep -- so every athlete's descent would appear in the column headed with
    * the opposite word, and the numbers would be right while the table lied. */
-  const dipRows = !isDip ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+  const dipRows = !isDip ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
       <td>${nn(r.eccentric_s)}</td><td>${nn(r.concentric_s)}</td>
       <td>${nn(r.elbow_flex_max_deg, 0)}°</td>
       <td>${nn(r.arm_flex_range_deg, 0)}°</td>
@@ -5207,14 +5251,14 @@ function render(res, fps) {
         data-made="1" title="${esc(tr("shotMade"))}">\u25cf</button>
       <button class="ghost mk${r.made === false ? " on" : ""}" data-rep="${r.rep}"
         data-made="0" title="${esc(tr("shotMissed"))}">\u25cb</button></td>`;
-  const shotRows = !isShot ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+  const shotRows = !isShot ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
       <td>${nn(r.release_height_m)}</td>
       <td>${nn(r.apex_offset_s, 2)}</td>
       <td>${nn(r.release_elbow_deg, 0)}\u00b0</td>
       <td>${nn(r.knee_flex_at_dip_deg, 0)}\u00b0</td>
       ${madeCell(r)}</tr>`).join("");
 
-  const sideRows = !isSide ? "" : res.reps.map((r) => `<tr><td>${r.rep}</td>
+  const sideRows = !isSide ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}</td>
       <td>${sideName(r.plant_side)}</td>
       <td>${nn(r.out_s)}</td><td>${nn(r.back_s)}</td>
       <td>${nn(r.excursion_m)}</td>
@@ -5232,10 +5276,10 @@ function render(res, fps) {
    * above jumpRows, and left in place here. Lazy is not an optimisation here;
    * it is what makes the mistake impossible to make again. */
   const rows = () => res.reps.map((r) => isSquat
-    ? `<tr><td>${r.rep}</td><td>${r.eccentric_s.toFixed(2)}</td><td>${r.concentric_s.toFixed(2)}</td>
+    ? `<tr><td>${r.rep}${qDot(r)}</td><td>${r.eccentric_s.toFixed(2)}</td><td>${r.concentric_s.toFixed(2)}</td>
          <td>${r.knee_flex_max_deg.toFixed(0)}°</td><td>${r.hip_flex_max_deg.toFixed(0)}°</td>
          <td>${r.depth_m.toFixed(2)}</td></tr>`
-    : `<tr><td>${r.rep}</td><td>${r.concentric_s.toFixed(2)}</td><td>${r.eccentric_s.toFixed(2)}</td>
+    : `<tr><td>${r.rep}${qDot(r)}</td><td>${r.concentric_s.toFixed(2)}</td><td>${r.eccentric_s.toFixed(2)}</td>
          <td>${r.elbow_flex_max_deg.toFixed(0)}°</td><td>${r.arm_flex_range_deg.toFixed(0)}°</td>
          <td>${r.pelvis_travel_m.toFixed(2)}</td></tr>`).join("");
   const head = isShot
@@ -5367,6 +5411,7 @@ function render(res, fps) {
     <table><thead>${head}</thead><tbody>${
       isShot ? shotRows : isDip ? dipRows : isSL ? slRows : isRun ? runRows
              : isSide ? sideRows : isJump ? jumpRows : rows()}${meanRow}</tbody></table>
+    ${qualitySummary(qCounts)}
     <div id="shotSummaryBox">${isShot ? shotSummary(res) : ""}</div>
     ${runPanel}
     ${suspect.length ? `<p class="note banner">${
@@ -5413,6 +5458,7 @@ function render(res, fps) {
       : (isRun && r.stance_side
           ? tr("repNSide", { n: r.rep, side: sideName(r.stance_side) })
           : tr("repN", { n: r.rep }));
+    addTabDot(b, r);
     b.onclick = () => select(i);
     tabs.appendChild(b);
   });
@@ -5425,7 +5471,7 @@ function render(res, fps) {
      * before they existed, with nothing to rebuild them from -- keeps the old
      * fixed angle chart rather than showing nothing. */
     const hasJm = jointOptions(items[i].jm, "angle", res.activity).length > 0;
-    $("chartBox").innerHTML = (hasJm
+    $("chartBox").innerHTML = qualityLine(items[i]) + (hasJm
         ? `<div class="jmplot" data-metric="angle" style="border-top:0;margin-top:0"></div>
            <div class="jmplot" data-metric="vel"></div>`
         : chart(items[i], res.activity, res))
