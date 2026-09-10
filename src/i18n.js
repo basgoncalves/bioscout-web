@@ -1105,6 +1105,7 @@ const EN = {
   "chat_nBadge": "{n} badge",
   "chat_nBadges": "{n} badges",
   "chat_jumpNoneEver": "No jumps recorded yet. Record a countermovement jump or a squat jump to get a height.",
+  "shareSeeFeed": "See it in the feed",
 };
 
 const PT = {
@@ -2188,6 +2189,7 @@ const PT = {
   "chat_nBadge": "{n} conquista",
   "chat_nBadges": "{n} conquistas",
   "chat_jumpNoneEver": "Ainda nenhum salto registado. Grava um salto com contramovimento ou um salto sem contramovimento para obter uma altura.",
+  "shareSeeFeed": "Ver no feed",
 };
 
 const DE = {
@@ -3270,6 +3272,7 @@ const DE = {
   "chat_nBadge": "{n} Abzeichen",
   "chat_nBadges": "{n} Abzeichen",
   "chat_jumpNoneEver": "Noch keine Sprünge aufgezeichnet. Nimm einen Counter-Movement-Sprung oder einen Squat Jump auf, um eine Höhe zu bekommen.",
+  "shareSeeFeed": "Im Feed ansehen",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };

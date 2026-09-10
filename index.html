@@ -904,6 +904,7 @@ try {
     <button id="shareGo" style="margin-top:10px" data-i18n="shareToApps">Share to other apps…</button>
     <button class="ghost" id="sharePost" style="margin-top:8px" data-i18n="sharePostFeed">Post to my BioScout feed</button>
     <p class="note" id="sharePostNote" style="margin:6px 0 0"></p>
+    <button class="ghost" id="shareSeeFeed" style="margin-top:8px" data-i18n="shareSeeFeed" hidden>See it in the feed</button>
     <button class="ghost" id="shareClose" style="margin-top:10px" data-i18n="close">Close</button>
   </dialog>
 
@@ -948,7 +949,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 96;
+window.BUILD = 97;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1727,9 +1728,10 @@ async function fetchVisibility(after) {
 
 function openShare(job, title) {
   shareJob = job;
+  $("shareSeeFeed").hidden = true;
   shareMedia = {};
   $("shareTitle").textContent = title;
-  $("shareTabs").hidden = !job.hasClip;
+  $("shareTabs").style.display = job.hasClip ? "" : "none";   // .tabs is display:flex, which beats [hidden]
   $("shareCaption").value = "";
   $("shareCaption").placeholder = tr("shareCaptionPh");
   paintShareCount();
@@ -1769,6 +1771,7 @@ function shareSession(sess) {
 $("sharePicTab").onclick = () => pickShareKind("image");
 $("shareClipTab").onclick = () => pickShareKind("video");
 $("shareClose").onclick = () => $("shareDlg").close();
+$("shareSeeFeed").onclick = () => { $("shareDlg").close(); showView("viewFeed"); renderFeed(); };
 $("shareDlg").addEventListener("close", closeShare);
 
 /** Hand a file to the phone's share sheet, or download it where there is none. */
@@ -1809,7 +1812,7 @@ $("sharePost").onclick = async () => {
     const login = await freshLogin();
     await cloud.post(login, { blob, kind: shareKind, body: $("shareCaption").value, meta: shareJob.meta });
     shareMsg(tr(shareVis === "open" ? "sharePosted" : "sharePostedPrivate"));
-    toast(tr("sharePosted"));
+    $("shareSeeFeed").hidden = false;
   } catch (e) {
     shareMsg(e.code === "signed_out" ? tr("sharePostSignIn") : cloudErrText(e), true);
   } finally {
@@ -3013,6 +3016,9 @@ function myTags() {
 }
 
 function atOnDay(key) {
+  // Today's session starts now; another day's at noon on it (then made
+  // unique by newSession, so two sessions on one day stay two).
+  if (key === dayKey(new Date())) return new Date().toISOString();
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d, 12, 0, 0).toISOString();
 }
@@ -3820,10 +3826,15 @@ function exitAssessMode() {
   avatarBeforeAssess = null;
 }
 
-function findSession(id) {
+function findSession(id, profile = currentAthlete()) {
+  // Whose it is, too: sessions opened from the calendar used to share their
+  // identity (noon on the day) across athletes, so an id alone could open
+  // another athlete's empty session instead of this one's.
+  const mine = (s) => s && s.started === id && (!profile || !s.profile || s.profile === profile);
   const live = getSession();
-  if (live && live.started === id) return live;
-  return listArchive().find((s) => s.started === id) || null;
+  if (mine(live)) return live;
+  const a = listArchive();
+  return a.find(mine) || (live && live.started === id ? live : null) || a.find((s) => s.started === id) || null;
 }
 
 /** A finished session, read-only: the day view's rows link here instead of
@@ -3898,10 +3909,10 @@ function renderSessionView() {
         <tbody>${t}</tbody></table>
         <p class="note">${tr("noteChangeFirstLast")}</p>`
         : `<p class="note">${tr("noteNotEnoughSets")}</p>`}` : ""}
-    <button id="sessionShareBtn" style="margin:14px 0 4px">${tr("shareSession")}</button>
+    ${sess.sets.length ? `<button id="sessionShareBtn" style="margin:14px 0 4px">${tr("shareSession")}</button>` : ""}
     ${repEditorHTML(sess)}
     ${sess.sets.some((x) => x.activity === "neck") ? neckLoadHTML() : ""}`;
-  $("sessionShareBtn").onclick = () => shareSession(sess);
+  if ($("sessionShareBtn")) $("sessionShareBtn").onclick = () => shareSession(sess);
 
   wireRepEditor(card, sess, () => {
     sessionViewSess = findSession(sess.started) || sess;

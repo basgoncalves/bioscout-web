@@ -172,8 +172,27 @@ export function lastUsedProfile() {
  * athlete had selected stayed empty, and the honest reading of the screen was
  * that the work had been lost.
  */
+/**
+ * A `started` no filed session already has.
+ *
+ * `started` is a session's identity -- in the archive, in the sync, and in
+ * the stored curves' keys -- and a session opened from the calendar starts at
+ * noon on its day. So two sessions opened on the same day (two athletes on one
+ * phone, or one athlete twice) got the same identity: the day view then opened
+ * the wrong one, and archiveSession() quietly skipped the second as "already
+ * filed". A millisecond later is the same noon to every reader, and unique.
+ */
+export function uniqueStarted(startedAt) {
+  const taken = new Set(listArchive().map((x) => x.started));
+  let t = new Date(startedAt).getTime();
+  if (!Number.isFinite(t)) return startedAt;
+  let iso = new Date(t).toISOString();
+  while (taken.has(iso)) iso = new Date(++t).toISOString();
+  return iso;
+}
+
 export function newSession(profileName, startedAt = null, sport = null) {
-  const s = { started: startedAt || new Date().toISOString(),
+  const s = { started: uniqueStarted(startedAt || new Date().toISOString()),
               profile: profileName || null, sets: [], u: stamp() };
   // Which sport the session is (sports.js). Absent on sessions from before
   // sports existed, which is read as "any".
@@ -957,6 +976,9 @@ export function importAll(data) {
 /** Append one recording as the next set. Returns the stored (summary) set. */
 export function addSet(result, fps, extra = {}) {
   const s = getSession() || newSession(extra.profile);
+  // An empty session opened before uniqueStarted() existed may share its
+  // identity with a filed one; nothing is keyed to it yet, so re-key it now.
+  if (!s.sets.length) s.started = uniqueStarted(s.started);
   const set = {
     index: s.sets.length + 1,
     // On the session's day, at the clock time the set was recorded. A set
