@@ -17,6 +17,7 @@ import { groupPeaks } from "./muscle_groups.js";
 import { listAssessments, importAssessments } from "./assess.js";
 import { DRINKS, DRINK_KINDS } from "./water.js";
 import { sessionReps } from "./achievements.js";
+import { stamp, IDENTITY, mergeTombs, mergeRecords, tombIndex, buried } from "./syncmeta.js";
 
 const PKEY = "bioscout.profiles.v1";
 const SKEY = "bioscout.session.v1";
@@ -33,6 +34,7 @@ const COKEY = "bioscout.coffee.v1";
 const DRINK_KEY = { water: WAKEY, coffee: COKEY };
 const CDKEY = "bioscout.cardio.v1";
 const LKEY = "bioscout.ledger.v1";
+const TKEY = "bioscout.deleted.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
  * one; curves are not, so only the most recent sets keep those.
@@ -88,6 +90,44 @@ function writeKeep(key, value) {
   return write(key, value);
 }
 
+// --- deletions -------------------------------------------------------------
+/* A delete leaves a tombstone so it can travel to the other devices (see
+ * syncmeta.js). Capped: a tombstone older than the oldest copy anyone could
+ * still import is dead weight, and 5000 deletions is years of use. */
+const TOMBS_MAX = 5000;
+
+export function listDeleted() {
+  const t = read(TKEY, []);
+  return Array.isArray(t) ? t : [];
+}
+
+/** Record that these records of `kind` were deleted, now. */
+function bury(kind, records) {
+  const at = stamp();
+  const t = (records || []).map((x) => ({ k: kind, id: IDENTITY[kind](x), at }));
+  if (!t.length) return;
+  write(TKEY, mergeTombs(listDeleted(), t).slice(-TOMBS_MAX));
+}
+
+/** A record written now is alive, whatever was deleted under its identity
+ *  before: without this, a day cleared and re-logged in the same millisecond
+ *  would read as deleted to the merge. */
+function unbury(kind, rec) {
+  const id = IDENTITY[kind](rec);
+  const t = listDeleted();
+  const kept = t.filter((x) => !(x.k === kind && x.id === id));
+  if (kept.length !== t.length) write(TKEY, kept);
+}
+
+/** Keep `list` minus the records matching `drop`, and bury what was dropped. */
+function dropAndBury(key, kind, list, drop) {
+  const gone = list.filter(drop);
+  const kept = list.filter((x) => !drop(x));
+  write(key, kept);
+  bury(kind, gone);
+  return kept.length;
+}
+
 // --- profiles --------------------------------------------------------------
 export function listProfiles() {
   const p = read(PKEY, { profiles: [], lastUsed: null });
@@ -97,6 +137,8 @@ export function listProfiles() {
 export function saveProfile(profile) {
   const store = listProfiles();
   const i = store.profiles.findIndex((x) => x.name === profile.name);
+  profile.u = stamp();
+  unbury("profiles", profile);
   if (i >= 0) store.profiles[i] = profile; else store.profiles.push(profile);
   store.lastUsed = profile.name;
   return write(PKEY, store);
@@ -104,6 +146,7 @@ export function saveProfile(profile) {
 
 export function deleteProfile(name) {
   const store = listProfiles();
+  bury("profiles", store.profiles.filter((x) => x.name === name));
   store.profiles = store.profiles.filter((x) => x.name !== name);
   if (store.lastUsed === name) store.lastUsed = store.profiles[0]?.name ?? null;
   return write(PKEY, store);
@@ -131,7 +174,7 @@ export function lastUsedProfile() {
  */
 export function newSession(profileName, startedAt = null, sport = null) {
   const s = { started: startedAt || new Date().toISOString(),
-              profile: profileName || null, sets: [] };
+              profile: profileName || null, sets: [], u: stamp() };
   // Which sport the session is (sports.js). Absent on sessions from before
   // sports existed, which is read as "any".
   if (sport) s.sport = sport;
@@ -258,6 +301,7 @@ export function addMeal({ profile = null, text = "", kcal = null, at = null,
     // derived from (at, profile) -- see media.js -- because a few hundred kB
     // of base64 in localStorage takes the whole store down with it.
     photo: !!photo,
+    u: stamp(),
   };
   if (!entry.text.trim() && !parts.length) return null;
   const all = listMeals();
@@ -265,14 +309,13 @@ export function addMeal({ profile = null, text = "", kcal = null, at = null,
   if (all.some((m) => m.at === entry.at && m.profile === entry.profile)) return null;
   all.push(entry);
   all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  unbury("meals", entry);
   write(MKEY, all.slice(-MEALS_MAX));
   return entry;
 }
 
 export function deleteMeal(at, profile = null) {
-  const kept = listMeals().filter((m) => !(m.at === at && m.profile === profile));
-  write(MKEY, kept);
-  return kept.length;
+  return dropAndBury(MKEY, "meals", listMeals(), (m) => m.at === at && m.profile === profile);
 }
 
 // --- diary -----------------------------------------------------------------
@@ -304,20 +347,20 @@ export function addDiary({ profile = null, mood = null, tags = [], levels = {},
     tags: keep,
     levels: lv,
     note: String(note).slice(0, 1000),
+    u: stamp(),
   };
   // An entry with no mood, no tags and no note is a mis-tap.
   if (entry.mood === null && !entry.tags.length && !entry.note.trim()) return null;
   const all = listDiary().filter((x) => !(x.at === entry.at && x.profile === entry.profile));
   all.push(entry);
   all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  unbury("diary", entry);
   write(DKEY, all.slice(-DIARY_MAX));
   return entry;
 }
 
 export function deleteDiary(at, profile = null) {
-  const kept = listDiary().filter((d) => !(d.at === at && d.profile === profile));
-  write(DKEY, kept);
-  return kept.length;
+  return dropAndBury(DKEY, "diary", listDiary(), (d) => d.at === at && d.profile === profile);
 }
 
 /** Foods the athlete added, as name -> kcal per 100 g, on the profile. */
@@ -360,18 +403,18 @@ export function listWeights() {
 export function addWeight({ profile = null, kg, at = null }) {
   const v = +kg;
   if (!Number.isFinite(v) || v <= 0 || v > 500) return null;
-  const entry = { at: at || new Date().toISOString(), profile, kg: Math.round(v * 10) / 10 };
+  const entry = { at: at || new Date().toISOString(), profile, kg: Math.round(v * 10) / 10,
+                  u: stamp() };
   const all = listWeights().filter((x) => !(x.at === entry.at && x.profile === entry.profile));
   all.push(entry);
   all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  unbury("weights", entry);
   write(WKEY, all.slice(-WEIGHTS_MAX));
   return entry;
 }
 
 export function deleteWeight(at, profile = null) {
-  const kept = listWeights().filter((w) => !(w.at === at && w.profile === profile));
-  write(WKEY, kept);
-  return kept.length;
+  return dropAndBury(WKEY, "weights", listWeights(), (w) => w.at === at && w.profile === profile);
 }
 
 // --- cycle -----------------------------------------------------------------
@@ -393,22 +436,22 @@ export function setCycleDay({ profile = null, at, flow = null, symptoms = [] }) 
     profile,
     flow: Number.isInteger(f) && f >= 1 && f <= 4 ? f : null,
     symptoms: [...new Set((symptoms || []).map((s) => String(s).slice(0, 40)))].slice(0, 40),
+    u: stamp(),
   };
   const day = String(at).slice(0, 10);
   const all = listCycle().filter(
     (x) => !(x.profile === entry.profile && String(x.at).slice(0, 10) === day));
   all.push(entry);
   all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  unbury("cycle", entry);
   write(CYKEY, all.slice(-CYCLE_MAX));
   return entry;
 }
 
 export function clearCycleDay(at, profile = null) {
   const day = String(at).slice(0, 10);
-  const kept = listCycle().filter(
-    (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
-  write(CYKEY, kept);
-  return kept.length;
+  return dropAndBury(CYKEY, "cycle", listCycle(),
+    (x) => x.profile === profile && String(x.at).slice(0, 10) === day);
 }
 
 // --- sleep -----------------------------------------------------------------
@@ -423,23 +466,23 @@ export function listSleep() {
 
 export function setSleep({ profile = null, at, bed = "", wake = "" }) {
   if (!at) return null;
-  const entry = { at, profile, bed: String(bed).slice(0, 5), wake: String(wake).slice(0, 5) };
+  const entry = { at, profile, bed: String(bed).slice(0, 5), wake: String(wake).slice(0, 5),
+                  u: stamp() };
   if (!entry.bed || !entry.wake) return null;
   const day = String(at).slice(0, 10);
   const all = listSleep().filter(
     (x) => !(x.profile === entry.profile && String(x.at).slice(0, 10) === day));
   all.push(entry);
   all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  unbury("sleep", entry);
   write(SLKEY, all.slice(-SLEEP_MAX));
   return entry;
 }
 
 export function clearSleep(at, profile = null) {
   const day = String(at).slice(0, 10);
-  const kept = listSleep().filter(
-    (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
-  write(SLKEY, kept);
-  return kept.length;
+  return dropAndBury(SLKEY, "sleep", listSleep(),
+    (x) => x.profile === profile && String(x.at).slice(0, 10) === day);
 }
 
 // --- vitals (steps, resting heart rate, blood pressure) ----------------------
@@ -478,6 +521,7 @@ export function setVitals({ profile = null, at, steps = null, restingHr = null,
     restingHr: Number.isFinite(h) && h > 0 ? h : null,
     sys: bp ? bp.sys : null,
     dia: bp ? bp.dia : null,
+    u: stamp(),
   };
   if (entry.steps === null && entry.restingHr === null && entry.sys === null) return null;
   const day = String(at).slice(0, 10);
@@ -485,16 +529,15 @@ export function setVitals({ profile = null, at, steps = null, restingHr = null,
     (x) => !(x.profile === entry.profile && String(x.at).slice(0, 10) === day));
   all.push(entry);
   all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  unbury("vitals", entry);
   write(VKEY, all.slice(-VITALS_MAX));
   return entry;
 }
 
 export function clearVitals(at, profile = null) {
   const day = String(at).slice(0, 10);
-  const kept = listVitals().filter(
-    (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
-  write(VKEY, kept);
-  return kept.length;
+  return dropAndBury(VKEY, "vitals", listVitals(),
+    (x) => x.profile === profile && String(x.at).slice(0, 10) === day);
 }
 
 // --- water and coffee (glasses / cups a day) ---------------------------------
@@ -515,9 +558,12 @@ export function setDrink({ kind = "water", profile = null, at, n }) {
   if (!Number.isFinite(g)) return null;
   const c = Math.max(0, Math.min(d.max, g));
   const day = String(at).slice(0, 10);
-  const all = listDrink(kind).filter(
-    (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
-  if (c > 0) all.push({ at, profile, [d.field]: c });
+  const had = listDrink(kind);
+  const same = (x) => x.profile === profile && String(x.at).slice(0, 10) === day;
+  const all = had.filter((x) => !same(x));
+  // Down to zero is a delete: the day is removed, and the removal travels.
+  if (c > 0) { const rec = { at, profile, [d.field]: c, u: stamp() }; all.push(rec); unbury(kind, rec); }
+  else bury(kind, had.filter(same));
   all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
   write(DRINK_KEY[kind], all.slice(-DRINK_MAX));
   return { at, profile, [d.field]: c };
@@ -553,12 +599,16 @@ export function mergeCardio(items) {
   const all = listCardio();
   const at = new Map(all.map((c, i) => [c.id, i]));
   let added = 0, updated = 0;
+  // An activity deleted here stays deleted: the next import from the source
+  // would otherwise bring it straight back.
+  const tombs = tombIndex(listDeleted());
   for (const c of items || []) {
-    if (!c || !c.id || !c.at) continue;
+    if (!c || !c.id || !c.at || buried(tombs, "cardio", c)) continue;
     const i = at.get(c.id);
-    if (i === undefined) { all.push(c); at.set(c.id, all.length - 1); added++; continue; }
-    const merged = { ...all[i], ...c };
-    if (JSON.stringify(merged) !== JSON.stringify(all[i])) { all[i] = merged; updated++; }
+    if (i === undefined) { all.push({ ...c, u: c.u || stamp() }); at.set(c.id, all.length - 1); added++; continue; }
+    const { u: _u, ...rest } = c;
+    const merged = { ...all[i], ...rest };
+    if (JSON.stringify(merged) !== JSON.stringify(all[i])) { all[i] = { ...merged, u: stamp() }; updated++; }
   }
   all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
   write(CDKEY, all.slice(-CARDIO_MAX));
@@ -566,9 +616,7 @@ export function mergeCardio(items) {
 }
 
 export function deleteCardio(id, profile = null) {
-  const kept = listCardio().filter((c) => !(c.id === id && c.profile === profile));
-  write(CDKEY, kept);
-  return kept.length;
+  return dropAndBury(CDKEY, "cardio", listCardio(), (c) => c.id === id && c.profile === profile);
 }
 
 /**
@@ -700,9 +748,11 @@ export function curveIndices(sessionStarted) {
 }
 
 // --- export and import -----------------------------------------------------
-/* No server, so no automatic sync. What there is instead: one file carrying
- * everything this device knows, which the athlete moves themselves. That is a
- * real limitation and the app says so rather than implying otherwise. */
+/* No server yet, so no automatic sync. What there is instead: one file
+ * carrying everything this device knows, which the athlete moves themselves.
+ * The merge below is the same one a server sync will run (syncmeta.js):
+ * newer edits win and deletions travel, so importing is a real two-way
+ * reconciliation rather than "add what is missing". */
 export const EXPORT_VERSION = 1;
 
 export function exportAll() {
@@ -732,6 +782,9 @@ export function exportAll() {
     /* Reps of sessions the archive has let go of, so the achievements on
      * the device this is imported into count the same lifetime. */
     ledger: listLedger(),
+    /* Deletions, so a record removed on this device is removed on the one
+     * this file is imported into (syncmeta.js). */
+    deleted: listDeleted(),
   };
 }
 
@@ -754,41 +807,67 @@ export function importAll(data) {
                    sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
                    weightsAdded: 0, cycleAdded: 0, sleepAdded: 0, vitalsAdded: 0,
                    waterAdded: 0, coffeeAdded: 0, cardioAdded: 0, assessmentsAdded: 0,
-                   ledgerAdded: 0 };
+                   ledgerAdded: 0, recordsUpdated: 0, recordsRemoved: 0 };
   report.assessmentsAdded = importAssessments(data.assessments);
 
+  // Deletions first: the merged tombstones decide what survives below, on
+  // both sides -- a meal deleted over there goes here too, and one deleted
+  // here is not brought back by the file.
+  const tombs = mergeTombs(listDeleted(), data.deleted);
+  write(TKEY, tombs.slice(-TOMBS_MAX));
+  let updated = 0, removed = 0;
+  const merge = (kind, local, incoming) => {
+    const r = mergeRecords(kind, local, Array.isArray(incoming) ? incoming : [], tombs);
+    updated += r.updated; removed += r.removed;
+    r.list.sort((x, y) => String(x.at).localeCompare(String(y.at)));
+    return r;
+  };
+
+  // Profiles: newer `u` wins, as for every other record. A profile with no
+  // `u` on either side (files from before sync-readiness) keeps the old rule,
+  // incoming fields laid over local ones, so an older file still carries a
+  // height or a date of birth the device never had.
   const store = listProfiles();
+  const pr = mergeRecords("profiles", store.profiles,
+    ((data.profiles && data.profiles.profiles) || []), tombs);
+  report.profilesAdded = pr.added; removed += pr.removed;
   for (const p of (data.profiles && data.profiles.profiles) || []) {
-    if (!p || !p.name) continue;
-    const i = store.profiles.findIndex((x) => x.name === p.name);
-    if (i < 0) { store.profiles.push(p); report.profilesAdded++; continue; }
-    const merged = { ...store.profiles[i], ...p };
-    // Only count a change that IS one: re-importing the same file should
-    // report "nothing new", not invent an update.
-    if (JSON.stringify(merged) !== JSON.stringify(store.profiles[i])) {
-      store.profiles[i] = merged; report.profilesUpdated++;
-    }
+    if (!p || !p.name || p.u) continue;
+    const i = pr.list.findIndex((x) => x.name === p.name);
+    if (i < 0 || pr.list[i].u) continue;
+    const merged = { ...pr.list[i], ...p };
+    if (JSON.stringify(merged) !== JSON.stringify(pr.list[i])) { pr.list[i] = merged; pr.updated++; }
   }
-  if (data.profiles && data.profiles.lastUsed) store.lastUsed = data.profiles.lastUsed;
+  report.profilesUpdated = pr.updated;
+  store.profiles = pr.list;
+  if (data.profiles && data.profiles.lastUsed && pr.list.some((x) => x.name === data.profiles.lastUsed)) {
+    store.lastUsed = data.profiles.lastUsed;
+  }
   write(PKEY, store);
 
-  const a = listArchive();
-  const seen = new Set(a.map((x) => x.started));
-  for (const s of data.archive || []) {
-    if (!s || !s.started || seen.has(s.started)) continue;
-    a.push(s); seen.add(s.started); report.sessionsAdded++;
-  }
-  // The open session on the other device is history here unless this device
-  // has nothing open -- in which case adopt it, so a phone handed over
-  // mid-workout carries on rather than starting again.
-  const incoming = data.session;
+  // Sessions: new ones join the archive; one already here is replaced when
+  // the incoming copy was changed later (a rep removed, a shot tapped).
   const open = getSession();
-  const alreadyHere = incoming &&
-    (seen.has(incoming.started) || (open && open.started === incoming.started));
-  if (incoming && incoming.sets && incoming.sets.length && !alreadyHere) {
-    if (!open) { write(SKEY, incoming); report.sessionAdopted = true; }
-    else { a.push(incoming); report.sessionsAdded++; }
+  const incoming = data.session;
+  const hasSets = (x) => x && Array.isArray(x.sets) && x.sets.length > 0;
+  const others = Array.isArray(data.archive) ? data.archive.slice() : [];
+  let adopt = null;
+  if (hasSets(incoming)) {
+    if (open && incoming.started === open.started) {
+      if (String(incoming.u || "") > String(open.u || "")) { write(SKEY, incoming); updated++; }
+    } else {
+      // The open session on the other device is history here unless this
+      // device has nothing open -- then adopt it, so a phone handed over
+      // mid-workout carries on rather than starting again.
+      const known = [...listArchive(), ...others].some((x) => x && x.started === incoming.started);
+      if (!open && !known) adopt = incoming; else others.push(incoming);
+    }
   }
+  const sr = mergeRecords("sessions", listArchive(), others, []);
+  updated += sr.updated;
+  report.sessionsAdded = sr.added;
+  const a = sr.list;
+  if (adopt) { write(SKEY, adopt); report.sessionAdopted = true; }
   // A ledger from the other device comes first, so a session it already
   // counted and this import would drop again is recognised as the same one.
   const ledger = Array.isArray(data.ledger) ? data.ledger : [];
@@ -799,77 +878,25 @@ export function importAll(data) {
   // the imported sessions still land, only the oldest go uncounted.
   write(AKEY, trimArchive(a) || a.slice(-ARCHIVE_MAX));
 
-  // Meals merge on (at, profile), so re-importing the same file adds nothing.
-  const meals = listMeals();
-  const have = new Set(meals.map((m) => `${m.profile}|${m.at}`));
-  for (const m of data.meals || []) {
-    if (!m || !m.at || have.has(`${m.profile}|${m.at}`)) continue;
-    meals.push(m); have.add(`${m.profile}|${m.at}`); report.mealsAdded++;
+  const stores = [
+    ["meals", MKEY, listMeals, MEALS_MAX, "mealsAdded"],
+    ["diary", DKEY, listDiary, DIARY_MAX, "diaryAdded"],
+    ["weights", WKEY, listWeights, WEIGHTS_MAX, "weightsAdded"],
+    ["cycle", CYKEY, listCycle, CYCLE_MAX, "cycleAdded"],
+    ["sleep", SLKEY, listSleep, SLEEP_MAX, "sleepAdded"],
+    ["vitals", VKEY, listVitals, VITALS_MAX, "vitalsAdded"],
+    ...DRINK_KINDS.map((k) => [k, DRINK_KEY[k], () => listDrink(k), DRINK_MAX, k + "Added"]),
+    ["cardio", CDKEY, listCardio, CARDIO_MAX, "cardioAdded"],
+  ];
+  for (const [kind, key, list, max, field] of stores) {
+    const r = merge(kind, list(), data[kind]);
+    report[field] = r.added;
+    // Only written when something changed: a no-op import leaves the store
+    // byte-for-byte as it was.
+    if (r.added || r.updated || r.removed) write(key, r.list.slice(-max));
   }
-  meals.sort((x, y) => String(x.at).localeCompare(String(y.at)));
-  write(MKEY, meals.slice(-MEALS_MAX));
-
-  const diary = listDiary();
-  const seenD = new Set(diary.map((d) => `${d.profile}|${d.at}`));
-  for (const d of data.diary || []) {
-    if (!d || !d.at || seenD.has(`${d.profile}|${d.at}`)) continue;
-    diary.push(d); seenD.add(`${d.profile}|${d.at}`); report.diaryAdded++;
-  }
-  diary.sort((x, y) => String(x.at).localeCompare(String(y.at)));
-  write(DKEY, diary.slice(-DIARY_MAX));
-
-  const wts = listWeights();
-  const seenW = new Set(wts.map((w) => `${w.profile}|${w.at}`));
-  for (const w of data.weights || []) {
-    if (!w || !w.at || seenW.has(`${w.profile}|${w.at}`)) continue;
-    wts.push(w); seenW.add(`${w.profile}|${w.at}`); report.weightsAdded++;
-  }
-  wts.sort((x, y) => String(x.at).localeCompare(String(y.at)));
-  write(WKEY, wts.slice(-WEIGHTS_MAX));
-
-  const cyc = listCycle();
-  const seenC = new Set(cyc.map((c) => `${c.profile}|${String(c.at).slice(0, 10)}`));
-  for (const c of data.cycle || []) {
-    if (!c || !c.at || seenC.has(`${c.profile}|${String(c.at).slice(0, 10)}`)) continue;
-    cyc.push(c); seenC.add(`${c.profile}|${String(c.at).slice(0, 10)}`); report.cycleAdded++;
-  }
-  cyc.sort((x, y) => String(x.at).localeCompare(String(y.at)));
-  write(CYKEY, cyc.slice(-CYCLE_MAX));
-
-  const slp = listSleep();
-  const seenS = new Set(slp.map((x) => `${x.profile}|${String(x.at).slice(0, 10)}`));
-  for (const x of data.sleep || []) {
-    if (!x || !x.at || seenS.has(`${x.profile}|${String(x.at).slice(0, 10)}`)) continue;
-    slp.push(x); seenS.add(`${x.profile}|${String(x.at).slice(0, 10)}`); report.sleepAdded++;
-  }
-  slp.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-  write(SLKEY, slp.slice(-SLEEP_MAX));
-
-  const vit = listVitals();
-  const seenV = new Set(vit.map((x) => `${x.profile}|${String(x.at).slice(0, 10)}`));
-  for (const x of data.vitals || []) {
-    if (!x || !x.at || seenV.has(`${x.profile}|${String(x.at).slice(0, 10)}`)) continue;
-    vit.push(x); seenV.add(`${x.profile}|${String(x.at).slice(0, 10)}`); report.vitalsAdded++;
-  }
-  vit.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-  write(VKEY, vit.slice(-VITALS_MAX));
-
-  for (const kind of DRINK_KINDS) {
-    const have = listDrink(kind);
-    const seen = new Set(have.map((x) => `${x.profile}|${String(x.at).slice(0, 10)}`));
-    for (const x of data[kind] || []) {
-      if (!x || !x.at || seen.has(`${x.profile}|${String(x.at).slice(0, 10)}`)) continue;
-      have.push(x); seen.add(`${x.profile}|${String(x.at).slice(0, 10)}`); report[kind + "Added"]++;
-    }
-    have.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-    write(DRINK_KEY[kind], have.slice(-DRINK_MAX));
-  }
-
-  // Cardio merges on the source id, which mergeCardio already does, so the
-  // import path is the same code the Strava button uses.
-  if (Array.isArray(data.cardio) && data.cardio.length) {
-    report.cardioAdded = mergeCardio(data.cardio).added;
-  }
+  report.recordsUpdated = updated;
+  report.recordsRemoved = removed;
 
   // Photos are not in the export. They live in IndexedDB and would multiply
   // the file size by an order of magnitude in base64 -- an export you cannot
@@ -901,6 +928,7 @@ export function addSet(result, fps, extra = {}) {
     perRep: result.reps.map((r) => summariseRep(r, result.activity)),
   };
   s.sets.push(set);
+  s.u = stamp();
   // Throw rather than return a set that is not in the log: the caller says so
   // on the page (sayStorageFull), instead of the set vanishing quietly.
   if (!writeKeep(SKEY, s)) throw new Error("storage full: the set could not be saved");
@@ -922,6 +950,7 @@ export function setRepOutcome(setIndex, rep, made) {
   const r = set && (set.perRep || []).find((x) => x.rep === rep);
   if (!r) return false;
   r.made = r.made === made ? null : made;
+  s.u = stamp();
   write(SKEY, s);
   return true;
 }
@@ -972,6 +1001,7 @@ export function setRepRemoved(sessionStarted, setIndex, rep, removed = true) {
     return null;
   }
   set.reps = set.perRep.length;
+  sess.u = stamp();
   if (!(arch ? writeKeep(AKEY, arch) : writeKeep(SKEY, sess))) return null;
   const store = read(CKEY, {});
   const c = store[`${sessionStarted}|${setIndex}`];

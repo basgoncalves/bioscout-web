@@ -59,9 +59,17 @@ ok(clampGlasses(12) === 10 && clampGlasses(-2) === 0 && clampGlasses("") === nul
   ok(Array.isArray(file.water) && file.water.length === 2, "the export carries water");
   const again = P.importAll(file);
   ok(again.waterAdded === 0, "re-importing the same file adds nothing", String(again.waterAdded));
+  // Zeroing the day AFTER the export is a delete newer than the file: the
+  // older copy must not bring it back (syncmeta.js -- deletions travel).
   P.setWater({ profile: "bas", at, glasses: 0 });
   const back = P.importAll(file);
-  ok(back.waterAdded === 1 && collectWater(P.listWater(), "bas").get("2026-09-10").glasses === 4,
+  ok(back.waterAdded === 0 && !collectWater(P.listWater(), "bas").has("2026-09-10"),
+     "an older file does not undo a newer delete");
+  // A day this device never had at all does come in.
+  const onlyThere = JSON.parse(JSON.stringify(file));
+  onlyThere.water = [{ at: "2026-09-12T10:00:00.000Z", profile: "bas", glasses: 2, u: "2026-09-12T10:00:00.000Z" }];
+  onlyThere.deleted = [];
+  ok(P.importAll(onlyThere).waterAdded === 1 && collectWater(P.listWater(), "bas").get("2026-09-12").glasses === 2,
      "an import restores a day this device does not have");
 }
 
@@ -76,7 +84,9 @@ ok(clampGlasses(12) === 10 && clampGlasses(-2) === 0 && clampGlasses("") === nul
   const c = collectCoffee(P.listCoffee(), "bas").get("2026-09-10");
   ok(c && c.n === 3 && c.cups === 3, "the last tap is the coffee count", JSON.stringify(c));
   ok(fmtVolume(3, "coffee") === "300 mL", "coffee is said in millilitres", fmtVolume(3, "coffee"));
-  ok(collectWater(P.listWater(), "bas").get("2026-09-10").glasses === 4,
+  P.setWater({ profile: "bas", at, glasses: 4 });
+  ok(collectWater(P.listWater(), "bas").get("2026-09-10").glasses === 4
+     && collectCoffee(P.listCoffee(), "bas").get("2026-09-10").n === 3,
      "coffee and water are counted separately");
   P.setCoffee({ profile: "bas", at, cups: 40 });
   ok(collectCoffee(P.listCoffee(), "bas").get("2026-09-10").n === 10, "capped at ten cups");
@@ -86,9 +96,11 @@ ok(clampGlasses(12) === 10 && clampGlasses(-2) === 0 && clampGlasses("") === nul
   P.setCoffee({ profile: "bas", at, cups: 0 });
   ok(!collectCoffee(P.listCoffee(), "bas").has("2026-09-10"), "back to zero removes the day");
   const r = P.importAll(file);
-  ok(r.coffeeAdded === 1 && collectCoffee(P.listCoffee(), "bas").get("2026-09-10").n === 3,
-     "an import restores it");
-  ok(P.importAll(file).coffeeAdded === 0, "and a second import adds nothing");
+  ok(r.coffeeAdded === 0 && !collectCoffee(P.listCoffee(), "bas").has("2026-09-10"),
+     "an import of the older file does not bring the deleted day back");
+  P.setCoffee({ profile: "bas", at, cups: 2 });
+  ok(P.importAll(file).coffeeAdded === 0 && collectCoffee(P.listCoffee(), "bas").get("2026-09-10").n === 2,
+     "re-logged after the delete: the newer count stays");
 }
 
 {

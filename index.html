@@ -1186,11 +1186,18 @@ $("importProfilesFile").onchange = async (e) => {
     const p = getProfile($("profile").value);
     if (p) applyProfile(p);
     renderTraining();
+    // A merge can now remove records too, so the day on screen is redrawn.
+    if (!$("viewDash").classList.contains("hidden")) renderDash();
     const bits = [];
     if (rep.profilesAdded) bits.push(tr("impNewProfiles", { n: rep.profilesAdded }));
     if (rep.profilesUpdated) bits.push(tr("impUpdated", { n: rep.profilesUpdated }));
     if (rep.sessionsAdded) bits.push(tr("impSessions", { n: rep.sessionsAdded }));
     if (rep.sessionAdopted) bits.push(tr("impAdopted"));
+    const logged = ["meals", "diary", "weights", "cycle", "sleep", "vitals", "water", "coffee",
+                    "cardio", "assessments"].reduce((n, k) => n + (rep[k + "Added"] || 0), 0);
+    if (logged) bits.push(tr("impRecords", { n: logged }));
+    if (rep.recordsUpdated) bits.push(tr("impNewer", { n: rep.recordsUpdated }));
+    if (rep.recordsRemoved) bits.push(tr("impDeleted", { n: rep.recordsRemoved }));
     say(bits.length ? tr("sayImported", { bits: bits.join(", ") })
                     : tr("sayNothingNew"));
   } catch (err) {
