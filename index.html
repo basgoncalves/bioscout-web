@@ -45,6 +45,16 @@
            font-family:inherit; cursor:pointer; }
   button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line);
                  font-weight:500; }
+  button.good { background:var(--good); color:#fff; }
+  /* - [ 83.0 ] +  */
+  .stepper { display:flex; gap:6px; align-items:stretch; flex:1; min-width:0; }
+  .stepper input { text-align:center; flex:1; min-width:0; }
+  .stepper button.stepBtn { width:48px; flex:0 0 48px; margin:0; padding:0; font-size:22px;
+                            line-height:1; touch-action:manipulation; user-select:none; }
+  /* Week / Month / Year */
+  .seg { display:flex; gap:6px; }
+  .seg button { margin:0; padding:7px 4px; font-size:13px; flex:1; }
+  .seg button.on { border-color:var(--accent); color:var(--accent); font-weight:700; }
   button:disabled { opacity:.45; cursor:default; }
   button + button { margin-top:8px; }
 
@@ -607,7 +617,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 84;
+window.BUILD = 85;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -648,14 +658,14 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices, setRepOutcome, setRepRemoved }
        from "./src/profiles.js";
-import { renderDashboard, mealFormHTML, diaryFormHTML, weightFormHTML,
+import { renderDashboard, mealFormHTML, diaryFormHTML, weightStepperHTML, weightSourceText,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
          collectDays, percentile } from "./src/dashboard.js";
 import { probe as probeHelper, fetchClip } from "./src/fetcher.js";
 import { probe as probeStrava, authorise as authoriseStrava,
          fetchActivities, toCardioAll } from "./src/strava.js";
 import { DEFAULT_TAGS, toggleTag, stepTag } from "./src/diary.js";
-import { collectWeights, weightOn } from "./src/weight.js";
+import { collectWeights, weightNear } from "./src/weight.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
          dayOfCycle } from "./src/cycle.js";
 import { densityFor, foodNames, describe, mealKcal, toGrams, unitStep } from "./src/foods.js";
@@ -1431,21 +1441,47 @@ function openAdd(step) {
       + diaryFormHTML(key, todayKey, myTags(), draft);
     wireDiaryForm(key);
   } else if (step === "weight") {
-    const current = weightOn(collectWeights(myWeights()), key);
-    body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("weightBeforeSession")}</h2>`
-      + weightFormHTML(key, todayKey, current)
-      + `<button class="ghost" id="weightSkip" style="margin-top:8px">${tr("skipToSession")}</button>`;
-    const go = () => { dlg.close(); startTraining(key); };
-    $("weightAddDay").onclick = () => {
-      const kg = $("weightKg").value;
-      if (!addWeight({ profile: currentAthlete(), kg, at: atOnDay(key) })) {
-        say(tr("weightNeedsNumber"), true); return;
+    /* Before a session: the weight for THAT day, defaulted to what was logged
+     * on it, else the most recent weigh-in before it (for a session filed on
+     * 6 July, the last one on or before 6 July -- not today's). Nothing is
+     * focused, so the keyboard stays down: - and + nudge the figure, and
+     * typing is still there for a big change.
+     *
+     * Continue logs the figure on the day (unless that exact figure is already
+     * the day's), uses it as the session's body mass, and starts the session.
+     * Blank continues without a weight. Close does nothing at all. */
+    const near = weightNear(collectWeights(myWeights()), key);
+    body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px;outline:none" tabindex="-1" autofocus>${
+        key === todayKey ? tr("weightBeforeSession") : tr("weightOnDay", { date: shortDate(key) })}</h2>
+      <p class="sub" style="margin:0 0 10px">${esc(weightSourceText(near))}</p>
+      ${weightStepperHTML("weightKg", near ? near.kg : null)}
+      <button class="good" id="weightContinue" style="margin-top:12px">${tr("continue")}</button>`;
+    wireSteppers(body);
+    $("weightContinue").onclick = () => {
+      const raw = $("weightKg").value.trim();
+      if (raw) {
+        const kg = Math.round(parseFloat(raw) * 10) / 10;
+        if (!(kg >= 20 && kg <= 500)) { say(tr("weightNeedsNumber"), true); return; }
+        const same = near && near.offset === 0 && Math.abs(near.kg - kg) < 0.05;
+        if (!same && !addWeight({ profile: currentAthlete(), kg, at: atOnDay(key) })) {
+          say(tr("weightNeedsNumber"), true); return;
+        }
+        // This session's body mass is the day's weight.
+        $("mass").value = kg;
+        massTouched = new Date().toISOString();
+        autosaveProfile();
       }
-      go();
+      dlg.close();
+      startTraining(key);
     };
-    $("weightSkip").onclick = go;
   }
   if (!dlg.open) dlg.showModal();
+  // Opening a modal focuses its first control; on a phone a focused number
+  // field means the keyboard. The weight step starts with nothing focused.
+  if (step === "weight") {
+    const h = body.querySelector("[autofocus]");
+    if (h) h.focus({ preventScroll: true });
+  }
 }
 
 const shortDate = (key) => {
@@ -1908,6 +1944,40 @@ async function importStrava() {
   }
 }
 
+/* - / + beside a number field. A tap moves it by data-step; holding repeats,
+ * after a short pause, so 83.0 to 81.5 is one press rather than fifteen. The
+ * field is never focused by this, so the phone's keyboard stays down. */
+function wireSteppers(root) {
+  root.querySelectorAll(".stepper").forEach((box) => {
+    const input = box.querySelector("input");
+    const step = parseFloat(box.dataset.step) || 0.1;
+    const lo = parseFloat(box.dataset.min), hi = parseFloat(box.dataset.max);
+    const nudge = (dir) => {
+      const cur = parseFloat(input.value);
+      const base = Number.isFinite(cur) ? cur : (Number.isFinite(lo) ? Math.max(lo, 70) : 0);
+      let v = Math.round((base + dir * step) * 10) / 10;
+      if (Number.isFinite(lo)) v = Math.max(lo, v);
+      if (Number.isFinite(hi)) v = Math.min(hi, v);
+      input.value = v.toFixed(1);
+    };
+    box.querySelectorAll("button.stepBtn").forEach((b) => {
+      const dir = +b.dataset.dir;
+      let wait = null, rep = null, lastDown = 0;
+      const stop = () => { clearTimeout(wait); clearInterval(rep); wait = rep = null; };
+      b.addEventListener("pointerdown", (e) => {
+        e.preventDefault();                       // no focus, no keyboard
+        lastDown = Date.now();
+        nudge(dir);
+        wait = setTimeout(() => { rep = setInterval(() => nudge(dir), 90); }, 450);
+      });
+      ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => b.addEventListener(ev, stop));
+      // The click that follows a press has already been counted; a click with
+      // no press before it (Enter / Space on a keyboard) has not.
+      b.addEventListener("click", () => { if (Date.now() - lastDown > 1000) nudge(dir); });
+    });
+  });
+}
+
 function renderDash() {
   const card = $("dashboardCard");
   if (!dashView) dashView = defaultDashView();
@@ -1963,6 +2033,19 @@ function renderDash() {
   if ($("addDiaryBtn")) $("addDiaryBtn").onclick = () => openAdd("diary");
   if ($("shareBtn")) $("shareBtn").onclick = shareMonth;
   if ($("newTrainingBtn")) $("newTrainingBtn").onclick = () => openAdd("weight");
+  wireSteppers(card);
+  if ($("weightDaySave")) $("weightDaySave").onclick = () => {
+    const kg = parseFloat($("weightDayKg").value);
+    if (!(kg >= 20 && kg <= 500)
+        || !addWeight({ profile: currentAthlete(), kg, at: atOnDay(dashView.selected) })) {
+      say(tr("weightNeedsNumber"), true); return;
+    }
+    say(tr("weightSaved", { kg: kg.toFixed(1), date: shortDate(dashView.selected) }));
+    renderDash();
+  };
+  card.querySelectorAll("button.wrange").forEach((b) => {
+    b.onclick = () => { dashView = { ...dashView, weightRange: b.dataset.range }; renderDash(); };
+  });
   if ($("trainImport")) $("trainImport").onclick = () => $("importProfilesFile").click();
   if ($("assessBtn")) $("assessBtn").onclick = () => openAssess();
   if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);

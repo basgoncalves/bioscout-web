@@ -249,7 +249,6 @@ const EN = {
   "stravaNothingNew": "Nothing new since the last import.",
   "stravaFailed": "Strava import failed: {error}",
   "weightBeforeSession": "Weight today",
-  "skipToSession": "Skip, start the session",
   "yourData": "Your data",
   "uploadData": "Upload or sync (coming)",
   "uploadSoon": "Importing a file from another app, or syncing a watch or scale, is not built yet. Export from Edit profile still works and carries everything except photos.",
@@ -836,6 +835,22 @@ const EN = {
   "sayRepRestored": "Rep {n} is back in the set.",
   "editReps": "Remove or restore reps",
   "editRepsNote": "Tap a rep that was tracked wrong to take it out of its set \u2014 it leaves the counts, means and trends. Tap it again to put it back.",
+  // --- weight section and pre-session weight (2026-09-10) ---
+  "weightTitle": "Weight",
+  "weightOnDay": "Weight on {date}",
+  "weightOnThisDay": "{kg} kg logged on this day",
+  "weightFromEarlier": "last logged {kg} kg on {date} ({n} earlier)",
+  "weightFromLater": "nearest logged {kg} kg on {date} ({n} later)",
+  "noWeightThatDay": "Nothing logged on this day",
+  "noWeightInRange": "No weight logged in this period.",
+  "weightTimeline": "Weight over time",
+  "weightSaved": "{kg} kg saved to {date}.",
+  "range_week": "Week",
+  "range_month": "Month",
+  "range_year": "Year",
+  "continue": "Continue",
+  "minusTenth": "0.1 kg less",
+  "plusTenth": "0.1 kg more",
 };
 
 const PT = {
@@ -1062,7 +1077,6 @@ const PT = {
   "stravaNothingNew": "Nada de novo desde a última importação.",
   "stravaFailed": "A importação do Strava falhou: {error}",
   "weightBeforeSession": "Peso hoje",
-  "skipToSession": "Saltar, começar a sessão",
   "yourData": "Os teus dados",
   "uploadData": "Carregar ou sincronizar (em breve)",
   "uploadSoon": "Importar um ficheiro de outra app, ou sincronizar um relógio ou balança, ainda não está feito. Exportar em Editar perfil continua a funcionar e leva tudo menos as fotos.",
@@ -1650,6 +1664,22 @@ const PT = {
   "sayRepRestored": "Rep {n} voltou \u00e0 s\u00e9rie.",
   "editReps": "Retirar ou repor repeti\u00e7\u00f5es",
   "editRepsNote": "Toque numa repeti\u00e7\u00e3o mal seguida para a retirar da s\u00e9rie \u2014 sai das contagens, m\u00e9dias e tend\u00eancias. Toque outra vez para a repor.",
+  // --- weight section and pre-session weight (2026-09-10) ---
+  "weightTitle": "Peso",
+  "weightOnDay": "Peso em {date}",
+  "weightOnThisDay": "{kg} kg registados neste dia",
+  "weightFromEarlier": "\u00faltimo registo {kg} kg em {date} ({n} antes)",
+  "weightFromLater": "registo mais pr\u00f3ximo {kg} kg em {date} ({n} depois)",
+  "noWeightThatDay": "Nada registado neste dia",
+  "noWeightInRange": "Nenhum peso registado neste per\u00edodo.",
+  "weightTimeline": "Peso ao longo do tempo",
+  "weightSaved": "{kg} kg guardados em {date}.",
+  "range_week": "Semana",
+  "range_month": "M\u00eas",
+  "range_year": "Ano",
+  "continue": "Continuar",
+  "minusTenth": "menos 0,1 kg",
+  "plusTenth": "mais 0,1 kg",
 };
 
 const DE = {
@@ -1877,7 +1907,6 @@ const DE = {
   "stravaNothingNew": "Nichts Neues seit dem letzten Import.",
   "stravaFailed": "Strava-Import fehlgeschlagen: {error}",
   "weightBeforeSession": "Gewicht heute",
-  "skipToSession": "Überspringen, Einheit starten",
   "yourData": "Deine Daten",
   "uploadData": "Hochladen oder synchronisieren (bald)",
   "uploadSoon": "Eine Datei aus einer anderen App zu importieren oder eine Uhr oder Waage zu synchronisieren, gibt es noch nicht. Der Export unter Profil bearbeiten funktioniert weiterhin und nimmt alles außer Fotos mit.",
@@ -2463,6 +2492,22 @@ const DE = {
   "sayRepRestored": "Wdh. {n} ist wieder im Satz.",
   "editReps": "Wiederholungen entfernen oder wiederherstellen",
   "editRepsNote": "Tippen Sie auf eine falsch erfasste Wiederholung, um sie aus ihrem Satz zu nehmen \u2014 sie f\u00e4llt aus Z\u00e4hlungen, Mittelwerten und Trends. Nochmals tippen holt sie zur\u00fcck.",
+  // --- weight section and pre-session weight (2026-09-10) ---
+  "weightTitle": "Gewicht",
+  "weightOnDay": "Gewicht am {date}",
+  "weightOnThisDay": "{kg} kg an diesem Tag erfasst",
+  "weightFromEarlier": "zuletzt {kg} kg am {date} ({n} fr\u00fcher)",
+  "weightFromLater": "n\u00e4chster Eintrag {kg} kg am {date} ({n} sp\u00e4ter)",
+  "noWeightThatDay": "An diesem Tag nichts erfasst",
+  "noWeightInRange": "In diesem Zeitraum kein Gewicht erfasst.",
+  "weightTimeline": "Gewicht im Verlauf",
+  "weightSaved": "{kg} kg f\u00fcr {date} gespeichert.",
+  "range_week": "Woche",
+  "range_month": "Monat",
+  "range_year": "Jahr",
+  "continue": "Weiter",
+  "minusTenth": "0,1 kg weniger",
+  "plusTenth": "0,1 kg mehr",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };

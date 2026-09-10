@@ -90,3 +90,47 @@ export function weightSeries(weights, year, month) {
   }
   return out;
 }
+
+/**
+ * The weight to OFFER for a day: the entry on that day, else the most recent
+ * one before it, else -- for a day before anything was logged -- the nearest
+ * one after it. This is a default for a form, not a statement about the day:
+ * `offset` says how far away (in days, negative = earlier) the figure came
+ * from, so the form can say so instead of passing it off as that day's.
+ */
+export function weightNear(weights, key) {
+  if (!key || !weights || !weights.length) return null;
+  const before = weightOn(weights, key);
+  if (before) return { kg: before.kg, at: before.at, day: before.day, offset: -before.stale };
+  const after = weights.find((w) => w.day > key);
+  return after ? { kg: after.kg, at: after.at, day: after.day,
+                   offset: daysBetween(key, after.day) } : null;
+}
+
+/** YYYY-MM-DD `n` days from `key` (negative for earlier). */
+export function addDays(key, n) {
+  const [y, m, d] = key.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + n, 12));
+  const p = (v) => String(v).padStart(2, "0");
+  return `${t.getUTCFullYear()}-${p(t.getUTCMonth() + 1)}-${p(t.getUTCDate())}`;
+}
+
+/**
+ * The weights to draw for the `days` days ending on `endKey`.
+ *
+ * `points` are the actual measurements in the window, one per day (the later
+ * one when a day has two, as weightOn does). `carried` is the weight that was
+ * already standing when the window opened -- the last measurement before it --
+ * so the line can start at the left edge instead of appearing out of nowhere
+ * at the first weigh-in. Nothing is interpolated between measurements: a
+ * weight holds until the next one (see the header).
+ */
+export function weightWindow(weights, endKey, days) {
+  const start = addDays(endKey, -(days - 1));
+  const byDay = new Map();
+  for (const w of weights || []) if (w.day >= start && w.day <= endKey) byDay.set(w.day, w.kg);
+  const points = [...byDay].map(([day, kg]) => ({ day, kg }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  const prev = weightOn(weights || [], addDays(start, -1));
+  return { start, end: endKey, days, carried: prev ? prev.kg : null, points };
+}

@@ -23,7 +23,7 @@
  */
 import { t as tr } from "./i18n.js";
 import { MOODS, collectDiary, moodTrend, tagLevels, LEVEL_MAX } from "./diary.js";
-import { collectWeights, weightOn, weightSeries } from "./weight.js";
+import { collectWeights, weightOn, weightSeries, weightNear, weightWindow } from "./weight.js";
 import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
          dayOfCycle, phaseModel, cycleDayKey, LUTEAL_DAYS, FLOWS } from "./cycle.js";
 import { itemKcal, mealKcal, describe, UNITS } from "./foods.js";
@@ -1011,18 +1011,112 @@ export function diaryFormHTML(key, todayKey, tags, draft = { tags: [], levels: {
 }
 
 /** The weight form, for the Add dialog. */
-export function weightFormHTML(key, todayKey, current) {
-  return `
-    <p class="sub" style="margin:0 0 8px">${esc(current
-      ? tr("weightCarried", { kg: current.kg.toFixed(1), n: nDays(current.stale) })
-      : tr("noWeightYet"))}</p>
-    <label for="weightKg">${esc(tr("weightKg"))}</label>
-    <input id="weightKg" type="number" step="0.1" min="20" max="500" inputmode="decimal"
-           value="${current ? current.kg.toFixed(1) : ""}">
-    <div class="row" style="margin-top:8px">
-      <button type="button" class="ghost" id="weightAddDay" style="margin:0;padding:9px">${
-        esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
+/* ---- weight: the day's figure, a stepper, and the timeline --------------- */
+
+/** A number field with - and + either side, 0.1 kg a tap (held: repeats).
+ *  The buttons exist so a weight can be nudged from the last one without the
+ *  phone's keyboard coming up at all. Wired by wireSteppers() in index.html.
+ *  Called with id="weightKg" (the pre-session dialog) and id="weightDayKg"
+ *  (the day view) -- named here so test_dom_ids can see them created. */
+export function weightStepperHTML(id, kg) {
+  return `<div class="stepper" data-step="0.1" data-min="20" data-max="500">
+      <button type="button" class="ghost stepBtn" data-dir="-1" aria-label="${esc(tr("minusTenth"))}">−</button>
+      <input id="${esc(id)}" type="number" step="0.1" min="20" max="500" inputmode="decimal"
+             value="${kg != null ? (+kg).toFixed(1) : ""}" aria-label="${esc(tr("weightKg"))}">
+      <button type="button" class="ghost stepBtn" data-dir="1" aria-label="${esc(tr("plusTenth"))}">+</button>
     </div>`;
+}
+
+/** Where a default weight came from, in words: this day, or n days either
+ *  side of it. */
+export function weightSourceText(near) {
+  if (!near) return tr("noWeightYet");
+  const kg = near.kg.toFixed(1);
+  if (near.offset === 0) return tr("weightOnThisDay", { kg });
+  return tr(near.offset < 0 ? "weightFromEarlier" : "weightFromLater",
+            { kg, date: shortDay(near.day), n: nDays(Math.abs(near.offset)) });
+}
+
+export const WEIGHT_RANGES = { week: 7, month: 30, year: 365 };
+
+/**
+ * The timeline, as an inline SVG: a step line (a weight holds until the next
+ * one -- see weight.js) with a dot on every actual weigh-in. Colours are
+ * the page's own variables, so it follows the light and dark themes.
+ */
+export function weightChartSVG(win) {
+  const W = 320, H = 130, L = 34, R = 8, T = 10, B = 22;
+  const vals = [...win.points.map((p) => p.kg), ...(win.carried != null ? [win.carried] : [])];
+  if (!vals.length) {
+    return `<p class="sub" style="margin:8px 0 0">${esc(tr("noWeightInRange"))}</p>`;
+  }
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (hi - lo < 1) { const m = (hi + lo) / 2; lo = m - 0.5; hi = m + 0.5; }
+  const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
+  const span = win.days - 1 || 1;
+  const x = (day) => L + (W - L - R) * (daysFrom(win.start, day) / span);
+  const y = (kg) => T + (H - T - B) * (1 - (kg - lo) / (hi - lo));
+  const xEnd = W - R;
+  // Step path: from the left edge at the carried weight, then flat to each
+  // weigh-in and up or down to it, then flat to the right edge.
+  let d = "", cur = win.carried, cx = L;
+  if (cur != null) d = `M${L},${y(cur).toFixed(1)}`;
+  for (const p of win.points) {
+    const px = x(p.day);
+    if (cur == null) d += `M${px.toFixed(1)},${y(p.kg).toFixed(1)}`;
+    else d += `H${px.toFixed(1)}V${y(p.kg).toFixed(1)}`;
+    cur = p.kg; cx = px;
+  }
+  if (cur != null) d += `H${xEnd}`;
+  const dots = win.points.map((p) =>
+    `<circle cx="${x(p.day).toFixed(1)}" cy="${y(p.kg).toFixed(1)}" r="${win.days > 60 ? 2 : 3}"
+       fill="var(--accent)"><title>${esc(shortDay(p.day))} · ${p.kg.toFixed(1)} kg</title></circle>`).join("");
+  const fmt = (v) => v.toFixed(1);
+  const lbl = (day) => esc(win.days > 60
+    ? localeDay(day).toLocaleDateString([], { month: "short", year: "numeric" })
+    : shortDay(day));
+  return `<svg class="wchart" viewBox="0 0 ${W} ${H}" role="img"
+      aria-label="${esc(tr("weightTimeline"))}" style="width:100%;height:auto;display:block;margin-top:8px">
+    <line x1="${L}" y1="${T}" x2="${xEnd}" y2="${T}" stroke="var(--line)"/>
+    <line x1="${L}" y1="${H - B}" x2="${xEnd}" y2="${H - B}" stroke="var(--line)"/>
+    <text x="${L - 4}" y="${T + 4}" text-anchor="end" font-size="10" fill="var(--muted)">${fmt(hi)}</text>
+    <text x="${L - 4}" y="${H - B + 3}" text-anchor="end" font-size="10" fill="var(--muted)">${fmt(lo)}</text>
+    <text x="${L}" y="${H - 6}" font-size="10" fill="var(--muted)">${lbl(win.start)}</text>
+    <text x="${xEnd}" y="${H - 6}" text-anchor="end" font-size="10" fill="var(--muted)">${lbl(win.end)}</text>
+    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round"/>
+    ${dots}
+  </svg>`;
+}
+
+const daysFrom = (a, b) => {
+  const t = (k) => { const [yy, mm, dd] = k.split("-").map(Number); return Date.UTC(yy, mm - 1, dd, 12); };
+  return Math.round((t(b) - t(a)) / 86400000);
+};
+
+/** The weight section of the day view: what was logged that day (or what is
+ *  standing from before), a stepper to log it, and the timeline. */
+function weightDayHTML(wts, key, todayKey, range) {
+  const r = WEIGHT_RANGES[range] ? range : "month";
+  const near = weightNear(wts, key);
+  const on = near && near.offset === 0;
+  const line = on ? tr("weightOnThisDay", { kg: near.kg.toFixed(1) })
+    : near ? `${tr("noWeightThatDay")} · ${weightSourceText(near)}`
+    : tr("noWeightYet");
+  const win = weightWindow(wts, key, WEIGHT_RANGES[r]);
+  return `<div class="daybox" id="weightBox">
+    <div style="font-weight:600">${esc(tr("weightTitle"))}</div>
+    <p class="sub" style="margin:4px 0 8px">${esc(line)}</p>
+    <div class="row" style="align-items:center">
+      ${weightStepperHTML("weightDayKg", near ? near.kg : null)}
+      <button type="button" class="ghost" id="weightDaySave" style="margin:0;padding:9px;flex:0 0 auto;width:auto">${
+        esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
+    </div>
+    <div class="seg" role="group" aria-label="${esc(tr("weightTimeline"))}" style="margin-top:10px">
+      ${Object.keys(WEIGHT_RANGES).map((k) => `<button type="button" class="ghost wrange${k === r ? " on" : ""}"
+        data-range="${k}" aria-pressed="${k === r}">${esc(tr("range_" + k))}</button>`).join("")}
+    </div>
+    ${weightChartSVG(win)}
+  </div>`;
 }
 
 /**
@@ -1073,14 +1167,10 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     <div id="dayHead">
       <div style="font-weight:600">${esc(localeDay(view.selected)
         .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>
-      ${(() => { const w = weightOn(wts, view.selected); return w
-        ? `<p class="sub" style="margin:2px 0 0">${esc(w.stale === 0
-            ? tr("weightMeasured", { kg: w.kg.toFixed(1) })
-            : tr("weightCarried", { kg: w.kg.toFixed(1), n: nDays(w.stale) }))}</p>`
-        : ""; })()}
     </div>
     ${calendarHTML({ meals: mealDays, diary: diaryDays, sleep: sleepDays, vitals: vitalsDays }[mode] || days,
                    view.year, view.month, view.selected, todayKey, mode)}
+    ${weightDayHTML(wts, view.selected, todayKey, view.weightRange)}
     ${dayHTML(days.get(view.selected), view.selected)}
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey)}
     ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey,
