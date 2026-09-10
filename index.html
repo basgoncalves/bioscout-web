@@ -455,6 +455,17 @@ try {
   .post:first-child { border-top:0; padding-top:0; }
   .postHead { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:6px; }
   .postHead b { font-size:14px; }
+  /* Profile pictures: a photo in a circle, or the name's first letter. */
+  .avatar { width:32px; height:32px; border-radius:50%; object-fit:cover; flex:none;
+            display:inline-flex; align-items:center; justify-content:center;
+            background:var(--accent); color:#fff; font-weight:700; font-size:14px;
+            vertical-align:middle; overflow:hidden; }
+  .avatar.big { width:64px; height:64px; font-size:26px; }
+  .avatar.mid { width:44px; height:44px; font-size:18px; }
+  .postWho { display:flex; align-items:center; gap:8px; min-width:0; }
+  .post .postHead img.avatar { width:32px; height:32px; max-height:none; border-radius:50%;
+                               object-fit:cover; margin:0; background:none; }
+  .whoTop { display:flex; align-items:center; gap:10px; }
   .post img, .post video { display:block; width:100%; max-height:70vh; object-fit:contain;
                            background:#0f1317; border-radius:10px; }
   .postBody { margin:8px 0 2px; font-size:15px; overflow-wrap:anywhere; }
@@ -591,7 +602,7 @@ try {
 
   <dialog id="termsDlg">
     <h2 style="font-size:16px;margin:0 0 10px" data-i18n="termsTitle">Terms &amp; privacy</h2>
-    <div class="termsText note" data-i18n-html="termsBody"><b>What BioScout is.</b> A training tool that estimates movement and joint-load figures from phone video. It is <b>not a medical device</b>: it does not diagnose, treat or give medical advice, and its numbers are estimates. Use it at your own risk and ask a professional about anything health-related. It is made by one person, Bas Goncalves, and provided as it is, without warranty.<br><br><b>Without an account</b> everything stays on this device. Videos are analysed here and never uploaded; profiles and logs live in this browser's storage, so clearing it or uninstalling the app deletes them. Export your data if you want to keep it.<br><br><b>With an account</b> (optional), the athlete you mark as you is also kept in your account on servers in the EU (Supabase, Frankfurt) so your devices can sync: training sessions and their summaries, meals, diary and mood, sleep, weight, vitals, water and coffee, cycle, assessments, reaction tests and imported activities. Some of this is health data; by creating an account and syncing you agree to it being stored for that purpose. Only you can read it. Videos, motion curves and meal photos are not uploaded.<br><br><b>The feed.</b> A post is a picture or short clip you choose plus up to 42 characters, shown with your username. If your account is <b>open</b>, anyone signed in to BioScout can see your posts; if it is <b>private</b>, only you and your friends can. <b>Friends</b> are mutual (one asks, the other accepts) and see your posts and name, never your logs. Anyone signed in can find you by your username, which is chosen once and cannot be changed. Post only what you have the right to share, never other people without their consent, and nothing illegal, hateful or sexual; posts and accounts that break this can be removed. You keep the rights to what you post and let BioScout show it in the app.<br><br><b>Your data, your choice.</b> Export it any time (Edit profile → Export), correct it in the app, and delete your account with everything in it, posts included (Edit profile → Account → Delete my account) — which also withdraws your consent. Questions or requests: basilio.goncalves7@gmail.com. You can also complain to the Austrian Data Protection Authority (dsb.gv.at).<br><br><b>Age.</b> You must be at least 14 to create an account; younger athletes need a parent or guardian to agree for them.<br><br><b>Also:</b> Help &amp; chat runs on this device and is not stored; "Talk to a professional" opens your own email or WhatsApp. Strava and video-link imports go through a helper on your own computer. Nothing is sold, and there are no ads or trackers. When these terms change, the app asks you to agree again. <a href="./privacy.html" target="_blank" rel="noopener">Full privacy notice</a></div>
+    <div class="termsText note" data-i18n-html="termsBody"><b>What BioScout is.</b> A training tool that estimates movement and joint-load figures from phone video. It is <b>not a medical device</b>: it does not diagnose, treat or give medical advice, and its numbers are estimates. Use it at your own risk and ask a professional about anything health-related. It is made by one person, Bas Goncalves, and provided as it is, without warranty.<br><br><b>Without an account</b> everything stays on this device. Videos are analysed here and never uploaded; profiles and logs live in this browser's storage, so clearing it or uninstalling the app deletes them. Export your data if you want to keep it.<br><br><b>With an account</b> (optional), the athlete you mark as you is also kept in your account on servers in the EU (Supabase, Frankfurt) so your devices can sync: training sessions and their summaries, meals, diary and mood, sleep, weight, vitals, water and coffee, cycle, assessments, reaction tests and imported activities. Some of this is health data; by creating an account and syncing you agree to it being stored for that purpose. Only you can read it. Videos, motion curves and meal photos are not uploaded.<br><br><b>The feed.</b> A post is a picture or short clip you choose plus up to 42 characters, shown with your username. A profile picture, if you add one, is shown next to your name to the same people. If your account is <b>open</b>, anyone signed in to BioScout can see your posts; if it is <b>private</b>, only you and your friends can. <b>Friends</b> are mutual (one asks, the other accepts) and see your posts and name, never your logs. Anyone signed in can find you by your username, which is chosen once and cannot be changed. Post only what you have the right to share, never other people without their consent, and nothing illegal, hateful or sexual; posts and accounts that break this can be removed. You keep the rights to what you post and let BioScout show it in the app.<br><br><b>Your data, your choice.</b> Export it any time (Edit profile → Export), correct it in the app, and delete your account with everything in it, posts included (Edit profile → Account → Delete my account) — which also withdraws your consent. Questions or requests: basilio.goncalves7@gmail.com. You can also complain to the Austrian Data Protection Authority (dsb.gv.at).<br><br><b>Age.</b> You must be at least 14 to create an account; younger athletes need a parent or guardian to agree for them.<br><br><b>Also:</b> Help &amp; chat runs on this device and is not stored; "Talk to a professional" opens your own email or WhatsApp. Strava and video-link imports go through a helper on your own computer. Nothing is sold, and there are no ads or trackers. When these terms change, the app asks you to agree again. <a href="./privacy.html" target="_blank" rel="noopener">Full privacy notice</a></div>
     <button class="ghost" id="termsAgreeBtn" data-i18n="termsAgree">I agree</button>
   </dialog>
 
@@ -625,7 +636,7 @@ try {
 
   <section id="viewDash" class="hidden">
     <div class="whoRow">
-      <div id="whoName" class="whoName"></div>
+      <div class="whoTop"><span id="whoAvatar" hidden></span><div id="whoName" class="whoName"></div></div>
       <div class="sub" id="whoSince"></div>
       <div class="whoBtns">
         <button class="ghost" id="feedBtn" data-i18n="feed" hidden>Feed</button>
@@ -716,6 +727,18 @@ try {
       </div>
       <div id="accountIn" hidden>
         <p class="sub" style="margin:0 0 8px" id="acctWho"></p>
+        <div style="display:flex;align-items:center;gap:12px;margin:0 0 10px">
+          <span id="acctAvatar"></span>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;font-size:13.5px" data-i18n="acctAvatar">Profile picture</div>
+            <div class="row" style="margin:4px 0 0">
+              <button type="button" class="ghost" id="acctAvatarPick" style="margin:0;padding:7px 10px;font-size:13.5px" data-i18n="acctAvatarPick">Choose a picture</button>
+              <button type="button" class="ghost" id="acctAvatarRemove" style="margin:0;padding:7px 10px;font-size:13.5px" data-i18n="acctAvatarRemove" hidden>Remove</button>
+            </div>
+            <p class="note" style="margin:4px 0 0" data-i18n="acctAvatarWho">Shown next to your name to the people who can see your posts.</p>
+          </div>
+          <input id="acctAvatarFile" type="file" accept="image/*" class="hidden">
+        </div>
         <label for="acctAthlete" data-i18n="acctAthlete">This athlete is me</label>
         <select id="acctAthlete"></select>
         <label for="acctVisibility" style="margin-top:8px" data-i18n="acctVisibility">Who sees my posts</label>
@@ -1554,6 +1577,7 @@ function paintAccount(msg = null, warn = false) {
   }
   const u = st.login.user || {};
   $("acctWho").textContent = tr("acctWho", { who: u.username || u.email || "?" });
+  paintOwnAvatar();
   const { profiles } = listProfiles();
   $("acctAthlete").innerHTML = profiles.map((p) =>
     `<option value="${esc(p.name)}"${p.name === st.athlete ? " selected" : ""}>${esc(p.name)}</option>`).join("");
@@ -2048,6 +2072,91 @@ $("feedBtn").hidden = !cloud.enabled;
 $("feedBtn").onclick = () => { showView("viewFeed"); renderFeed(); };
 $("feedMore").onclick = () => renderFeed(true);
 
+/* ---- profile pictures -----------------------------------------------------
+ * A small square JPEG (256 px, ~20 kB) at <uid>/avatar.jpg in the posts
+ * bucket (cloud.js). Whoever may see your posts may see it. This device keeps
+ * its own copy so your face shows at once and offline; everyone else's comes
+ * as a signed link, cached for the visit. */
+const AVATAR_KEY = "bioscout.avatar.v1";
+const avatarUrlCache = {};
+function ownAvatar() {
+  try {
+    const a = JSON.parse(localStorage.getItem(AVATAR_KEY) || "null");
+    const uid = cloudState().login?.user?.id;
+    return a && uid && a.uid === uid ? a.data : null;
+  } catch { return null; }
+}
+/** Your picture from this device's copy; anyone else's from the cache. */
+function avatarFor(id, me) {
+  return (id && id === me && ownAvatar()) || avatarUrlCache[id] || null;
+}
+function avatarHTML(url, name, cls = "") {
+  const letter = [...String(name || "?").replace(/^@/, "").trim()][0] || "?";
+  return url
+    ? `<img class="avatar ${cls}" src="${esc(url)}" alt="" loading="lazy">`
+    : `<span class="avatar ${cls}" aria-hidden="true">${esc(letter.toUpperCase())}</span>`;
+}
+function paintOwnAvatar() {
+  const st = cloudState();
+  if (!st.login) return;
+  const mine = ownAvatar();
+  $("acctAvatar").innerHTML = avatarHTML(mine, st.login.user?.username || st.login.user?.email, "big");
+  $("acctAvatarRemove").hidden = !mine;
+  $("acctAvatarPick").textContent = tr(mine ? "acctAvatarChange" : "acctAvatarPick");
+}
+/* The dashboard's name gets the face too -- when the athlete on screen is the
+ * one this account syncs as, the only case where the face is theirs. */
+function paintWhoAvatar() {
+  const st = cloudState();
+  const box = $("whoAvatar");
+  const show = cloud.enabled && !!st.login && !!st.athlete && st.athlete === currentAthlete();
+  const mine = show ? ownAvatar() : null;
+  box.hidden = !mine;
+  box.innerHTML = mine ? avatarHTML(mine, st.athlete, "mid") : "";
+}
+/** A photo as a centred square JPEG, `edge` px a side. */
+async function squareJpeg(file, edge = 256) {
+  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const side = Math.min(bmp.width, bmp.height);
+  const cv = document.createElement("canvas");
+  cv.width = cv.height = edge;
+  cv.getContext("2d").drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side,
+                                0, 0, edge, edge);
+  bmp.close?.();
+  const blob = await new Promise((r) => cv.toBlob(r, "image/jpeg", 0.85));
+  if (!blob) throw new Error("could not encode the picture");
+  return { blob, data: cv.toDataURL("image/jpeg", 0.85) };
+}
+$("acctAvatarPick").onclick = () => $("acctAvatarFile").click();
+$("acctAvatarFile").onchange = async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  if (!String(file.type).startsWith("image/")) { paintAccount(tr("acctAvatarNotImage"), true); return; }
+  $("acctAvatarPick").disabled = true;
+  try {
+    const { blob, data } = await squareJpeg(file);
+    const login = await freshLogin();
+    await cloud.setAvatar(login, blob);
+    try { localStorage.setItem(AVATAR_KEY, JSON.stringify({ uid: login.user.id, data })); } catch { /* full */ }
+    delete avatarUrlCache[login.user.id];
+    paintAccount(tr("acctAvatarSaved"));
+    paintWhoAvatar();
+  } catch (err) {
+    paintAccount(err && err.code ? cloudErrText(err) : tr("acctAvatarFailed"), true);
+  } finally { $("acctAvatarPick").disabled = false; }
+};
+$("acctAvatarRemove").onclick = async () => {
+  try {
+    const login = await freshLogin();
+    await cloud.removeAvatar(login);
+    try { localStorage.removeItem(AVATAR_KEY); } catch { /* none */ }
+    delete avatarUrlCache[login.user.id];
+    paintAccount(tr("acctAvatarRemoved"));
+    paintWhoAvatar();
+  } catch (err) { paintAccount(cloudErrText(err), true); }
+};
+
 /* ---- friends -------------------------------------------------------------
  * Find people by username, ask, accept. Mutual: a friend sees your posts even
  * when your profile is private -- and nothing from your logs, ever (records
@@ -2062,6 +2171,7 @@ function friendName(r) {
 }
 function friendRow(r, buttons) {
   return `<div class="erow" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)">
+    ${avatarHTML(avatarUrlCache[r.id], r.username || r.display_name)}
     <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${friendName(r)}</div>${buttons}</div>`;
 }
 const fBtn = (act, id, label, ghost = true) =>
@@ -2088,6 +2198,15 @@ async function renderFriends() {
     friendMe = acct;
     friendRows = rows;
     paintFriends();
+    // Their faces, once the list is up (best effort).
+    try {
+      Object.assign(avatarUrlCache, await cloud.avatarUrls(login, rows.map((r) => r.id)));
+      if (!$("viewFriends").classList.contains("hidden")) {
+        const q = $("friendSearch") ? $("friendSearch").value : "";
+        paintFriends();
+        if (q) { $("friendSearch").value = q; runFriendSearch(); }
+      }
+    } catch { /* initials it is */ }
   } catch (e) {
     body.innerHTML = `<p class="note warn">${esc(cloudErrText(e))}</p>`;
   }
@@ -2144,8 +2263,11 @@ async function runFriendSearch() {
   const q = searchTerm($("friendSearch").value);
   if (!q) { box.innerHTML = ""; return; }
   try {
-    const found = await cloud.searchUsers(await freshLogin(), q);
+    const login = await freshLogin();
+    const found = await cloud.searchUsers(login, q);
     if (searchTerm($("friendSearch")?.value) !== q) return;      // typed on since
+    try { Object.assign(avatarUrlCache, await cloud.avatarUrls(login, found.map((r) => r.id))); }
+    catch { /* initials */ }
     box.innerHTML = found.length ? found.map((r) => {
       const rel = relationTo(r.id, friendRows);
       const btn = rel === "friend" ? `<span class="sub">${esc(tr("friendsAlready"))}</span>`
@@ -2222,7 +2344,9 @@ function postHTML(p, me) {
       ? `<video src="${esc(p.media_url)}" controls playsinline muted loop preload="metadata"></video>`
       : `<img src="${esc(p.media_url)}" loading="lazy" alt="">`;
   return `<div class="post">
-    <div class="postHead"><b>${esc(who)}</b><span class="sub">${esc(when)}</span></div>
+    <div class="postHead"><span class="postWho">${avatarHTML(avatarFor(p.owner, me),
+        own ? (cloudState().login?.user?.username || a.username || who) : (a.username || a.display_name || who))}
+      <b>${esc(who)}</b></span><span class="sub">${esc(when)}</span></div>
     ${media}
     ${p.body ? `<p class="postBody">${esc(p.body)}</p>` : ""}
     ${bits.length ? `<p class="sub" style="margin:4px 0 0">${esc(bits.join(" · "))}</p>` : ""}
@@ -2245,6 +2369,10 @@ async function renderFeed(more = false) {
     const before = more && feedPosts.length ? feedPosts[feedPosts.length - 1].created_at : null;
     const page = await cloud.feed(login, { before, limit: 20 });
     feedPosts = more ? [...feedPosts, ...page] : page;
+    // Profile pictures for the people on this page -- best effort: a feed
+    // without faces is still a feed.
+    try { Object.assign(avatarUrlCache, await cloud.avatarUrls(login, page.map((x) => x.owner))); }
+    catch { /* no pictures this time */ }
     list.innerHTML = feedPosts.length ? feedPosts.map((p) => postHTML(p, login.user.id)).join("")
       : `<p class="note">${esc(tr("feedEmpty"))}</p>`;
     $("feedMore").classList.toggle("hidden", page.length < 20);
@@ -3749,6 +3877,7 @@ function renderDash(fromSync = false) {
                                    myCardio(), myWater(), myCoffee(), view);
   paintStrava();
   $("whoName").textContent = currentAthlete() || tr("noProfile");
+  paintWhoAvatar();
   $("whoSince").textContent = tr("dashboardSub", { first: monthLabel(dashView) });
 
   const step = (n) => {

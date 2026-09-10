@@ -56,5 +56,31 @@ ok(searchTerm("b") === null && searchTerm("@") === null, "one character is too s
   ok(code === "bad_username", "a malformed one never reaches the server");
 }
 
+/* Profile pictures: one file per account at <uid>/avatar.jpg. */
+{
+  const { avatarPath } = await import("../src/cloud.js");
+  const seen = [];
+  const fake = async (url, init) => {
+    seen.push({ url, method: init.method, body: init.body });
+    if (url.includes("/object/sign/")) {
+      return { ok: true, status: 200, text: async () => JSON.stringify([
+        { path: "u2/avatar.jpg", signedURL: "/object/sign/posts/u2/avatar.jpg?token=a", error: null },
+        { path: "u3/avatar.jpg", signedURL: null, error: "Either the object does not exist" }]) };
+    }
+    return { ok: true, status: 200, text: async () => "{}" };
+  };
+  const cloud = makeCloud({ url: "https://x.supabase.co", key: "k", fetchImpl: fake });
+  const login = { access_token: "t", user: { id: "me" } };
+  ok(avatarPath("me") === "me/avatar.jpg", "a profile picture sits in your own media folder");
+  await cloud.setAvatar(login, new Blob(["x"], { type: "image/jpeg" }));
+  ok(seen[0].method === "DELETE" && seen[1].method === "POST" && seen[1].url.endsWith("/posts/me/avatar.jpg"),
+     "setting it removes the old one, then uploads the new one to the same place");
+  const urls = await cloud.avatarUrls(login, ["u2", "u3", "u2", null]);
+  ok(Object.keys(urls).join() === "u2" && urls.u2.startsWith("https://x.supabase.co/storage/v1/object/sign/"),
+     "links come back for the pictures that exist and you may see; the rest are left out");
+  const signReq = seen.find((x) => x.url.includes("/object/sign/"));
+  ok(JSON.parse(signReq.body).paths.length === 2, "asked once per account, not once per post");
+}
+
 console.log(bad ? `\n${bad} check(s) failed` : "\nAll checks passed");
 process.exit(bad ? 1 : 0);

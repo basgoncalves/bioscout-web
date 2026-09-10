@@ -142,6 +142,13 @@ export function fromRows(rows, athlete) {
 // --- posts (pure) --------------------------------------------------------------
 /** The storage bucket that holds posted pictures and clips (private). */
 export const BUCKET = "posts";
+/* A profile picture lives in the same bucket, at <uid>/avatar.jpg: the
+ * folder already says whose it is, the bucket's policies already say who may
+ * see it (you, and -- as for posts -- anyone when your account is open, your
+ * friends once friends exist), and deleting the account's media folder
+ * already takes it with it. No table change was needed for it. */
+export const AVATAR_NAME = "avatar.jpg";
+export const avatarPath = (uid) => `${uid}/${AVATAR_NAME}`;
 /** A post's words. Counted the way Postgres counts them (code points), so an
  *  emoji is one, and the server's char_length(body) <= 42 can never refuse
  *  what the page let through. */
@@ -401,6 +408,42 @@ export function makeCloud({ url, key, fetchImpl = globalThis.fetch?.bind(globalT
         for (const p of posts) p.media_url = p.media_path ? url.get(p.media_path) || null : null;
       }
       return posts;
+    },
+
+    /* ---- profile picture ------------------------------------------------ */
+
+    /** Put up your profile picture (a small square JPEG), replacing any old
+     *  one. Delete then upload: the bucket lets you add and remove your own
+     *  files but not overwrite them. Short cache so a new face shows soon. */
+    async setAvatar(login, blob) {
+      const path = avatarPath(login.user.id);
+      try { await this.removeMedia(login, [path]); } catch { /* there was none */ }
+      await call(`/storage/v1/object/${BUCKET}/${path}`, {
+        method: "POST", token: login.access_token, body: blob,
+        headers: { "x-upsert": "false", "cache-control": "60" } });
+      return path;
+    },
+
+    async removeAvatar(login) {
+      await this.removeMedia(login, [avatarPath(login.user.id)]);
+    },
+
+    /** Signed links to the profile pictures of these accounts, as {id: url}.
+     *  Someone with no picture -- or whose picture you may not see -- is
+     *  simply absent; the page draws their initial instead. */
+    async avatarUrls(login, ids) {
+      const uniq = [...new Set((ids || []).filter(Boolean))];
+      if (!uniq.length) return {};
+      const signed = await call(`/storage/v1/object/sign/${BUCKET}`, {
+        method: "POST", token: login.access_token,
+        body: { expiresIn: 3600, paths: uniq.map(avatarPath) } });
+      const out = {};
+      for (const x of signed || []) {
+        if (!x || !x.signedURL || x.error) continue;
+        const id = String(x.path || "").split("/")[0];
+        if (id) out[id] = base + "/storage/v1" + x.signedURL;
+      }
+      return out;
     },
 
     /** Take down one of your posts, and its picture or clip with it. */
