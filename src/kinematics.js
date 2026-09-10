@@ -2222,17 +2222,35 @@ export function kickbackRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
  */
 export const DEFAULT_SHOT_CFG = {
   smoothWin: 3,
-  // The hand has to finish above the head for this to be a shot rather than a
-  // pass, a dribble or a rebound. In hip-height units (F._scale), the top of
-  // the head is around 0.85; 0.95 puts the wrist clearly above it.
-  minReleaseRise: 0.95,
-  // The hand has to have come DOWN first. A catch-and-shoot dips less than a
-  // free throw, so this is deliberately shallow -- it exists to reject a hand
-  // that was already up, not to grade the dip.
-  minDipFrac: 0.12,
-  // Two shots cannot be a third of a second apart. This also stops the little
-  // rebound of the follow-through being read as a second attempt.
-  minShotFrames: 14,
+  /* Everything about the hand is measured AGAINST THE SHOULDER, in hip-heights
+   * (F._scale), not against the floor.
+   *
+   * The first version asked for a hand 0.95 hip-heights above the floor. That
+   * is the height of a hand hanging at the side: every dribble, every chest
+   * pass and every time the ball was picked up cleared it, and each one that
+   * had a small dip in front became a "shot" (Bas, 2026-09-10: extra shots,
+   * odd numbers). Measured from the shoulder the rule means what it says --
+   * the hand finished above the head -- and it holds while the body is in the
+   * air, where a floor-based height has the jump folded into it.
+   *
+   * For scale: the nose is about 0.2 hip-heights above the shoulder, the top of
+   * the head about 0.4, and a shooting arm at release puts the wrist 0.6-0.8
+   * above the shoulder. */
+  minOverhead: 0.45,
+  // The hand has to come UP into the shot from low -- chest or below. A hand
+  // that was already high and went a little higher is not a shot.
+  minRise: 0.5,
+  // ...and come DOWN after it. Two peaks with less than this between them are
+  // one shot (a set point then the release; a wobble in the follow-through).
+  minDrop: 0.35,
+  // How far before release the dip is looked for. Without a limit the first
+  // shot's dip was the lowest hand anywhere before it -- bending to pick up
+  // the ball ten seconds earlier -- and its load time and knee came from there.
+  dipLookS: 1.5,
+  // How long a held follow-through may last before the arm must come down.
+  holdS: 2.5,
+  // Two shots cannot be closer than this.
+  minGapS: 0.8,
   // How long after release the follow-through is worth keeping, in seconds.
   followS: 0.45,
   // Below this the clip is frontal and the sagittal measures are not valid.
@@ -2240,12 +2258,12 @@ export const DEFAULT_SHOT_CFG = {
 };
 
 /** Jump-shot features: the jump, plus the shooting arm. */
-export function buildShotFeatures(poses) {
+export function buildShotFeatures(poses, cfg = DEFAULT_SHOT_CFG) {
   const F = buildJumpFeatures(poses);
   const frames = Object.keys(poses).map(Number).sort((a, b) => a - b);
   const n = F._n, lo = F._lo;
   for (const k of ["wrist_y_l", "wrist_y_r", "wrist_x_l", "wrist_x_r",
-                   "elbow_flex_l", "elbow_flex_r", "head_y"]) {
+                   "elbow_flex_l", "elbow_flex_r", "head_y", "over_l", "over_r"]) {
     F[k] = new Array(n).fill(NaN);
   }
   for (const fi of frames) {
@@ -2255,6 +2273,11 @@ export function buildShotFeatures(poses) {
     const lw = lm.left_wrist, rw = lm.right_wrist;
     if (lw) { F.wrist_y_l[i] = lw[1]; F.wrist_x_l[i] = lw[0]; }
     if (rw) { F.wrist_y_r[i] = rw[1]; F.wrist_x_r[i] = rw[0]; }
+    // Height above the shoulder. Each wrist against the mean of both
+    // shoulders, so a left/right label swap on the shoulders changes nothing.
+    const shY = ls && rs ? (ls[1] + rs[1]) / 2 : (ls || rs || [NaN, NaN])[1];
+    if (lw && isNum(shY)) F.over_l[i] = (shY - lw[1]) / F._scale;
+    if (rw && isNum(shY)) F.over_r[i] = (shY - rw[1]) / F._scale;
     F.elbow_flex_l[i] = 180 - angle3(ls, le, lw);
     F.elbow_flex_r[i] = 180 - angle3(rs, re, rw);
     if (lm.nose) F.head_y[i] = lm.nose[1];
@@ -2266,53 +2289,109 @@ export function buildShotFeatures(poses) {
    * two are close together for most of every shot and only the peak tells them
    * apart. Picking it per clip rather than per athlete also means a left-handed
    * athlete, or a right-hander shooting lefty for a drill, needs no setting.
+   * Smoothed first, so one frame of a wrist flung up by a tracking glitch
+   * cannot pick the side on its own.
    */
-  const top = (a) => { const v = a.filter(isNum); return v.length ? Math.min(...v) : Infinity; };
-  const side = top(F.wrist_y_r) <= top(F.wrist_y_l) ? "r" : "l";
+  const top = (a) => { const v = smooth(interpNan(a), cfg.smoothWin || 3).filter(isNum);
+                       return v.length ? Math.max(...v) : -Infinity; };
+  const side = top(F.over_r) >= top(F.over_l) ? "r" : "l";
   F._shootSide = side;
   F.wrist_y = F["wrist_y_" + side];
   F.wrist_x = F["wrist_x_" + side];
   F.elbow_flex = F["elbow_flex_" + side];
-  // Hand height above the floor, in hip-heights, so it means the same thing at
-  // any camera distance.
+  // Hand height above the floor, in hip-heights -- for the release height.
   F.hand = F.wrist_y.map((y) => (isNum(y) && isNum(F._floorY)
     ? (F._floorY - y) / F._scale : NaN));
+  /* What finds the shots: the HIGHER of the two hands above the shoulder,
+   * frame by frame. The shooting hand is the higher one at every release, so
+   * this is the shooting hand where it matters -- and it does not care which
+   * label the pose model gave it, which in a side view it swaps now and then. */
+  F.over = F.over_l.map((a, i) => {
+    const b = F.over_r[i];
+    return isNum(a) && isNum(b) ? Math.max(a, b) : isNum(a) ? a : b;
+  });
   return F;
+}
+
+/** Sub-frame position of a peak (or trough) at i, from the parabola through
+ *  i-1, i, i+1. Half a frame either way at most. At the 12-20 fps a phone
+ *  manages live, a frame is 50-80 ms, which is the size of the difference
+ *  between releasing at the top and releasing on the way down. */
+function subFrame(arr, i) {
+  const a = arr[i - 1], b = arr[i], c = arr[i + 1];
+  if (!isNum(a) || !isNum(b) || !isNum(c)) return i;
+  const den = a - 2 * b + c;
+  if (!den) return i;
+  const d = (0.5 * (a - c)) / den;
+  return i + Math.max(-0.5, Math.min(0.5, d));
 }
 
 /**
  * One "rep" per attempt: [dip, release, end of follow-through].
  *
  * Release is peak wrist height -- see the note at the top of this section for
- * what that costs.
+ * what that costs. Every window is sized in seconds from F._fps, because a
+ * live recording runs at whatever rate the phone manages (often 12-20 fps),
+ * not the 30 the first version assumed.
  */
 export function findShotReps(F, cfg = DEFAULT_SHOT_CFG) {
-  const n = F._n;
-  const hand = smooth(interpNan(F.hand), cfg.smoothWin);
-  const peaks = localMaxima(hand, cfg.minShotFrames, cfg.minReleaseRise);
-  const follow = Math.max(3, Math.round(cfg.followS * 30));
-  const reps = [];
-  for (let k = 0; k < peaks.length; k++) {
-    const rel = peaks[k];
-    const left = k > 0 ? peaks[k - 1] : 0;
-    const dip = rel > left ? argmin(hand, left, rel) : left;
-    if (hand[rel] - hand[dip] < cfg.minDipFrac) continue;   // the hand was already up
-    if ((rel - dip) < 3) continue;
-    const end = Math.min(n - 1, rel + follow);
-    if (end <= rel) continue;
-    /* The hand must COME DOWN again.
-     *
-     * Without this, a hand raised and held -- a rebound, a catch above the
-     * head, an athlete standing with the ball up while the next player shoots
-     * -- has a highest frame like any other, and that frame becomes a
-     * "release" with a dip in front of it and a full set of numbers behind it.
-     * A shot ends with the arm coming down; anything that does not is not one. */
-    let low = hand[rel];
-    for (let i = rel + 1; i <= end; i++) if (hand[i] < low) low = hand[i];
-    if (hand[rel] - low < cfg.minDipFrac) continue;
-    reps.push([dip, rel, end]);
+  const n = F._n, fps = F._fps || 30;
+  const c = { ...DEFAULT_SHOT_CFG, ...cfg };
+  const over = smooth(interpNan(F.over), c.smoothWin);
+  const hand = smooth(interpNan(F.hand), c.smoothWin);
+  const sec = (s) => Math.max(1, Math.round(s * fps));
+
+  // Every local top above the head.
+  let peaks = [];
+  for (let i = 1; i < n - 1; i++) {
+    if (isNum(over[i]) && over[i] >= c.minOverhead
+        && over[i] >= over[i - 1] && over[i] > over[i + 1]) peaks.push(i);
   }
-  return { reps, rise: hand,
+  /* One shot, one peak. Two tops with no real drop between them -- the set
+   * point and the release, or a wobble while the follow-through is held -- are
+   * the same attempt; the higher one is its release. Tops closer than minGapS
+   * are merged the same way. */
+  const merged = [];
+  for (const p of peaks) {
+    const q = merged[merged.length - 1];
+    if (q !== undefined) {
+      let low = Infinity;
+      for (let i = q; i <= p; i++) if (over[i] < low) low = over[i];
+      if (Math.min(over[q], over[p]) - low < c.minDrop || p - q < sec(c.minGapS)) {
+        if (over[p] > over[q]) merged[merged.length - 1] = p;
+        continue;
+      }
+    }
+    merged.push(p);
+  }
+
+  const reps = [];
+  let prevEnd = 0;
+  for (const rel of merged) {
+    // The dip: the lowest the hand got in the last dipLookS before release,
+    // and not before the previous shot's follow-through ended.
+    const from = Math.max(prevEnd, rel - sec(c.dipLookS));
+    const dip = argmin(over, from, rel);
+    if (over[rel] - over[dip] < c.minRise) continue;      // the hand was already up
+    if (rel - dip < 2) continue;
+    /* The hand must COME DOWN again -- within holdS, so a follow-through held
+     * for a second still counts. Without this, a hand raised and held (a
+     * rebound, a catch above the head, standing with the ball up while
+     * someone else shoots) has a highest frame like any other. When the
+     * recording stops before holdS is up, a smaller drop is enough: stopping
+     * the camera with the arm still up is how many live takes end. */
+    const lim = rel + sec(c.holdS);
+    const stop = Math.min(n - 1, lim);
+    let low = over[rel];
+    for (let i = rel + 1; i <= stop; i++) if (over[i] < low) low = over[i];
+    const need = lim > n - 1 ? c.minDrop / 3 : c.minDrop;
+    if (over[rel] - low < need) continue;
+    const end = Math.min(n - 1, rel + sec(c.followS));
+    if (end <= rel) continue;
+    reps.push([dip, rel, end]);
+    prevEnd = end;
+  }
+  return { reps, rise: hand, over,
            refused: reps.length ? null : "noShots",
            shootSide: F._shootSide };
 }
@@ -2322,17 +2401,29 @@ export function findShotReps(F, cfg = DEFAULT_SHOT_CFG) {
  *
  * `apexOffset_s` is the only number here that is hard to get any other way and
  * is worth the whole module: whether the ball left the hand on the way up, at
- * the top, or on the way down. Negative is before the apex.
+ * the top, or on the way down. Negative is before the apex. Both the release
+ * and the apex are placed between frames (subFrame), which at live frame
+ * rates is the difference between a number and a coin toss.
  */
 export function shotMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_SHOT_CFG) {
   const [dip, rel, end] = rep;
   const wristY = interpNan(F.wrist_y), hipY = interpNan(F.hip_cy);
   const elbow = interpNan(F.elbow_flex), knee = interpNan(F.knee_flex);
+  const over = F.over ? smooth(interpNan(F.over), cfg.smoothWin || 3) : null;
   const m = (px) => (pxPerM > 0 ? +(px / pxPerM).toFixed(3) : null);
   // The apex of the BODY, not of the hand: the highest the hips got between
   // the dip and the end of the follow-through.
   let apex = dip;
   for (let i = dip; i <= end; i++) if (hipY[i] < hipY[apex]) apex = i;
+  const relT = over ? subFrame(over, rel) : rel;
+  const apexT = apex > dip && apex < end ? subFrame(hipY.map((y) => -y), apex) : apex;
+  /* The legs' load: the deepest the knee bent in the second before release.
+   * Not the knee at the hand's lowest frame -- the ball bottoms out at the
+   * chest while the knees are still going down, or before they start. */
+  let kneeMax = NaN;
+  for (let i = Math.max(0, rel - Math.round(fps)); i <= rel; i++) {
+    if (isNum(knee[i]) && !(knee[i] <= kneeMax)) kneeMax = knee[i];
+  }
   // Flight, by the same rule the jumps use, so a jump shot and a
   // countermovement jump do not report height two different ways.
   const lift = cfg.liftFrac ?? DEFAULT_JUMP_CFG.liftFrac;
@@ -2347,12 +2438,12 @@ export function shotMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_SHOT_CFG) {
     dip_hand_m: m(F._floorY - wristY[dip]),
     release_elbow_deg: isNum(elbow[rel]) ? +elbow[rel].toFixed(1) : null,
     dip_elbow_deg: isNum(elbow[dip]) ? +elbow[dip].toFixed(1) : null,
-    knee_flex_at_dip_deg: isNum(knee[dip]) ? +knee[dip].toFixed(1) : null,
+    knee_flex_at_dip_deg: isNum(kneeMax) ? +kneeMax.toFixed(1) : null,
     // Up from the dip to release: the part of a shot a coach calls the motion.
-    load_s: +((rel - dip) / fps).toFixed(3),
+    load_s: +((relT - dip) / fps).toFixed(3),
     follow_s: +((end - rel) / fps).toFixed(3),
     // Negative: released on the way up. Positive: released while falling.
-    apex_offset_s: +((rel - apex) / fps).toFixed(3),
+    apex_offset_s: +((relT - apexT) / fps).toFixed(3),
     flight_s: air ? +flight.toFixed(3) : 0,
     jump_height_m: air ? +((G * flight * flight) / 8).toFixed(3) : 0,
     shoot_side: F._shootSide,

@@ -4467,6 +4467,15 @@ function assessLeadIn(t, seconds = 6) {
 }
 let avatarBeforeAssess = null;
 
+/* The rate the frames so far actually arrived at -- a live camera has no
+ * grid, and detectors that size their windows in seconds (the jump shot, the
+ * jumps) need it. The same estimate finish() uses. */
+function framesFps() {
+  if (fileFps) return fileFps;
+  const span = frames.length > 1 ? (frames[frames.length - 1].t - frames[0].t) / 1000 : 0;
+  return span > 0 ? (frames.length - 1) / span : 30;
+}
+
 /* How many reps are in the frames recorded SO FAR, counted with the same
  * detector that will count them at the end. A second, simpler live counter
  * would be worse than none: a HUD that says 10 strides and a report that says
@@ -4480,7 +4489,9 @@ function assessRepsSoFar(t) {
   const poses = {};
   frames.forEach((f, i) => { poses[i] = f.lm; });
   try {
-    const found = spec.findReps(spec.features(poses), spec.defaultCfg);
+    const F = spec.features(poses);
+    F._fps = framesFps();          // windows sized in seconds need the real rate
+    const found = spec.findReps(F, spec.defaultCfg);
     // Counted the way the report will count it, so the HUD and the page after
     // it cannot disagree: per leg for gait, take the smaller side.
     if (!t.perLeg) return (found.reps || []).length;
@@ -4532,7 +4543,9 @@ function assessSideCounts(t) {
   const poses = {};
   frames.forEach((f, i) => { poses[i] = f.lm; });
   try {
-    const found = spec.findReps(spec.features(poses), spec.defaultCfg);
+    const F = spec.features(poses);
+    F._fps = framesFps();          // windows sized in seconds need the real rate
+    const found = spec.findReps(F, spec.defaultCfg);
     const sides = found.repSides || [];
     return { l: sides.filter((x) => x === "l").length,
              r: sides.filter((x) => x === "r").length };

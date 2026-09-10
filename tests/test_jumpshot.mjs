@@ -182,5 +182,84 @@ function shots(n, { releaseAt = "apex", dip = 0.22 } = {}) {
      `${k(shallow)?.toFixed(0)} vs ${k(deep)?.toFixed(0)} deg`);
 }
 
+/* --- a real session: dribbling, passing, picking the ball up -------------
+ * What Bas's live test was full of, and what the first version counted as
+ * shots: its "above the head" was measured from the FLOOR at 0.95 hip-heights,
+ * which a hand hanging at the side already clears. */
+const toPoses = (list) => { const P = {}; list.forEach((p, i) => { P[i] = p; }); return P; };
+function session({ pickup = true } = {}) {
+  const out = [];
+  if (pickup) {
+    // Bend down to the ball on the floor, then stand with it at the chest.
+    for (let i = 0; i < 20; i++) out.push(frame(1 - 0.4 * Math.sin(Math.PI * i / 20), 0.15 + 1.2 * (i / 20), 0));
+  }
+  // Dribbling: the hand between knee and waist, 4 bounces a second.
+  for (let i = 0; i < 90; i++) out.push(frame(1, 0.8 + 0.25 * Math.sin(i / 1.2), 0));
+  // Two chest passes: the hand shoots out at chest height and comes back.
+  for (let k = 0; k < 2; k++) {
+    for (let i = 0; i < 10; i++) out.push(frame(1, 1.1 + 0.25 * Math.sin(Math.PI * i / 10), 0));
+    for (let i = 0; i < 10; i++) out.push(frame(1, 1.1, 0));
+  }
+  const sh = shots(3);
+  for (const k of Object.keys(sh).map(Number).sort((a, b) => a - b)) out.push(sh[k]);
+  return toPoses(out);
+}
+{
+  const F = buildShotFeatures(session());
+  F._fps = 30;
+  const { reps } = findShotReps(F);
+  ok(reps.length === 3, "dribbles, passes and a pick-up are not shots; the three shots are",
+     `found ${reps.length}`);
+  const res = analyse(session(), 30, { activity: "jumpshot", heightM: 1.81 });
+  ok(res.reps.length === 3 && res.reps[0].load_s < 1.0,
+     "the first shot's load starts at its own dip, not at the pick-up",
+     `${res.reps[0]?.load_s} s`);
+}
+
+/* --- live frame rates ---------------------------------------------------- */
+{
+  // Every other frame of a 30 fps take: what a phone manages live.
+  const sh = shots(3), keys = Object.keys(sh).map(Number).sort((a, b) => a - b);
+  const half = toPoses(keys.filter((k) => k % 2 === 0).map((k) => sh[k]));
+  const res = analyse(half, 15, { activity: "jumpshot", heightM: 1.81 });
+  ok(res.reps.length === 3, "at 15 fps the three shots are still three", `${res.reps.length}`);
+  const r = res.reps[0];
+  ok(r && Math.abs(r.follow_s - DEFAULT_SHOT_CFG.followS) < 0.1,
+     "the follow-through window is in seconds, not in 30 fps frames", `${r?.follow_s} s`);
+  const full = analyse(shots(3), 30, { activity: "jumpshot", heightM: 1.81 }).reps[0];
+  ok(r && full && Math.abs(r.apex_offset_s - full.apex_offset_s) < 0.07,
+     "and release-vs-apex agrees with the 30 fps take to within a frame",
+     `${r?.apex_offset_s} vs ${full?.apex_offset_s}`);
+}
+
+/* --- one attempt, however it is shaped ------------------------------------ */
+function setShot({ hold = 0 } = {}) {
+  const out = [];
+  for (let i = 0; i < 10; i++) out.push(frame(1, 1.2, 0));
+  for (let i = 1; i <= 8; i++) out.push(frame(1 - 0.2 * i / 8, 1.2 - 0.4 * i / 8, 0));
+  // Up to the set point above the forehead, a slight sag there, then release.
+  for (let i = 1; i <= 8; i++) out.push(frame(0.8 + 0.2 * i / 8, 0.8 + 1.2 * i / 8, 0));
+  for (let i = 0; i < 4; i++) out.push(frame(1, 2.0 - 0.08 * Math.sin(Math.PI * i / 4), 0));
+  for (let i = 1; i <= 5; i++) out.push(frame(1 + 0.05 * i / 5, 2.0 + 0.4 * i / 5, 0));
+  // Follow-through held, with a little wobble, then the arm comes down.
+  for (let i = 0; i < hold; i++) out.push(frame(1, 2.3 + 0.03 * Math.sin(i), 0));
+  for (let i = 1; i <= 12; i++) out.push(frame(1, 2.3 - 1.3 * i / 12, 0));
+  for (let i = 0; i < 15; i++) out.push(frame(1, 1.0, 0));
+  return toPoses(out);
+}
+{
+  const a = findShotReps(buildShotFeatures(setShot()));
+  ok(a.reps.length === 1, "a set point then the release is ONE shot", `${a.reps.length}`);
+  const b = findShotReps(buildShotFeatures(setShot({ hold: 36 })));
+  ok(b.reps.length === 1, "a follow-through held for over a second still counts", `${b.reps.length}`);
+}
+{
+  // One frame where the guide hand is flung above everything by the tracker.
+  const sh = shots(2);
+  sh[25] = { ...sh[25], left_wrist: [236, 1000 - 380 * 3.2] };
+  const { shootSide } = findShotReps(buildShotFeatures(sh));
+  ok(shootSide === "r", "one glitched frame does not pick the shooting hand", shootSide);
+}
+
 console.log(bad ? `\nFAIL ${bad} check(s)` : "\nAll checks passed");
 if (bad) process.exit(1);
