@@ -18,6 +18,12 @@ export const SEGMENTS = {
   shank: { mass: 0.0465, com: 0.433, rg: 0.302 },
   thigh: { mass: 0.1000, com: 0.433, rg: 0.323 },
   hat:   { mass: 0.6780, com: 0.626, rg: 0.496 },
+  // Arm segments, same table. The forearm and hand are one segment (Winter's
+  // "forearm and hand", elbow axis to ulnar styloid): the pose model's hand
+  // landmarks are too unstable to carry a wrist joint of their own, and a grip
+  // on a bar is a rigid hand anyway.
+  upperarm:     { mass: 0.0280, com: 0.436, rg: 0.322 },
+  forearm_hand: { mass: 0.0220, com: 0.682, rg: 0.468 },
 };
 
 const med = (a) => { const v = [...a].sort((x, y) => x - y); return v.length ? v[v.length >> 1] : 0; };
@@ -153,5 +159,122 @@ export function inverseDynamics(coordsM, massKg, fps,
     com_y: comY,
     body_weight_n: totalMass * G,
     facing,
+  };
+}
+
+/* ---------------------------------------------------------------------------
+ * The arm, for pull-ups, dips and the shooting arm.
+ *
+ * The leg chain above starts from the one force it can derive -- the ground
+ * reaction -- and walks up. The arm is the same walk from the other end: start
+ * at the hand, where the external force is known or derivable, and go
+ * wrist -> elbow -> shoulder.
+ *
+ *   hang / support   pull-up and dip. The hands carry the whole body and the
+ *                    feet carry nothing, so the force at the hands is the
+ *                    whole-body one, m*(a_com + g), exactly as the ground
+ *                    reaction is for a squat -- just applied at the other end.
+ *                    Split equally between the two arms.
+ *   free             the shooting arm. Nothing holds the hand but the ball, so
+ *                    the external force is the ball's weight and inertia until
+ *                    release, and nothing after it.
+ *
+ * Sign: EXTENSION POSITIVE, as at every other joint in this file. A pull-up's
+ * elbow therefore reads negative (the flexors are doing the work) and a dip's
+ * reads positive (triceps); a pull-up's shoulder reads positive (lats, an
+ * extensor) and a dip's bottom position reads negative (pecs and anterior
+ * deltoid holding the arm from being forced further back).
+ *
+ * "Which way is flexion" is not a free choice in a 2D image: it depends on
+ * which way the athlete faces. The elbow settles it -- it only folds one way,
+ * forward -- so the facing is read from the direction the forearm turns
+ * relative to the upper arm over the whole clip. See armFacing().
+ * ------------------------------------------------------------------------- */
+
+/** +1 if the athlete faces +x in a y-UP frame, -1 if -x, 0 if the arm never
+ *  bent enough to tell. Weighted by how bent the elbow is, so straight-arm
+ *  frames (where the sign is noise) contribute nothing. */
+export function armFacing(shoulder, elbow, wrist) {
+  let s = 0;
+  for (let i = 0; i < elbow.length; i++) {
+    const a = shoulder[i], b = elbow[i], c = wrist[i];
+    if (!a || !b || !c) continue;
+    const u = [b[0] - a[0], b[1] - a[1]], f = [c[0] - b[0], c[1] - b[1]];
+    const nu = Math.hypot(u[0], u[1]), nf = Math.hypot(f[0], f[1]);
+    if (!(nu > 1e-9 && nf > 1e-9)) continue;
+    s += (u[0] * f[1] - u[1] * f[0]) / (nu * nf);
+  }
+  return Math.abs(s) < 1e-6 ? 0 : Math.sign(s);
+}
+
+export function armInverseDynamics(p, massKg, fps, {
+  mode = "hang", systemKg = massKg, ballKg = 0.6, releaseIdx = null,
+  smoothWin = 9, facing = null,
+} = {}) {
+  const dt = 1 / fps;
+  const { shoulder, elbow, wrist, hip } = p;
+  const n = elbow.length;
+  const fa = segment("forearm_hand", elbow, wrist, massKg, dt, smoothWin);
+  const ua = segment("upperarm", shoulder, elbow, massKg, dt, smoothWin);
+  const face = facing || armFacing(shoulder, elbow, wrist) || 1;
+
+  // The force ON the hand, per arm.
+  let hand, handTotalY = null;
+  if (mode === "free") {
+    const wx = deriv(deriv(smooth(wrist.map((q) => q[0]), smoothWin), dt), dt);
+    const wy = deriv(deriv(smooth(wrist.map((q) => q[1]), smoothWin), dt), dt);
+    const rel = Number.isFinite(releaseIdx) ? releaseIdx : n - 1;
+    hand = wx.map((ax, i) => (i <= rel
+      ? [-ballKg * ax, -ballKg * (wy[i] + G)] : [0, 0]));
+  } else {
+    /* Whole-body centre of mass from what is in frame. Knees and ankles are
+     * often cut off in a pull-up clip; their mass then sits with the trunk,
+     * which moves with it anyway when the legs hang still. A caller solving
+     * one arm at a time passes the body's own COM in `p.com`, so both arms
+     * see the same load rather than each reading it off its own side. */
+    const parts = p.com ? [] : [["hat", hip, shoulder, 1]];
+    if (p.knee) parts.push(["thigh", hip, p.knee, 2]);
+    if (p.knee && p.ankle) parts.push(["shank", p.knee, p.ankle, 2]);
+    let wSum = 0;
+    const com = new Array(n).fill(0).map(() => [0, 0]);
+    for (const [name, a, b, k] of parts) {
+      const q = SEGMENTS[name], w = q.mass * k;
+      wSum += w;
+      for (let i = 0; i < n; i++) {
+        com[i][0] += w * (a[i][0] + q.com * (b[i][0] - a[i][0]));
+        com[i][1] += w * (a[i][1] + q.com * (b[i][1] - a[i][1]));
+      }
+    }
+    if (p.com) p.com.forEach((c, i) => { com[i][0] = c[0]; com[i][1] = c[1]; });
+    else for (const c of com) { c[0] /= wSum; c[1] /= wSum; }
+    const ax = deriv(deriv(smooth(com.map((c) => c[0]), smoothWin), dt), dt);
+    const ay = deriv(deriv(smooth(com.map((c) => c[1]), smoothWin), dt), dt);
+    const m = Math.max(0, systemKg);
+    handTotalY = ay.map((v) => m * (v + G));
+    hand = ax.map((v, i) => [0.5 * m * v, 0.5 * handTotalY[i]]);
+  }
+
+  // Forearm + hand: the hand force at the wrist, the elbow force unknown.
+  const F_el = fa.acc.map((a, i) => [fa.mass * a[0] - hand[i][0],
+                                     fa.mass * a[1] - hand[i][1] + fa.mass * G]);
+  const M_el = fa.alpha.map((al, i) => fa.inertia * al
+    - crossZ(sub([elbow[i]], [fa.com[i]]), [F_el[i]])[0]
+    - crossZ(sub([wrist[i]], [fa.com[i]]), [hand[i]])[0]);
+  // Upper arm: minus those at the elbow, the shoulder force unknown.
+  const F_sh = ua.acc.map((a, i) => [ua.mass * a[0] + F_el[i][0],
+                                     ua.mass * a[1] + F_el[i][1] + ua.mass * G]);
+  const M_sh = ua.alpha.map((al, i) => ua.inertia * al + M_el[i]
+    + crossZ(sub([elbow[i]], [ua.com[i]]), [F_el[i]])[0]
+    - crossZ(sub([shoulder[i]], [ua.com[i]]), [F_sh[i]])[0]);
+
+  /* Counter-clockwise is flexion at both joints for an athlete facing +x
+   * (forearm and upper arm both swing forward and up), so extension-positive
+   * is minus facing times the counter-clockwise moment. */
+  return {
+    elbow_moment: M_el.map((v) => -face * v),
+    shoulder_moment: M_sh.map((v) => -face * v),
+    hand_force_vertical: handTotalY,
+    body_weight_n: Math.max(0, systemKg) * G,
+    facing: face,
   };
 }

@@ -274,6 +274,15 @@
   button.muscle .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
                        margin-right:6px; vertical-align:middle; }
   button.muscle.on .mval { color:rgba(255,255,255,.8); }
+  .jmplot { border-top:1px solid var(--line); padding-top:8px; margin-top:12px; }
+  .jmplot h2 { font-size:14px; margin:0 0 4px; font-weight:600; }
+  .jmpick { display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 6px; }
+  .jmpick label { display:inline-flex; align-items:center; gap:6px; margin:0;
+                  padding:5px 10px; border:1px solid var(--line); border-radius:8px;
+                  font-size:12.5px; color:var(--ink); cursor:pointer; }
+  .jmpick label.on { border-color:var(--accent); }
+  .jmpick input { width:auto; margin:0; padding:0; }
+  .jmpeaks { font-size:12px; color:var(--muted); margin-top:4px; }
 </style>
 </head>
 <body>
@@ -602,6 +611,10 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          buildSquatFeatures, buildJumpFeatures, computePxPerM,
          jointPositionsM } from "./src/kinematics.js";
 import { inverseDynamics } from "./src/dynamics.js";
+import { isUpperBody, defaultJoint, clipAngles, clipVelocities,
+         repKinematics, clipArmMoments, armMomentsForRep, addPower, jointOptions,
+         armTracks,
+         jmFromStored } from "./src/jointmetrics.js";
 import { classify, MIN_CONFIDENCE } from "./src/detect.js";
 import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          newSession, getSession, clearSession, addSet, summariseSession,
@@ -2639,6 +2652,14 @@ async function exportSession() {
                        data: writeMot("joint_moments", dc, r.times,
                          Object.fromEntries(dc.map((k) => [k, r.dyn[k]]))) });
         }
+        const jk = r.jm ? Object.keys(r.jm).filter((k) => Array.isArray(r.jm[k])
+          && r.jm[k].length === r.times.length && /_(angle|vel|moment|power)(_[lr])?$/.test(k)) : [];
+        if (jk.length) {
+          files.push({ name: d + "joint_metrics.csv",
+                       data: csvFromColumns(["time", ...jk],
+                                            [r.times, ...jk.map((k) => r.jm[k])],
+                                            r.times.length) });
+        }
         // Muscle and joint contact forces were only ever written by the
         // per-set "Download everything". A session archive therefore had
         // angles and moments and nothing else, for every activity -- which
@@ -3615,7 +3636,9 @@ async function enrich(res, poses, fps, heightM, activity) {
    * instead of refusing the whole task.
    */
   const spec = ACTIVITIES[activity];
-  const canDoDynamics = (activity === "squat" || spec.jump
+  // The jump shot is a jump with an arm on it: the same sagittal view and the
+  // same derived ground reaction, so the legs get the same inverse dynamics.
+  const canDoDynamics = (activity === "squat" || spec.jump || spec.shot
                          || activity === "slsquat"
                          || (ACTIVITIES[activity]?.gait && res.travel?.stationary))
                         && (!spec.travels || res.travel?.stationary);
@@ -3633,6 +3656,53 @@ async function enrich(res, poses, fps, heightM, activity) {
       }
     } catch (err) { console.warn("dynamics failed", err); }
   }
+
+  /* Angle, angular velocity, moment and power per joint -- the four plots.
+   *
+   * Angles and velocities for every task, from the measured angles over the
+   * whole clip -- see jointmetrics.js for why not the .mot columns. Moments:
+   * the legs' come from the inverse dynamics above, where it ran; the arms'
+   * are solved here for the three arm tasks, starting from the force at the
+   * hands. Power is moment times velocity wherever both exist. */
+  try {
+    const Fj = spec.features(poses);
+    const side = activity === "jumpshot" ? (Fj._shootSide || null) : null;
+    const tracks = isUpperBody(activity) ? armTracks(poses, side) : null;
+    const angles = clipAngles(activity, spec, Fj, tracks,
+                              { ankleUsable: res.view?.ankle_usable !== false });
+    const vels = clipVelocities(angles, fps);
+    let armPrep = null;
+    if (tracks) {
+      try {
+        const { pxPerM } = computePxPerM(poses, heightM);
+        armPrep = clipArmMoments(activity, tracks, pxPerM, massKg, fps,
+                                 { systemKg: massKg + res.externalKg });
+      } catch (err) { console.warn("arm dynamics failed", err); }
+    }
+    for (const r of [...res.reps, ...(res.whole ? [res.whole] : [])]) {
+      if (!r.bounds) continue;
+      const jm = repKinematics(angles, vels, r.bounds);
+      if (r.dyn) {
+        for (const j of ["hip", "knee", "ankle"]) {
+          if (r.dyn[j + "_moment"]) jm[j + "_moment"] = r.dyn[j + "_moment"];
+        }
+      }
+      const arm = armMomentsForRep(armPrep, r.bounds, massKg, fps);
+      if (arm) {
+        /* Face-on, each arm is solved in the frontal plane. The shoulder's
+         * moment is then its adduction moment -- the lats pulling the arms to
+         * the sides, which is the pull-up. The elbow's is not a flexion
+         * moment at all: with the forearms near vertical the load there is
+         * mostly sideways, held by the joint, and plotting it as biceps work
+         * would be a wrong number with the right units. So it is left out,
+         * and armViewNote says why. */
+        if (armSideOn(res)) jm.elbow_moment = arm.elbow_moment;
+        jm.shoulder_moment = arm.shoulder_moment;
+        if (arm.hand_force_vertical) jm.hand_force_n = arm.hand_force_vertical;
+      }
+      r.jm = addPower(jm);
+    }
+  } catch (err) { console.warn("joint metrics failed", err); }
 
   /* Muscle forces, under the same rule as the moments above -- and they were
    * NOT under it before, which made the note on a running clip a lie: it said
@@ -3904,6 +3974,311 @@ function chart(rep, activity, res) {
                   marks.map(([, n2]) => n2).filter(Boolean).join(" · ")
                   || tr("phaseBoundaries") })}</span>` : ""}</div>
           ${refs.length ? refNote(refCond) : ""}`;
+}
+
+/* ---- one plot per metric, joints ticked in or out ------------------------
+ *
+ * Angle, angular velocity, moment and power each get ONE plot, with a row of
+ * tick boxes for the joints this task tracks. The alternative -- a plot per
+ * joint per metric -- is twenty panels on a phone for an arm task, and the
+ * question people actually ask ("is my elbow doing what my shoulder is
+ * doing?") needs the two on one axis anyway.
+ *
+ * Colour means the JOINT and is the same on all four plots, so a knee is the
+ * same blue in its angle, its velocity, its moment and its power. On gait,
+ * colour means the side instead (the reason is at the top of the old angle
+ * chart, kept in curveChart below), and the joint is told by line style.
+ *
+ * What is ticked is remembered per task and per metric while the page is open,
+ * so paging through reps keeps the same joints on screen. */
+const JOINT_LABEL = { knee: "kneeJoint", hip: "hipJoint", ankle: "ankleJoint",
+                      shoulder: "shoulderJoint", elbow: "elbowJoint" };
+const JOINT_COLOR = { knee: "#2f6fe4", hip: "#e8871a", ankle: "#1d7a45",
+                      elbow: "#c0392b", shoulder: "#7d5bbe" };
+// Gait only: colour is taken by the side, so the joint gets the line style.
+const JOINT_STYLE = { knee: {}, elbow: {}, hip: { dash: true }, shoulder: { dash: true },
+                      ankle: { dot: true } };
+const METRIC_META = {
+  angle:  { title: "jmAngleTitle", unit: "°", note: "jmAngleNote", zero: false },
+  vel:    { title: "jmVelTitle", unit: "°/s", note: "jmVelNote", zero: true },
+  moment: { title: "jointMoments", unit: "N·m", note: null, zero: true },
+  power:  { title: "jmPowerTitle", unit: "W", note: "jmPowerNote", zero: true },
+};
+const jointSel = {};   // "<activity>|<metric>" -> joints ticked
+
+function selectedJoints(activity, metric, opts) {
+  const avail = opts.map((o) => o.joint);
+  const kept = jointSel[`${activity}|${metric}`];
+  if (kept) return kept.filter((j) => avail.includes(j));
+  const d = defaultJoint(activity);
+  return avail.includes(d) ? [d] : avail.slice(0, 1);
+}
+
+/** Muscle contributions to one leg joint's moment, and the buttons to isolate
+ *  one. Only for a single ticked joint: with two joints on the axis, a set of
+ *  coloured curves could belong to either. */
+function muscleContrib(rep, res, jkey) {
+  const j = JOINTS.find((x) => x.key === jkey);
+  if (!j || !rep.forces) return null;
+  const top = topMusclesForJoint(rep, j.key);
+  if (!top.length) return null;
+  const sel = selectedMuscle[j.key];
+  const bases = [];
+  for (const [nm] of top) if (!bases.includes(baseName(nm))) bases.push(baseName(nm));
+  const mcol = (nm) => MCOLORS[bases.indexOf(baseName(nm)) % MCOLORS.length];
+  const shown = sel ? top.filter(([, , i]) => i === sel.idx) : top;
+  const series = [];
+  const angles = rep.coords && rep.coords[j.coord];
+  if (momentArms && angles) {
+    // Same frame as the surrogate: enrich() flips a GPK-signed knee for it.
+    const a = (res.activity === "squat" && KNEE_SIGN[res.osimModel] < 0 &&
+               j.coord.startsWith("knee")) ? angles.map((v) => -v) : angles;
+    const seenBase = new Set();
+    for (const [nm, , i] of shown) {
+      const arm = armSeries(j.key, nm, a);
+      if (!arm) continue;
+      const b = baseName(nm), first = !seenBase.has(b);
+      seenBase.add(b);
+      series.push([first ? prettyBase(nm) : nm,
+                   rep.forces.map((r, k) => ARM_SIGN[j.key] * r[i] * arm[k]),
+                   sideOpt(mcol(nm), sideOf(nm), first)]);
+    }
+  }
+  const rows = top.map(([nm, p, i]) => {
+    const on = sel && sel.idx === i;
+    return `<button class="muscle${on ? " on" : ""}" data-joint="${j.key}"
+              data-idx="${i}" data-name="${nm}" title="Peak ${p.toFixed(0)} N">
+              <i class="dot" style="background:${mcol(nm)}${
+                sideOf(nm) === "l" ? ";opacity:.55" : ""}"></i>${nm}
+              <span class="mval">${p > 1000 ? (p / 1000).toFixed(1) + "k" : p.toFixed(0)} N</span>
+            </button>`;
+  }).join("");
+  const note = series.length
+    ? (sel ? tr("isolatedMuscle", { name: sel.name, n: top.length }) : tr("contribHint"))
+    : tr("needMomentArms");
+  return { series, html: `<p class="note" style="margin-top:2px">${note}</p>
+                          <div class="muscles">${rows}</div>` };
+}
+
+/** The peak line under a plot: what each ticked curve reached. */
+function peakText(metric, name, v, massKg) {
+  const f0 = (x) => x.toFixed(0);
+  const hi = Math.max(...v), lo = Math.min(...v);
+  if (metric === "angle") return tr("jmRange", { joint: name, min: f0(lo), max: f0(hi) });
+  if (metric === "vel") return tr("jmPeakVel", { joint: name, flex: f0(Math.max(0, hi)),
+                                                  ext: f0(Math.max(0, -lo)) });
+  if (metric === "power") return tr("jmPeakPower", { joint: name, gen: f0(Math.max(0, hi)),
+                                                      abs: f0(Math.max(0, -lo)) });
+  const pk = Math.max(Math.abs(hi), Math.abs(lo));
+  return tr("jmPeakMoment", { joint: name, v: f0(pk),
+                              vkg: massKg > 0 ? (pk / massKg).toFixed(2) : "—" });
+}
+
+/** One metric's plot for one rep: tick boxes, the curves, their peaks. */
+function metricPlot(rep, res, metric) {
+  const jm = rep.jm;
+  const opts = jointOptions(jm, metric, res.activity);
+  if (!opts.length) return "";
+  const meta = METRIC_META[metric];
+  const sel = selectedJoints(res.activity, metric, opts);
+  const aspec = ACTIVITIES[res.activity] || {};
+  const gait = !!aspec.gait;
+  const sdj = rep.sd && rep.sd.jm;
+  const series = [], bands = [], peaks = [];
+  for (const o of opts) {
+    if (!sel.includes(o.joint)) continue;
+    const name = tr(JOINT_LABEL[o.joint]);
+    for (const [k, side] of o.keys) {
+      let opt, label = name;
+      if (gait) {
+        const sd = side || "l";
+        opt = { color: sd === "l" ? SIDE_L : SIDE_R, ...JOINT_STYLE[o.joint] };
+        label += " " + tr(sd === "l" ? "leftLeg" : "rightLeg");
+      } else if (side) {
+        opt = { color: JOINT_COLOR[o.joint], dot: side === "l" };
+        label += " " + tr(side === "l" ? "leftShort" : "rightShort");
+      } else {
+        opt = { color: JOINT_COLOR[o.joint] };
+      }
+      series.push([label, jm[k], opt]);
+      bands.push((sdj && sdj[k]) || null);
+      peaks.push(peakText(metric, label, jm[k], res.massKg));
+    }
+    // Gait: the right cycle's copy of a single sagittal estimate (moment and
+    // power are not resolved per leg -- noteMomentOneSide says so).
+    const rk = `${o.joint}_${metric}`;
+    if (gait && o.keys.length === 1 && !o.keys[0][1] && rep.jmRight && rep.jmRight[rk]) {
+      const label = name + " " + tr("rightLeg");
+      series.push([label, rep.jmRight[rk], { color: SIDE_R, ...JOINT_STYLE[o.joint] }]);
+      bands.push(null);
+      peaks.push(peakText(metric, label, rep.jmRight[rk], res.massKg));
+    }
+  }
+
+  /* Reference curves, squat mean rep only -- the corpus holds squats and
+   * nothing else. Its knee angle is GPK-signed (flexion negative); these plots
+   * are flexion positive, so it is flipped to sit on the same side. */
+  const refCond = rep.isMean && res.activity === "squat" ? normCondition(res) : null;
+  let refs = 0;
+  if (refCond && (metric === "angle" || metric === "moment")) {
+    for (const j of ["knee", "hip", "ankle"]) {
+      if (!sel.includes(j)) continue;
+      const c = refCurve(refCond, metric === "angle" ? "joint_angle" : "joint_moment", j);
+      if (!c) continue;
+      const flip = metric === "angle" && j === "knee" ? -1 : 1;
+      series.push([`${tr(JOINT_LABEL[j])} (${tr("refShort")})`, c.mean.map((v) => flip * v),
+                   { dash: true, color: JOINT_COLOR[j] }]);
+      bands.push(metric === "moment" ? refBand(c) : null);
+      refs++;
+    }
+  }
+
+  // One leg joint ticked on the moment plot: its muscles, on the same axis.
+  let extra = "";
+  if (metric === "moment" && rep.forces) {
+    const legSel = sel.filter((j) => JOINTS.some((x) => x.key === j));
+    if (sel.length === 1 && legSel.length === 1) {
+      const mc = muscleContrib(rep, res, legSel[0]);
+      if (mc) {
+        for (const x of mc.series) { series.push(x); bands.push(null); }
+        extra = mc.html;
+      }
+    } else if (legSel.length) {
+      extra = `<p class="note" style="margin-top:2px">${tr("jmOneJointForMuscles")}</p>`;
+    }
+  }
+
+  const ticks = opts.map((o) => {
+    const on = sel.includes(o.joint);
+    return `<label class="${on ? "on" : ""}"><input type="checkbox" value="${o.joint}"${
+      on ? " checked" : ""}><i class="swatch" style="background:${
+      gait ? "var(--muted)" : JOINT_COLOR[o.joint]};margin:0"></i>${tr(JOINT_LABEL[o.joint])}</label>`;
+  }).join("");
+  const body = series.length
+    ? curveChart(rep, res.activity, series, bands, { unit: meta.unit, zero: meta.zero })
+    : `<p class="note">${tr("jmNoneTicked")}</p>`;
+  return `<h2>${tr(meta.title)}</h2>
+    <div class="jmpick" role="group" aria-label="${tr(meta.title)}">${ticks}</div>
+    ${body}
+    ${peaks.length ? `<p class="jmpeaks">${peaks.join(" · ")}</p>` : ""}
+    ${extra}
+    ${refs ? refNote(refCond) : ""}
+    ${meta.note ? `<p class="note" style="margin-top:2px">${tr(meta.note)}</p>` : ""}
+    ${gait && (metric === "moment" || metric === "power") && rep.jmRight
+      ? `<p class="note" style="margin-top:2px">${tr("noteMomentOneSide")}</p>` : ""}`;
+}
+
+/** Draw one .jmplot box and wire its tick boxes and muscle buttons. Only the
+ *  box redraws: rebuilding the whole card would scroll the athlete away from
+ *  the plot they are looking at. */
+function drawMetric(box, rep, res) {
+  const metric = box.dataset.metric;
+  const html = metricPlot(rep, res, metric);
+  box.innerHTML = html;
+  box.classList.toggle("hidden", !html);
+  box.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.onchange = () => {
+      jointSel[`${res.activity}|${metric}`] =
+        [...box.querySelectorAll('input[type="checkbox"]:checked')].map((x) => x.value);
+      drawMetric(box, rep, res);
+    };
+  });
+  box.querySelectorAll("button.muscle").forEach((b) => {
+    b.onclick = () => {
+      const j = b.dataset.joint, idx = +b.dataset.idx;
+      if (selectedMuscle[j] && selectedMuscle[j].idx === idx) delete selectedMuscle[j];
+      else selectedMuscle[j] = { idx, name: b.dataset.name };
+      drawMetric(box, rep, res);
+    };
+  });
+}
+
+function wireMetrics(root, rep, res) {
+  root.querySelectorAll(".jmplot").forEach((box) => drawMetric(box, rep, res));
+}
+
+/**
+ * The curve renderer behind all four plots -- the old angle chart's drawing,
+ * with the series handed in. Keeps what that chart knew: the turnaround and
+ * touch-down markers on an event-aligned mean, foot contacts on the whole-run
+ * panel, the between-rep SD band in its own line's colour.
+ */
+function curveChart(rep, activity, allSeries, allBandsIn, { unit = "", zero = false } = {}) {
+  const allBands = allBandsIn && allBandsIn.some((b) => b && b.length) ? allBandsIn : null;
+  const pct = rep.timeUnit === "%";
+  const t = rep.times, W = 320, H = 190, P = { l: 38, r: 8, t: 10, b: 22 };
+  const all = allSeries.flatMap(([, v], i) => {
+    const b = allBands && allBands[i];
+    return b ? Array.from(v).flatMap((x, j) => [x + b[j], x - b[j]]) : Array.from(v);
+  }).filter(Number.isFinite);
+  const y0 = all.length ? Math.min(...all) : 0, y1 = all.length ? Math.max(...all) : 1;
+  const pad = (y1 - y0) * 0.08 || 1;
+  const lo = y0 - pad, hi = y1 + pad;
+  const sx = (v) => P.l + ((v - t[0]) / (t[t.length - 1] - t[0] || 1)) * (W - P.l - P.r);
+  const sy = (v) => H - P.b - ((v - lo) / (hi - lo)) * (H - P.t - P.b);
+  let g = "";
+  for (let k = 0; k <= 3; k++) {
+    const yy = P.t + (H - P.t - P.b) * k / 3;
+    const val = hi - (hi - lo) * k / 3;
+    g += `<line x1="${P.l}" y1="${yy}" x2="${W - P.r}" y2="${yy}" stroke="var(--line)" stroke-width=".8"/>`;
+    g += `<text x="${P.l - 5}" y="${yy + 3.5}" font-size="9" text-anchor="end" fill="var(--muted)">${val.toFixed(0)}</text>`;
+  }
+  if (zero && lo < 0 && hi > 0) {
+    g += `<line x1="${P.l}" y1="${sy(0)}" x2="${W - P.r}" y2="${sy(0)}" stroke="var(--muted)" stroke-width="1"/>`;
+  }
+  const marks = [];
+  if (pct) {
+    const isJump = !!ACTIVITIES[activity]?.jump;
+    if (rep.topPct != null) marks.push([rep.topPct, isJump ? "take-off" : "turnaround"]);
+    if (rep.landPct != null) marks.push([rep.landPct, "touch-down"]);
+  } else if (rep.bounds) {
+    const tt = t[rep.bounds[1] - rep.bounds[0]];
+    if (tt !== undefined && !rep.wholeTrial) marks.push([tt, ""]);
+    if (rep.land_frame != null) {
+      const li = rep.land_frame - rep.bounds[0];
+      if (li > 0 && li < t.length) marks.push([t[li], ""]);
+    }
+  }
+  for (const [mv] of marks) {
+    g += `<line x1="${sx(mv)}" y1="${P.t}" x2="${sx(mv)}" y2="${H - P.b}" stroke="var(--muted)" stroke-width=".8" stroke-dasharray="3 3"/>`;
+  }
+  if (rep.contacts) {
+    for (const [side, col] of [["l", SIDE_L], ["r", SIDE_R]]) {
+      for (const ct of rep.contacts[side] || []) {
+        if (ct < t[0] || ct > t[t.length - 1]) continue;
+        g += `<line x1="${sx(ct)}" y1="${P.t}" x2="${sx(ct)}" y2="${H - P.b}" stroke="${col}" stroke-width="1" stroke-opacity=".45"/>`;
+      }
+    }
+  }
+  if (allBands) {
+    allSeries.forEach(([, vals, o], i) => {
+      const b = allBands[i];
+      if (b) g += bandPath(t, vals, b, sx, sy, (o && o.color) || COLORS[i % COLORS.length]);
+    });
+  }
+  allSeries.forEach(([, vals, o], i) => {
+    const col = (o && o.color) || COLORS[i % COLORS.length];
+    const dash = o && o.dash ? ' stroke-dasharray="4 3"'
+               : o && o.dot ? ` stroke-dasharray="${SIDE_DASH}"` : "";
+    g += `<polyline fill="none" stroke="${col}" stroke-width="${o && o.dash ? 1.4 : 1.9}"${
+      dash} stroke-linejoin="round" points="${
+      Array.from(vals, (v, j) => `${sx(t[j]).toFixed(1)},${sy(Number.isFinite(v) ? v : 0).toFixed(1)}`).join(" ")}"/>`;
+  });
+  const lab = (v) => (pct ? `${v.toFixed(0)}%` : `${v.toFixed(1)}s`);
+  g += `<text x="${P.l}" y="${H - 6}" font-size="9" fill="var(--muted)">${lab(t[0])}</text>`;
+  g += `<text x="${W - P.r}" y="${H - 6}" font-size="9" text-anchor="end" fill="var(--muted)">${lab(t[t.length - 1])}</text>`;
+  const legend = allSeries.map(([n, , o], i) => o && o.noLegend ? "" :
+    `<span><i class="swatch" style="${
+      swatchStyle((o && o.color) || COLORS[i % COLORS.length], o)}"></i>${n}</span>`).join("");
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${g}</svg>
+          <div class="legend">${legend}<span>${unit}</span>${
+            rep.contacts && ((rep.contacts.l || []).length + (rep.contacts.r || []).length)
+              ? `<span>${tr("footContactMarks")}</span>` : ""}${
+            allBands ? `<span>${tr("sdBetweenReps")}</span>` : ""}${
+            rep.isMean && rep.eventAligned && marks.length
+              ? `<span>${tr("dashedLabel", { items:
+                  marks.map(([, n2]) => n2).filter(Boolean).join(" · ")
+                  || tr("phaseBoundaries") })}</span>` : ""}</div>`;
 }
 
 /** Mean ± SD ribbon: forward along the upper edge, back along the lower. */
@@ -4219,101 +4594,6 @@ function shotSummary(res) {
     <p class="note">${tr("noteShotCompare", { made: made.length, missed: missed.length })}</p>`;
 }
 
-function jointSubplot(rep, res, j) {
-  const d = rep.dyn;
-  const moment = d[j.series];
-  const top = topMusclesForJoint(rep, j.key);
-  const pk = Math.max(...moment.map(Math.abs),
-                      ...(rep.dynRight && rep.dynRight[j.series]
-                          ? rep.dynRight[j.series].map(Math.abs) : []));
-  const sel = selectedMuscle[j.key];
-  const sdd = rep.sd && rep.sd.dyn;
-
-  // Colour by MUSCLE, so vaslat_r and vaslat_l are one colour and the button
-  // list reads as five muscles rather than five halves of muscles.
-  const bases = [];
-  for (const [nm] of top) if (!bases.includes(baseName(nm))) bases.push(baseName(nm));
-  const mcol = (nm) => MCOLORS[bases.indexOf(baseName(nm)) % MCOLORS.length];
-
-
-  // Muscle contributions to THIS moment, where the model's moment arms are
-  // available: force x arm, in the same newton-metres and the same
-  // extension-positive convention as the net moment they sit on.
-  const shown = sel ? top.filter(([, , i]) => i === sel.idx) : top;
-  const contrib = [];
-  const angles = rep.coords && rep.coords[j.coord];
-  if (momentArms && angles && rep.forces) {
-    // The surrogate is trained on Rajagopal signs, and enrich() already flipped
-    // a GPK-signed knee for it. The arm table is in the same frame, so flip
-    // here too rather than reading the arm at a mirrored angle.
-    const a = (res.activity === "squat" && KNEE_SIGN[res.osimModel] < 0 &&
-               j.coord.startsWith("knee")) ? angles.map((v) => -v) : angles;
-    for (const [nm, , i] of shown) {
-      const arm = armSeries(j.key, nm, a);
-      if (!arm) continue;
-      contrib.push([nm, rep.forces.map((r, k) => ARM_SIGN[j.key] * r[i] * arm[k]), nm]);
-    }
-  }
-
-  // Reference moment, mean rep only. Same movement, same model family, same
-  // extension-positive convention -- build_norms.py flips it on the way out.
-  const refCond = rep.isMean && res.activity === "squat" ? normCondition(res) : null;
-  const refM = refCond ? refCurve(refCond, "joint_moment", j.key) : null;
-
-  /* The right cycle's copy of the same estimate, where there is one.
-   *
-   * This is NOT a right-leg moment and is not drawn as one: the inverse
-   * dynamics reads body-centre landmarks and whole-body acceleration, so there
-   * is a single sagittal moment, and what these two curves separate is the
-   * cycle, not the limb. The note under the plot says so, because a green and
-   * a red curve on a gait chart will otherwise be read as left and right leg
-   * -- which is exactly what the angle chart above it does mean. */
-  const momentR = rep.dynRight && rep.dynRight[j.series];
-
-  const seenBase = new Set();
-  const series = [[tr("netMomentOf", { joint: tr(j.label) }),
-                   moment, momentR ? { color: SIDE_L } : undefined],
-    ...(momentR ? [[tr("netMomentOf", { joint: tr(j.label) }) + " " + tr("rightLeg"),
-                    momentR, { color: SIDE_R }]] : []),
-    ...contrib.map(([nm, vals]) => {
-      const b = baseName(nm), first = !seenBase.has(b);
-      seenBase.add(b);
-      return [first ? prettyBase(nm) : nm, vals,
-              sideOpt(mcol(nm), sideOf(nm), first)];
-    })];
-  if (refM) series.push([tr("refSeries", { cond: condName(refCond), ref: tr("refShort") }), refM.mean,
-                         { dash: true, color: REF_COLOR }]);
-  const pal = ["#8892a6", ...MCOLORS];
-  const bands = sdd && sdd[j.series]
-    ? [sdd[j.series], ...(momentR ? [null] : []),
-       ...contrib.map(() => null), ...(refM ? [refBand(refM)] : [])]
-    : null;
-  const momentChart = lineChart(rep.times, series, "N·m", pal, bands)
-    + (refM ? refNote(refCond) : "");
-
-  const rows = top.map(([nm, p, i]) => {
-    const on = sel && sel.idx === i;
-    return `<button class="muscle${on ? " on" : ""}" data-joint="${j.key}"
-              data-idx="${i}" data-name="${nm}" title="Peak ${p.toFixed(0)} N">
-              <i class="dot" style="background:${mcol(nm)}${
-                sideOf(nm) === "l" ? ";opacity:.55" : ""}"></i>${nm}
-              <span class="mval">${p > 1000 ? (p / 1000).toFixed(1) + "k" : p.toFixed(0)} N</span>
-            </button>`;
-  }).join("");
-
-  return `<div class="subplot">
-      <h2>${tr(j.label)} <span class="pk">${tr("peakWord")} ${pk.toFixed(0)} N·m
-        (${(pk / res.massKg).toFixed(2)} N·m/kg)</span></h2>
-      ${momentChart}
-      ${momentR ? `<p class="note" style="margin-top:2px">${tr("noteMomentOneSide")}</p>` : ""}
-      <p class="note" style="margin-top:2px">${contrib.length
-        ? (sel ? tr("isolatedMuscle", { name: sel.name, n: top.length })
-               : tr("contribHint"))
-        : tr("needMomentArms")}</p>
-      <div class="muscles">${rows || '<span class="note">no muscle data</span>'}</div>
-    </div>`;
-}
-
 function loadNote(res) {
   const bits = [];
   if (res.addedKg) bits.push(`+${res.addedKg} kg load`);
@@ -4323,22 +4603,40 @@ function loadNote(res) {
           system ${(res.massKg + res.externalKg).toFixed(1)} kg)`;
 }
 
+/** Whether the arm moments can be read as flexion / extension. The jump shot
+ *  is refused face-on before it gets here, so only the hanging tasks ask. */
+function armSideOn(res) {
+  return res.activity === "jumpshot" || (res.view?.view ?? "sagittal") === "sagittal";
+}
+
 function momentPanel(rep, res) {
-  if (!rep.dyn) return "";
-  const d = rep.dyn;
+  const opts = jointOptions(rep.jm, "moment", res.activity);
+  if (!opts.length) return "";
+  const d = rep.dyn, jm = rep.jm;
+  const arms = opts.some((o) => o.joint === "elbow" || o.joint === "shoulder");
+  const legs = opts.some((o) => ["hip", "knee", "ankle"].includes(o.joint));
+  const sysN = (res.massKg + (res.externalKg || 0)) * 9.80665;
+  const bits = [tr("extensionPositive")];
+  if (legs) bits.push(tr("perLegLabel"));
+  if (arms) bits.push(tr(res.activity === "jumpshot" ? "shootingArmLabel" : "perArmLabel"));
+  if (d) bits.push(`${tr("peakGrfLabel")} ${(Math.max(...d.grf_vertical) / d.body_weight_n).toFixed(2)} ${tr("timesSystemWeight")}`);
+  if (jm.hand_force_n && sysN > 0) {
+    bits.push(`${tr("peakHandForceLabel")} ${(Math.max(...jm.hand_force_n) / sysN).toFixed(2)} ${tr("timesSystemWeight")}`);
+  }
   return `
-    <h1 style="font-size:16px;margin:16px 0 2px">${tr("jointMoments")}</h1>
-    <p class="sub" style="margin-bottom:8px">${tr("extensionPositive")} ·
-      ${tr("perLegLabel")} · ${tr("peakGrfLabel")}
-      ${(Math.max(...d.grf_vertical) / d.body_weight_n).toFixed(2)} ${tr("timesSystemWeight")}
-      ${loadNote(res)}</p>
+    <h1 style="font-size:16px;margin:16px 0 2px">${tr("jmKineticsTitle")}</h1>
+    <p class="sub" style="margin-bottom:4px">${bits.join(" · ")} ${loadNote(res)}</p>
     ${res.massKg + res.externalKg <= 0
       ? `<p class="note banner">${tr("noteAssistExceeds", { kg: res.assistKg })}</p>` : ""}
-    ${JOINTS.map((j) => jointSubplot(rep, res, j)).join("")}
-    <p class="note">${tr("noteInverseDynamics")}</p>
-    <p class="note banner">${momentArms
+    <div class="jmplot" data-metric="moment"></div>
+    <div class="jmplot" data-metric="power"></div>
+    ${legs ? `<p class="note">${tr("noteInverseDynamics")}</p>` : ""}
+    ${arms ? `<p class="note">${tr(res.activity === "jumpshot"
+                                   ? "noteArmDynamicsShot" : "noteArmDynamicsHang")}</p>` : ""}
+    ${arms && !armSideOn(res) ? `<p class="note banner">${tr("noteArmFaceOn")}</p>` : ""}
+    ${legs && rep.forces ? `<p class="note banner">${momentArms
       ? tr("noteContribArms", { model: momentArms.model || "OpenSim" })
-      : tr("noteContribNoArms")}</p>`;
+      : tr("noteContribNoArms")}</p>` : ""}`;
 }
 
 function forcePanel(rep, res) {
@@ -4490,6 +4788,19 @@ function forcePanel(rep, res) {
     })}</p>`;
 }
 
+/** Peak |value| per joint for one metric, or null if the rep has none. */
+function jmPeaks(jm, metric) {
+  if (!jm) return null;
+  const out = {};
+  for (const [k, v] of Object.entries(jm)) {
+    const m = new RegExp(`^(.*)_${metric}$`).exec(k);
+    if (m && Array.isArray(v) && v.length) {
+      out[m[1]] = +Math.max(...v.map(Math.abs)).toFixed(1);
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 function csvFromColumns(header, cols, n) {
   const lines = [header.join(",")];
   for (let i = 0; i < n; i++) lines.push(header.map((h, k) => {
@@ -4520,6 +4831,17 @@ async function exportZip(res, fps) {
         files.push({ name: d + "joint_moments.sto",
                      data: writeMot("joint_moments", dc, r.times,
                        Object.fromEntries(dc.map((k) => [k, r.dyn[k]]))) });
+      }
+      if (r.jm) {
+        // Angle, velocity, moment and power per joint, one column each.
+        const keys = Object.keys(r.jm).filter((k) => Array.isArray(r.jm[k])
+          && r.jm[k].length === r.times.length && /_(angle|vel|moment|power)(_[lr])?$/.test(k));
+        if (keys.length) {
+          files.push({ name: d + "joint_metrics.csv",
+                       data: csvFromColumns(["time", ...keys],
+                                            [r.times, ...keys.map((k) => r.jm[k])],
+                                            r.times.length) });
+        }
       }
       if (r.forces && r.forces.length) {
         const header = ["time", ...r.forceNames];
@@ -4580,11 +4902,10 @@ async function exportZip(res, fps) {
       net_external_kg: res.externalKg,
       reps: res.reps.map((r) => ({
         rep: r.rep, duration_s: +r.duration_s.toFixed(3),
-        peak_moments_Nm: r.dyn ? {
-          hip: +Math.max(...r.dyn.hip_moment.map(Math.abs)).toFixed(1),
-          knee: +Math.max(...r.dyn.knee_moment.map(Math.abs)).toFixed(1),
-          ankle: +Math.max(...r.dyn.ankle_moment.map(Math.abs)).toFixed(1),
-        } : null,
+        // Every joint that has a moment -- the arms' on the arm tasks, the
+        // legs' where the inverse dynamics ran.
+        peak_moments_Nm: jmPeaks(r.jm, "moment"),
+        peak_power_W: jmPeaks(r.jm, "power"),
       })),
     };
     files.push({ name: "session.json", data: JSON.stringify(summary, null, 2) });
@@ -4615,6 +4936,13 @@ repN/joint_angles.mot    OpenSim coordinates, signed for ${res.osimModel}
                          height above the floor, not a displacement.
 repN/joint_moments.sto   hip/knee/ankle moments (N.m, extension positive, per
                          leg) and ground reaction (N, both legs).
+repN/joint_metrics.csv   per joint: angle (deg, flexion positive, measured --
+                         not clipped like the .mot), angular velocity (deg/s),
+                         moment (N.m, extension positive, per leg / per arm)
+                         and power (W, positive = concentric). Arm moments on
+                         pull-ups and dips assume the hands carry the whole
+                         body, split equally; on a jump shot, the ball
+                         (0.6 kg) in the shooting hand until release.
 repN/muscle_forces.csv   80 muscles, per frame, in newtons. SEE WARNING BELOW.
 plots/                   PNG of every chart shown in the app.
 session.json             summary and settings used.
@@ -4941,6 +5269,14 @@ function render(res, fps) {
    * figure that is neither -- and it would do it silently, which is how a limp
    * disappears into a mean. Every other task has one mean because its reps are
    * one thing. */
+  // A set restored from before the per-joint metrics existed has none; build
+  // what its stored curves allow, so the mean below can average them too.
+  for (const r of [...res.reps, ...(res.whole ? [res.whole] : [])]) {
+    if (!r.jm) {
+      try { r.jm = jmFromStored(r, res.activity, KNEE_SIGN[res.osimModel] ?? -1); }
+      catch { r.jm = null; }
+    }
+  }
   const meanRep = isRun ? null : ensembleRep(res.reps);
   /* Gait panels: one per CYCLE, not one per foot-strike.
    *
@@ -5084,7 +5420,15 @@ function render(res, fps) {
   wireSetSwitcher();
   function select(i) {
     [...tabs.children].forEach((c, k) => c.setAttribute("aria-selected", k === i));
-    $("chartBox").innerHTML = chart(items[i], res.activity, res)
+    /* Angles and angular velocity, one plot each with the task's joints
+     * ticked in or out. A rep with no per-joint metrics -- a set restored from
+     * before they existed, with nothing to rebuild them from -- keeps the old
+     * fixed angle chart rather than showing nothing. */
+    const hasJm = jointOptions(items[i].jm, "angle", res.activity).length > 0;
+    $("chartBox").innerHTML = (hasJm
+        ? `<div class="jmplot" data-metric="angle" style="border-top:0;margin-top:0"></div>
+           <div class="jmplot" data-metric="vel"></div>`
+        : chart(items[i], res.activity, res))
       + (items[i].wholeTrial
            ? `<p class="note">${tr("noteWholeTrial")}</p>`
            : items[i].sideMerged
@@ -5096,16 +5440,9 @@ function render(res, fps) {
                : tr(items[i].eventAligned ? "noteMeanEventAligned" : "noteMeanStretched",
                     { n: items[i].nReps }) + tr("noteMeanBand")}</p>`
            : "");
+    wireMetrics($("chartBox"), items[i], res);
     $("dynBox").innerHTML = momentPanel(items[i], res);
-    $("dynBox").querySelectorAll("button.muscle").forEach((b) => {
-      b.onclick = () => {
-        const j = b.dataset.joint, idx = +b.dataset.idx;
-        // clicking the active muscle clears it
-        if (selectedMuscle[j] && selectedMuscle[j].idx === idx) delete selectedMuscle[j];
-        else selectedMuscle[j] = { idx, name: b.dataset.name };
-        select(i);
-      };
-    });
+    wireMetrics($("dynBox"), items[i], res);
     $("forceBox").innerHTML = forcePanel(items[i], res);
   }
   select(0);

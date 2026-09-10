@@ -488,6 +488,15 @@ export function saveCurves(sessionStarted, index, result) {
           o.dyn[k] = Array.isArray(v) || ArrayBuffer.isView(v) ? r2(v) : v;
         }
       }
+      // Per-joint angle / velocity / moment / power (jointmetrics.js). Kept so
+      // a restored set shows the same four plots, arm moments included --
+      // they cannot be rebuilt from the .mot columns alone.
+      if (rp.jm) {
+        o.jm = {};
+        for (const [k, v] of Object.entries(rp.jm)) {
+          if (Array.isArray(v) || ArrayBuffer.isView(v)) o.jm[k] = r2(v);
+        }
+      }
       for (const [k, v] of Object.entries(rp)) {
         /* Strings as well as numbers.
          *
@@ -520,6 +529,12 @@ export function saveCurves(sessionStarted, index, result) {
       o.dyn = {};
       for (const [k, v] of Object.entries(w.dyn)) {
         o.dyn[k] = Array.isArray(v) || ArrayBuffer.isView(v) ? r2(v) : v;
+      }
+    }
+    if (w.jm) {
+      o.jm = {};
+      for (const [k, v] of Object.entries(w.jm)) {
+        if (Array.isArray(v) || ArrayBuffer.isView(v)) o.jm[k] = r2(v);
       }
     }
     store[key].whole = o;

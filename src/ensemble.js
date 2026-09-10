@@ -241,6 +241,11 @@ export function ensembleRep(reps) {
     eventAligned: aligned,
   };
   if (dyn && Object.keys(dyn).length) { out.dyn = dyn; if (!solo) out.sd.dyn = dynSd; }
+  // Angles, velocities, moments and power per joint (jointmetrics.js). The
+  // velocities and powers were taken per rep in seconds, so this is the mean
+  // of real rates, not a derivative of the mean in degrees per percent.
+  const [jm, jmSd] = meanDict(usable, (r) => r.jm, align);
+  if (jm && Object.keys(jm).length) { out.jm = jm; if (!solo) out.sd.jm = jmSd; }
 
   const forces = meanMatrix(usable, "forces", align);
   if (forces) {
@@ -309,7 +314,25 @@ export function mergeSides(left, right) {
     topPct: base.topPct, landPct: base.landPct,
     eventAligned: !!base.eventAligned,
   };
-  if (Object.values(sd.coords).some(Boolean)) out.sd = sd;
+  /* The per-joint metrics follow the same rule. Sided keys (each leg's angle
+   * and velocity) come from their own foot's cycle; unsided ones -- the single
+   * sagittal moment and its power -- are one estimate, so the left cycle's
+   * copy is `jm` and the right cycle's is `jmRight`, exactly as dyn is. */
+  const jl = left && left.jm, jr = right && right.jm;
+  if (jl || jr) {
+    const unsided = (o) => Object.fromEntries(Object.entries(o || {})
+      .filter(([k]) => !/_[lr]$/.test(k)));
+    const pk = (o, suffix) => Object.fromEntries(Object.entries(o || {})
+      .filter(([k]) => k.endsWith(suffix)));
+    out.jm = { ...unsided(jl || jr), ...pk(jl, "_l"), ...pk(jr, "_r") };
+    if (jl && jr) out.jmRight = unsided(jr);
+    const sl = left && left.sd && left.sd.jm, sr = right && right.sd && right.sd.jm;
+    if (sl || sr) {
+      out.sd = out.sd || {};
+      out.sd.jm = { ...unsided(sl || sr), ...pk(sl, "_l"), ...pk(sr, "_r") };
+    }
+  }
+  if (Object.values(sd.coords).some(Boolean)) out.sd = { ...(out.sd || {}), ...sd };
   if (left && left.dyn) out.dyn = left.dyn;
   if (right && right.dyn) out.dynRight = right.dyn;
   return out;
