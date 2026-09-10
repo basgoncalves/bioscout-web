@@ -95,6 +95,21 @@ try {
   /* The body map (bodymap.js) */
   svg.bodymap { width:100%; max-width:340px; height:auto; display:block; margin:0 auto; }
   svg.bodymap g.bm-base { fill:var(--bmBase); }
+  /* Diary: the day's overall mood as five faces */
+  .faces { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin:6px 0 4px; }
+  button.faceBtn { margin:0; padding:4px 0; background:transparent; border:1px solid transparent;
+                   border-radius:12px; touch-action:manipulation; }
+  button.faceBtn svg { width:100%; max-width:44px; height:auto; display:block; margin:0 auto; }
+  button.faceBtn .fc { fill:var(--fc); fill-opacity:.16; stroke:var(--fc); stroke-width:1.4; }
+  button.faceBtn .eye { fill:var(--fc); }
+  button.faceBtn .mouth { fill:none; stroke:var(--fc); stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round; }
+  button.faceBtn .mouth.open { fill:var(--fc); }
+  button.faceBtn.on { border-color:var(--fc); background:color-mix(in srgb, var(--fc) 12%, transparent); }
+  button.faceBtn.on .fc { fill-opacity:1; }
+  button.faceBtn.on .eye { fill:#fff; }
+  button.faceBtn.on .mouth { stroke:#fff; }
+  button.faceBtn.on .mouth.open { fill:#fff; }
+  svg.bodymap g.bm-hair { fill:var(--bmPart); fill:color-mix(in srgb, var(--muted) 55%, var(--bmBase)); }
   svg.bodymap g.bm-part { fill:var(--bmPart); cursor:pointer; outline:none; }
   svg.bodymap g.bm-part.done { fill:var(--accent); fill-opacity:.45; }
   svg.bodymap g.bm-part.sel { fill:var(--accent); fill-opacity:1; }
@@ -956,7 +971,7 @@ import { renderDashboard, mealFormHTML, diaryFormHTML,
 import { probe as probeHelper, fetchClip } from "./src/fetcher.js";
 import { probe as probeStrava, authorise as authoriseStrava,
          fetchActivities, toCardioAll } from "./src/strava.js";
-import { DEFAULT_TAGS, liveTags, toggleTag, stepTag } from "./src/diary.js";
+import { DEFAULT_TAGS, liveTags, toggleTag, stepTag, quickMoodAt } from "./src/diary.js";
 import { collectWeights, weightNear } from "./src/weight.js";
 import { collectCups } from "./src/water.js";
 import { SPORT_IDS, allowedIn } from "./src/sports.js";
@@ -3117,6 +3132,16 @@ function renderDash(fromSync = false) {
       else img.remove();             // flag says photo, store says no: say nothing
     } catch { img.remove(); }
   });
+  /* The day's overall mood: one tap files it, tapping the chosen face again
+   * takes it back. Filed as a flagged diary record (see quickMoodAt). */
+  card.querySelectorAll("button.faceBtn").forEach((b) => {
+    b.onclick = () => {
+      const at = quickMoodAt(dashView.selected);
+      if (b.classList.contains("on")) deleteDiary(at, currentAthlete());
+      else addDiary({ profile: currentAthlete(), mood: +b.dataset.mood, at, quick: true });
+      renderDash();
+    };
+  });
   card.querySelectorAll("button.diaryDel").forEach((b) => {
     b.onclick = () => { deleteDiary(b.dataset.at, currentAthlete()); renderDash(); };
   });
@@ -3235,7 +3260,8 @@ function renderBodyMap() {
   if (!show) { box.innerHTML = ""; return; }
   const trained = [...new Set((sess.sets || []).flatMap((x) => regionsFor(x.activity)))];
   box.innerHTML = `<div style="font-weight:600;margin-bottom:4px">${tr("bmTitle")}</div>`
-    + bodyMapHTML(tr, { selected: bodyRegion, trained, current: $("activity").value });
+    + bodyMapHTML(tr, { selected: bodyRegion, trained, current: $("activity").value,
+                        female: getProfile(sess.profile || currentAthlete())?.sex === "F" });
   box.querySelectorAll("g.bm-part").forEach((g) => {
     const pick = () => { bodyRegion = g.dataset.region === bodyRegion ? null : g.dataset.region; renderBodyMap(); };
     g.addEventListener("click", pick);

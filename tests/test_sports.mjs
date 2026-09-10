@@ -47,5 +47,13 @@ ok((svg.match(/class="ghost bmEx/g) || []).length === 3 && /bmEx on" data-activi
    "the glutes list three exercises, the current one marked");
 ok(bodyMapHTML((k) => k, { selected: "core" }).includes("bmNone"), "a group with nothing trackable says so");
 
+{
+  const regionsOf = (h) => [...h.matchAll(/data-region="([a-z]+)"/g)].map((m) => m[1]).sort().join();
+  const him = bodyMapHTML((k) => k, {}), her = bodyMapHTML((k) => k, { female: true });
+  ok(her.includes("bm-hair") && !him.includes("bm-hair") && her.includes('class="bodymap female"'),
+     "a female athlete gets the female figure; others do not");
+  ok(regionsOf(her) === regionsOf(him), "and both figures offer exactly the same groups to tap");
+}
+
 console.log(fails ? `\n${fails} FAILED` : "\nAll checks passed");
 process.exit(fails ? 1 : 0);

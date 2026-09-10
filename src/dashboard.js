@@ -1038,6 +1038,29 @@ export function mealFormHTML(key, todayKey, draft = { items: [] }, names = []) {
 
 /** The diary form on its own, for the Add dialog. */
 /** The selected day's diary, and the form to write one. */
+/* Five faces, red to green, for the day's overall mood -- one tap, no entry
+ * to open. Mouths from a deep frown to an open smile, so the scale reads
+ * without the colours too. */
+const FACE_COLOURS = ["#d0463b", "#e0873a", "#d8b43a", "#86b84f", "#3e9d5b"];
+const FACE_MOUTHS = [
+  "M8 18 Q12 13.5 16 18",          // 1 awful
+  "M8.5 17 Q12 14.8 15.5 17",      // 2 bad
+  "M8.5 16 L15.5 16",              // 3 ok
+  "M8.5 15 Q12 17.6 15.5 15",      // 4 good
+  "M7.5 14 Q12 20 16.5 14 Z",      // 5 great (open)
+];
+function moodFacesHTML(current) {
+  return `<div class="faces" role="radiogroup" aria-label="${esc(tr("moodToday"))}">${MOODS.map((m, i) => {
+    const on = current === m.v;
+    const c = FACE_COLOURS[i];
+    return `<button type="button" class="faceBtn${on ? " on" : ""}" data-mood="${m.v}" role="radio"
+        aria-checked="${on}" aria-label="${esc(tr(m.key))}" title="${esc(tr(m.key))}" style="--fc:${c}">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle class="fc" cx="12" cy="12" r="10.2"/>
+        <circle class="eye" cx="8.8" cy="9.6" r="1.3"/><circle class="eye" cx="15.2" cy="9.6" r="1.3"/>
+        <path class="mouth${i === 4 ? " open" : ""}" d="${FACE_MOUTHS[i]}"/></svg></button>`;
+  }).join("")}</div>`;
+}
+
 function diaryHTML(day, key, todayKey, trend) {
   const rows = (day?.entries || []).map((e) => {
     const t = new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -1066,6 +1089,8 @@ function diaryHTML(day, key, todayKey, trend) {
   return `<div class="daybox">
     <div style="font-weight:600">${esc(tr("diary"))}</div>
     ${trendLine}
+    <p class="sub" style="margin:6px 0 0">${esc(tr(key === todayKey ? "moodToday" : "moodThatDay"))}</p>
+    ${moodFacesHTML(day?.quick ?? null)}
     ${rows || `<p class="sub" style="margin:6px 0 0">${esc(tr("noDiaryThatDay"))}</p>`}
     <button type="button" class="ghost" id="addDiaryBtn" style="margin-top:8px">${esc(tr("addEntry"))}</button>
   </div>`;

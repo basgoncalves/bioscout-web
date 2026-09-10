@@ -64,6 +64,15 @@ export const liveTags = (tags) => (tags || []).filter((t) => !RETIRED_TAGS.inclu
 
 export const isMood = (v) => Number.isInteger(v) && v >= 1 && v <= 5;
 
+/** Where a day's overall mood (the faces on the dashboard) is filed: one
+ *  diary record per day at 23:59:59.999 local, flagged `quick`, so it syncs
+ *  and exports like any entry and a second tap overwrites instead of adding.
+ *  Not noon: "add to this day" entries are filed at local noon. */
+export function quickMoodAt(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
+}
+
 /** Local calendar day of an ISO timestamp, as YYYY-MM-DD. Same rule as the
  *  rest of the app: an 11pm entry belongs to the day it was written, locally. */
 export function dayKey(iso) {
@@ -87,8 +96,11 @@ export function collectDiary(entries, profile = null) {
     if (profile && e.profile !== profile) continue;
     const key = dayKey(e.at);
     if (!key) continue;
-    if (!days.has(key)) days.set(key, { key, entries: [], tags: new Map(), mood: null, rated: 0 });
+    if (!days.has(key)) days.set(key, { key, entries: [], tags: new Map(), mood: null, rated: 0, quick: null });
     const d = days.get(key);
+    // The day's overall mood from the faces on the dashboard is not an entry:
+    // it is kept aside and, below, IS the day's mood when there is one.
+    if (e.quick) { if (isMood(e.mood)) d.quick = e.mood; continue; }
     d.entries.push(e);
     for (const { tag, n } of tagLevels(e)) {
       // A day shows the highest level anything reached: two entries of
@@ -103,7 +115,11 @@ export function collectDiary(entries, profile = null) {
   for (const d of days.values()) {
     d.entries.sort((a, b) => String(a.at).localeCompare(String(b.at)));
     if (d.rated) d.mood = d.mood / d.rated;
+    // Said outright beats averaged: the face tapped for the day is the day's
+    // overall mood, whatever the individual entries said along the way.
+    if (d.quick) { d.mood = d.quick; d.rated = Math.max(1, d.rated); }
   }
+  for (const [k, d] of days) if (!d.entries.length && !d.quick) days.delete(k);
   return days;
 }
 

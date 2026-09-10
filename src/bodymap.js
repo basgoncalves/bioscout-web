@@ -39,41 +39,70 @@ const E = (cx, cy, rx, ry) => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${r
 const R = (x, y, w, h, r = 5) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}"/>`;
 const P = (d) => `<path d="${d}"/>`;
 
-function figure(cx, back) {
+/* Proportions. The female figure is not the male one with a different head:
+ * narrower shoulders and arms, a waist, wider hips and thighs, a bust in place
+ * of flat pecs, and hair -- the same shapes and the same tap targets, so the
+ * two figures pick exactly the same groups. */
+const BUILD = {
+  male:   { sh: 26, shW: 21, waist: 21, hip: 18, delt: 24, deltR: 10, arm: 30, armR: 7,
+            fore: 34, foreR: 6, hand: 36, core: 13, pelvis: 16, thigh: 11, thighR: 10,
+            knee: 11, shin: 12, shinR: 6, lat: 19, glute: 10, gluteR: 11, calfR: 8 },
+  female: { sh: 23, shW: 19, waist: 16, hip: 21, delt: 20, deltR: 8.5, arm: 26, armR: 6,
+            fore: 30, foreR: 5, hand: 32, core: 11, pelvis: 20, thigh: 12, thighR: 10.5,
+            knee: 10, shin: 11, shinR: 5.5, lat: 16, glute: 11, gluteR: 12.5, calfR: 7.5 },
+};
+
+function figure(cx, back, female = false) {
+  const b = female ? BUILD.female : BUILD.male;
   const L = (dx) => cx - dx, Rt = (dx) => cx + dx;
-  const parts = [
+  const parts = [];
+  // Hair, front view: shoulder length, behind the head (a fringe goes on top
+  // of the head below). The back view covers the head entirely, further down.
+  if (female && !back) {
+    parts.push(["hair", P(`M${L(13)},20 Q${L(14)},4 ${cx},5 Q${Rt(14)},4 ${Rt(13)},20 L${Rt(15)},41 Q${Rt(10)},43 ${Rt(7)},36 L${L(7)},36 Q${L(10)},43 ${L(15)},41 Z`)]);
+  }
+  parts.push(
     // Torso underlay, so the groups read as one body rather than loose pieces.
-    [null, P(`M${L(26)},44 Q${cx},34 ${Rt(26)},44 L${Rt(21)},90 L${Rt(18)},126 L${L(18)},126 L${L(21)},90 Z`)],
-    [null, `<circle cx="${cx}" cy="20" r="13"/>`],                        // head
-    ["neck", R(cx - 6, 32, 12, 10, 3)],
-    ["shoulders", E(L(24), 51, 10, 9) + E(Rt(24), 51, 10, 9)],
-    [back ? "triceps" : "biceps", E(L(30), 78, 7, 16) + E(Rt(30), 78, 7, 16)],
-    [null, E(L(34), 111, 6, 16) + E(Rt(34), 111, 6, 16)],                // forearms
-    [null, E(L(36), 132, 5, 6) + E(Rt(36), 132, 5, 6)],                  // hands
-  ];
+    [null, P(`M${L(b.sh)},44 Q${cx},34 ${Rt(b.sh)},44 Q${Rt(b.shW)},60 ${Rt(b.waist)},90 L${Rt(b.hip)},126 L${L(b.hip)},126 L${L(b.waist)},90 Q${L(b.shW)},60 ${L(b.sh)},44 Z`)],
+    [null, `<circle cx="${cx}" cy="20" r="${female ? 12 : 13}"/>`],      // head
+  );
+  if (female) parts.push(["hair", back
+    ? P(`M${L(12.5)},20 Q${L(13.5)},6 ${cx},6 Q${Rt(13.5)},6 ${Rt(12.5)},20 L${Rt(14)},40 Q${cx},43 ${L(14)},40 Z`)
+    : P(`M${L(12)},21 Q${L(12.5)},6.5 ${cx},7 Q${Rt(12.5)},6.5 ${Rt(12)},21 Q${Rt(8)},12.5 ${cx},14 Q${L(8)},12.5 ${L(12)},21 Z`)]);
+  parts.push(
+    ["neck", R(cx - (female ? 5 : 6), 32, female ? 10 : 12, 10, 3)],
+    ["shoulders", E(L(b.delt), 51, b.deltR, b.deltR - 1) + E(Rt(b.delt), 51, b.deltR, b.deltR - 1)],
+    [back ? "triceps" : "biceps", E(L(b.arm), 78, b.armR, 16) + E(Rt(b.arm), 78, b.armR, 16)],
+    [null, E(L(b.fore), 111, b.foreR, 16) + E(Rt(b.fore), 111, b.foreR, 16)],   // forearms
+    [null, E(L(b.hand), 132, 5, 6) + E(Rt(b.hand), 132, 5, 6)],                 // hands
+  );
   if (!back) {
     parts.push(
-      ["chest", P(`M${L(20)},45 Q${L(20)},44 ${cx - 1},45 L${cx - 1},66 Q${L(10)},72 ${L(20)},66 Z`)
-              + P(`M${Rt(20)},45 Q${Rt(20)},44 ${cx + 1},45 L${cx + 1},66 Q${Rt(10)},72 ${Rt(20)},66 Z`)],
-      ["core", R(cx - 13, 71, 26, 42, 7)],
-      [null, P(`M${L(16)},113 L${Rt(16)},113 L${Rt(18)},128 L${L(18)},128 Z`)],   // hips
-      ["quads", E(L(11), 160, 10, 30) + E(Rt(11), 160, 10, 30)],
-      [null, E(L(11), 193, 6, 5) + E(Rt(11), 193, 6, 5)],                // knees
-      [null, E(L(12), 220, 6, 22) + E(Rt(12), 220, 6, 22)],              // shins
+      ["chest", female
+        ? E(L(8.5), 61, 8, 7.5) + E(Rt(8.5), 61, 8, 7.5)
+        : P(`M${L(20)},45 Q${L(20)},44 ${cx - 1},45 L${cx - 1},66 Q${L(10)},72 ${L(20)},66 Z`)
+          + P(`M${Rt(20)},45 Q${Rt(20)},44 ${cx + 1},45 L${cx + 1},66 Q${Rt(10)},72 ${Rt(20)},66 Z`)],
+      ["core", female
+        ? P(`M${L(11)},71 L${Rt(11)},71 Q${Rt(8)},92 ${Rt(12)},113 L${L(12)},113 Q${L(8)},92 ${L(11)},71 Z`)
+        : R(cx - b.core, 71, 2 * b.core, 42, 7)],
+      [null, P(`M${L(b.pelvis)},113 L${Rt(b.pelvis)},113 L${Rt(b.pelvis + 2)},128 L${L(b.pelvis + 2)},128 Z`)],   // hips
+      ["quads", E(L(b.thigh), 160, b.thighR, 30) + E(Rt(b.thigh), 160, b.thighR, 30)],
+      [null, E(L(b.knee), 193, 6, 5) + E(Rt(b.knee), 193, 6, 5)],               // knees
+      [null, E(L(b.shin), 220, b.shinR, 22) + E(Rt(b.shin), 220, b.shinR, 22)], // shins
     );
   } else {
     parts.push(
       ["back", P(`M${L(14)},40 L${Rt(14)},40 L${cx},66 Z`)                // traps
-             + P(`M${L(19)},58 Q${L(18)},90 ${cx - 2},104 L${cx - 2},66 Z`)   // lats
-             + P(`M${Rt(19)},58 Q${Rt(18)},90 ${cx + 2},104 L${cx + 2},66 Z`)],
-      ["core", R(cx - 11, 100, 22, 16, 5)],                                 // lower back
-      ["glutes", E(L(10), 128, 11, 12) + E(Rt(10), 128, 11, 12)],
-      ["hamstrings", E(L(12), 166, 10, 25) + E(Rt(12), 166, 10, 25)],
-      [null, E(L(11), 195, 6, 5) + E(Rt(11), 195, 6, 5)],                // knees
-      ["calves", E(L(12), 218, 8, 20) + E(Rt(12), 218, 8, 20)],
+             + P(`M${L(b.lat)},58 Q${L(b.lat - 1)},90 ${cx - 2},104 L${cx - 2},66 Z`)   // lats
+             + P(`M${Rt(b.lat)},58 Q${Rt(b.lat - 1)},90 ${cx + 2},104 L${cx + 2},66 Z`)],
+      ["core", R(cx - (female ? 10 : 11), 100, female ? 20 : 22, 16, 5)],     // lower back
+      ["glutes", E(L(b.glute), 128, b.gluteR, 12) + E(Rt(b.glute), 128, b.gluteR, 12)],
+      ["hamstrings", E(L(b.thigh + 1), 166, b.thighR, 25) + E(Rt(b.thigh + 1), 166, b.thighR, 25)],
+      [null, E(L(b.knee), 195, 6, 5) + E(Rt(b.knee), 195, 6, 5)],               // knees
+      ["calves", E(L(b.shin), 218, b.calfR, 20) + E(Rt(b.shin), 218, b.calfR, 20)],
     );
   }
-  parts.push([null, E(L(12), 246, 7, 4) + E(Rt(12), 246, 7, 4)]);       // feet
+  parts.push([null, E(L(12), 246, female ? 6 : 7, 4) + E(Rt(12), 246, female ? 6 : 7, 4)]);   // feet
   return parts;
 }
 
@@ -83,12 +112,16 @@ function figure(cx, back) {
  *   selected  the tapped group, or null
  *   trained   groups this session has already done (tinted)
  *   current   the Movement currently selected, shown as chosen
+ *   female    draw the female figure (the athlete's profile says sex F)
  */
-export function bodyMapHTML(tr, { selected = null, trained = [], current = null } = {}) {
+export function bodyMapHTML(tr, { selected = null, trained = [], current = null,
+                                  female = false } = {}) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const done = new Set(trained);
-  const draw = (cx, back) => figure(cx, back).map(([reg, shape]) => reg
+  const draw = (cx, back) => figure(cx, back, female).map(([reg, shape]) =>
+    reg === "hair" ? `<g class="bm-hair">${shape}</g>`
+    : reg
     ? `<g class="bm-part${reg === selected ? " sel" : done.has(reg) ? " done" : ""}" data-region="${reg}"
          role="button" tabindex="0" aria-label="${esc(tr("bm_" + reg))}"><title>${esc(tr("bm_" + reg))}</title>${shape}</g>`
     : `<g class="bm-base">${shape}</g>`).join("");
@@ -99,7 +132,7 @@ export function bodyMapHTML(tr, { selected = null, trained = [], current = null 
         ? `<div style="margin-top:4px">${ex.map((a) => `<button type="button"
             class="ghost bmEx${a === current ? " on" : ""}" data-activity="${a}">${esc(tr(a))}</button>`).join("")}</div>`
         : `<p class="sub" style="margin:4px 0 0">${esc(tr("bmNone"))}</p>`}</div>`;
-  return `<svg class="bodymap" viewBox="0 0 260 262" role="group" aria-label="${esc(tr("bmTitle"))}">
+  return `<svg class="bodymap${female ? " female" : ""}" viewBox="0 0 260 262" role="group" aria-label="${esc(tr("bmTitle"))}">
       ${draw(60, false)}${draw(200, true)}
       <text x="60" y="260" text-anchor="middle">${esc(tr("bmFront"))}</text>
       <text x="200" y="260" text-anchor="middle">${esc(tr("bmBack"))}</text>

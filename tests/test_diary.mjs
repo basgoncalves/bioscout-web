@@ -196,5 +196,24 @@ ok(targetDims(0, 0, 640) === null, "a zero-sized source is refused rather than d
      "a clock change does not shift the day count", String(daysBetween("2026-03-28", "2026-03-30")));
 }
 
+/* ---- the day's overall mood (the faces) --------------------------------- */
+{
+  const { quickMoodAt } = await import("../src/diary.js");
+  const at = quickMoodAt("2026-09-10");
+  ok(new Date(at).getDate() === 10 && new Date(at).getHours() === 23,
+     "the overall mood is filed late on its own local day, not at noon", at);
+  const days = collectDiary([
+    { at: "2026-09-10T08:00:00.000Z", mood: 2, tags: ["sore"] },
+    { at, mood: 5, quick: true },
+    { at: quickMoodAt("2026-09-11"), mood: 3, quick: true },
+  ]);
+  const d = days.get("2026-09-10");
+  ok(d.mood === 5 && d.quick === 5, "the tapped face is the day's mood, over the entries' mean");
+  ok(d.entries.length === 1, "and it is not listed as an entry");
+  ok(days.get("2026-09-11").mood === 3 && days.get("2026-09-11").rated >= 1,
+     "a day with only a face still counts as a rated day");
+  ok(!collectDiary([{ at, mood: 9, quick: true }]).size, "a face outside 1-5 is not a day");
+}
+
 console.log(bad ? `\nFAIL  ${bad} check(s)` : "\nALL CHECKS PASSED");
 process.exit(bad ? 1 : 0);

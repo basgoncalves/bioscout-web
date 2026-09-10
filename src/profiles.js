@@ -331,7 +331,7 @@ export function listDiary() {
 }
 
 export function addDiary({ profile = null, mood = null, tags = [], levels = {},
-                           note = "", at = null }) {
+                           note = "", at = null, quick = false }) {
   const m = Number(mood);
   const keep = [...new Set((tags || []).map((t) => String(t).slice(0, 40)))].slice(0, TAGS_MAX);
   const lv = {};
@@ -349,6 +349,7 @@ export function addDiary({ profile = null, mood = null, tags = [], levels = {},
     note: String(note).slice(0, 1000),
     u: stamp(),
   };
+  if (quick) entry.quick = true;       // the day's overall mood, see diary.js
   // An entry with no mood, no tags and no note is a mis-tap.
   if (entry.mood === null && !entry.tags.length && !entry.note.trim()) return null;
   const all = listDiary().filter((x) => !(x.at === entry.at && x.profile === entry.profile));
