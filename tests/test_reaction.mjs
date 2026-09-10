@@ -54,8 +54,15 @@ ok(summarise([]) === null && summarise([NaN, -3]) === null, "nothing counted is 
   let seed = 7;
   const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   const count = (a, k) => a.filter((x) => x === k).length;
-  const c = sequence("choice", rand);
-  ok(c.length === 8 && count(c, "left") === 4 && count(c, "right") === 4, "choice: four left, four right");
+  let choiceOk = true, leftMore = 0;
+  for (let i = 0; i < 200; i++) {
+    const c = sequence("choice", rand);
+    const l = count(c, "left"), r = count(c, "right");
+    if (c.length !== 5 || !((l === 3 && r === 2) || (l === 2 && r === 3))) choiceOk = false;
+    if (l === 3) leftMore++;
+  }
+  ok(choiceOk, "choice: five tries, three of one side and two of the other");
+  ok(leftMore > 40 && leftMore < 160, "and which side gets three is random", String(leftMore));
   let neverFirst = true;
   for (let i = 0; i < 200; i++) {
     const g = sequence("gonogo", rand);
@@ -65,14 +72,15 @@ ok(summarise([]) === null && summarise([NaN, -3]) === null, "nothing counted is 
   let colourOk = true;
   for (let i = 0; i < 200; i++) {
     const q = sequence("colour", rand);
-    if (q.length !== 8 || ["red", "blue", "green", "yellow"].some((c) => count(q, c) !== 2)
+    if (q.length !== 5 || ["red", "blue", "green", "yellow"].some((c) => count(q, c) < 1)
         || q.some((c, k) => k && c === q[k - 1])) colourOk = false;
   }
-  ok(colourOk, "colour: two of each of four colours, never the same one twice in a row");
+  ok(colourOk, "colour: five tries, every colour at least once, never the same one twice in a row");
   ok(GAME_IDS.join() === "simple,choice,colour", "the page offers tap, left/right and colour");
   ok(gameOf({ game: "gonogo" }) === "gonogo", "a filed go/no-go test still reads as go/no-go");
-  ok(sequence("simple").every((x) => x === "go") && sequence("simple").length === GAMES.simple.go,
+  ok(sequence("simple").every((x) => x === "go") && sequence("simple").length === 5,
      "simple: five greens");
+  ok(GAME_IDS.every((g) => sequence(g, rand).length === TRIALS), "every game offered is five tries");
   ok(sequence("nonsense").length === 5, "an unknown game falls back to simple");
   ok(gameOf({}) === "simple" && gameOf({ game: "choice" }) === "choice",
      "tests from before the games read as simple");

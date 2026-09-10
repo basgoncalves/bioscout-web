@@ -29,15 +29,20 @@
  * Pure: no DOM, no storage, so tests/test_reaction.mjs runs it in node.
  */
 
+/* Every game is five counted tries (Bas, 2026-09-10): short enough to repeat,
+ * and the same length whichever game, so the medians rest on the same number
+ * of taps. */
 export const TRIALS = 5;
 
-/* How many stimuli each game shows. Choice is balanced left/right; go/no-go
- * is 7 go to 3 no-go, the usual ~70/30 that keeps "go" the habit to resist. */
+/* What each game shows. Five does not split evenly, so choice is 3 of one
+ * side and 2 of the other (which side gets 3 is random each run), and colour
+ * is every colour once plus one of them again. Go/no-go (7 go, 3 no-go) is
+ * retired and kept only so old records read. */
 export const COLOURS = ["red", "blue", "green", "yellow"];
 export const GAMES = {
   simple: { go: 5 },
-  choice: { left: 4, right: 4 },
-  colour: { red: 2, blue: 2, green: 2, yellow: 2 },
+  choice: { left: 3, right: 2 },
+  colour: { red: 1, blue: 1, green: 1, yellow: 1 },
   gonogo: { go: 7, nogo: 3 },
 };
 /** The games the page offers, in tab order. */
@@ -49,6 +54,12 @@ export function sequence(game, rand = Math.random) {
   const g = GAMES[game] || GAMES.simple;
   const out = [];
   for (const [kind, n] of Object.entries(g)) for (let i = 0; i < n; i++) out.push(kind);
+  // Five tries: choice decides at random which side gets the third, colour
+  // which colour comes up twice.
+  if (game === "choice" && rand() < 0.5) {
+    for (let i = 0; i < out.length; i++) out[i] = out[i] === "left" ? "right" : "left";
+  }
+  if (game === "colour") out.push(COLOURS[Math.floor(rand() * COLOURS.length)]);
   for (let i = out.length - 1; i > 0; i--) {
     const j = Math.floor(rand() * (i + 1));
     [out[i], out[j]] = [out[j], out[i]];
