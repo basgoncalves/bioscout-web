@@ -123,9 +123,12 @@ export function lastUsedProfile() {
  * athlete had selected stayed empty, and the honest reading of the screen was
  * that the work had been lost.
  */
-export function newSession(profileName, startedAt = null) {
+export function newSession(profileName, startedAt = null, sport = null) {
   const s = { started: startedAt || new Date().toISOString(),
               profile: profileName || null, sets: [] };
+  // Which sport the session is (sports.js). Absent on sessions from before
+  // sports existed, which is read as "any".
+  if (sport) s.sport = sport;
   writeKeep(SKEY, s);
   return s;
 }

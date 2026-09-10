@@ -118,7 +118,7 @@ export function collectDays(sessions, cardio = []) {
       if (!key) continue;
       if (!days.has(key)) days.set(key, emptyDay(key));
       const d = days.get(key);
-      d.sets.push({ ...set, session: s.started, profile: s.profile ?? null });
+      d.sets.push({ ...set, session: s.started, profile: s.profile ?? null, sport: s.sport ?? null });
       d.reps += set.reps || 0;
       if (set.assess) d.assess = true;
       if (set.activity) d.activities.add(set.activity);
@@ -369,7 +369,8 @@ function dayHTML(day, key) {
   const bySession = new Map();
   for (const s of day.sets) {
     if (!bySession.has(s.session)) {
-      bySession.set(s.session, { started: s.session, sets: 0, reps: 0, acts: new Set(), assess: 0 });
+      bySession.set(s.session, { started: s.session, sets: 0, reps: 0, acts: new Set(), assess: 0,
+                                 sport: s.sport || null });
     }
     const g = bySession.get(s.session);
     g.sets++; g.reps += s.reps; g.acts.add(s.activity);
@@ -382,7 +383,8 @@ function dayHTML(day, key) {
     `<tr class="sessionRow${g.assess ? " assessRow" : ""}" data-session="${esc(g.started)}">
       <td>${esc(time(g.started))}${g.assess
         ? ` <span class="tagAssess">${esc(tr("assessTag"))}</span>` : ""}</td>
-      <td>${[...g.acts].map((a) => esc(tr(a))).join(", ")}</td><td>${g.sets}</td><td>${g.reps}</td></tr>`).join("");
+      <td>${g.sport ? `<b>${esc(tr("sport_" + g.sport))}</b><br>` : ""}${
+        [...g.acts].map((a) => esc(tr(a))).join(", ")}</td><td>${g.sets}</td><td>${g.reps}</td></tr>`).join("");
   const acts = [...day.activities].map((a) => esc(tr(a))).join(", ");
 
   const hasSets = day.sets.length > 0;
