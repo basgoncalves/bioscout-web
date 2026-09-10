@@ -851,6 +851,7 @@ const EN = {
   "continue": "Continue",
   "minusTenth": "0.1 kg less",
   "plusTenth": "0.1 kg more",
+  "setNotSaved": "The analysis is below, but this set could NOT be saved to your training log ({err}). Export your data from Edit profile to free space, then record again.",
 };
 
 const PT = {
@@ -1680,6 +1681,7 @@ const PT = {
   "continue": "Continuar",
   "minusTenth": "menos 0,1 kg",
   "plusTenth": "mais 0,1 kg",
+  "setNotSaved": "A an\u00e1lise est\u00e1 abaixo, mas esta s\u00e9rie N\u00c3O foi guardada no registo de treino ({err}). Exporte os seus dados em Editar perfil para libertar espa\u00e7o e grave outra vez.",
 };
 
 const DE = {
@@ -2508,6 +2510,7 @@ const DE = {
   "continue": "Weiter",
   "minusTenth": "0,1 kg weniger",
   "plusTenth": "0,1 kg mehr",
+  "setNotSaved": "Die Auswertung steht unten, aber dieser Satz konnte NICHT im Trainingsprotokoll gespeichert werden ({err}). Exportieren Sie Ihre Daten unter Profil bearbeiten, um Platz zu schaffen, und nehmen Sie erneut auf.",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };

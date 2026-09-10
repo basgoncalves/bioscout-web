@@ -57,6 +57,31 @@ function write(key, value) {
   catch { return false; }          // private window, quota, or blocked storage
 }
 
+/**
+ * write(), for the records that must not be lost: a session and its sets.
+ *
+ * The stored curves are by far the biggest thing on the device (tens to
+ * hundreds of kB a set) and the only thing here that can be rebuilt from
+ * nothing -- a set without its curves is still a set in the log, one without
+ * its row is gone. So when the quota refuses, the oldest curve sets are
+ * dropped one at a time and the write is tried again. Before this, a full
+ * store made addSet's write fail SILENTLY: the analysis showed, the log did
+ * not get the set, and nothing said so.
+ */
+function writeKeep(key, value) {
+  if (write(key, value)) return true;
+  const store = read(CKEY, {});
+  const keys = Object.keys(store)
+    .sort((a, b) => String(store[a].at).localeCompare(String(store[b].at)));
+  while (keys.length) {
+    delete store[keys.shift()];
+    if (!write(CKEY, store)) continue;
+    if (write(key, value)) return true;
+  }
+  try { localStorage.removeItem(CKEY); } catch { /* ignore */ }
+  return write(key, value);
+}
+
 // --- profiles --------------------------------------------------------------
 export function listProfiles() {
   const p = read(PKEY, { profiles: [], lastUsed: null });
@@ -101,7 +126,7 @@ export function lastUsedProfile() {
 export function newSession(profileName, startedAt = null) {
   const s = { started: startedAt || new Date().toISOString(),
               profile: profileName || null, sets: [] };
-  write(SKEY, s);
+  writeKeep(SKEY, s);
   return s;
 }
 
@@ -125,15 +150,16 @@ export function listArchive() {
  *  not history, it is a session someone started and walked away from. */
 export function archiveSession() {
   const s = getSession();
-  clearSession();
-  if (!s || !s.sets || !s.sets.length) return listArchive().length;
+  if (!s || !s.sets || !s.sets.length) { clearSession(); return listArchive().length; }
   const a = listArchive();
   // `started` is the identity: importing the same file twice must not double
   // the history, and two sessions cannot begin at the same millisecond.
   if (!a.some((x) => x.started === s.started)) a.push(s);
   a.sort((x, y) => String(x.started).localeCompare(String(y.started)));
   const trimmed = a.slice(-ARCHIVE_MAX);
-  write(AKEY, trimmed);
+  // Filed FIRST, cleared after. The other order lost the whole session
+  // whenever the archive write was refused (a full store).
+  if (writeKeep(AKEY, trimmed)) clearSession();
   return trimmed.length;
 }
 
@@ -749,7 +775,9 @@ export function addSet(result, fps, extra = {}) {
     perRep: result.reps.map((r) => summariseRep(r, result.activity)),
   };
   s.sets.push(set);
-  write(SKEY, s);
+  // Throw rather than return a set that is not in the log: the caller says so
+  // on the page (sayStorageFull), instead of the set vanishing quietly.
+  if (!writeKeep(SKEY, s)) throw new Error("storage full: the set could not be saved");
   return set;
 }
 
@@ -818,7 +846,7 @@ export function setRepRemoved(sessionStarted, setIndex, rep, removed = true) {
     return null;
   }
   set.reps = set.perRep.length;
-  if (arch) write(AKEY, arch); else write(SKEY, sess);
+  if (!(arch ? writeKeep(AKEY, arch) : writeKeep(SKEY, sess))) return null;
   const store = read(CKEY, {});
   const c = store[`${sessionStarted}|${setIndex}`];
   if (c && move(c, removed ? "reps" : "removedReps", removed ? "removedReps" : "reps")) {

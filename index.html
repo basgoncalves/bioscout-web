@@ -617,7 +617,7 @@
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 85;
+window.BUILD = 86;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1707,7 +1707,22 @@ window.addEventListener("popstate", (e) => {
 });
 
 $("navBack").onclick = () => history.back();
-$("navHome").onclick = () => { showView("viewDash"); renderDash(); };
+/* Home. From the recorder, home opens on the day the open session is filed
+ * under -- not on whatever day the calendar was last left on. A session
+ * started from 6 July files its sets on 6 July, and landing on today after it
+ * reads exactly like the set was never recorded. */
+function goHome() {
+  const open = getSession();
+  const last = open && open.sets && open.sets.length ? open.sets[open.sets.length - 1] : null;
+  const key = last ? dayKey(new Date(last.at || open.started)) : null;
+  if (key && !$("viewRecord").classList.contains("hidden")) {
+    const [y, m] = key.split("-").map(Number);
+    dashView = { ...(dashView || defaultDashView()), year: y, month: m - 1, selected: key };
+  }
+  showView("viewDash");
+  renderDash();
+}
+$("navHome").onclick = goHome;
 
 const currentAthlete = () => $("profile").value || null;
 
@@ -1769,7 +1784,12 @@ function startTraining(dayKeyStr) {
   // A session with sets in it is training in progress; archive it before
   // starting the next, exactly as the results card does.
   const open = getSession();
-  if (open && open.sets && open.sets.length) archiveSession();
+  if (open && open.sets && open.sets.length) {
+    archiveSession();
+    // Not filed (the store refused it): starting a new session now would
+    // overwrite it. Stop and say so instead.
+    if (getSession()?.sets?.length) { say(tr("setNotSaved", { err: "storage full" }), true); return; }
+  }
   /* Filed on the day the athlete opened it from, not on today.
    *
    * The day view is where a session is started, and starting one from the 6th
@@ -2173,6 +2193,7 @@ function renderTraining() {
     // File the old one rather than dropping it: the export is only worth
     // moving between devices if there is history in it.
     const kept = archiveSession();
+    if (getSession()?.sets?.length) { say(tr("setNotSaved", { err: "storage full" }), true); return; }
     newSession($("profile").value || null);
     $("trainingCard").classList.add("hidden");
     say(tr("sayNewSession", {
@@ -2691,7 +2712,9 @@ function renderSummary() {
     <button class="ghost" id="closeSummaryBtn" style="margin-top:8px">${tr("close")}</button>
     <div class="status" id="sessionZipStatus"></div>`;
   $("saveExportBtn").onclick = () => exportSession();
-  $("closeSummaryBtn").onclick = () => { $("summaryBox").innerHTML = ""; };
+  // Close means done: back to the dashboard, on the day the session is filed
+  // under, so the set just recorded is the first thing on screen.
+  $("closeSummaryBtn").onclick = () => { $("summaryBox").innerHTML = ""; goHome(); };
 }
 
 /** The whole training session as one archive: every set's summary, the trends,
@@ -3710,7 +3733,10 @@ async function finish() {
           renderAssess();
         }
       } catch (e) {
+        // Said on the page. This used to be a console line only, so a set that
+        // did not reach the log looked exactly like one that had.
         console.warn("could not log the set", e);
+        say(tr("setNotSaved", { err: e.message || String(e) }), true);
       }
     }
     render(lastResult, fps);
