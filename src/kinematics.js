@@ -822,14 +822,154 @@ export function buildJumpFeatures(poses) {
   // time than in the air.
   const n = F._n;
   F.foot_rise = new Array(n).fill(NaN);
+  // The same lowest-foot position in image pixels, NaN where the tracker lost
+  // the foot. The jump detector measures it against a LOCAL floor (jumpSignals
+  // below); foot_rise, against the one clip-wide floor, is kept for the
+  // callers that only need "roughly how high are the feet".
+  F.foot_low = new Array(n).fill(NaN);
   let seen = 0;
   for (let i = 0; i < n; i++) {
     const a = F.ankle_cy[i], t = F.toe_cy[i];
     const low = Math.max(isNum(a) ? a : -Infinity, isNum(t) ? t : -Infinity);
-    if (Number.isFinite(low)) { F.foot_rise[i] = F._floorY - low; seen++; }
+    if (Number.isFinite(low)) { F.foot_rise[i] = F._floorY - low; F.foot_low[i] = low; seen++; }
   }
   F._footCoverage = n ? seen / n : 0;
   return F;
+}
+
+/* ---- where the floor is, jump by jump --------------------------------------
+ *
+ * The first version measured every foot against ONE floor for the whole clip:
+ * the 97th percentile of every foot position seen. Both halves of that failed
+ * on real clips, and a simulated phone recording (tests/jump_sim.mjs) shows
+ * each failure on demand:
+ *
+ *   jitter   the 97th percentile of a wobbling landmark is its wobble's lower
+ *            extreme, a centimetre or two BELOW where the foot actually rests.
+ *            A standing foot then reads as a little airborne, the take-off and
+ *            touch-down edges walk outward into the stance, and every flight is
+ *            too long: +7 cm of height on average at ordinary jitter, +22 cm at
+ *            worst.
+ *   drift    athletes creep between jumps, and a few centimetres nearer the
+ *            camera moves the feet down the picture. Against a fixed floor the
+ *            standing feet of a later jump sit above it for seconds at a time --
+ *            a "flight" too long to be one, so the jump was thrown away. One in
+ *            five jumps went missing that way.
+ *
+ * So the floor is found where the feet are: first roughly (a rolling median,
+ * which is the ground whenever the feet spend most of a second on it), then
+ * exactly, as the median foot position of each separate stretch of standing
+ * between flights. A flight runs from one stretch's floor to the next one's.
+ * The detection threshold is raised to sit above this clip's own jitter.
+ */
+function rollingMedian(arr, half) {
+  const n = arr.length, out = new Array(n).fill(NaN);
+  for (let i = 0; i < n; i++) {
+    const w = [];
+    for (let j = Math.max(0, i - half); j <= Math.min(n - 1, i + half); j++) {
+      if (isNum(arr[j])) w.push(arr[j]);
+    }
+    if (w.length) { w.sort((a, b) => a - b); out[i] = w[w.length >> 1]; }
+  }
+  return out;
+}
+
+export function jumpSignals(F, cfg = DEFAULT_JUMP_CFG) {
+  if (F._jumpSig && F._jumpSig.cfg === cfg) return F._jumpSig;
+  const n = F._n, fps = F._fps || 30, scale = F._scale || 1;
+  let low = F.foot_low || F.foot_rise.map((r) => (isNum(r) ? F._floorY - r : NaN));
+  let observed = low.map(isNum);
+  /* One landmark, not whichever is lowest this frame.
+   *
+   * "Lowest point of the foot" is the toe for the whole of a jump -- flat,
+   * on the toes, and in the air. But when the tracker drops the toe and keeps
+   * the ankle, the lowest point it has is the ankle, 7 cm higher on a flat
+   * foot and 12 on a pointed one: a spike of that size in the middle of the
+   * flight, which is what threw the timing off by up to 11 cm of height. So
+   * where the toe is usually seen, the toe is the signal; a frame with only
+   * the ankle is bridged with the toe-to-ankle offset from the frames around
+   * it, and left out of anything that times the flight. */
+  const toe = F.toe_cy, ank = F.ankle_cy;
+  if (toe && ank && toe.filter(isNum).length >= 0.5 * n) {
+    const off = toe.map((t, i) => (isNum(t) && isNum(ank[i]) ? t - ank[i] : NaN));
+    const offS = off.some(isNum) ? interpNan(rollingMedian(off, Math.max(2, Math.round(0.25 * fps)))) : off.map(() => 0);
+    low = toe.map((t, i) => (isNum(t) ? Math.max(t, isNum(ank[i]) ? ank[i] : -Infinity)
+                                      : isNum(ank[i]) ? ank[i] + Math.max(0, offS[i]) : NaN));
+    observed = toe.map(isNum);
+  }
+  // Pass 1: a rough floor, good enough to find the flights.
+  const rough = interpNan(rollingMedian(low, Math.max(5, Math.round(fps))));
+  const lowI = interpNan(low);
+  const rise1 = smooth(rough.map((f, i) => f - lowI[i]), cfg.smoothWin);
+  const lift = cfg.liftFrac * scale;
+  const pad = Math.max(2, Math.round(0.05 * fps));
+  const airish = new Array(n).fill(false);
+  for (let i = 0; i < n; i++) {
+    if (rise1[i] > lift) for (let k = Math.max(0, i - pad); k <= Math.min(n - 1, i + pad); k++) airish[k] = true;
+  }
+  // Pass 2: each stretch of standing gets its own floor.
+  const segs = [];
+  for (let i = 0; i < n;) {
+    if (airish[i]) { i++; continue; }
+    let j = i;
+    while (j + 1 < n && !airish[j + 1]) j++;
+    const v = [];
+    for (let k = i; k <= j; k++) if (observed[k]) v.push(low[k]);
+    segs.push({ a: i, b: j, floor: v.length ? nanmedian(v) : NaN });
+    i = j + 1;
+  }
+  const floor = rough.slice();
+  for (const sg of segs) if (isNum(sg.floor)) for (let k = sg.a; k <= sg.b; k++) floor[k] = sg.floor;
+  // Across a flight, from the floor it left to the floor it came down on.
+  for (let q = 0; q + 1 < segs.length; q++) {
+    const A = segs[q], B = segs[q + 1];
+    if (!isNum(A.floor) || !isNum(B.floor)) continue;
+    for (let k = A.b + 1; k < B.a; k++) {
+      floor[k] = A.floor + (B.floor - A.floor) * (k - A.b) / (B.a - A.b);
+    }
+  }
+  const riseRaw = floor.map((f, i) => f - lowI[i]);
+  // This clip's own jitter, from the standing frames: robust SD of the foot
+  // about its floor.
+  const dev = [];
+  for (const sg of segs) {
+    for (let k = sg.a; k <= sg.b; k++) if (observed[k]) dev.push(Math.abs(low[k] - sg.floor));
+  }
+  const sigma = dev.length ? 1.4826 * nanmedian(dev) : 0;
+  const sig = {
+    cfg, fps, observed, floor, riseRaw, sigma,
+    rise: smooth(riseRaw, cfg.smoothWin),
+    thresh: Math.max(lift, 4 * sigma),
+    edge: Math.max(cfg.edgeFrac * scale, 2.5 * sigma),
+    segs,
+  };
+  F._jumpSig = sig;
+  return sig;
+}
+
+/** Least-squares y = c0 + c1 x + c2 x^2. Null if singular. */
+export function fitParabola(xs, ys) {
+  let n0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, t0 = 0, t1 = 0, t2 = 0;
+  for (let i = 0; i < xs.length; i++) {
+    const x = xs[i], y = ys[i];
+    if (!isNum(x) || !isNum(y)) continue;
+    const x2 = x * x;
+    n0++; s1 += x; s2 += x2; s3 += x2 * x; s4 += x2 * x2; t0 += y; t1 += x * y; t2 += x2 * y;
+  }
+  if (n0 < 3) return null;
+  const M = [[n0, s1, s2, t0], [s1, s2, s3, t1], [s2, s3, s4, t2]];
+  for (let c = 0; c < 3; c++) {
+    let piv = c;
+    for (let r = c + 1; r < 3; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    if (Math.abs(M[c][c]) < 1e-12) return null;
+    for (let r = 0; r < 3; r++) {
+      if (r === c) continue;
+      const f = M[r][c] / M[c][c];
+      for (let k = c; k < 4; k++) M[r][k] -= f * M[c][k];
+    }
+  }
+  return [M[0][3] / M[0][0], M[1][3] / M[1][1], M[2][3] / M[2][2]];
 }
 
 /** Contiguous runs where the feet are off the floor. */
@@ -860,22 +1000,31 @@ export function findJumpReps(F, cfg = DEFAULT_JUMP_CFG) {
   if ((F._footCoverage ?? 1) < cfg.minFootCoverage) {
     return { reps: [], rise: [], refused: "feet" };
   }
-  const rise = smooth(interpNan(F.foot_rise), cfg.smoothWin);
+  const sig = jumpSignals(F, cfg);
+  const rise = sig.rise;
   const hipY = smooth(interpNan(F.hip_cy), cfg.smoothWin);
-  const thresh = cfg.liftFrac * (F._scale || 1);
+  const thresh = sig.thresh;
   const reps = [];
   let prevEnd = -1;
   const runs = flightRuns(rise, thresh, cfg);
   /* How high the hip gets while the feet are demonstrably on the floor. The
    * 10th percentile rather than the minimum, so one noisy frame cannot raise
-   * the bar the jump has to clear. */
-  const edge = cfg.edgeFrac * (F._scale || 1);
-  const grounded = [];
-  for (let i = 0; i < n; i++) if (!(rise[i] > edge) && isNum(hipY[i])) grounded.push(hipY[i]);
-  const standRef = grounded.length ? nanpercentile(grounded, 10) : -Infinity;
+   * the bar the jump has to clear. Taken from the stretch of standing just
+   * before THIS jump: an athlete who has crept toward the camera stands lower
+   * in the picture than they did three jumps ago, and a clip-wide reference
+   * would make a real jump look like it never left the ground. */
+  const edge = sig.edge;
+  const standRefBefore = (a) => {
+    const sg = [...sig.segs].reverse().find((q) => q.b < a) || sig.segs[0];
+    const v = [];
+    if (sg) for (let i = sg.a; i <= sg.b; i++) if (!(rise[i] > edge) && isNum(hipY[i])) v.push(hipY[i]);
+    if (!v.length) for (let i = 0; i < n; i++) if (!(rise[i] > edge) && isNum(hipY[i])) v.push(hipY[i]);
+    return v.length ? nanpercentile(v, 10) : -Infinity;
+  };
 
   for (let ri = 0; ri < runs.length; ri++) {
     const [a, b] = runs[ri];
+    const standRef = standRefBefore(a);
     // Smaller y is higher on screen: the apex must beat the standing reference.
     let apexY = Infinity;
     for (let i = a; i <= b; i++) if (isNum(hipY[i]) && hipY[i] < apexY) apexY = hipY[i];
@@ -919,11 +1068,13 @@ export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
   // happens between two frames, and at 30 fps the foot covers ~10 cm in one
   // frame, so the smeared edge overestimated height by up to 10 cm. Detect on
   // the smoothed signal, time on the raw one.
-  const riseRaw = interpNan(F.foot_rise);
-  const rise = smooth(riseRaw, cfg.smoothWin);
+  const sig = jumpSignals(F, cfg);
+  const riseRaw = sig.riseRaw;
+  const rise = sig.rise;
   const hipY = smooth(interpNan(F.hip_cy), cfg.smoothWin);
-  const thresh = cfg.liftFrac * (F._scale || 1);
-  const edge = cfg.edgeFrac * (F._scale || 1);
+  const hipRaw = interpNan(F.hip_cy);
+  const thresh = sig.thresh;
+  const edge = sig.edge;
   let land = takeoff;
   while (land + 1 <= t1 && rise[land + 1] > thresh) land++;
   const flightFrames = land - takeoff + 1;
@@ -958,8 +1109,61 @@ export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
     const lo = Math.min(i, i - (j - i)), hi = Math.max(i, i - (j - i));
     return Math.max(lo, Math.min(hi, t));
   };
-  const offF = a + 1 <= b2 ? zeroBefore(a, a + 1) : a;
-  const onF = b2 - 1 >= a ? zeroBefore(b2, b2 - 1) : b2;
+  let offF = a + 1 <= b2 ? zeroBefore(a, a + 1) : a;
+  let onF = b2 - 1 >= a ? zeroBefore(b2, b2 - 1) : b2;
+  /* Better, when there is enough flight to fit: the whole airborne path.
+   *
+   * The two-frame extrapolation above reads the take-off off the first two
+   * airborne frames and the touch-down off the last two, so a single frame of
+   * landmark jitter at either end moves the flight by a frame -- at 30 fps,
+   * 5 to 10 cm of height. In the air the foot follows a parabola, and a
+   * parabola fitted through every frame the foot was actually SEEN airborne
+   * (not the ones interpolated across a dropout) crosses its floor at the
+   * take-off and touch-down instants with the jitter averaged out.
+   *
+   * Its roots are trusted only between the frames that bracket each edge in
+   * what the camera SAW: take-off after the last frame the foot was seen on
+   * the floor and before the first it was seen in the air, touch-down the
+   * same way round. Bracketing by frames the tracker dropped -- and so were
+   * filled in by interpolation -- let a dropout at take-off drag the edge a
+   * frame early and add 6-11 cm; a fixed bound in frames rejected every good
+   * fit at 60 fps, where a frame is half as long. Outside the brackets the
+   * edges above stand. */
+  {
+    const obs = sig.observed;
+    const isAir = (i) => obs[i] && riseRaw[i] > edge;
+    let aO = null, g0 = aMin;
+    for (let j = takeoff; j >= aMin; j--) {
+      if (!obs[j]) continue;
+      if (riseRaw[j] > edge) aO = j; else { g0 = j; break; }
+    }
+    let bO = null, g1 = bMax;
+    for (let j = land; j <= bMax; j++) {
+      if (!obs[j]) continue;
+      if (riseRaw[j] > edge) bO = j; else { g1 = j; break; }
+    }
+    const xs = [], ys = [];
+    if (aO != null && bO != null) {
+      for (let i = aO; i <= bO; i++) if (isAir(i)) { xs.push(i); ys.push(riseRaw[i]); }
+    }
+    const c = xs.length >= 5 ? fitParabola(xs, ys) : null;
+    if (c && c[2] < 0) {
+      const disc = c[1] * c[1] - 4 * c[2] * c[0];
+      if (disc > 0) {
+        const r1 = (-c[1] + Math.sqrt(disc)) / (2 * c[2]);
+        const r2 = (-c[1] - Math.sqrt(disc)) / (2 * c[2]);
+        const lo = Math.min(r1, r2), hi = Math.max(r1, r2);
+        /* A frame read as grounded may still be low in the air -- just under
+         * the edge, which sits above the jitter -- so the bracket reaches past
+         * it by about the time the foot takes to cross that band: one frame
+         * at 30 fps, two at 60. */
+        const slack = Math.max(1, Math.round(0.035 * fps));
+        if (lo >= g0 - slack && lo <= aO + 0.25 && hi >= bO - 0.25 && hi <= g1 + slack) {
+          offF = lo; onF = hi;
+        }
+      }
+    }
+  }
   const G = 9.80665;
   const flight_s = Math.max(0, (onF - offF)) / fps;
   const height_flight_m = (G * flight_s * flight_s) / 8;
@@ -977,7 +1181,25 @@ export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
   const offIdx = Math.max(0, Math.round(offF));
   let apex = offIdx;
   for (let i = offIdx; i <= b2; i++) if (hipY[i] < hipY[apex]) apex = i;
-  const height_com_m = pxPerM > 0 ? (hipY[offIdx] - hipY[apex]) / pxPerM : NaN;
+  let height_com_m = pxPerM > 0 ? (hipY[offIdx] - hipY[apex]) / pxPerM : NaN;
+  /* Same idea for the hip: a parabola through the raw hip over the frames
+   * strictly inside the flight, read at the take-off instant and at its
+   * vertex. Frame-picking on the smoothed hip both rounds the take-off to a
+   * whole frame and shaves the apex (a 3-frame average of a peak is below the
+   * peak). Kept only if it curves the right way. */
+  {
+    const xs = [], ys = [];
+    for (let i = Math.ceil(offF); i <= Math.floor(onF); i++) if (isNum(hipRaw[i])) { xs.push(i); ys.push(hipRaw[i]); }
+    const c = xs.length >= 5 ? fitParabola(xs, ys) : null;
+    if (c && c[2] > 0 && pxPerM > 0) {
+      const xv = -c[1] / (2 * c[2]);
+      if (xv > offF && xv < onF) {
+        const at = (x) => c[0] + c[1] * x + c[2] * x * x;
+        height_com_m = (at(offF) - at(xv)) / pxPerM;
+        apex = Math.round(xv);
+      }
+    }
+  }
 
   // Countermovement: how far the hip dipped below where it started.
   let lowest = t0;
@@ -1956,6 +2178,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   try { ({ pxPerM, detail } = computePxPerM(poses, heightM)); }
   catch (err) { if (activity !== "neck") throw err; }
   const [refA, refB] = spec.reference(F);
+  F._fps = fps;          // the jump detector sizes its floor window in seconds
   const found = spec.findReps(F, conf);
   const bounds = found.reps;
   const view = viewQuality(poses);
