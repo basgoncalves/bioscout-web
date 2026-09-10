@@ -29,7 +29,7 @@ import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
 import { itemKcal, mealKcal, describe, UNITS } from "./foods.js";
 import { collectSleep, meanSleep, duration as sleepMins, fmt as fmtSleep } from "./sleep.js";
 import { collectVitals, meanSteps } from "./vitals.js";
-import { collectWater, fmtLitres, GLASSES, GLASS_L } from "./water.js";
+import { collectWater, collectCoffee, fmtVolume, DRINKS } from "./water.js";
 import { collectCardio, fmtDuration, fmtDistance, pace } from "./cardio.js";
 import { rate, scoreColour } from "./health.js";
 
@@ -523,35 +523,46 @@ function healthHTML(ctx) {
 }
 
 /** The selected day's meals, and the form to add one to it. */
-/* One glass, drawn: the outline always, the water only when it was drunk.
- * Drawn rather than an emoji so an empty glass reads as empty on every phone. */
+/* One glass or cup, drawn: the outline always, the drink only when it was
+ * had. Drawn rather than an emoji so an empty one reads as empty on every phone. */
 const glassSVG = (full) => `<svg class="glass${full ? " full" : ""}" viewBox="0 0 24 32" aria-hidden="true">
     <path class="fill" d="M5.4 11 H18.6 L17.3 28.2 H6.7 Z"/>
     <path class="rim" d="M3.5 3 H20.5 L18.4 29 H5.6 Z"/></svg>`;
+const cupSVG = (full) => `<svg class="glass cup${full ? " full" : ""}" viewBox="0 0 24 32" aria-hidden="true">
+    <path class="fill" d="M3.3 14 H16.7 L16 25 Q15.6 27.5 13 27.5 H7 Q4.4 27.5 4 25 Z"/>
+    <path class="rim" d="M2 10 H18 L17 25.5 Q16.6 29 13 29 H7 Q3.4 29 3 25.5 Z"/>
+    <path class="rim" d="M17.6 13.5 H19.5 Q22.5 13.5 22.2 17.5 Q21.9 21.5 17.2 21.5"/>
+    <path class="steam" d="M7 7 Q5.8 5 7 3 M11 7 Q9.8 5 11 3 M15 7 Q13.8 5 15 3"/></svg>`;
 
-/** Water for the day: ten glasses of 0.5 L, filled from the left, with - and +
- *  either side. Every tap is saved on the spot (index.html), because a glass
- *  counter that also wants a Save button is one nobody keeps. */
-function waterHTML(hit) {
-  const n = hit ? hit.glasses : 0;
-  const glasses = Array.from({ length: GLASSES }, (_, i) => glassSVG(i < n)).join("");
-  const label = tr("waterGlasses", { n, max: GLASSES, l: fmtLitres(n) });
-  return `<div class="entry" id="waterBox">
-    <div class="waterHead"><span style="font-weight:600">${esc(tr("water"))}</span>
-      <span class="sub">${esc(fmtLitres(n))}</span></div>
+/** A drink for the day: ten glasses of water (0.5 L) or cups of coffee
+ *  (100 mL), filled from the left, with - and + either side. Every tap is saved
+ *  on the spot (index.html, button.drinkBtn), because a counter that also wants
+ *  a Save button is one nobody keeps. */
+function drinkHTML(kind, hit) {
+  const d = DRINKS[kind];
+  const n = hit ? hit.n : 0;
+  const icon = kind === "coffee" ? cupSVG : glassSVG;
+  const icons = Array.from({ length: d.max }, (_, i) => icon(i < n)).join("");
+  const label = tr(kind === "coffee" ? "coffeeCups" : "waterGlasses",
+                   { n, max: d.max, l: fmtVolume(n, kind) });
+  const each = kind === "coffee"
+    ? `${Math.round(d.cupL * 1000)} mL`
+    : `${d.cupL.toLocaleString([], { minimumFractionDigits: 1 })} L`;
+  return `<div class="entry drink" data-kind="${kind}" id="${kind}Box">
+    <div class="waterHead"><span style="font-weight:600">${esc(tr(kind))}</span>
+      <span class="sub">${esc(fmtVolume(n, kind))}</span></div>
     <div class="water">
-      <button type="button" class="ghost waterBtn" id="waterMinus"${n <= 0 ? " disabled" : ""}
-        aria-label="${esc(tr("waterLess"))}">−</button>
-      <div class="glasses" role="img" aria-label="${esc(label)}" title="${esc(label)}">${glasses}</div>
-      <button type="button" class="ghost waterBtn" id="waterPlus"${n >= GLASSES ? " disabled" : ""}
-        aria-label="${esc(tr("waterMore"))}">+</button>
+      <button type="button" class="ghost waterBtn drinkBtn" data-drink="${kind}" data-dir="-1"${
+        n <= 0 ? " disabled" : ""} aria-label="${esc(tr(kind === "coffee" ? "coffeeLess" : "waterLess"))}">−</button>
+      <div class="glasses" role="img" aria-label="${esc(label)}" title="${esc(label)}">${icons}</div>
+      <button type="button" class="ghost waterBtn drinkBtn" data-drink="${kind}" data-dir="1"${
+        n >= d.max ? " disabled" : ""} aria-label="${esc(tr(kind === "coffee" ? "coffeeMore" : "waterMore"))}">+</button>
     </div>
-    <p class="sub" style="margin:4px 0 0">${esc(tr("waterEach", {
-      l: GLASS_L.toLocaleString([], { minimumFractionDigits: 1 }) }))}</p>
+    <p class="sub" style="margin:4px 0 0">${esc(tr(kind === "coffee" ? "coffeeEach" : "waterEach", { l: each }))}</p>
   </div>`;
 }
 
-function mealsHTML(day, key, todayKey, water = null) {
+function mealsHTML(day, key, todayKey, water = null, coffee = null) {
   const rows = (day?.meals || []).map((m) => {
     const t = new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const shot = m.photo
@@ -584,7 +595,8 @@ function mealsHTML(day, key, todayKey, water = null) {
          <tbody>${rows}</tbody></table>${sum}`
       : `<p class="sub" style="margin:6px 0 0">${esc(tr("noMealsThatDay"))}</p>`}
     <button type="button" class="ghost" id="addMealBtn" style="margin-top:8px">${esc(tr("addMeal"))}</button>
-    ${waterHTML(water)}
+    ${drinkHTML("water", water)}
+    ${drinkHTML("coffee", coffee)}
   </div>`;
 }
 
@@ -1178,7 +1190,7 @@ function weightDayHTML(wts, key, todayKey, range) {
  * throw the athlete back to today.
  */
 export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, vitals, cardio, water,
-                                view, today = new Date()) {
+                                coffee, view, today = new Date()) {
   const days = collectDays(sessions, cardio);
   const mealDays = collectMeals(meals);
   const diaryDays = collectDiary(diary);
@@ -1187,6 +1199,7 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
   const sleepDays = collectSleep(sleep);
   const vitalsDays = collectVitals(vitals);
   const waterDays = collectWater(water);
+  const coffeeDays = collectCoffee(coffee);
   const o = overall(days, today);
   const todayKey = dayKey(today);
   // "cycle" is deliberately not a mode here: it already has its own section,
@@ -1225,7 +1238,8 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
                    view.year, view.month, view.selected, todayKey, mode)}
     ${weightDayHTML(wts, view.selected, todayKey, view.weightRange)}
     ${dayHTML(days.get(view.selected), view.selected)}
-    ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey, waterDays.get(view.selected))}
+    ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey, waterDays.get(view.selected),
+                coffeeDays.get(view.selected))}
     ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey,
                 moodTrend(diaryDays, 30, today))}
     ${sleepHTML(sleepDays, view.selected, todayKey, meanSleep(sleepDays, 14, today))}

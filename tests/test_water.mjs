@@ -1,5 +1,5 @@
 /**
- * Water and blood pressure: the two add-ons to the day view.
+ * Water, coffee and blood pressure: the add-ons to the day view.
  *
  * Water is a per-day glass count, saved on every tap, that does not carry
  * forward and removes itself at zero. Blood pressure is a pair or nothing,
@@ -63,6 +63,39 @@ ok(clampGlasses(12) === 10 && clampGlasses(-2) === 0 && clampGlasses("") === nul
   const back = P.importAll(file);
   ok(back.waterAdded === 1 && collectWater(P.listWater(), "bas").get("2026-09-10").glasses === 4,
      "an import restores a day this device does not have");
+}
+
+/* ---- coffee ------------------------------------------------------------ */
+
+{
+  const { collectCoffee, fmtVolume, DRINKS } = await import("../src/water.js");
+  ok(DRINKS.coffee.cupL === 0.1 && DRINKS.coffee.max === 10, "ten cups of 100 mL");
+  const at = "2026-09-10T10:00:00.000Z";
+  P.setCoffee({ profile: "bas", at, cups: 2 });
+  P.setCoffee({ profile: "bas", at, cups: 3 });
+  const c = collectCoffee(P.listCoffee(), "bas").get("2026-09-10");
+  ok(c && c.n === 3 && c.cups === 3, "the last tap is the coffee count", JSON.stringify(c));
+  ok(fmtVolume(3, "coffee") === "300 mL", "coffee is said in millilitres", fmtVolume(3, "coffee"));
+  ok(collectWater(P.listWater(), "bas").get("2026-09-10").glasses === 4,
+     "coffee and water are counted separately");
+  P.setCoffee({ profile: "bas", at, cups: 40 });
+  ok(collectCoffee(P.listCoffee(), "bas").get("2026-09-10").n === 10, "capped at ten cups");
+  P.setCoffee({ profile: "bas", at, cups: 3 });
+  const file = JSON.parse(JSON.stringify(P.exportAll()));
+  ok(Array.isArray(file.coffee) && file.coffee.length === 1, "the export carries coffee");
+  P.setCoffee({ profile: "bas", at, cups: 0 });
+  ok(!collectCoffee(P.listCoffee(), "bas").has("2026-09-10"), "back to zero removes the day");
+  const r = P.importAll(file);
+  ok(r.coffeeAdded === 1 && collectCoffee(P.listCoffee(), "bas").get("2026-09-10").n === 3,
+     "an import restores it");
+  ok(P.importAll(file).coffeeAdded === 0, "and a second import adds nothing");
+}
+
+{
+  const { DEFAULT_TAGS, liveTags } = await import("../src/diary.js");
+  ok(!DEFAULT_TAGS.includes("caffeine"), "caffeine is no longer a diary tag");
+  ok(JSON.stringify(liveTags(["sore", "caffeine", "Travel"])) === '["sore","Travel"]',
+     "and a profile's saved tag list stops offering it");
 }
 
 /* ---- blood pressure --------------------------------------------------- */

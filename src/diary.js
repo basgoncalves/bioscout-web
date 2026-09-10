@@ -51,8 +51,16 @@ export function tagLevels(entry) {
 /** A starting set, meant to be edited. Chosen to be things that plausibly
  *  move a training day, not a lifestyle checklist. */
 export const DEFAULT_TAGS = [
-  "sleptWell", "sore", "stressed", "restDay", "travel", "illness", "caffeine",
+  "sleptWell", "sore", "stressed", "restDay", "travel", "illness",
 ];
+
+/* Tags that no longer belong in the diary. "caffeine" became the Coffee cup
+ * counter under Meals (water.js) -- a count of 100 mL cups says how much,
+ * which a 1-10 level never did. Old entries keep the tag and still show it;
+ * it is only taken out of the list offered for new ones, including from a
+ * profile's saved list, which was seeded from the defaults. */
+export const RETIRED_TAGS = ["caffeine"];
+export const liveTags = (tags) => (tags || []).filter((t) => !RETIRED_TAGS.includes(t));
 
 export const isMood = (v) => Number.isInteger(v) && v >= 1 && v <= 5;
 

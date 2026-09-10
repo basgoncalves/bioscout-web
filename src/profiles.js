@@ -15,6 +15,7 @@
 import { UNITS } from "./foods.js";
 import { groupPeaks } from "./muscle_groups.js";
 import { listAssessments, importAssessments } from "./assess.js";
+import { DRINKS, DRINK_KINDS } from "./water.js";
 
 const PKEY = "bioscout.profiles.v1";
 const SKEY = "bioscout.session.v1";
@@ -27,6 +28,8 @@ const CYKEY = "bioscout.cycle.v1";
 const SLKEY = "bioscout.sleep.v1";
 const VKEY = "bioscout.vitals.v1";
 const WAKEY = "bioscout.water.v1";
+const COKEY = "bioscout.coffee.v1";
+const DRINK_KEY = { water: WAKEY, coffee: COKEY };
 const CDKEY = "bioscout.cardio.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
@@ -450,29 +453,38 @@ export function clearVitals(at, profile = null) {
   return kept.length;
 }
 
-// --- water (glasses a day) --------------------------------------------------
-/* One count per day, overwritten on every tap of + or - -- see water.js. A
- * count of zero removes the day rather than filing "drank nothing". */
-const WATER_MAX = 2000;
+// --- water and coffee (glasses / cups a day) ---------------------------------
+/* One count per day per drink, overwritten on every tap of + or - -- see
+ * water.js. A count of zero removes the day rather than filing "drank none". */
+const DRINK_MAX = 2000;
 
-export function listWater() {
-  const v = read(WAKEY, []);
+export function listDrink(kind) {
+  if (!DRINK_KEY[kind]) return [];
+  const v = read(DRINK_KEY[kind], []);
   return Array.isArray(v) ? v : [];
 }
 
-export function setWater({ profile = null, at, glasses }) {
-  if (!at) return null;
-  const g = Math.round(+glasses);
+export function setDrink({ kind = "water", profile = null, at, n }) {
+  const d = DRINKS[kind];
+  if (!at || !d) return null;
+  const g = Math.round(+n);
   if (!Number.isFinite(g)) return null;
-  const n = Math.max(0, Math.min(10, g));
+  const c = Math.max(0, Math.min(d.max, g));
   const day = String(at).slice(0, 10);
-  const all = listWater().filter(
+  const all = listDrink(kind).filter(
     (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
-  if (n > 0) all.push({ at, profile, glasses: n });
+  if (c > 0) all.push({ at, profile, [d.field]: c });
   all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-  write(WAKEY, all.slice(-WATER_MAX));
-  return { at, profile, glasses: n };
+  write(DRINK_KEY[kind], all.slice(-DRINK_MAX));
+  return { at, profile, [d.field]: c };
 }
+
+export const listWater = () => listDrink("water");
+export const listCoffee = () => listDrink("coffee");
+export const setWater = ({ profile = null, at, glasses }) =>
+  setDrink({ kind: "water", profile, at, n: glasses });
+export const setCoffee = ({ profile = null, at, cups }) =>
+  setDrink({ kind: "coffee", profile, at, n: cups });
 
 // --- cardio (imported endurance activities) ---------------------------------
 /* Keyed on the SOURCE's own id, not on the day: a day can hold a commute ride
@@ -664,6 +676,7 @@ export function exportAll() {
     sleep: listSleep(),
     vitals: listVitals(),
     water: listWater(),
+    coffee: listCoffee(),
     cardio: listCardio(),
     /* Filed assessments travel with everything else.
      *
@@ -693,7 +706,7 @@ export function importAll(data) {
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
                    sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
                    weightsAdded: 0, cycleAdded: 0, sleepAdded: 0, vitalsAdded: 0,
-                   waterAdded: 0, cardioAdded: 0, assessmentsAdded: 0 };
+                   waterAdded: 0, coffeeAdded: 0, cardioAdded: 0, assessmentsAdded: 0 };
   report.assessmentsAdded = importAssessments(data.assessments);
 
   const store = listProfiles();
@@ -786,14 +799,16 @@ export function importAll(data) {
   vit.sort((a, b) => String(a.at).localeCompare(String(b.at)));
   write(VKEY, vit.slice(-VITALS_MAX));
 
-  const wat = listWater();
-  const seenWa = new Set(wat.map((x) => `${x.profile}|${String(x.at).slice(0, 10)}`));
-  for (const x of data.water || []) {
-    if (!x || !x.at || seenWa.has(`${x.profile}|${String(x.at).slice(0, 10)}`)) continue;
-    wat.push(x); seenWa.add(`${x.profile}|${String(x.at).slice(0, 10)}`); report.waterAdded++;
+  for (const kind of DRINK_KINDS) {
+    const have = listDrink(kind);
+    const seen = new Set(have.map((x) => `${x.profile}|${String(x.at).slice(0, 10)}`));
+    for (const x of data[kind] || []) {
+      if (!x || !x.at || seen.has(`${x.profile}|${String(x.at).slice(0, 10)}`)) continue;
+      have.push(x); seen.add(`${x.profile}|${String(x.at).slice(0, 10)}`); report[kind + "Added"]++;
+    }
+    have.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    write(DRINK_KEY[kind], have.slice(-DRINK_MAX));
   }
-  wat.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-  write(WAKEY, wat.slice(-WATER_MAX));
 
   // Cardio merges on the source id, which mergeCardio already does, so the
   // import path is the same code the Strava button uses.

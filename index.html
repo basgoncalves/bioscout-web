@@ -130,6 +130,12 @@ try {
   svg.glass path.fill { fill:#3d9be9; opacity:0; }
   svg.glass.full path.fill { opacity:1; }
   svg.glass.full path.rim { stroke:#3d9be9; }
+  svg.glass.cup path.fill { fill:#8a5a34; }
+  svg.glass.cup.full path.rim { stroke:#8a5a34; }
+  svg.glass.cup path.steam { fill:none; stroke:var(--muted); stroke-width:1.2; stroke-linecap:round;
+                             opacity:0; }
+  svg.glass.cup.full path.steam { opacity:.6; stroke:#8a5a34; }
+  .entry.drink + .entry.drink { border-top:none; margin-top:4px; }
   button.waterBtn { width:40px; flex:none; margin:0; padding:8px 0; font-size:20px; line-height:1;
                     touch-action:manipulation; }
   /* Resting heart rate guide */
@@ -781,7 +787,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listDiary, addDiary, deleteDiary, profileTags, saveProfileTags,
          listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
          listSleep, setSleep, clearSleep,
-         listVitals, setVitals, clearVitals, bpPair, listWater, setWater,
+         listVitals, setVitals, clearVitals, bpPair, listWater, listCoffee, setDrink,
          listCardio, mergeCardio, latestCardioAt,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
@@ -793,9 +799,9 @@ import { renderDashboard, mealFormHTML, diaryFormHTML,
 import { probe as probeHelper, fetchClip } from "./src/fetcher.js";
 import { probe as probeStrava, authorise as authoriseStrava,
          fetchActivities, toCardioAll } from "./src/strava.js";
-import { DEFAULT_TAGS, toggleTag, stepTag } from "./src/diary.js";
+import { DEFAULT_TAGS, liveTags, toggleTag, stepTag } from "./src/diary.js";
 import { collectWeights, weightNear } from "./src/weight.js";
-import { collectWater } from "./src/water.js";
+import { collectCups } from "./src/water.js";
 import { SPORT_IDS, allowedIn } from "./src/sports.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
@@ -2088,6 +2094,11 @@ function myWater() {
   return listWater().filter((v) => v.profile === who);
 }
 
+function myCoffee() {
+  const who = currentAthlete();
+  return listCoffee().filter((v) => v.profile === who);
+}
+
 function myCardio() {
   const who = currentAthlete();
   return listCardio().filter((c) => c.profile === who);
@@ -2107,7 +2118,7 @@ const monthLabel = (v) =>
   new Date(v.year, v.month, 1).toLocaleDateString([], { month: "long", year: "numeric" });
 
 function myTags() {
-  return profileTags(currentAthlete()) || DEFAULT_TAGS;
+  return liveTags(profileTags(currentAthlete()) || DEFAULT_TAGS);
 }
 
 function atOnDay(key) {
@@ -2244,7 +2255,7 @@ function renderDash() {
                  ageY: prof?.ageY ?? null };
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
                                    myWeights(), myCycle(), mySleep(), myVitals(),
-                                   myCardio(), myWater(), view);
+                                   myCardio(), myWater(), myCoffee(), view);
   paintStrava();
   $("whoName").textContent = currentAthlete() || tr("noProfile");
   $("whoSince").textContent = tr("dashboardSub", { first: monthLabel(dashView) });
@@ -2330,16 +2341,18 @@ function renderDash() {
     renderDash();
   };
   if ($("hrMeasureBtn")) $("hrMeasureBtn").onclick = openHr;
-  /* Water saves on every tap: the count IS the record, and a Save button
-   * after each glass is one more thing nobody does. */
-  const waterStep = (dir) => {
-    const hit = collectWater(myWater()).get(dashView.selected);
-    const n = (hit ? hit.glasses : 0) + dir;
-    setWater({ profile: currentAthlete(), at: atOnDay(dashView.selected), glasses: n });
-    renderDash();
-  };
-  if ($("waterPlus")) $("waterPlus").onclick = () => waterStep(1);
-  if ($("waterMinus")) $("waterMinus").onclick = () => waterStep(-1);
+  /* Water and coffee save on every tap: the count IS the record, and a Save
+   * button after each glass is one more thing nobody does. */
+  card.querySelectorAll("button.drinkBtn").forEach((b) => {
+    b.onclick = () => {
+      const kind = b.dataset.drink;
+      const hit = collectCups(kind === "coffee" ? myCoffee() : myWater(), kind)
+        .get(dashView.selected);
+      setDrink({ kind, profile: currentAthlete(), at: atOnDay(dashView.selected),
+                 n: (hit ? hit.n : 0) + (+b.dataset.dir) });
+      renderDash();
+    };
+  });
   if ($("vitalsImport")) $("vitalsImport").onclick = () => $("importProfilesFile").click();
   /* Assessments on the dashboard. A filed one is read from its red row in the
    * Training section (openSessionRow); only an unfiled one is flagged here. */
