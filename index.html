@@ -320,6 +320,28 @@ try {
      free training goes away, because the protocol chose all of it already. */
   body.assessMode .trainOnly { display:none !important; }
   .daybox { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
+  /* Achievements: four medals per movement. Metal colours with dark ink read
+     the same in light and dark themes, so there is no dark variant. */
+  .achRow { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 10px;
+            align-items:center; padding:6px 0; }
+  .achRow + .achRow { border-top:1px solid var(--line); }
+  .achName { display:flex; flex-direction:column; min-width:0; }
+  .achMedals { display:flex; gap:5px; }
+  .ach { width:30px; height:30px; border-radius:50%; display:inline-flex;
+         align-items:center; justify-content:center; font-size:11px; font-weight:700;
+         border:1.5px dashed var(--line); color:var(--muted); }
+  .ach.on { border:0; color:#1b1b1b; box-shadow:inset 0 -2px 0 rgba(0,0,0,.18); }
+  .ach.t1.on { background:#d4955a; }
+  .ach.t2.on { background:#c9ced6; }
+  .ach.t3.on { background:#f0c43c; }
+  .ach.t4.on { background:#8fdcec; }
+  .achBar { height:5px; border-radius:3px; background:var(--line); overflow:hidden; }
+  .achBar i { display:block; height:100%; background:var(--accent); }
+  .achNextTxt { text-align:right; font-size:12px; }
+  .achToast { position:fixed; left:50%; bottom:18px; transform:translateX(-50%);
+              z-index:50; width:max-content; max-width:min(92vw,420px); padding:10px 14px; border-radius:12px;
+              background:var(--card); color:var(--ink); border:1px solid var(--accent);
+              box-shadow:var(--shadow); font-weight:600; cursor:pointer; }
   .vbars { display:flex; align-items:flex-end; gap:3px; height:56px; }
   .vbar { flex:1; height:100%; display:flex; align-items:flex-end; }
   .vbar i { display:block; width:100%; min-height:2px; border-radius:3px 3px 0 0;
@@ -791,8 +813,9 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listCardio, mergeCardio, latestCardioAt,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
-         saveCurves, getCurves, curveIndices, setRepOutcome, setRepRemoved }
+         saveCurves, getCurves, curveIndices, setRepOutcome, setRepRemoved, listLedger }
        from "./src/profiles.js";
+import { achievements, repEvents, newlyEarned, repUnit } from "./src/achievements.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
          collectDays, percentile } from "./src/dashboard.js";
@@ -2059,6 +2082,28 @@ function dashboardData() {
   return allSessions(listArchive(), getSession(), currentAthlete());
 }
 
+/** This athlete's badges (achievements.js): archive + open session + the
+ *  ledger of sessions the archive has dropped. */
+function myAchievements() {
+  try { return achievements(repEvents(dashboardData(), listLedger(), currentAthlete())); }
+  catch (e) { console.warn("achievements", e); return []; }
+}
+
+/* A badge earned by the set just saved is said once, in a note that clears
+ * itself: the status line under the camera is rewritten a moment later by
+ * "analysed", and a badge said there would never be seen. */
+let achToastTimer = null;
+function announceBadges(got) {
+  const el = $("achToast");
+  if (!el || !got.length) return;
+  el.innerHTML = got.map((g) => `<div>🏅 ${esc(tr("achUnlocked", {
+    task: tr(g.activity), reps: repUnit(g.n, g.activity, tr) }))}</div>`).join("");
+  el.hidden = false;
+  clearTimeout(achToastTimer);
+  achToastTimer = setTimeout(() => { el.hidden = true; }, 6000);
+  el.onclick = () => { el.hidden = true; };
+}
+
 /** This athlete's meals. Same rule as sessions: a shared phone holds
  *  everyone's, and a log is only useful if it is one person's. */
 function myMeals() {
@@ -2252,7 +2297,7 @@ function renderDash() {
   // Height comes from the profile; weight comes from the log, carried forward.
   const prof = getProfile(currentAthlete());
   const view = { ...dashView, heightM: prof?.heightM ?? null, sex: prof?.sex ?? null,
-                 ageY: prof?.ageY ?? null };
+                 ageY: prof?.ageY ?? null, achievements: myAchievements() };
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
                                    myWeights(), myCycle(), mySleep(), myVitals(),
                                    myCardio(), myWater(), myCoffee(), view);
@@ -4034,8 +4079,10 @@ async function finish() {
       // Never let the training log take the analysis down with it: the results
       // are the point of the recording, the set row is a bonus on top.
       try {
+        const badgesBefore = myAchievements();
         const set = addSet(lastResult, fps, { profile: $("profile").value || null,
                                              assess: assessStep });
+        announceBadges(newlyEarned(badgesBefore, myAchievements()));
         lastResult.setIndex = set.index;
         lastResult.sessionStarted = getSession()?.started ?? null;
         pageSets.push({ index: set.index, res: lastResult, fps });
@@ -6326,5 +6373,6 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
   }, 1500));
 }
 </script>
+  <div id="achToast" class="achToast" role="status" hidden></div>
 </body>
 </html>

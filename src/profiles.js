@@ -16,6 +16,7 @@ import { UNITS } from "./foods.js";
 import { groupPeaks } from "./muscle_groups.js";
 import { listAssessments, importAssessments } from "./assess.js";
 import { DRINKS, DRINK_KINDS } from "./water.js";
+import { sessionReps } from "./achievements.js";
 
 const PKEY = "bioscout.profiles.v1";
 const SKEY = "bioscout.session.v1";
@@ -31,6 +32,7 @@ const WAKEY = "bioscout.water.v1";
 const COKEY = "bioscout.coffee.v1";
 const DRINK_KEY = { water: WAKEY, coffee: COKEY };
 const CDKEY = "bioscout.cardio.v1";
+const LKEY = "bioscout.ledger.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
  * one; curves are not, so only the most recent sets keep those.
@@ -163,11 +165,53 @@ export function archiveSession() {
   // the history, and two sessions cannot begin at the same millisecond.
   if (!a.some((x) => x.started === s.started)) a.push(s);
   a.sort((x, y) => String(x.started).localeCompare(String(y.started)));
-  const trimmed = a.slice(-ARCHIVE_MAX);
+  const trimmed = trimArchive(a);
+  if (!trimmed) return listArchive().length;
   // Filed FIRST, cleared after. The other order lost the whole session
   // whenever the archive write was refused (a full store).
   if (writeKeep(AKEY, trimmed)) clearSession();
   return trimmed.length;
+}
+
+/* --- ledger of dropped sessions --------------------------------------------
+ * The archive keeps the last ARCHIVE_MAX sessions. A session that falls off
+ * the end takes its reps with it, and achievements (achievements.js) count a
+ * lifetime: so before a session is dropped, one line is written here -- when
+ * it started, whose it was, reps per task. ~70 bytes a session, against the
+ * tens of kB a set's curves cost, so it is not capped.
+ *
+ * `s` (started) is the identity, as in the archive: re-importing a file adds
+ * nothing, and a session that is both here and back in the archive (an old
+ * export imported) is counted once -- achievements.js skips ledger entries
+ * whose session is live. */
+export function listLedger() {
+  const l = read(LKEY, []);
+  return Array.isArray(l) ? l : [];
+}
+
+function ledgerAdd(entries) {
+  const l = listLedger();
+  const seen = new Set(l.map((e) => e.s));
+  let added = 0;
+  for (const e of entries) {
+    if (!e || !e.s || seen.has(e.s)) continue;
+    l.push(e); seen.add(e.s); added++;
+  }
+  if (!added) return true;
+  l.sort((x, y) => String(x.s).localeCompare(String(y.s)));
+  return writeKeep(LKEY, l);
+}
+
+/** Sorted archive, cut to ARCHIVE_MAX, with whatever is cut written to the
+ *  ledger first. Null when the ledger could not be written: then nothing is
+ *  dropped, because a dropped session nobody counted is lost reps. */
+function trimArchive(a) {
+  a.sort((x, y) => String(x.started).localeCompare(String(y.started)));
+  const cut = a.length - ARCHIVE_MAX;
+  if (cut <= 0) return a;
+  const dropped = a.slice(0, cut).map((s) => ({ s: s.started, p: s.profile ?? null, r: sessionReps(s) }));
+  try { if (!ledgerAdd(dropped)) return null; } catch { return null; }
+  return a.slice(cut);
 }
 
 // --- meals -----------------------------------------------------------------
@@ -685,6 +729,9 @@ export function exportAll() {
      * hardest to reproduce and most worth keeping. Old files simply lack the
      * field, so no version bump: an absent key imports as nothing. */
     assessments: listAssessments(),
+    /* Reps of sessions the archive has let go of, so the achievements on
+     * the device this is imported into count the same lifetime. */
+    ledger: listLedger(),
   };
 }
 
@@ -706,7 +753,8 @@ export function importAll(data) {
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
                    sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
                    weightsAdded: 0, cycleAdded: 0, sleepAdded: 0, vitalsAdded: 0,
-                   waterAdded: 0, coffeeAdded: 0, cardioAdded: 0, assessmentsAdded: 0 };
+                   waterAdded: 0, coffeeAdded: 0, cardioAdded: 0, assessmentsAdded: 0,
+                   ledgerAdded: 0 };
   report.assessmentsAdded = importAssessments(data.assessments);
 
   const store = listProfiles();
@@ -741,8 +789,15 @@ export function importAll(data) {
     if (!open) { write(SKEY, incoming); report.sessionAdopted = true; }
     else { a.push(incoming); report.sessionsAdded++; }
   }
-  a.sort((x, y) => String(x.started).localeCompare(String(y.started)));
-  write(AKEY, a.slice(-ARCHIVE_MAX));
+  // A ledger from the other device comes first, so a session it already
+  // counted and this import would drop again is recognised as the same one.
+  const ledger = Array.isArray(data.ledger) ? data.ledger : [];
+  const beforeL = listLedger().length;
+  try { ledgerAdd(ledger); } catch { /* counted as far as it went */ }
+  report.ledgerAdded = listLedger().length - beforeL;
+  // If the ledger could not take the overflow, fall back to the plain cut:
+  // the imported sessions still land, only the oldest go uncounted.
+  write(AKEY, trimArchive(a) || a.slice(-ARCHIVE_MAX));
 
   // Meals merge on (at, profile), so re-importing the same file adds nothing.
   const meals = listMeals();

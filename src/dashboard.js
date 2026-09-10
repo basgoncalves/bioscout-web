@@ -32,6 +32,7 @@ import { collectVitals, meanSteps } from "./vitals.js";
 import { collectWater, collectCoffee, fmtVolume, DRINKS } from "./water.js";
 import { collectCardio, fmtDuration, fmtDistance, pace } from "./cardio.js";
 import { rate, scoreColour } from "./health.js";
+import { MILESTONES, badgeCount, repUnit } from "./achievements.js";
 
 /* Plurals come from the dictionary keys the session card already uses, rather
  * than from new ones. "3 reps in 1 sets" is the kind of thing that makes an
@@ -354,6 +355,43 @@ function volumeHTML(days, today) {
   }).join("");
   return `<div class="vol"><div class="sub" style="margin:14px 0 4px">${
     esc(tr("weeklyVolume"))}</div><div class="vbars">${bars}</div></div>`;
+}
+
+/**
+ * Badges per movement at 10, 100, 500 and 1000 reps (achievements.js).
+ * One row per task the athlete has done, four medals, and how far to the next.
+ * `list` is null when the page did not compute it (tests of other sections).
+ */
+export function achievementsHTML(list) {
+  if (!list) return "";
+  const head = `<div style="font-weight:600">${esc(tr("achievements"))}</div>`;
+  if (!list.length) {
+    return `<div class="daybox" id="achBox">${head}
+      <p class="sub" style="margin:6px 0 0">${esc(tr("achEmpty"))}</p></div>`;
+  }
+  const date = (iso) => new Date(iso).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" });
+  const label = (n) => (n >= 1000 ? `${n / 1000}k` : String(n));
+  const rows = list.map((a) => {
+    const medals = a.tiers.map((t, i) => `<span class="ach t${i + 1}${t.at ? " on" : ""}" title="${
+      esc(t.at ? tr("achEarned", { date: date(t.at) }) : repUnit(t.n, a.activity, tr))}">${label(t.n)}</span>`).join("");
+    // Progress is measured from the last milestone passed, so the bar fills
+    // from empty again after each badge instead of creeping along a 0-1000 line.
+    const prev = [0, ...MILESTONES].filter((n) => n <= a.total && (a.next === null || n < a.next)).pop() || 0;
+    const pct = a.next === null ? 100 : Math.round((100 * (a.total - prev)) / (a.next - prev));
+    const nextTxt = a.next === null ? tr("achAll") : tr("achNext", { left: a.next - a.total, next: a.next });
+    return `<div class="achRow">
+      <div class="achName"><b>${esc(tr(a.activity))}</b><span class="sub">${
+        esc(repUnit(a.total, a.activity, tr))}</span></div>
+      <div class="achMedals">${medals}</div>
+      <div class="achBar" title="${esc(nextTxt)}"><i style="width:${pct}%"></i></div>
+      <div class="sub achNextTxt">${esc(nextTxt)}</div>
+    </div>`;
+  }).join("");
+  return `<div class="daybox" id="achBox">${head}
+    <p class="sub" style="margin:2px 0 8px">${esc(tr("achBadges", {
+      n: badgeCount(list), max: list.length * MILESTONES.length }))}</p>
+    ${rows}
+    <p class="sub" style="margin:8px 0 0">${esc(tr("achNote"))}</p></div>`;
 }
 
 function dayHTML(day, key) {
@@ -1246,6 +1284,7 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     ${vitalsHTML(vitalsDays, view.selected, todayKey, meanSteps(vitalsDays, 14, today))}
     ${cycleHTML(cycleDays, view.selected, todayKey)}
     ${volumeHTML(days, today)}
+    ${achievementsHTML(view.achievements || null)}
     <div class="daybox">
       <div style="font-weight:600">${esc(tr("yourData"))}</div>
       <!-- Filled in after probing for the local Strava helper. The default
