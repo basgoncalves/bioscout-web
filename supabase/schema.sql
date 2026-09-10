@@ -38,7 +38,7 @@ create index if not exists records_pull on public.records (owner, server_at);
 -- same) `u` than the stored row is dropped, so two devices pushing in either
 -- order end with the same row. server_at is the pull cursor, always server time.
 create or replace function public.records_lww() returns trigger
-language plpgsql as $$
+language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'UPDATE' then
     if new.u <= old.u then return null; end if;      -- keep the newer row
@@ -57,34 +57,36 @@ create trigger records_lww before insert or update on public.records
 create or replace function public.new_account() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
+  -- A username that is malformed or taken is left out rather than allowed to
+  -- fail the sign-up itself: the login matters more than the handle.
   insert into public.accounts (id, username, display_name)
   values (new.id,
-          nullif(lower(new.raw_user_meta_data ->> 'username'), ''),
-          nullif(new.raw_user_meta_data ->> 'display_name', ''))
+          case when lower(new.raw_user_meta_data ->> 'username') ~ '^[a-z0-9_.]{3,24}$'
+                and not exists (select 1 from public.accounts a
+                                where a.username = lower(new.raw_user_meta_data ->> 'username'))
+               then lower(new.raw_user_meta_data ->> 'username') end,
+          left(nullif(new.raw_user_meta_data ->> 'display_name', ''), 60))
   on conflict (id) do nothing;
   return new;
 end $$;
+revoke execute on function public.new_account() from public, anon, authenticated;
+revoke execute on function public.records_lww() from public, anon, authenticated;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.new_account();
-
--- Is a username free? Callable before signing in, answers only yes/no.
-create or replace function public.username_available(name text) returns boolean
-language sql stable security definer set search_path = public as $$
-  select not exists (select 1 from public.accounts where username = lower(name));
-$$;
-grant execute on function public.username_available(text) to anon, authenticated;
 
 alter table public.accounts enable row level security;
 alter table public.records  enable row level security;
 
 drop policy if exists "own account: read"   on public.accounts;
 drop policy if exists "own account: update" on public.accounts;
-create policy "own account: read"   on public.accounts for select using (id = auth.uid());
-create policy "own account: update" on public.accounts for update using (id = auth.uid())
-  with check (id = auth.uid());
+-- (select auth.uid()) rather than auth.uid(): evaluated once per query, not per row.
+create policy "own account: read"   on public.accounts for select to authenticated
+  using (id = (select auth.uid()));
+create policy "own account: update" on public.accounts for update to authenticated
+  using (id = (select auth.uid())) with check (id = (select auth.uid()));
 
 drop policy if exists "own records" on public.records;
-create policy "own records" on public.records for all
-  using (owner = auth.uid()) with check (owner = auth.uid());
+create policy "own records" on public.records for all to authenticated
+  using (owner = (select auth.uid())) with check (owner = (select auth.uid()));
