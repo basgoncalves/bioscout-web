@@ -121,6 +121,29 @@ try {
   dialog { border:1px solid var(--line); border-radius:14px; background:var(--card);
            color:var(--ink); padding:16px; width:min(92vw,420px); }
   dialog::backdrop { background:rgba(0,0,0,.55); }
+  /* Water: ten glasses between a - and a + */
+  .waterHead { display:flex; justify-content:space-between; align-items:baseline; }
+  .water { display:flex; align-items:center; gap:6px; margin-top:6px; }
+  .glasses { flex:1; min-width:0; display:grid; grid-template-columns:repeat(10,1fr); gap:2px; }
+  .glasses svg { width:100%; max-width:26px; height:auto; display:block; margin:0 auto; }
+  svg.glass path.rim { fill:none; stroke:var(--muted); stroke-width:1.6; stroke-linejoin:round; }
+  svg.glass path.fill { fill:#3d9be9; opacity:0; }
+  svg.glass.full path.fill { opacity:1; }
+  svg.glass.full path.rim { stroke:#3d9be9; }
+  button.waterBtn { width:40px; flex:none; margin:0; padding:8px 0; font-size:20px; line-height:1;
+                    touch-action:manipulation; }
+  /* Resting heart rate guide */
+  .hrWays { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:10px 0 6px; }
+  .hrWays figure { margin:0; text-align:center; }
+  .hrWays svg { width:100%; max-width:150px; height:auto; display:block; margin:0 auto 4px; }
+  .hrWays svg .body { fill:var(--bmBase); }
+  .hrWays svg .pulse { fill:#d64545; }
+  .hrWays svg .ring { fill:none; stroke:#d64545; stroke-width:1.5; }
+  .hrWays svg .crease { fill:none; stroke:var(--card); stroke-width:1.4; stroke-linecap:round; }
+  .hrWays figcaption { font-size:12.5px; line-height:1.35; color:var(--muted); text-align:left; }
+  .hrCount { font-size:48px; font-weight:700; text-align:center; line-height:1.1;
+             font-variant-numeric:tabular-nums; margin:8px 0 0; }
+  .hrCount.live { color:var(--accent); }
   .health { display:flex; align-items:center; gap:12px; margin:6px 0 10px; }
   .dial { width:78px; height:78px; flex:none; }
   .dialText { font-size:22px; font-weight:700; }
@@ -515,6 +538,52 @@ try {
       <button class="ghost" id="addDlgClose" data-i18n="close">Close</button>
     </dialog>
 
+    <!-- Counting a resting heart rate by hand: where to press, a 10-second
+         count, and the beats typed in. x6 is done here, not by the person. -->
+    <dialog id="hrDlg">
+      <h2 style="font-size:16px;margin:0 0 2px" data-i18n="hrTitle">Resting heart rate</h2>
+      <p class="sub" style="margin:0" data-i18n="hrRest">Sit or lie quietly for five minutes first.</p>
+      <div class="hrWays">
+        <figure>
+          <!-- Forearm, palm up, fingers to the left; the dot is the radial
+               pulse on the thumb side of the wrist. -->
+          <svg viewBox="0 0 120 80" aria-hidden="true">
+            <path class="body" d="M120 30 L72 31 C68 31 64 28 60 25 L42 14 C38 12 34 14 35 18
+              C36 21 40 23 44 26 L46 28 C40 29 30 30 14 32 C6 33 4 42 6 48 C8 54 14 55 20 55
+              L44 59 C54 61 64 60 72 58 L120 58 Z"/>
+            <path class="crease" d="M10 39 L40 37 M9 45 L40 44 M11 51 L40 51"/>
+            <circle class="ring" cx="77" cy="36" r="11" opacity=".35"/>
+            <circle class="ring" cx="77" cy="36" r="7" opacity=".7"/>
+            <circle class="pulse" cx="77" cy="36" r="3.6"/>
+          </svg>
+          <figcaption data-i18n-html="hrWrist"><b>Wrist</b></figcaption>
+        </figure>
+        <figure>
+          <!-- Head in profile facing right; the dot is the carotid pulse,
+               in the groove beside the windpipe under the jaw. -->
+          <svg viewBox="0 0 120 80" aria-hidden="true">
+            <path class="body" d="M20 80 C22 66 34 62 44 60 L46 50 C36 44 34 30 36 22 C40 8 56 2 68 6
+              C80 10 84 20 84 28 L90 38 L85 40 C86 44 84 48 80 48 C78 52 74 54 70 54 L68 60
+              C80 62 96 66 100 80 Z"/>
+            <circle class="ring" cx="64" cy="54" r="11" opacity=".35"/>
+            <circle class="ring" cx="64" cy="54" r="7" opacity=".7"/>
+            <circle class="pulse" cx="64" cy="54" r="3.6"/>
+          </svg>
+          <figcaption data-i18n-html="hrNeck"><b>Neck</b></figcaption>
+        </figure>
+      </div>
+      <p class="sub" style="margin:0" data-i18n="hrFingers">Use your index and middle fingers, not your thumb.</p>
+      <div class="hrCount" id="hrCount">10</div>
+      <p class="sub" style="margin:0;text-align:center" id="hrStatus" data-i18n="hrFindFirst">Find the pulse, then press Start.</p>
+      <button id="hrStart" style="margin-top:10px" data-i18n="hrStart">Start the 10-second count</button>
+      <label for="hrBeats" style="margin-top:10px;display:block" data-i18n="hrBeats">Beats in 10 seconds</label>
+      <input id="hrBeats" type="number" min="1" max="60" step="1" inputmode="numeric">
+      <p class="sub" style="margin:6px 0 0" id="hrResult"></p>
+      <button class="ghost" id="hrUse" style="margin-top:10px" disabled data-i18n="hrUseThis">Use this</button>
+      <p class="sub" style="margin:10px 0 0" data-i18n="hrCaveat">Ten seconds x 6: every beat missed or added moves the result by 6 bpm.</p>
+      <button class="ghost" id="hrClose" style="margin-top:10px" data-i18n="close">Close</button>
+    </dialog>
+
     <!-- Trim a clip before analysing it. Scrubbing sets the handle you last
          touched, so the athlete finds the frame they mean by watching it
          rather than by arithmetic on a duration. -->
@@ -712,7 +781,7 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listDiary, addDiary, deleteDiary, profileTags, saveProfileTags,
          listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
          listSleep, setSleep, clearSleep,
-         listVitals, setVitals, clearVitals,
+         listVitals, setVitals, clearVitals, bpPair, listWater, setWater,
          listCardio, mergeCardio, latestCardioAt,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
@@ -726,6 +795,7 @@ import { probe as probeStrava, authorise as authoriseStrava,
          fetchActivities, toCardioAll } from "./src/strava.js";
 import { DEFAULT_TAGS, toggleTag, stepTag } from "./src/diary.js";
 import { collectWeights, weightNear } from "./src/weight.js";
+import { collectWater } from "./src/water.js";
 import { SPORT_IDS, allowedIn } from "./src/sports.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
@@ -1756,6 +1826,71 @@ function wireDiaryForm(key) {
 }
 
 $("addDlgClose").onclick = () => $("addDlg").close();
+
+/* --- counting a resting heart rate ----------------------------------------
+ * Ten seconds, then the beats counted x 6. The dialog does the arithmetic so
+ * nobody types "12" into a field that wanted 72. The result goes into the day's
+ * Resting heart rate field and through the ordinary Vitals save, so it obeys
+ * the same rules as a typed-in rate. */
+const HR_SECONDS = 10;
+let hrTimer = null;
+const hrBpm = () => {
+  const n = Math.round(parseFloat($("hrBeats").value));
+  return Number.isFinite(n) && n > 0 ? n * (60 / HR_SECONDS) : null;
+};
+function hrStopTimer() { clearInterval(hrTimer); hrTimer = null; }
+function hrShowResult() {
+  const bpm = hrBpm();
+  const ok = bpm !== null && bpm >= 30 && bpm <= 220;
+  $("hrResult").textContent = bpm === null ? ""
+    : ok ? tr("hrBpm", { bpm }) : tr("hrOdd", { bpm });
+  $("hrUse").disabled = !ok;
+  $("hrUse").textContent = ok ? tr("hrUse", { bpm }) : tr("hrUseThis");
+}
+function openHr() {
+  hrStopTimer();
+  $("hrCount").textContent = String(HR_SECONDS);
+  $("hrCount").classList.remove("live");
+  $("hrStatus").textContent = tr("hrFindFirst");
+  $("hrStart").textContent = tr("hrStart");
+  $("hrStart").disabled = false;
+  $("hrBeats").value = "";
+  hrShowResult();
+  $("hrDlg").showModal();
+}
+$("hrStart").onclick = () => {
+  if (hrTimer) return;
+  const t0 = performance.now();
+  $("hrStart").disabled = true;
+  $("hrCount").classList.add("live");
+  $("hrStatus").textContent = tr("hrGo");
+  try { navigator.vibrate && navigator.vibrate(80); } catch { /* no vibration */ }
+  const tick = () => {
+    const left = Math.max(0, Math.ceil(HR_SECONDS - (performance.now() - t0) / 1000));
+    $("hrCount").textContent = String(left);
+    if (left > 0) return;
+    hrStopTimer();
+    $("hrCount").classList.remove("live");
+    $("hrStatus").textContent = tr("hrStop");
+    $("hrStart").textContent = tr("hrAgain");
+    $("hrStart").disabled = false;
+    stopTone();
+    try { navigator.vibrate && navigator.vibrate([80, 60, 80]); } catch { /* none */ }
+    $("hrBeats").focus();
+  };
+  hrTimer = setInterval(tick, 100);
+  tick();
+};
+$("hrBeats").oninput = hrShowResult;
+$("hrUse").onclick = () => {
+  const bpm = hrBpm();
+  if (!(bpm >= 30 && bpm <= 220) || !$("vitalsHr")) return;
+  $("vitalsHr").value = String(bpm);
+  $("hrDlg").close();
+  $("vitalsSave").click();
+};
+$("hrClose").onclick = () => $("hrDlg").close();
+$("hrDlg").addEventListener("close", hrStopTimer);
 $("mealShotFile").onchange = (e) => {
   mealShot = e.target.files[0] || null;
   e.target.value = "";               // same photo twice in a row must still fire
@@ -1948,6 +2083,11 @@ function myVitals() {
   return listVitals().filter((v) => v.profile === who);
 }
 
+function myWater() {
+  const who = currentAthlete();
+  return listWater().filter((v) => v.profile === who);
+}
+
 function myCardio() {
   const who = currentAthlete();
   return listCardio().filter((c) => c.profile === who);
@@ -2104,7 +2244,7 @@ function renderDash() {
                  ageY: prof?.ageY ?? null };
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
                                    myWeights(), myCycle(), mySleep(), myVitals(),
-                                   myCardio(), view);
+                                   myCardio(), myWater(), view);
   paintStrava();
   $("whoName").textContent = currentAthlete() || tr("noProfile");
   $("whoSince").textContent = tr("dashboardSub", { first: monthLabel(dashView) });
@@ -2180,12 +2320,26 @@ function renderDash() {
   // merges in fine; whatever else the file happens to include comes along.
   if ($("sleepImport")) $("sleepImport").onclick = () => $("importProfilesFile").click();
   if ($("vitalsSave")) $("vitalsSave").onclick = () => {
+    const sys = $("vitalsSys").value, dia = $("vitalsDia").value;
+    if (bpPair(sys, dia) === false) { say(tr("bpInvalid"), true); return; }
     if (!setVitals({ profile: currentAthlete(), at: atOnDay(dashView.selected),
-                     steps: $("vitalsSteps").value, restingHr: $("vitalsHr").value })) {
+                     steps: $("vitalsSteps").value, restingHr: $("vitalsHr").value,
+                     sys, dia })) {
       say(tr("vitalsNeedsOne"), true); return;
     }
     renderDash();
   };
+  if ($("hrMeasureBtn")) $("hrMeasureBtn").onclick = openHr;
+  /* Water saves on every tap: the count IS the record, and a Save button
+   * after each glass is one more thing nobody does. */
+  const waterStep = (dir) => {
+    const hit = collectWater(myWater()).get(dashView.selected);
+    const n = (hit ? hit.glasses : 0) + dir;
+    setWater({ profile: currentAthlete(), at: atOnDay(dashView.selected), glasses: n });
+    renderDash();
+  };
+  if ($("waterPlus")) $("waterPlus").onclick = () => waterStep(1);
+  if ($("waterMinus")) $("waterMinus").onclick = () => waterStep(-1);
   if ($("vitalsImport")) $("vitalsImport").onclick = () => $("importProfilesFile").click();
   /* An assessment filed on the day being looked at, offered on the day being
    * looked at. The calendar already outlines those days in red, which tells

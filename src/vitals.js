@@ -1,5 +1,5 @@
 /**
- * vitals.js -- steps and resting heart rate, one reading per day.
+ * vitals.js -- steps, resting heart rate and blood pressure, one reading per day.
  *
  * These come from a watch, not from the app: nothing here is measured or
  * derived, only typed in after the fact. That is why it does not carry
@@ -7,10 +7,11 @@
  * roughly true today; yesterday's step count says nothing about today's, so a
  * day with no entry has no vitals, not yesterday's numbers repeated.
  *
- * The two fields are independent on purpose. A watch on the charger
+ * The fields are independent on purpose. A watch on the charger
  * overnight still counted steps; a reading taken mid-afternoon is not a
- * resting rate. Either can be logged alone, and the day shows whichever
- * arrived.
+ * resting rate. Any of them can be logged alone, and the day shows whichever
+ * arrived. Blood pressure is the exception inside the exception: its two
+ * numbers only mean anything together, so it is kept as a pair or not at all.
  */
 
 /** Local calendar day of an ISO timestamp, as YYYY-MM-DD. */
@@ -37,8 +38,11 @@ export function collectVitals(entries, profile = null) {
       ? null : (Number.isFinite(+e.steps) && +e.steps >= 0 ? +e.steps : null);
     const restingHr = e.restingHr === null || e.restingHr === undefined || e.restingHr === ""
       ? null : (Number.isFinite(+e.restingHr) && +e.restingHr > 0 ? +e.restingHr : null);
-    if (steps === null && restingHr === null) continue;
-    days.set(key, { key, steps, restingHr });
+    const sys = Number.isFinite(+e.sys) && e.sys !== null && e.sys !== "" ? +e.sys : null;
+    const dia = Number.isFinite(+e.dia) && e.dia !== null && e.dia !== "" ? +e.dia : null;
+    const bp = sys !== null && dia !== null && sys > dia && dia > 0;
+    if (steps === null && restingHr === null && !bp) continue;
+    days.set(key, { key, steps, restingHr, sys: bp ? sys : null, dia: bp ? dia : null });
   }
   return days;
 }

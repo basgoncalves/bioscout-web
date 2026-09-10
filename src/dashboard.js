@@ -29,6 +29,7 @@ import { collectCycle, cycleStarts, cycleLengths, lengthStats, predictNext,
 import { itemKcal, mealKcal, describe, UNITS } from "./foods.js";
 import { collectSleep, meanSleep, duration as sleepMins, fmt as fmtSleep } from "./sleep.js";
 import { collectVitals, meanSteps } from "./vitals.js";
+import { collectWater, fmtLitres, GLASSES, GLASS_L } from "./water.js";
 import { collectCardio, fmtDuration, fmtDistance, pace } from "./cardio.js";
 import { rate, scoreColour } from "./health.js";
 
@@ -229,13 +230,16 @@ export function weeklyVolume(days, n = 12, today = new Date()) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-/* "8,432 steps · 58 bpm resting", or just the half that was logged. Shared by
+/* "8,432 steps · 58 bpm resting · 120/80 mmHg", or just the parts logged. Shared by
  * the calendar cell label and the day card so the two cannot say different
  * things about the same day. */
 function vitalsInfo(hit) {
   const parts = [];
   if (Number.isFinite(hit?.steps)) parts.push(tr("vitalsSteps", { n: hit.steps.toLocaleString() }));
   if (Number.isFinite(hit?.restingHr)) parts.push(tr("vitalsHr", { n: hit.restingHr }));
+  if (Number.isFinite(hit?.sys) && Number.isFinite(hit?.dia)) {
+    parts.push(tr("vitalsBp", { sys: hit.sys, dia: hit.dia }));
+  }
   return parts.join(" · ");
 }
 
@@ -262,7 +266,7 @@ function level(reps, max) {
  * are optional per meal, so a day of untyped meals would read as an empty one. */
 const weightOf = (mode) => (d) =>
   mode === "sleep" ? (d.minutes || 1)       // a night with no parseable duration still shows
-  : mode === "vitals" ? (d.steps || 1)      // a resting-HR-only day still shows
+  : mode === "vitals" ? (d.steps || 1)      // a HR- or pressure-only day still shows
   : mode === "meals" ? d.meals.length
   : mode === "diary" ? (d.rated ? d.mood : 0.5)   // an unrated day still shows faintly
   // A run has no reps, so a cardio-only day would shade as an empty one.
@@ -519,7 +523,35 @@ function healthHTML(ctx) {
 }
 
 /** The selected day's meals, and the form to add one to it. */
-function mealsHTML(day, key, todayKey) {
+/* One glass, drawn: the outline always, the water only when it was drunk.
+ * Drawn rather than an emoji so an empty glass reads as empty on every phone. */
+const glassSVG = (full) => `<svg class="glass${full ? " full" : ""}" viewBox="0 0 24 32" aria-hidden="true">
+    <path class="fill" d="M5.4 11 H18.6 L17.3 28.2 H6.7 Z"/>
+    <path class="rim" d="M3.5 3 H20.5 L18.4 29 H5.6 Z"/></svg>`;
+
+/** Water for the day: ten glasses of 0.5 L, filled from the left, with - and +
+ *  either side. Every tap is saved on the spot (index.html), because a glass
+ *  counter that also wants a Save button is one nobody keeps. */
+function waterHTML(hit) {
+  const n = hit ? hit.glasses : 0;
+  const glasses = Array.from({ length: GLASSES }, (_, i) => glassSVG(i < n)).join("");
+  const label = tr("waterGlasses", { n, max: GLASSES, l: fmtLitres(n) });
+  return `<div class="entry" id="waterBox">
+    <div class="waterHead"><span style="font-weight:600">${esc(tr("water"))}</span>
+      <span class="sub">${esc(fmtLitres(n))}</span></div>
+    <div class="water">
+      <button type="button" class="ghost waterBtn" id="waterMinus"${n <= 0 ? " disabled" : ""}
+        aria-label="${esc(tr("waterLess"))}">−</button>
+      <div class="glasses" role="img" aria-label="${esc(label)}" title="${esc(label)}">${glasses}</div>
+      <button type="button" class="ghost waterBtn" id="waterPlus"${n >= GLASSES ? " disabled" : ""}
+        aria-label="${esc(tr("waterMore"))}">+</button>
+    </div>
+    <p class="sub" style="margin:4px 0 0">${esc(tr("waterEach", {
+      l: GLASS_L.toLocaleString([], { minimumFractionDigits: 1 }) }))}</p>
+  </div>`;
+}
+
+function mealsHTML(day, key, todayKey, water = null) {
   const rows = (day?.meals || []).map((m) => {
     const t = new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     const shot = m.photo
@@ -552,6 +584,7 @@ function mealsHTML(day, key, todayKey) {
          <tbody>${rows}</tbody></table>${sum}`
       : `<p class="sub" style="margin:6px 0 0">${esc(tr("noMealsThatDay"))}</p>`}
     <button type="button" class="ghost" id="addMealBtn" style="margin-top:8px">${esc(tr("addMeal"))}</button>
+    ${waterHTML(water)}
   </div>`;
 }
 
@@ -729,7 +762,8 @@ export function importInfo() {
      aria-label="${esc(tr("importAcceptsTip"))}">i</a>`;
 }
 
-/** Steps and resting heart rate for the day, typed in from a watch -- see
+/** Steps, resting heart rate and blood pressure for the day, typed in (or, for
+ *  the heart rate, counted with the guide in index.html's #hrDlg) -- see
  *  vitals.js for why a blank day is not carried forward from the last one. */
 function vitalsHTML(vitalsDays, key, todayKey, trend) {
   const hit = vitalsDays.get(key);
@@ -755,6 +789,21 @@ function vitalsHTML(vitalsDays, key, todayKey, trend) {
         <label for="vitalsHr">${esc(tr("restingHr"))}</label>
         <input id="vitalsHr" type="number" min="1" step="1" inputmode="numeric"
                value="${hit?.restingHr ?? ""}">
+      </div>
+    </div>
+    <button type="button" class="ghost" id="hrMeasureBtn" style="margin:8px 0 0;padding:9px">${
+      esc(tr("hrMeasure"))}</button>
+    <div style="font-weight:600;font-size:13.5px;margin-top:10px">${esc(tr("bloodPressure"))}</div>
+    <div class="row" style="margin-top:4px">
+      <div>
+        <label for="vitalsSys">${esc(tr("bpSys"))}</label>
+        <input id="vitalsSys" type="number" min="60" max="260" step="1" inputmode="numeric"
+               placeholder="120" value="${hit?.sys ?? ""}">
+      </div>
+      <div>
+        <label for="vitalsDia">${esc(tr("bpDia"))}</label>
+        <input id="vitalsDia" type="number" min="30" max="160" step="1" inputmode="numeric"
+               placeholder="80" value="${hit?.dia ?? ""}">
       </div>
     </div>
     <div class="row" style="margin-top:8px">
@@ -1128,7 +1177,8 @@ function weightDayHTML(wts, key, todayKey, range) {
  * does not lose the selected day, and re-rendering after a new set does not
  * throw the athlete back to today.
  */
-export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, vitals, cardio, view, today = new Date()) {
+export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, vitals, cardio, water,
+                                view, today = new Date()) {
   const days = collectDays(sessions, cardio);
   const mealDays = collectMeals(meals);
   const diaryDays = collectDiary(diary);
@@ -1136,6 +1186,7 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
   const cycleDays = collectCycle(cycle);
   const sleepDays = collectSleep(sleep);
   const vitalsDays = collectVitals(vitals);
+  const waterDays = collectWater(water);
   const o = overall(days, today);
   const todayKey = dayKey(today);
   // "cycle" is deliberately not a mode here: it already has its own section,
@@ -1174,7 +1225,7 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
                    view.year, view.month, view.selected, todayKey, mode)}
     ${weightDayHTML(wts, view.selected, todayKey, view.weightRange)}
     ${dayHTML(days.get(view.selected), view.selected)}
-    ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey)}
+    ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey, waterDays.get(view.selected))}
     ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey,
                 moodTrend(diaryDays, 30, today))}
     ${sleepHTML(sleepDays, view.selected, todayKey, meanSleep(sleepDays, 14, today))}

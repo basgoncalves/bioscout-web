@@ -26,6 +26,7 @@ const WKEY = "bioscout.weights.v1";
 const CYKEY = "bioscout.cycle.v1";
 const SLKEY = "bioscout.sleep.v1";
 const VKEY = "bioscout.vitals.v1";
+const WAKEY = "bioscout.water.v1";
 const CDKEY = "bioscout.cardio.v1";
 
 /* How many sets keep their WAVEFORMS. Summaries are tiny and every set keeps
@@ -394,7 +395,7 @@ export function clearSleep(at, profile = null) {
   return kept.length;
 }
 
-// --- vitals (steps, resting heart rate) -------------------------------------
+// --- vitals (steps, resting heart rate, blood pressure) ----------------------
 /* One reading per day, keyed like sleep -- see vitals.js for why these do not
  * carry forward the way weight does. */
 const VITALS_MAX = 2000;
@@ -404,16 +405,34 @@ export function listVitals() {
   return Array.isArray(v) ? v : [];
 }
 
-export function setVitals({ profile = null, at, steps = null, restingHr = null }) {
+/* Blood pressure is a pair or nothing. A systolic without its diastolic is not
+ * half a reading, it is no reading -- and a pair where the lower number is the
+ * higher one is two fields typed in the wrong order, not a pressure. The
+ * ranges are wide on purpose: they refuse typos (1200/80), not unusual people. */
+export function bpPair(sys, dia) {
+  const blank = (v) => v === null || v === undefined || v === "";
+  if (blank(sys) && blank(dia)) return null;
+  const s = Math.round(+sys), d = Math.round(+dia);
+  if (!Number.isFinite(s) || !Number.isFinite(d)) return false;
+  if (s < 60 || s > 260 || d < 30 || d > 160 || s <= d) return false;
+  return { sys: s, dia: d };
+}
+
+export function setVitals({ profile = null, at, steps = null, restingHr = null,
+                            sys = null, dia = null }) {
   if (!at) return null;
   const s = steps === null || steps === "" ? null : Math.round(+steps);
   const h = restingHr === null || restingHr === "" ? null : Math.round(+restingHr);
+  const bp = bpPair(sys, dia);
+  if (bp === false) return null;           // half a pressure, or an impossible one
   const entry = {
     at, profile,
     steps: Number.isFinite(s) && s >= 0 ? s : null,
     restingHr: Number.isFinite(h) && h > 0 ? h : null,
+    sys: bp ? bp.sys : null,
+    dia: bp ? bp.dia : null,
   };
-  if (entry.steps === null && entry.restingHr === null) return null;
+  if (entry.steps === null && entry.restingHr === null && entry.sys === null) return null;
   const day = String(at).slice(0, 10);
   const all = listVitals().filter(
     (x) => !(x.profile === entry.profile && String(x.at).slice(0, 10) === day));
@@ -429,6 +448,30 @@ export function clearVitals(at, profile = null) {
     (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
   write(VKEY, kept);
   return kept.length;
+}
+
+// --- water (glasses a day) --------------------------------------------------
+/* One count per day, overwritten on every tap of + or - -- see water.js. A
+ * count of zero removes the day rather than filing "drank nothing". */
+const WATER_MAX = 2000;
+
+export function listWater() {
+  const v = read(WAKEY, []);
+  return Array.isArray(v) ? v : [];
+}
+
+export function setWater({ profile = null, at, glasses }) {
+  if (!at) return null;
+  const g = Math.round(+glasses);
+  if (!Number.isFinite(g)) return null;
+  const n = Math.max(0, Math.min(10, g));
+  const day = String(at).slice(0, 10);
+  const all = listWater().filter(
+    (x) => !(x.profile === profile && String(x.at).slice(0, 10) === day));
+  if (n > 0) all.push({ at, profile, glasses: n });
+  all.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(WAKEY, all.slice(-WATER_MAX));
+  return { at, profile, glasses: n };
 }
 
 // --- cardio (imported endurance activities) ---------------------------------
@@ -620,6 +663,7 @@ export function exportAll() {
     cycle: listCycle(),
     sleep: listSleep(),
     vitals: listVitals(),
+    water: listWater(),
     cardio: listCardio(),
     /* Filed assessments travel with everything else.
      *
@@ -649,7 +693,7 @@ export function importAll(data) {
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
                    sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
                    weightsAdded: 0, cycleAdded: 0, sleepAdded: 0, vitalsAdded: 0,
-                   cardioAdded: 0, assessmentsAdded: 0 };
+                   waterAdded: 0, cardioAdded: 0, assessmentsAdded: 0 };
   report.assessmentsAdded = importAssessments(data.assessments);
 
   const store = listProfiles();
@@ -741,6 +785,15 @@ export function importAll(data) {
   }
   vit.sort((a, b) => String(a.at).localeCompare(String(b.at)));
   write(VKEY, vit.slice(-VITALS_MAX));
+
+  const wat = listWater();
+  const seenWa = new Set(wat.map((x) => `${x.profile}|${String(x.at).slice(0, 10)}`));
+  for (const x of data.water || []) {
+    if (!x || !x.at || seenWa.has(`${x.profile}|${String(x.at).slice(0, 10)}`)) continue;
+    wat.push(x); seenWa.add(`${x.profile}|${String(x.at).slice(0, 10)}`); report.waterAdded++;
+  }
+  wat.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  write(WAKEY, wat.slice(-WATER_MAX));
 
   // Cardio merges on the source id, which mergeCardio already does, so the
   // import path is the same code the Strava button uses.
