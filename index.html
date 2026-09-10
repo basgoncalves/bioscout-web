@@ -320,6 +320,7 @@ try {
      free training goes away, because the protocol chose all of it already. */
   body.assessMode .trainOnly { display:none !important; }
   .daybox { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
+  .accountBox { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:0 0 11px; }
   /* Achievements: four medals per movement. Metal colours with dark ink read
      the same in light and dark themes, so there is no dark variant. */
   .achRow { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 10px;
@@ -547,17 +548,48 @@ try {
       <button class="ghost" id="saveProfileBtn" style="margin:0;padding:9px" data-i18n="saveProfile">Save profile</button>
       <button class="ghost" id="delProfileBtn" style="margin:0;padding:9px" data-i18n="delete">Delete</button>
     </div>
+    <!-- Account: shown only when src/cloud_config.js names a server. Signed
+         out it is a login form; signed in it says who, which athlete syncs,
+         and when it last did. -->
+    <div id="accountBox" class="accountBox" hidden>
+      <div style="font-weight:600;margin-bottom:6px" data-i18n="account">Account</div>
+      <div id="accountOut">
+        <div class="row" style="margin-bottom:8px">
+          <div>
+            <label for="acctLogin" data-i18n="acctLogin">Username or email</label>
+            <input id="acctLogin" type="text" autocomplete="username" autocapitalize="off" spellcheck="false">
+          </div>
+          <div>
+            <label for="acctPass" data-i18n="acctPass">Password</label>
+            <input id="acctPass" type="password" autocomplete="current-password">
+          </div>
+        </div>
+        <div class="row" style="margin-bottom:6px">
+          <button id="acctSignIn" style="margin:0;padding:9px" data-i18n="acctSignIn">Sign in</button>
+          <button class="ghost" id="acctSignUp" style="margin:0;padding:9px" data-i18n="acctSignUp">Create account</button>
+        </div>
+        <p class="sub" id="acctMsg" style="margin:0 0 6px" hidden></p>
+        <p class="note" style="margin:0" data-i18n-html="noteAccount">An account is optional.</p>
+      </div>
+      <div id="accountIn" hidden>
+        <p class="sub" style="margin:0 0 8px" id="acctWho"></p>
+        <label for="acctAthlete" data-i18n="acctAthlete">This athlete is me</label>
+        <select id="acctAthlete"></select>
+        <p class="sub" style="margin:6px 0 8px" id="acctStatus"></p>
+        <div class="row" style="margin-bottom:6px">
+          <button class="ghost" id="acctSync" style="margin:0;padding:9px" data-i18n="acctSync">Sync now</button>
+          <button class="ghost" id="acctSignOut" style="margin:0;padding:9px" data-i18n="acctSignOut">Sign out</button>
+        </div>
+      </div>
+    </div>
     <div class="row" style="margin-bottom:6px">
       <button class="ghost" id="exportProfilesBtn" style="margin:0;padding:9px" data-i18n="exportData">Export my data</button>
       <button class="ghost" id="importProfilesBtn" style="margin:0;padding:9px" data-i18n="import">Import</button>
     </div>
     <input id="importProfilesFile" type="file" accept="application/json,.json" class="hidden">
-    <p class="note" style="margin:0 0 11px" data-i18n-html="notePrivacy">Profiles and training history live on
-      <b>this device only</b> — there is no account and nothing is uploaded, so
-      nobody else can see your sessions and neither can I. To carry them to
-      another phone or laptop, export the file here and import it there. That
-      is a manual step, not background sync: without a server there is no
-      honest way to make it automatic.</p>
+    <p class="note" style="margin:0 0 11px" data-i18n-html="notePrivacy">Everything is kept on
+      <b>this device</b>. Without an account nothing is uploaded; to carry your
+      data to another phone or laptop, export the file here and import it there.</p>
     
       <button class="ghost" id="settingsClose" data-i18n="close">Close</button>
     </dialog>
@@ -816,6 +848,9 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          saveCurves, getCurves, curveIndices, setRepOutcome, setRepRemoved, listLedger }
        from "./src/profiles.js";
 import { achievements, repEvents, newlyEarned, repUnit } from "./src/achievements.js";
+import { CLOUD } from "./src/cloud_config.js";
+import { makeCloud, syncOnce, loadState as cloudState, saveState as saveCloudState,
+         clearState as clearCloudState, USERNAME_RE } from "./src/cloud.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
          collectDays, percentile } from "./src/dashboard.js";
@@ -1211,6 +1246,143 @@ $("delProfileBtn").onclick = () => {
   refreshProfiles("");
   say(tr("profileDeleted", { name: n }));
 };
+
+/* ---- account and sync ------------------------------------------------------
+ * Optional. src/cloud.js does the work; this is the Edit-profile box and the
+ * moments a sync runs: on start, when the app comes back to the front, a few
+ * seconds after something is logged (renderDash / a new set), every minute
+ * while open, and on "Sync now". A sync that fails says why in the box and
+ * changes nothing locally -- the device copy is always the one in use. */
+const cloud = makeCloud(CLOUD);
+let syncing = false, syncTimer = null;
+
+function cloudErrText(e) {
+  const map = { offline: "acctOffline", invalid_credentials: "acctBadLogin", username_taken: "acctTaken",
+                bad_username: "acctBadUsername", weak_password: "acctWeakPass", user_already_exists: "acctTaken",
+                email_not_confirmed: "acctConfirmFirst", signed_out: "acctSignedOut" };
+  return map[e && e.code] ? tr(map[e.code]) : tr("acctErr", { err: (e && e.message) || String(e) });
+}
+
+function paintAccount(msg = null, warn = false) {
+  const box = $("accountBox");
+  if (!cloud.enabled) { box.hidden = true; return; }
+  box.hidden = false;
+  const st = cloudState();
+  const inn = !!st.login;
+  $("accountOut").hidden = inn;
+  $("accountIn").hidden = !inn;
+  if (!inn) {
+    $("acctMsg").hidden = !msg;
+    $("acctMsg").textContent = msg || "";
+    $("acctMsg").classList.toggle("warn", !!warn);
+    return;
+  }
+  const u = st.login.user || {};
+  $("acctWho").textContent = tr("acctWho", { who: u.username || u.email || "?" });
+  const { profiles } = listProfiles();
+  $("acctAthlete").innerHTML = profiles.map((p) =>
+    `<option value="${esc(p.name)}"${p.name === st.athlete ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+  const last = st.lastSync ? new Date(st.lastSync).toLocaleString([], { day: "numeric", month: "short",
+    hour: "2-digit", minute: "2-digit" }) : null;
+  $("acctStatus").textContent = msg || (syncing ? tr("acctSyncing")
+    : last ? tr("acctSynced", { time: last }) : tr("acctNeverSynced"));
+  $("acctStatus").classList.toggle("warn", !!warn);
+}
+
+async function runSync({ quiet = false } = {}) {
+  const st = cloudState();
+  if (!cloud.enabled || !st.login || !st.athlete || syncing) return;
+  syncing = true;
+  if (!quiet) paintAccount();
+  try {
+    const r = await syncOnce(cloud, st, { exportAll, importAll });
+    saveCloudState(r.state);
+    if (r.pulled) {
+      refreshProfiles($("profile").value || lastUsedProfile()?.name || "");
+      if (!$("viewDash").classList.contains("hidden")) renderDash(true);
+    }
+    syncing = false;
+    paintAccount();
+  } catch (e) {
+    syncing = false;
+    // A refresh token the server no longer accepts is a sign-out, not a retry.
+    if (/refresh|jwt|token/i.test(String(e.code) + " " + e.message) && e.code !== "offline") {
+      const s2 = cloudState(); delete s2.login; saveCloudState(s2);
+    }
+    if (!quiet || e.code !== "offline") paintAccount(cloudErrText(e), true);
+  }
+}
+/** Sync a little after a local change, once, however many changes there were. */
+function scheduleSync(ms = 8000) {
+  if (!cloud.enabled || !cloudState().login) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => runSync({ quiet: true }), ms);
+}
+
+async function afterLogin(login) {
+  const st = cloudState();
+  // The athlete that syncs: the one open now, else the only one, else a new
+  // one named after the account -- a fresh laptop has no athletes yet.
+  let athlete = currentAthlete() || (listProfiles().profiles.length === 1 ? listProfiles().profiles[0].name : null);
+  if (!athlete) {
+    athlete = login.user.username || String(login.user.email || "me").split("@")[0];
+    if (!getProfile(athlete)) saveProfile({ name: athlete });
+    refreshProfiles(athlete);
+  }
+  // A different account on this device starts its sync from the beginning.
+  const same = st.userId === login.user.id;
+  saveCloudState({ login, userId: login.user.id, athlete,
+                   cursor: same ? st.cursor : null, pushedAt: same ? st.pushedAt : null });
+  $("acctPass").value = "";
+  paintAccount();
+  await runSync();
+}
+
+$("acctSignIn").onclick = async () => {
+  const id = $("acctLogin").value.trim(), pw = $("acctPass").value;
+  if (!id || !pw) { paintAccount(tr("acctNeedBoth"), true); return; }
+  try { await afterLogin(await cloud.signIn(id, pw)); }
+  catch (e) { paintAccount(cloudErrText(e), true); }
+};
+$("acctSignUp").onclick = async () => {
+  const id = $("acctLogin").value.trim(), pw = $("acctPass").value;
+  if (!id || !pw) { paintAccount(tr("acctNeedBoth"), true); return; }
+  if (pw.length < 8) { paintAccount(tr("acctWeakPass"), true); return; }
+  try {
+    if (id.includes("@")) {
+      const login = await cloud.signUpEmail(id, pw);
+      if (!login) { paintAccount(tr("acctConfirmEmail", { email: id })); return; }
+      await afterLogin(login);
+    } else {
+      if (!USERNAME_RE.test(id.toLowerCase())) { paintAccount(tr("acctBadUsername"), true); return; }
+      await afterLogin(await cloud.signUpUsername(id, pw));
+    }
+  } catch (e) { paintAccount(cloudErrText(e), true); }
+};
+$("acctSync").onclick = () => runSync();
+$("acctSignOut").onclick = async () => {
+  const st = cloudState();
+  if (st.login) await cloud.signOut(st.login);
+  // Signing out keeps everything on the device -- it only stops syncing.
+  // The cursors are kept too, so signing back in to the same account resumes
+  // instead of re-downloading the history.
+  delete st.login; saveCloudState(st);
+  paintAccount(tr("acctSignedOutOk"));
+};
+$("acctAthlete").onchange = (e) => {
+  const st = cloudState();
+  // Another athlete is another history: sync it from the start.
+  saveCloudState({ ...st, athlete: e.target.value, cursor: null, pushedAt: null });
+  runSync();
+};
+$("settingsBtn").addEventListener("click", () => paintAccount());
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  const st = cloudState();
+  if (!st.lastSync || Date.now() - new Date(st.lastSync).getTime() > 30e3) runSync({ quiet: true });
+});
+setInterval(() => { if (!document.hidden) runSync({ quiet: true }); }, 60e3);
+setTimeout(() => runSync({ quiet: true }), 2500);
 
 /* ---- appearance ----------------------------------------------------------
  * Light or dark, and one of five colour schemes (the accent colour -- buttons,
@@ -2298,7 +2470,10 @@ function wireSteppers(root) {
   });
 }
 
-function renderDash() {
+function renderDash(fromSync = false) {
+  // Most logging ends in a redraw here, so this is where a sync is queued --
+  // except for the redraw a sync itself causes.
+  if (!fromSync) scheduleSync();
   const card = $("dashboardCard");
   if (!dashView) dashView = defaultDashView();
   // Height comes from the profile; weight comes from the log, carried forward.
@@ -4090,6 +4265,7 @@ async function finish() {
         const set = addSet(lastResult, fps, { profile: $("profile").value || null,
                                              assess: assessStep });
         announceBadges(newlyEarned(badgesBefore, myAchievements()));
+        scheduleSync();
         lastResult.setIndex = set.index;
         lastResult.sessionStarted = getSession()?.started ?? null;
         pageSets.push({ index: set.index, res: lastResult, fps });

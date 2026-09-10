@@ -850,11 +850,19 @@ export function importAll(data) {
   const open = getSession();
   const incoming = data.session;
   const hasSets = (x) => x && Array.isArray(x.sets) && x.sets.length > 0;
-  const others = Array.isArray(data.archive) ? data.archive.slice() : [];
+  // Any incoming copy of the session open here -- from a sync, it arrives in
+  // the archive list -- updates the open session instead of being filed as a
+  // second, archived copy of it.
+  const others = [];
+  for (const x of Array.isArray(data.archive) ? data.archive : []) {
+    if (open && x && x.started === open.started) {
+      if (String(x.u || "") > String(getSession().u || "")) { write(SKEY, x); updated++; }
+    } else others.push(x);
+  }
   let adopt = null;
   if (hasSets(incoming)) {
     if (open && incoming.started === open.started) {
-      if (String(incoming.u || "") > String(open.u || "")) { write(SKEY, incoming); updated++; }
+      if (String(incoming.u || "") > String(getSession().u || "")) { write(SKEY, incoming); updated++; }
     } else {
       // The open session on the other device is history here unless this
       // device has nothing open -- then adopt it, so a phone handed over
