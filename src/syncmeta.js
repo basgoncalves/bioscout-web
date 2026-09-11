@@ -45,6 +45,7 @@ export const IDENTITY = {
   coffee: (x) => `${who(x)}|${day(x.at)}`,
   reaction: (x) => `${who(x)}|${x.at}`,
   cardio: (x) => `${who(x)}|${x.id}`,
+  plans: (x) => `${who(x)}|${x.id}`,
   profiles: (x) => String(x.name),
   sessions: (x) => String(x.started),
 };
@@ -52,6 +53,7 @@ export const IDENTITY = {
 /** The fields a record must have to be one at all, per store. */
 const VALID = {
   cardio: (x) => x.id && x.at,
+  plans: (x) => x.id && x.day,
   profiles: (x) => x.name,
   sessions: (x) => x.started && Array.isArray(x.sets),
 };

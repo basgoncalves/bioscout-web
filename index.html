@@ -415,6 +415,37 @@ try {
   button.day .dayDot { position:absolute; right:4px; top:4px; width:5px; height:5px;
                        border-radius:50%; background:#c9483d; }
   tr.assessRow td { color:#e0736a; }
+  /* Training plans: a dashed outline on planned days; cards in the day view. */
+  button.day.planned { border-style:dashed; border-color:var(--accent); border-width:2px; }
+  .planCard { border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-top:8px; }
+  .planCard.done { border-color:var(--accent); }
+  .planHead { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; }
+  .planHead button.planEdit { width:auto; margin:0; padding:5px 10px; font-size:12.5px; }
+  .planRow { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; padding:3px 0;
+             border-top:1px solid var(--line); font-size:13.5px; }
+  .planHead + .planRow { border-top:none; }
+  .planAct { flex:1 1 40%; min-width:0; }
+  .planSR { font-variant-numeric:tabular-nums; }
+  .planGot { color:var(--muted); font-size:12.5px; flex-basis:100%; }
+  .planGot.ok { color:var(--accent); }
+  .planEditHead { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin:10px 0 4px; }
+  .planEditRow { display:grid; grid-template-columns:minmax(0,1fr) 3.2em auto 3.6em 3.8em 2.4em;
+                 gap:4px; align-items:center; margin-bottom:6px; }
+  .planEditRow select, .planEditRow input { margin:0; padding:8px 4px; min-width:0; }
+  .planEditRow button.planDel { margin:0; padding:8px 0; }
+  .planX { color:var(--muted); }
+  button.chip.planChip.ok { border-color:var(--accent); color:var(--accent); }
+  button.chip.planChip.on { background:var(--accent); color:#fff; border-color:transparent; }
+  /* Rest timer. */
+  .restClock { font-size:44px; font-weight:700; text-align:center; font-variant-numeric:tabular-nums;
+               margin:6px 0 4px; line-height:1.1; }
+  .restClock.over { color:var(--accent); }
+  .restPresets { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
+  .restPresets button.chip.on { background:var(--accent); color:#fff; border-color:transparent; }
+  .restPill { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(14px + env(safe-area-inset-bottom));
+              width:auto; margin:0; padding:9px 18px; border-radius:999px; z-index:50;
+              font-variant-numeric:tabular-nums; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+  .restPill.over { background:var(--accent); color:#fff; }
   button.mk { display:inline-block; width:32px; padding:5px 0; margin:0 3px 0 0;
               font-size:13px; line-height:1.1; }
   button.mk.on { border-color:var(--accent); color:var(--accent); font-weight:700; }
@@ -909,6 +940,8 @@ try {
     <div class="card trainOnly" id="setup">
     <!-- Strength sessions only: pick the exercise by body part (bodymap.js). -->
     <div id="bodyMapBox" class="trainOnly hidden" style="margin-bottom:12px"></div>
+    <!-- Today's plan, if there is one: planned vs done, tap to pick. -->
+    <div id="planNow" class="trainOnly hidden" style="margin-bottom:12px"></div>
     <div class="row trainOnly" style="margin-bottom:11px">
       <div>
         <label for="activity" data-i18n="movement">Movement</label>
@@ -1012,6 +1045,23 @@ try {
     <button class="ghost" id="switchBtn" data-i18n="switchCamera">Switch camera</button>
     <button class="ghost" id="stopBtn" data-i18n="closeCamera">Close camera</button>
   </div>
+
+  <!-- Rest between sets: a countdown, nothing saved (resttimer.js). -->
+  <div class="card trainOnly" id="restCard">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">
+      <b data-i18n="restTitle">Rest timer</b>
+      <span class="sub" data-i18n="restSub">Beeps and buzzes at zero</span>
+    </div>
+    <div class="restClock" id="restClock" aria-live="off">1:30</div>
+    <div class="restPresets" id="restPresets"></div>
+    <div class="row" style="margin-top:8px">
+      <button type="button" class="ghost" id="restMinus" style="margin:0">−15 s</button>
+      <button type="button" id="restGo" style="margin:0" data-i18n="restStart">Start</button>
+      <button type="button" class="ghost" id="restPlus" style="margin:0">+15 s</button>
+    </div>
+    <button type="button" class="ghost" id="restReset" style="margin-top:8px" data-i18n="restReset">Reset</button>
+  </div>
+  <button type="button" class="restPill" id="restPill" hidden></button>
 
   <div class="card hidden" id="trainingCard"></div>
   <div class="card hidden" id="results"></div>
@@ -1129,13 +1179,16 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
          listSleep, setSleep, clearSleep,
          listVitals, setVitals, clearVitals, bpPair, listWater, listCoffee, setDrink,
-         listReaction, addReaction, deleteReaction,
+         listReaction, addReaction, deleteReaction, listPlans, savePlan, deletePlan,
          listCardio, mergeCardio, latestCardioAt,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
          saveCurves, getCurves, curveIndices, setRepOutcome, setRepRemoved, listLedger, eraseAthlete }
        from "./src/profiles.js";
 import { achievements, repEvents, newlyEarned, repUnit } from "./src/achievements.js";
+import { plansOn, planProgress, nextPlanned, PLAN_ITEMS_MAX } from "./src/plans.js";
+import { REST_PRESETS, REST_DEFAULT, restTimer, restStart, restPause, restReset, restSet, restAdd,
+         restLeft, restRunning, fmtClock } from "./src/resttimer.js";
 import { CLOUD } from "./src/cloud_config.js";
 import { makeChat } from "./src/chat.js";
 import { makeCloud, syncOnce, loadState as cloudState, saveState as saveCloudState,
@@ -1157,7 +1210,7 @@ import { collectCups } from "./src/water.js";
 import { groupFriends, relationTo, searchTerm } from "./src/friends.js";
 import { foreperiod, classify as rtClassify, summarise as rtSummarise,
          reactionTrend, sequence, GAMES, GAME_IDS, gameOf } from "./src/reaction.js";
-import { SPORT_IDS, allowedIn } from "./src/sports.js";
+import { SPORT_IDS, allowedIn, sportActivities } from "./src/sports.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
          dayOfCycle } from "./src/cycle.js";
@@ -2900,7 +2953,7 @@ let mealDraft = { items: [] };
 /* `step` used to default to null and open a Training/Meal/Diary picker here
  * first -- that picker is gone now that Meals and Diary each carry their own
  * button, so every caller passes the step it wants directly. */
-function openAdd(step) {
+function openAdd(step, planId = null) {
   const dlg = $("addDlg");
   const body = $("addDlgBody");
   const key = dashView.selected;
@@ -2915,6 +2968,8 @@ function openAdd(step) {
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 4px">${tr("diary")}</h2>`
       + diaryFormHTML(key, todayKey, myTags(), draft);
     wireDiaryForm(key);
+  } else if (step === "plan") {
+    openPlanForm(key, planId);
   } else if (step === "sport") {
     /* The one step between "New training session" and the recorder: which
      * sport. It decides the movements the recorder offers (sports.js) and is
@@ -2936,6 +2991,236 @@ function openAdd(step) {
     if (h) h.focus({ preventScroll: true });
   }
 }
+
+/* ---- training plans -------------------------------------------------------
+ * A plan is movements x sets x reps (+ optional load) for a day, and a note
+ * (plans.js). Edited in the Add dialog; `planDraft` holds the form between
+ * redraws (a changed sport, a row added or removed). */
+let planDraft = null;
+const allMovements = () => [...$("activity").options].map((o) => o.value).filter((v) => v !== "auto");
+
+function openPlanForm(key, planId) {
+  const body = $("addDlgBody");
+  if (!planDraft) {
+    const old = planId ? myPlans().find((p) => p.id === planId) : null;
+    planDraft = old ? JSON.parse(JSON.stringify(old))
+      : { id: null, day: key, sport: "strength", items: [{ activity: "", sets: 3, reps: 10, kg: 0 }], note: "" };
+  }
+  const d = planDraft;
+  const acts = (d.sport && sportActivities(d.sport)) || allMovements();
+  const sportOpts = [`<option value=""${d.sport ? "" : " selected"}>${tr("planAnySport")}</option>`,
+    ...SPORT_IDS.map((id) => `<option value="${id}"${d.sport === id ? " selected" : ""}>${tr("sport_" + id)}</option>`)].join("");
+  const rows = d.items.map((it, i) => `<div class="planEditRow" data-i="${i}">
+      <select class="planAct" aria-label="${esc(tr("movement"))}">
+        <option value="">${tr("planPickMovement")}</option>
+        ${acts.map((a) => `<option value="${a}"${a === it.activity ? " selected" : ""}>${tr(a)}</option>`).join("")}
+      </select>
+      <input class="planSets" type="number" inputmode="numeric" min="1" max="20" value="${it.sets}" aria-label="${esc(tr("sets"))}">
+      <span class="planX">\u00d7</span>
+      <input class="planReps" type="number" inputmode="numeric" min="1" max="200" value="${it.reps}" aria-label="${esc(tr("reps"))}">
+      <input class="planKg" type="number" inputmode="decimal" min="0" step="0.5" value="${it.kg || ""}"
+        placeholder="+kg" aria-label="${esc(tr("addedLoad"))}">
+      <button type="button" class="ghost planDel" aria-label="${esc(tr("planRemoveRow"))}">\u00d7</button>
+    </div>`).join("");
+  body.innerHTML = `<h2 style="font-size:16px;margin:0 0 2px">${tr(d.id ? "planEditTitle" : "planAdd")}</h2>
+    <p class="sub" style="margin:0 0 10px">${esc(localeDayLong(d.day))}</p>
+    <label for="planSport">${tr("sport")}</label>
+    <select id="planSport">${sportOpts}</select>
+    <div class="planEditHead"><span>${tr("movement")}</span><span>${tr("sets")} \u00d7 ${tr("reps")} \u00b7 kg</span></div>
+    <div id="planItems">${rows}</div>
+    ${d.items.length < PLAN_ITEMS_MAX ? `<button type="button" class="ghost" id="planAddItem" style="margin-top:6px">${tr("planAddMovement")}</button>` : ""}
+    <label for="planNote" style="margin-top:10px">${tr("note")}</label>
+    <textarea id="planNote" rows="2" maxlength="300" placeholder="${esc(tr("planNotePlaceholder"))}"></textarea>
+    <button type="button" id="planSave" style="margin-top:10px">${tr("planSave")}</button>
+    ${d.id ? `<button type="button" class="ghost" id="planDelete" style="margin-top:8px">${tr("planDelete")}</button>` : ""}`;
+  $("planNote").value = d.note || "";
+  const read = () => {
+    d.sport = $("planSport").value || null;
+    d.note = $("planNote").value;
+    d.items = [...body.querySelectorAll(".planEditRow")].map((r) => ({
+      activity: r.querySelector(".planAct").value,
+      sets: +r.querySelector(".planSets").value || 1,
+      reps: +r.querySelector(".planReps").value || 1,
+      kg: +r.querySelector(".planKg").value || 0,
+    }));
+  };
+  $("planSport").onchange = () => {
+    read();
+    // Keep the rows the new sport still offers; the rest start blank.
+    const ok = sportActivities(d.sport) || allMovements();
+    d.items = d.items.map((it) => (ok.includes(it.activity) ? it : { ...it, activity: "" }));
+    openPlanForm(key, planId);
+  };
+  if ($("planAddItem")) $("planAddItem").onclick = () => {
+    read();
+    const last = d.items[d.items.length - 1];
+    d.items.push({ activity: "", sets: last ? last.sets : 3, reps: last ? last.reps : 10, kg: 0 });
+    openPlanForm(key, planId);
+  };
+  body.querySelectorAll(".planDel").forEach((b) => {
+    b.onclick = () => {
+      read();
+      d.items.splice(+b.closest(".planEditRow").dataset.i, 1);
+      if (!d.items.length) d.items.push({ activity: "", sets: 3, reps: 10, kg: 0 });
+      openPlanForm(key, planId);
+    };
+  });
+  $("planSave").onclick = () => {
+    read();
+    const rec = savePlan({ ...d, id: d.id || undefined, profile: currentAthlete() });
+    if (!rec) { say(tr("planEmpty"), true); return; }
+    planDraft = null;
+    done();
+  };
+  if ($("planDelete")) $("planDelete").onclick = () => {
+    deletePlan(d.id, currentAthlete());
+    planDraft = null;
+    done();
+  };
+}
+
+const localeDayLong = (key) => {
+  const [y, m, dd] = key.split("-").map(Number);
+  return new Date(y, m - 1, dd).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+};
+
+/** The sets recorded on `day` by this athlete, for planned-vs-done. */
+function setsOnDay(day) {
+  return collectDays(dashboardData(), []).get(day)?.sets || [];
+}
+
+/* "Start" on today's plan: a session of the plan's sport, with the first
+ * movement that still has sets to do (and its load) already chosen. */
+function startFromPlan(planId) {
+  const today = dayKey(new Date());
+  const plan = myPlans().find((p) => p.id === planId);
+  if (!plan) return;
+  startTraining(today, plan.sport || null);
+  pickPlanned(nextPlanned(planProgress([plan], setsOnDay(today))));
+}
+function pickPlanned(it) {
+  if (!it) return;
+  const sel = $("activity");
+  const opt = [...sel.options].find((o) => o.value === it.activity && !o.disabled);
+  if (!opt) return;
+  sel.value = it.activity;
+  sel.dispatchEvent(new Event("change"));
+  $("added").value = it.kg || 0;
+}
+
+/* Today's plans on the recorder, as chips: planned vs done, and a tap picks
+ * the movement and its load. Only for a session filed on today. */
+function renderPlanNow() {
+  const box = $("planNow");
+  const sess = getSession();
+  const today = dayKey(new Date());
+  const on = sess && !assessStep && dayKey(sess.started) === today;
+  const prog = on ? planProgress(plansOn(myPlans(), today), setsOnDay(today)) : [];
+  const items = prog.flatMap((p) => p.items);
+  box.classList.toggle("hidden", !items.length);
+  if (!items.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div style="font-weight:600;margin-bottom:6px">${tr("planToday")}</div>
+    <div class="chips">${items.map((it, i) => `<button type="button" class="chip planChip${
+      it.complete ? " ok" : ""}${$("activity").value === it.activity ? " on" : ""}" data-i="${i}">${
+      it.complete ? "\u2713 " : ""}${esc(tr(it.activity))} ${
+      tr("planDoneSets", { done: it.doneSets, n: it.sets })} \u00b7 ${it.reps}${it.kg ? " +" + it.kg + " kg" : ""}</button>`).join("")}</div>`;
+  box.querySelectorAll("button.planChip").forEach((b) => {
+    b.onclick = () => { pickPlanned(items[+b.dataset.i]); renderPlanNow(); renderBodyMap(); };
+  });
+}
+
+/* ---- rest timer -----------------------------------------------------------
+ * A countdown between sets (resttimer.js keeps the end time, so a phone that
+ * throttles the page still finishes on time). At zero: three beeps, a buzz,
+ * and a note. The last duration and a running countdown survive a reload. */
+const REST_KEY = "bioscout.rest.v1";
+let rest = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem(REST_KEY) || "null");
+    if (v && v.durS) {
+      const t = { ...restTimer(v.durS), endAt: v.endAt ?? null, leftS: v.leftS ?? v.durS };
+      // A countdown that ran out while the page was closed is just over.
+      return t.endAt != null && t.endAt < Date.now() ? restReset(t) : t;
+    }
+  } catch { /* none kept */ }
+  return restTimer(REST_DEFAULT);
+})();
+let restTick = null, restAudio = null, restFlash = null;
+const saveRest = () => {
+  try { localStorage.setItem(REST_KEY, JSON.stringify(rest)); } catch { /* per visit */ }
+};
+function restBeep() {
+  try {
+    const ctx = restAudio;
+    if (!ctx) return;
+    [0, 0.35, 0.7].forEach((t0) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = 880; o.type = "sine";
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + t0);
+      g.gain.exponentialRampToValueAtTime(0.4, ctx.currentTime + t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t0 + 0.25);
+      o.connect(g).connect(ctx.destination);
+      o.start(ctx.currentTime + t0); o.stop(ctx.currentTime + t0 + 0.3);
+    });
+  } catch { /* no sound on this device */ }
+}
+function paintRest() {
+  const now = Date.now();
+  const left = restLeft(rest, now), run = restRunning(rest);
+  $("restClock").textContent = fmtClock(left);
+  $("restClock").classList.toggle("over", !!restFlash);
+  $("restGo").textContent = tr(run ? "restPause" : left < rest.durS && left > 0 ? "restResume" : "restStart");
+  $("restPresets").innerHTML = REST_PRESETS.map((sec) =>
+    `<button type="button" class="chip restPre${sec === rest.durS ? " on" : ""}" data-s="${sec}">${fmtClock(sec)}</button>`).join("");
+  $("restPresets").querySelectorAll("button.restPre").forEach((b) => {
+    b.onclick = () => { rest = restSet(rest, +b.dataset.s); restFlash = null; restSync(); };
+  });
+  const pill = $("restPill");
+  pill.hidden = !(run || restFlash);
+  pill.textContent = restFlash ? tr("restOver") : tr("restPill", { t: fmtClock(left) });
+  pill.classList.toggle("over", !!restFlash);
+}
+function restSync() {
+  saveRest();
+  clearInterval(restTick); restTick = null;
+  if (restRunning(rest)) {
+    restTick = setInterval(() => {
+      if (restLeft(rest, Date.now()) <= 0) {
+        rest = restReset(rest);
+        restFlash = setTimeout(() => { restFlash = null; paintRest(); }, 6000);
+        restBeep();
+        try { navigator.vibrate?.([300, 150, 300, 150, 300]); } catch { /* none */ }
+        toast(tr("restOver"));
+        restSync();
+        return;
+      }
+      paintRest();
+    }, 250);
+  }
+  paintRest();
+}
+$("restGo").onclick = () => {
+  // The first tap unlocks sound: browsers only allow audio started by one.
+  try {
+    restAudio = restAudio || new (window.AudioContext || window.webkitAudioContext)();
+    restAudio.resume?.();
+  } catch { /* no sound */ }
+  const now = Date.now();
+  if (restFlash) { clearTimeout(restFlash); restFlash = null; }
+  rest = restRunning(rest) ? restPause(rest, now) : restStart(rest, now);
+  restSync();
+};
+$("restReset").onclick = () => { rest = restReset(rest); restFlash = null; restSync(); };
+$("restMinus").onclick = () => { rest = restAdd(rest, -15, Date.now()); restSync(); };
+$("restPlus").onclick = () => { rest = restAdd(rest, 15, Date.now()); restSync(); };
+$("restPill").onclick = () => {
+  if (restFlash) { clearTimeout(restFlash); restFlash = null; paintRest(); return; }
+  if ($("viewRecord").classList.contains("hidden")) showView("viewRecord");
+  $("restCard").scrollIntoView({ behavior: "smooth", block: "center" });
+};
+document.addEventListener("visibilitychange", () => { if (!document.hidden) paintRest(); });
+$("activity").addEventListener("change", () => renderPlanNow());
+restSync();          // a countdown still running from before a reload carries on
 
 const shortDate = (key) => {
   const [y, m, d] = key.split("-").map(Number);
@@ -3318,6 +3603,8 @@ $("settingsClose").onclick = () => {
 };
 
 function startTraining(dayKeyStr, sport = null) {
+  // A day that has not happened yet can be planned, not recorded.
+  if (dayKeyStr && dayKeyStr > dayKey(new Date())) { say(tr("planFutureNote"), true); return; }
   // A session with sets in it is training in progress; archive it before
   // starting the next, exactly as the results card does.
   const open = getSession();
@@ -3435,6 +3722,11 @@ function myWater() {
 function myCoffee() {
   const who = currentAthlete();
   return listCoffee().filter((v) => v.profile === who);
+}
+
+function myPlans() {
+  const who = currentAthlete();
+  return listPlans().filter((v) => v.profile === who);
 }
 
 function myReaction() {
@@ -3876,7 +4168,7 @@ function renderDash(fromSync = false) {
   const prof = getProfile(currentAthlete());
   const view = { ...dashView, heightM: prof?.heightM ?? null, sex: prof?.sex ?? null,
                  ageY: prof?.ageY ?? null, achievements: myAchievements(),
-                 reaction: myReaction() };
+                 reaction: myReaction(), plans: myPlans() };
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
                                    myWeights(), myCycle(), mySleep(), myVitals(),
                                    myCardio(), myWater(), myCoffee(), view);
@@ -3948,6 +4240,13 @@ function renderDash(fromSync = false) {
   if ($("addDiaryBtn")) $("addDiaryBtn").onclick = () => openAdd("diary");
   if ($("shareBtn")) $("shareBtn").onclick = shareMonth;
   if ($("newTrainingBtn")) $("newTrainingBtn").onclick = () => openAdd("sport");
+  if ($("planAddBtn")) $("planAddBtn").onclick = () => { planDraft = null; openAdd("plan"); };
+  card.querySelectorAll("button.planEdit").forEach((b) => {
+    b.onclick = () => { planDraft = null; openAdd("plan", b.dataset.plan); };
+  });
+  card.querySelectorAll("button.planStart").forEach((b) => {
+    b.onclick = () => startFromPlan(b.dataset.plan);
+  });
   wireSteppers(card);
   if ($("weightDaySave")) $("weightDaySave").onclick = () => {
     const kg = parseFloat($("weightDayKg").value);
@@ -4080,6 +4379,8 @@ function renderTraining() {
   // An assessment test picks its own movement, whatever the session's sport.
   applySport(assessStep ? null : (sess?.sport || null));
   renderBodyMap();
+  renderPlanNow();
+  paintRest();
   if (!sess || !sess.sets.length) { card.classList.add("hidden"); return; }
   card.classList.remove("hidden");
   const vars = availablePeakVars(sess);

@@ -31,6 +31,7 @@ import { collectSleep, meanSleep, duration as sleepMins, fmt as fmtSleep } from 
 import { collectVitals, meanSteps } from "./vitals.js";
 import { collectWater, collectCoffee, fmtVolume, DRINKS } from "./water.js";
 import { collectReaction, reactionTrend } from "./reaction.js";
+import { plansOn, planProgress, plannedDays } from "./plans.js";
 import { SUMMARY_CHARTS, SUMMARY_WINDOWS, windowDays, timeOfDay, intensity, weekdayVolume,
          movementMix, restGaps } from "./trainsummary.js";
 import { collectCardio, fmtDuration, fmtDistance, pace } from "./cardio.js";
@@ -278,7 +279,7 @@ const weightOf = (mode) => (d) =>
   // it does not have.
   : (d.reps || (d.cardio && d.cardio.length ? 1 : 0));
 
-function calendarHTML(days, year, month, selected, todayKey, mode) {
+function calendarHTML(days, year, month, selected, todayKey, mode, planned = new Set()) {
   const weeks = monthMatrix(year, month);
   const w = weightOf(mode);
   const inView = weeks.flat().filter((c) => c.inMonth).map((c) => days.get(c.key)).filter(Boolean);
@@ -300,6 +301,9 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
     // Outlined, not recoloured: the fill still means training volume, and an
     // assessment day is usually a training day too.
     if (hit?.assess) cls.push("assessDay");
+    // A planned day: a dashed outline in training view, whatever else it has.
+    const plan = mode === "training" && planned.has(c.key);
+    if (plan) cls.push("planned");
     if (c.key === todayKey) cls.push("today");
     if (c.key === selected) cls.push("sel");
     const assessNote = hit?.assess ? " \u00b7 " + tr("assessTag") : "";
@@ -318,7 +322,7 @@ function calendarHTML(days, year, month, selected, todayKey, mode) {
     // things get added, and you cannot add to a day you cannot select.
     // The red outline says something happened; the label says what, for anyone
     // reading by tooltip or by screen reader rather than by colour.
-    const full = label + assessNote;
+    const full = label + assessNote + (plan ? " \u00b7 " + tr("planTag") : "");
     return `<button type="button" class="${cls.join(" ")}" data-day="${c.key}"
       title="${esc(full)}" aria-label="${esc(full)}">
       <span>${c.date.getDate()}</span>${assessNote
@@ -501,15 +505,55 @@ export function achievementsHTML(list) {
     <p class="sub" style="margin:8px 0 0">${esc(tr("achNote"))}</p></div>`;
 }
 
-function dayHTML(day, key, reactionLines = "") {
-  const btns = `<div class="row" style="margin-top:10px">
+/* ---- training plans -------------------------------------------------------
+ * The day's plans (plans.js) with, for today and earlier, what was done of
+ * them. Days after today can only be planned: dayHTML swaps the record
+ * buttons for "Plan a session". */
+function planHTML(progress, key, todayKey) {
+  const future = key > todayKey, today = key === todayKey;
+  const cards = progress.map((p) => {
+    const rows = p.items.map((it) => {
+      const load = it.kg ? ` <span class="sub">+${it.kg} kg</span>` : "";
+      const got = future ? "" : `<span class="planGot${it.complete ? " ok" : ""}">${
+        it.complete ? "\u2713 " : ""}${esc(tr("planDoneSets", { done: it.doneSets, n: it.sets }))}${
+        it.doneReps ? " \u00b7 " + esc(tr(it.doneReps === 1 ? "nRep" : "nRepsCount", { n: it.doneReps })) : ""}</span>`;
+      return `<div class="planRow"><span class="planAct">${esc(tr(it.activity))}</span>
+        <span class="planSR">${it.sets} \u00d7 ${it.reps}${load}</span>${got}</div>`;
+    }).join("");
+    const head = `${p.sport ? esc(tr("sport_" + p.sport)) : esc(tr("planTitle"))}${
+      !future && p.planned ? ` <span class="sub">\u00b7 ${esc(tr("planDoneSets", { done: p.done, n: p.planned }))}</span>` : ""}`;
+    return `<div class="planCard${p.complete ? " done" : ""}">
+      <div class="planHead"><b>${head}</b>
+        <button type="button" class="ghost planEdit" data-plan="${esc(p.id)}">${esc(tr("planEdit"))}</button></div>
+      ${rows}
+      ${p.note ? `<p class="sub" style="margin:4px 0 0">${esc(p.note)}</p>` : ""}
+      ${today && !p.complete && p.items.length ? `<button type="button" class="planStart" data-plan="${esc(p.id)}"
+        style="margin:8px 0 0">${esc(tr("planStart"))}</button>` : ""}
+    </div>`;
+  }).join("");
+  return `${progress.length ? `<div style="font-weight:600;margin-top:12px">${esc(tr("planTitle"))}</div>${cards}` : ""}`;
+}
+
+function dayHTML(day, key, reactionLines = "", { plans = [], todayKey = key } = {}) {
+  const future = key > todayKey;
+  const planBtn = `<button type="button" class="ghost" id="planAddBtn" style="margin:${future ? "10px" : "8px"} 0 0">${
+    esc(tr("planAdd"))}</button>`;
+  const plansBlock = planHTML(plans, key, todayKey);
+  if (future) {
+    /* Nothing can be recorded on a day that has not happened: no New session,
+     * no import, no test. Only a plan. */
+    return `<div class="daybox"><div style="font-weight:600">${esc(tr("modeTraining"))}</div>
+      <p class="sub" style="margin:6px 0 0">${esc(tr("planFutureNote"))}</p>
+      ${plansBlock}${planBtn}</div>`;
+  }
+  const btns = `${plansBlock}<div class="row" style="margin-top:10px">
       <button id="newTrainingBtn" style="margin:0">${esc(tr("newTrainingSession"))}</button>
       <button type="button" class="ghost" id="trainImport" style="margin:0;padding:9px">${esc(tr("import"))}</button>
     </div>
     <div class="row" style="margin-top:8px">
       <button type="button" class="ghost" id="assessBtn" style="margin:0">${esc(tr("assess"))}</button>
       <button type="button" class="ghost" id="reactionBtn" style="margin:0">${esc(tr("rtTitle"))}</button>
-    </div>`;
+    </div>${key === todayKey ? planBtn : ""}`;
   if (!day) {
     return `<div class="daybox"><div style="font-weight:600">${esc(tr("modeTraining"))}</div>
       ${reactionLines || `<p class="sub" style="margin:6px 0 0">${esc(tr("noTrainingThatDay"))}</p>`}${btns}</div>`;
@@ -1422,14 +1466,16 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
         .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>
     </div>
     ${calendarHTML({ meals: mealDays, diary: diaryDays, sleep: sleepDays, vitals: vitalsDays }[mode] || days,
-                   view.year, view.month, view.selected, todayKey, mode)}
+                   view.year, view.month, view.selected, todayKey, mode, plannedDays(view.plans || []))}
     ${summaryHTML(days, wts, view)}
     ${weightDayHTML(wts, view.selected, todayKey)}
     </div><div class="dashRight">
     <div class="dayHead2">${esc(localeDay(view.selected)
       .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>
     ${dayHTML(days.get(view.selected), view.selected,
-              reactionLinesHTML(view.reaction || [], view.selected, today))}
+              reactionLinesHTML(view.reaction || [], view.selected, today),
+              { todayKey, plans: planProgress(plansOn(view.plans || [], view.selected),
+                                              days.get(view.selected)?.sets || []) })}
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey, waterDays.get(view.selected),
                 coffeeDays.get(view.selected))}
     ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey,

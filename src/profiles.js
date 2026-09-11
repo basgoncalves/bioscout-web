@@ -18,6 +18,7 @@ import { listAssessments, importAssessments, eraseAssessments } from "./assess.j
 import { DRINKS, DRINK_KINDS } from "./water.js";
 import { sessionReps } from "./achievements.js";
 import { stamp, IDENTITY, mergeTombs, mergeRecords, tombIndex, buried } from "./syncmeta.js";
+import { normalizePlan } from "./plans.js";
 
 const PKEY = "bioscout.profiles.v1";
 const SKEY = "bioscout.session.v1";
@@ -32,6 +33,7 @@ const VKEY = "bioscout.vitals.v1";
 const WAKEY = "bioscout.water.v1";
 const COKEY = "bioscout.coffee.v1";
 const RXKEY = "bioscout.reaction.v1";
+const PLKEY = "bioscout.plans.v1";
 const DRINK_KEY = { water: WAKEY, coffee: COKEY };
 const CDKEY = "bioscout.cardio.v1";
 const LKEY = "bioscout.ledger.v1";
@@ -638,6 +640,36 @@ export function deleteReaction(at, profile = null) {
   return dropAndBury(RXKEY, "reaction", listReaction(), (x) => x.at === at && x.profile === profile);
 }
 
+// --- training plans ---------------------------------------------------------
+/* Sessions planned for a day (plans.js): movements with sets x reps, keyed by
+ * their own id -- a day can hold a morning and an evening plan. Local and in
+ * the export file; not in the cloud sync yet (the server's list of record
+ * kinds does not include it, same as reaction tests). */
+const PLANS_MAX = 1000;
+
+export function listPlans() {
+  const v = read(PLKEY, []);
+  return Array.isArray(v) ? v : [];
+}
+
+/** Add or replace (same id and athlete) a plan. Returns it, or null when
+ *  there was nothing in it to keep. */
+export function savePlan(plan) {
+  const rec = normalizePlan(plan);
+  if (!rec) return null;
+  rec.u = stamp();
+  const all = listPlans().filter((x) => !(x.id === rec.id && x.profile === rec.profile));
+  all.push(rec);
+  all.sort((a, b) => String(a.day).localeCompare(String(b.day)) || String(a.id).localeCompare(String(b.id)));
+  unbury("plans", rec);
+  write(PLKEY, all.slice(-PLANS_MAX));
+  return rec;
+}
+
+export function deletePlan(id, profile = null) {
+  return dropAndBury(PLKEY, "plans", listPlans(), (x) => x.id === id && x.profile === profile);
+}
+
 // --- cardio (imported endurance activities) ---------------------------------
 /* Keyed on the SOURCE's own id, not on the day: a day can hold a commute ride
  * and an evening run, and re-importing must recognise both rather than
@@ -838,7 +870,7 @@ export function eraseAthlete(name) {
   const curves = read(CKEY, {});
   for (const k of Object.keys(curves)) if (gone.has(k.split("|")[0])) delete curves[k];
   write(CKEY, curves);
-  for (const key of [MKEY, DKEY, WKEY, CYKEY, SLKEY, VKEY, WAKEY, COKEY, CDKEY, RXKEY]) {
+  for (const key of [MKEY, DKEY, WKEY, CYKEY, SLKEY, VKEY, WAKEY, COKEY, CDKEY, RXKEY, PLKEY]) {
     const list = read(key, []);
     if (Array.isArray(list)) write(key, list.filter((x) => !mine(x)));
   }
@@ -874,6 +906,7 @@ export function exportAll() {
     water: listWater(),
     coffee: listCoffee(),
     reaction: listReaction(),
+    plans: listPlans(),
     cardio: listCardio(),
     /* Filed assessments travel with everything else.
      *
@@ -909,7 +942,7 @@ export function importAll(data) {
   const report = { profilesAdded: 0, profilesUpdated: 0, sessionsAdded: 0,
                    sessionAdopted: false, mealsAdded: 0, diaryAdded: 0,
                    weightsAdded: 0, cycleAdded: 0, sleepAdded: 0, vitalsAdded: 0,
-                   waterAdded: 0, coffeeAdded: 0, reactionAdded: 0, cardioAdded: 0, assessmentsAdded: 0,
+                   waterAdded: 0, coffeeAdded: 0, reactionAdded: 0, plansAdded: 0, cardioAdded: 0, assessmentsAdded: 0,
                    ledgerAdded: 0, recordsUpdated: 0, recordsRemoved: 0 };
   report.assessmentsAdded = importAssessments(data.assessments);
 
@@ -999,6 +1032,7 @@ export function importAll(data) {
     ...DRINK_KINDS.map((k) => [k, DRINK_KEY[k], () => listDrink(k), DRINK_MAX, k + "Added"]),
     ["cardio", CDKEY, listCardio, CARDIO_MAX, "cardioAdded"],
     ["reaction", RXKEY, listReaction, REACTION_MAX, "reactionAdded"],
+    ["plans", PLKEY, listPlans, PLANS_MAX, "plansAdded"],
   ];
   for (const [kind, key, list, max, field] of stores) {
     const r = merge(kind, list(), data[kind]);
