@@ -127,5 +127,103 @@ function reps(n, depth = 0.38, down = 12, up = 12, hold = 8) {
   ok(!(r.qualityNotes || []).some((n) => n.code === "bodyLine"), "a straight body is not flagged");
 }
 
+
+/* --- front-on and angled -------------------------------------------------
+ * Bas filmed from the front / at an angle (2026-09-11) and got refusals and
+ * dropped reps: the old rule wanted the shoulder-hip line flat in the picture
+ * and the elbow folding in the picture, and from the front neither happens.
+ * So: a body in 3-D, in metres, seen through a pinhole camera placed in front
+ * of the head (theta = 0), at 45 degrees, or side-on (90). */
+function clip3d(drops, { theta = 0, camH = 0.30, camDist = 1.1, stand = 0 } = {}) {
+  const Hm = 1.80, Tm = 0.288 * Hm, LEGm = 0.50 * Hm, UA = 0.186 * Hm, FA = 0.146 * Hm;
+  const f = 900, cx = 640, cy = 360;
+  const th = (theta * Math.PI) / 180;
+  // Body frame: z runs from the hands (0) toward the feet, y up, x lateral.
+  // Rotated about the vertical axis through the hands, then seen along +z
+  // from (0, camH, -camDist).
+  const view = ([x, y, z]) => {
+    const xr = x * Math.cos(th) + z * Math.sin(th), zr = -x * Math.sin(th) + z * Math.cos(th);
+    const d = zr + camDist;
+    return [cx + (f * xr) / d, cy - (f * (y - camH)) / d];
+  };
+  const lockH = (UA + FA) * 0.97;
+  const len = LEGm + Tm;
+  const frames = [];
+  const P = (name, side, pt) => [`${side}_${name}`, view(pt)];
+  const both = (fn) => { const o = {}; for (const sd of ["left", "right"]) Object.assign(o, fn(sd, sd === "left" ? -1 : 1)); return o; };
+  for (let i = 0; i < stand; i++) {
+    const z = 0.9;
+    frames.push({ nose: view([0, 1.64, 0.8]), ...both((sd, L) => Object.fromEntries([
+      P("shoulder", sd, [L * 0.2, 1.46, z]), P("elbow", sd, [L * 0.22, 1.12, z]),
+      P("wrist", sd, [L * 0.22, 0.86, z]), P("hip", sd, [L * 0.1, 0.95, z]),
+      P("knee", sd, [L * 0.1, 0.5, z]), P("ankle", sd, [L * 0.1, 0.08, z]),
+      P("heel", sd, [L * 0.1, 0.03, z + 0.05]), P("foot_index", sd, [L * 0.1, 0.02, z - 0.12]),
+      P("ear", sd, [L * 0.07, 1.66, z])])) });
+  }
+  // Shoulders over the hands at lockout; the toes stay put.
+  const toeZ = Math.sqrt(len * len - lockH * lockH);
+  for (const dd of drops) {
+    const h = lockH - dd * Tm;
+    const ang = Math.asin(Math.min(0.99, h / len));
+    const sh = [toeZ - len * Math.cos(ang), h], toe = [toeZ, 0];
+    const fr = LEGm / len;
+    const hip = [toe[0] + fr * (sh[0] - toe[0]), toe[1] + fr * (sh[1] - toe[1])];
+    const knee = [(hip[0] + toe[0]) / 2, (hip[1] + toe[1]) / 2];
+    const wr = [0, 0.02];
+    // Elbow by two-link geometry, tucked: bent back toward the feet.
+    const dz = wr[0] - sh[0], dy = wr[1] - sh[1], dist = Math.hypot(dz, dy);
+    const a = (UA * UA - FA * FA + dist * dist) / (2 * dist);
+    const hh = Math.sqrt(Math.max(0, UA * UA - a * a));
+    const bz = sh[0] + (a * dz) / dist, by = sh[1] + (a * dy) / dist;
+    const e1 = [bz - (hh * dy) / dist, by + (hh * dz) / dist];
+    const e2 = [bz + (hh * dy) / dist, by - (hh * dz) / dist];
+    const el = e1[0] > e2[0] ? e1 : e2;
+    frames.push({ nose: view([0, h + 0.1, sh[0] - 0.2]), ...both((sd, L) => {
+      const pt = (lat, [z, y]) => [L * lat, y, z];
+      return Object.fromEntries([
+        P("shoulder", sd, pt(0.2, sh)), P("elbow", sd, pt(0.2, el)), P("wrist", sd, pt(0.2, wr)),
+        P("hip", sd, pt(0.1, hip)), P("knee", sd, pt(0.1, knee)), P("ankle", sd, pt(0.1, [toe[0], 0.08])),
+        P("heel", sd, pt(0.1, [toe[0] + 0.03, 0.1])), P("foot_index", sd, pt(0.1, [toe[0] - 0.02, 0])),
+        P("ear", sd, pt(0.07, [sh[0] - 0.12, h + 0.12]))]);
+    }) });
+  }
+  const poses = {};
+  frames.forEach((p, i) => { poses[i] = p; });
+  return poses;
+}
+
+for (const theta of [0, 45, 90]) {
+  const res = analyse(clip3d(reps(5)), 30, { activity: "pushup", heightM: 1.8 });
+  ok(res.reps.length === 5, `filmed at ${theta} deg: five push-ups are five reps`,
+     `found ${res.reps.length}${res.refused ? " (" + res.refused + ")" : ""}`);
+  const r = res.reps[0];
+  ok(r && r.depth_m > 0.12 && r.depth_m < 0.5, `  and the depth is a plausible shoulder travel`,
+     r && `${r.depth_m} m`);
+}
+{
+  const res = analyse(clip3d(reps(5), { theta: 0 }), 30, { activity: "pushup", heightM: 1.8 });
+  ok(res.reps[0] && res.reps[0].body_bend_deg == null,
+     "front-on, the body-line angle is left out rather than read as a sag",
+     String(res.reps[0]?.body_bend_deg));
+}
+{
+  // Standing in front of the phone for three seconds before getting down.
+  const res = analyse(clip3d(reps(5), { theta: 0, stand: 90 }), 30, { activity: "pushup", heightM: 1.8 });
+  ok(res.reps.length === 5, "walking into position first does not refuse the clip or add reps",
+     `found ${res.reps.length}${res.refused ? " (" + res.refused + ")" : ""}`);
+}
+{
+  const out = findPushupReps(buildPushupFeatures(clip3d(reps(4, 0.05), { theta: 0 })));
+  ok(out.reps.length === 0, "front-on, wobbling in a plank is still not push-ups");
+}
+{
+  // Live: every other frame.
+  const P = clip3d(reps(5), { theta: 45 });
+  const half = {};
+  Object.keys(P).map(Number).filter((k) => k % 2 === 0).forEach((k, i) => { half[i] = P[k]; });
+  const res = analyse(half, 15, { activity: "pushup", heightM: 1.8 });
+  ok(res.reps.length === 5, "at 15 fps the five are still five", `${res.reps.length}`);
+}
+
 console.log(bad ? `\n${bad} check(s) failed` : "\nAll checks passed");
 process.exit(bad ? 1 : 0);

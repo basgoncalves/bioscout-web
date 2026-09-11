@@ -398,42 +398,159 @@ export function findDipReps(F, cfg = DEFAULT_DIP_CFG) {
  * velocities and depth are what the camera can say here. */
 export const DEFAULT_PUSHUP_CFG = {
   ...DEFAULT_DIP_CFG,
-  // Lying down the shoulders travel less of a torso length than in a dip.
-  minDropFrac: 0.15,
-  minRepFrames: 10,
+  /* Everything below is in fractions of BODY HEIGHT in pixels (F._hpx), not
+   * of the torso's vertical extent.
+   *
+   * The first version borrowed the dip's scale -- the vertical gap between
+   * shoulders and hips -- which for a body lying down is a few centimetres and
+   * changes through the rep, so every threshold meant something different in
+   * every clip. It also asked for the shoulder-hip line to lie flat in the
+   * picture, which from the front or at an angle it never does, and for the
+   * elbow to fold in the picture, which from the front (elbows bending back,
+   * toward the feet) it barely does. Filmed front-on or angled, a clip was
+   * refused or its reps dropped (Bas, 2026-09-11). */
+  // Shoulders lowered by at least this much (~11 cm for 1.8 m). A full push-up
+  // moves them 0.15-0.2 of height; a shallow one is counted and reported.
+  minDropFrac: 0.06,
+  minRepS: 0.5,
   minElbowFlexionDeg: 35,
-  // The shoulder-hip line at least this far from vertical, for this much of
-  // the clip. A plank is ~80-90 deg; an incline push-up against a bench is
-  // still well past 45.
-  minTrunkDeg: 50,
-  minLyingFrac: 0.6,
+  // ...or, where the elbow cannot be read, the shoulders close at least this
+  // fraction of their height above the hands.
+  minArmShortening: 0.25,
+  // The hands stay on the floor: they may move at most this fraction of what
+  // the shoulders moved. A curl, a squat holding something, waving -- the
+  // hands move there, and none of them is a push-up.
+  maxHandTravel: 0.6,
+  // Refused only when the body is clearly UPRIGHT (hips well below the
+  // shoulders, the trunk near vertical) for most of the clip -- a dip, or
+  // standing -- rather than required to look flat in the picture.
+  uprightTrunkDeg: 35,
+  uprightHipFrac: 0.2,
+  maxUprightFrac: 0.5,
 };
 
-export const buildPushupFeatures = buildDipFeatures;
-
-/** Reps of a push-up: lockout, bottom, lockout -- refused when the body is
- *  not lying down. */
-export function findPushupReps(F, cfg = DEFAULT_PUSHUP_CFG) {
-  const trunk = F.trunk || [];
-  const seen = trunk.filter(isNum);
-  const lying = seen.length ? seen.filter((v) => v >= cfg.minTrunkDeg).length / seen.length : 0;
-  if (lying < cfg.minLyingFrac) {
-    return { reps: [], drop: smooth(interpNan(F.drop), cfg.smoothWin), refused: "notLying" };
+/* Body height in pixels from whichever segments the camera sees least
+ * foreshortened: the median length of each over the clip, divided by its
+ * share of height, and the largest of those. Side-on that is the trunk or a
+ * leg; front-on the shoulder width or the upper arm, which a side view
+ * squashes to nothing. */
+const SHOULDER_WIDTH_FRAC = 0.23;
+function bodyHeightPx(poses, minFrames = 3) {
+  const segs = { ...SEGMENT_PAIRS, shoulders: [["left_shoulder", "right_shoulder"]] };
+  const frac = { ...DEFAULT_FRACTIONS, shoulders: SHOULDER_WIDTH_FRAC };
+  let best = NaN;
+  for (const [seg, pairs] of Object.entries(segs)) {
+    const L = [];
+    for (const lm of Object.values(poses)) {
+      let m = NaN;
+      for (const [a, b] of pairs) { const v = segLen(lm, a, b); if (isNum(v) && !(v <= m)) m = v; }
+      if (isNum(m)) L.push(m);
+    }
+    if (L.length < minFrames) continue;
+    const est = nanmedian(L) / frac[seg];
+    if (isNum(est) && !(est <= best)) best = est;
   }
-  const r = findDipReps(F, cfg);
-  return { ...r, refused: r.reps.length ? null : (r.refused === "handsOverhead" ? r.refused : "noPushups") };
+  return best;
 }
 
-/** Push-up extras for one rep: shoulder travel (the depth) and how far the
- *  body bent away from a straight line at the hip -- sagging or piking. */
-export function pushupMetrics(F, b, pxPerM) {
+export function buildPushupFeatures(poses) {
+  const F = buildDipFeatures(poses);
+  const hpx = bodyHeightPx(poses);
+  F._hpx = hpx > 1e-6 ? hpx : F._scale / DEFAULT_FRACTIONS.trunk;
+  // Upright: trunk near vertical in the picture AND the hips well below the
+  // shoulders. Both, because front-on a lying body's trunk also reads near
+  // vertical -- but there the hips are hidden behind the shoulders, level
+  // with them, not a torso below.
+  // Against the body's size in THAT frame, since walking up to the phone or
+  // away from it changes how many pixels a metre is.
+  const frames = Object.keys(poses).map(Number);
+  const hpxAt = new Array(F._n).fill(NaN);
+  for (const fi of frames) hpxAt[fi - F._lo] = bodyHeightPx({ 0: poses[fi] }, 1);
+  F.upright = F.trunk.map((t, i) => {
+    const h = F.hip_cy[i], sh = F.shoulder_cy[i], H = hpxAt[i];
+    if (!isNum(t) || !isNum(h) || !isNum(sh) || !(H > 0)) return NaN;
+    return t < DEFAULT_PUSHUP_CFG.uprightTrunkDeg
+      && (h - sh) / H > DEFAULT_PUSHUP_CFG.uprightHipFrac ? 1 : 0;
+  });
+  return F;
+}
+
+/** Reps of a push-up: lockout, bottom, lockout. Works side-on, front-on and
+ *  in between; refused when the body is upright for most of the clip. */
+export function findPushupReps(F, cfg = DEFAULT_PUSHUP_CFG) {
+  const c = { ...DEFAULT_PUSHUP_CFG, ...cfg };
+  const n = F._n, fps = F._fps || 30, H = F._hpx || F._scale;
+  const up = F.upright || [];
+  const seen = up.filter(isNum);
+  const uprightFrac = seen.length ? seen.filter((v) => v === 1).length / seen.length : 0;
+  const shY = interpNan(F.shoulder_cy);
+  if (uprightFrac > c.maxUprightFrac) {
+    return { reps: [], drop: shY.map(() => 0), refused: "notLying" };
+  }
+  // Lockout from the frames that are not upright, so walking into position,
+  // kneeling down or standing up afterwards does not set it.
+  const down = shY.filter((y, i) => isNum(y) && up[i] !== 1);
+  const lockY = nanpercentile(down, 10);
+  const drop = smooth(shY.map((y, i) => (up[i] === 1 || !isNum(y) ? 0 : (y - lockY) / H)),
+                      c.smoothWin);
+  const elbow = interpNan(F.elbow);
+  const wr = interpNan(F.wrist_cy);
+  const gap = shY.map((y, i) => wr[i] - y);                 // shoulders above the hands
+  const minFrames = Math.max(4, Math.round(c.minRepS * fps));
+
+  const bottoms = localMaxima(drop, minFrames, c.minDropFrac);
+  const reps = [];
+  for (let k = 0; k < bottoms.length; k++) {
+    const bot = bottoms[k];
+    let left = k > 0 ? bottoms[k - 1] : 0;
+    let right = k < bottoms.length - 1 ? bottoms[k + 1] : n - 1;
+    // Not across upright frames: the lockout either side of a rep is in the
+    // plank, not back where the athlete stood before getting down.
+    for (let i = bot; i >= left; i--) if (up[i] === 1) { left = i + 1; break; }
+    for (let i = bot; i <= right; i++) if (up[i] === 1) { right = i - 1; break; }
+    const b0 = bot > left ? argmin(drop, left, bot) : left;
+    const b1 = right > bot ? argmin(drop, bot, right) : right;
+    if ((b1 - b0) < minFrames || (bot - b0) < 2 || (b1 - bot) < 2) continue;
+    // It has to come back up: a lowering to the floor at the end of a set is
+    // not a rep.
+    const travel = drop[bot] - Math.max(drop[b0], drop[b1]);
+    if (travel < c.minDropFrac * 0.6) continue;
+    // The arms did it: the elbow folded, or the shoulders closed on the hands.
+    const straight = Math.max(elbow[b0], elbow[b1]), bent = elbow[bot];
+    const folded = isNum(straight) && isNum(bent) && (straight - bent) >= c.minElbowFlexionDeg;
+    const g0 = Math.max(gap[b0], gap[b1]), gb = gap[bot];
+    const closed = isNum(g0) && isNum(gb) && g0 > 0 && (g0 - gb) / g0 >= c.minArmShortening;
+    if (!folded && !closed) continue;
+    // ...with the hands staying where they were.
+    let wLo = Infinity, wHi = -Infinity, sLo = Infinity, sHi = -Infinity;
+    for (let i = b0; i <= b1; i++) {
+      if (isNum(wr[i])) { wLo = Math.min(wLo, wr[i]); wHi = Math.max(wHi, wr[i]); }
+      if (isNum(shY[i])) { sLo = Math.min(sLo, shY[i]); sHi = Math.max(sHi, shY[i]); }
+    }
+    if (isFinite(wHi) && isFinite(sHi) && (wHi - wLo) > c.maxHandTravel * (sHi - sLo)) continue;
+    reps.push([b0, bot, b1]);
+  }
+  return { reps, drop, refused: reps.length ? null : "noPushups" };
+}
+
+/** Push-up extras for one rep: shoulder travel (the depth) and, side-on only,
+ *  how far the body bent away from a straight line at the hip -- sagging or
+ *  piking. Front-on the shoulder-hip-knee angle in the picture is not that
+ *  angle, so it is left out rather than flagged as a sag. */
+export function pushupMetrics(F, b, pxPerM, { heightM = null, sideOn = true } = {}) {
   const [b0, , b1] = b;
   const sh = interpNan(F.shoulder_cy).slice(b0, b1 + 1).filter(isNum);
   const hip = interpNan(F.hip).slice(b0, b1 + 1).filter(isNum);
+  const travel = sh.length ? Math.max(...sh) - Math.min(...sh) : NaN;
+  // Metres from body height when it is known: the per-segment scale shrinks
+  // with every foreshortened segment, body height from the longest does not.
+  const depth = !isNum(travel) ? null
+    : heightM > 0 && F._hpx > 0 ? (travel / F._hpx) * heightM
+    : pxPerM > 0 ? travel / pxPerM : null;
   return {
-    depth_m: sh.length && pxPerM > 0 ? +((Math.max(...sh) - Math.min(...sh)) / pxPerM).toFixed(3) : null,
+    depth_m: depth != null ? +depth.toFixed(3) : null,
     // F.hip is the included shoulder-hip-knee angle: 180 is a straight body.
-    body_bend_deg: hip.length ? +(180 - Math.min(...hip)).toFixed(1) : null,
+    body_bend_deg: sideOn && hip.length ? +(180 - Math.min(...hip)).toFixed(1) : null,
   };
 }
 
@@ -2835,7 +2952,8 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       s.elbow_clipped = rawElbow.length
         ? Math.max(...rawElbow) > capped + 0.5 : false;
       s.arm_flex_range_deg = Math.max(...coords.arm_flex_r) - Math.min(...coords.arm_flex_r);
-      if (activity === "pushup") Object.assign(s, pushupMetrics(F, b, pxPerM));
+      if (activity === "pushup") Object.assign(s, pushupMetrics(F, b, pxPerM,
+        { heightM, sideOn: view.view !== "frontal" }));
     }
     if (coords.pelvis_ty) {
       s.pelvis_travel_m = Math.max(...coords.pelvis_ty) - Math.min(...coords.pelvis_ty);
