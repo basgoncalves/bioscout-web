@@ -3263,6 +3263,9 @@ $("restPill").onclick = () => {
   $("restCard").scrollIntoView({ behavior: "smooth", block: "center" });
 };
 document.addEventListener("visibilitychange", () => { if (!document.hidden) paintRest(); });
+/* Closing the tab, or the phone dropping the page out of memory: let the
+ * camera go rather than leaving the track to the browser's own clean-up. */
+window.addEventListener("pagehide", () => { if (stream) stopCamera(); });
 $("activity").addEventListener("change", () => renderPlanNow());
 restSync();          // a countdown still running from before a reload carries on
 
@@ -3744,7 +3747,23 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
  * recorder closes BioScout, which is the single most annoying thing a web app
  * can do on Android. `push` is false when we are REACTING to a back, or the
  * two would fight. */
+/* Leaving the recorder closes the camera. Always.
+ *
+ * Nothing else in the app switched it off, so walking back to the dashboard
+ * mid-session left the lens live behind the page: the indicator light on,
+ * the phone warming, and the next app that asked for the camera finding it
+ * busy (Bas, 2026-09-13). A take in progress is stopped and analysed first --
+ * closing the camera under it would throw away the set that was just done --
+ * and a scripted session waits for a tap rather than starting takes at an
+ * empty room. */
+function leaveRecorder() {
+  if (recording) { try { $("recBtn").click(); } catch { /* mid-stop already */ } }
+  if (proto && !proto.summary) proto.nextAt = null;
+  if (stream || running) stopCamera();
+}
+
 function showView(id, push = true) {
+  if (id !== "viewRecord") leaveRecorder();
   if (id !== "viewRecord" && assessStep) exitAssessMode();
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
   $("navBar").classList.toggle("hidden", id === "viewLogin" || id === "viewDash");
