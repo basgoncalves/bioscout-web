@@ -564,6 +564,18 @@ try {
   .pill { background:rgba(0,0,0,.5); padding:4px 9px; border-radius:999px;
           backdrop-filter:blur(6px); }
   .rec { color:#ff5a5a; }
+  /* The scripted-session overlay: top left, over the video. */
+  .protoHud { position:absolute; left:10px; top:40px; right:10px; display:flex;
+              align-items:center; gap:12px; pointer-events:none; color:#fff;
+              text-shadow:0 2px 6px rgba(0,0,0,.85); }
+  .protoHudBox { background:rgba(0,0,0,.55); border-radius:14px; padding:6px 10px 8px;
+                 min-width:78px; text-align:center; backdrop-filter:blur(6px); }
+  .protoHudCount { font-size:46px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; }
+  .protoHudBox.done { background:rgba(45,112,108,.75); }
+  .protoHudOf { font-size:13px; font-weight:600; opacity:.85; margin-top:2px; }
+  .protoHudAct { font-size:30px; font-weight:800; line-height:1.05; text-transform:uppercase;
+                 letter-spacing:.5px; min-width:0; }
+  @media (max-width:380px) { .protoHudCount { font-size:38px; } .protoHudAct { font-size:24px; } }
   .status { font-size:13px; color:var(--muted); margin-top:10px; min-height:19px; }
   table { width:100%; border-collapse:collapse; font-size:14px; }
   th,td { text-align:right; padding:7px 4px; border-bottom:1px solid var(--line); }
@@ -1027,6 +1039,14 @@ try {
     <div class="hud">
       <span class="pill" id="hudLeft" data-i18n="hudStandingBy">standing by</span>
       <span class="pill" id="hudRight"></span>
+    </div>
+    <!-- A scripted session, over the picture itself: the count in the corner
+         and the movement in big letters. Read from across the room, with a
+         pulse rate of 180 and the phone on the floor. -->
+    <div class="protoHud hidden" id="protoHud">
+      <div class="protoHudBox"><div class="protoHudCount" id="protoHudCount">0</div>
+        <div class="protoHudOf" id="protoHudOf"></div></div>
+      <div class="protoHudAct" id="protoHudAct"></div>
     </div>
   </div>
 
@@ -3306,6 +3326,7 @@ let protoTimer = null;
 function protoExit() {
   clearInterval(protoTimer); protoTimer = null;
   proto = null;
+  $("protoHud").classList.add("hidden");
   $("activity").disabled = false;
   $("protoBanner").classList.add("hidden");
   renderTraining();
@@ -3361,10 +3382,17 @@ function protoTick() {
   const now = Date.now();
   if (recording) {
     if (proto.kind === "tabata") {
+      if (now - (proto.countedAt || 0) >= 900) {
+        proto.countedAt = now;
+        proto.reps = liveReps({ activity: proto.activity });
+      }
       if (proto.workEnd && now >= proto.workEnd) { protoBeeps(1); $("recBtn").click(); }
     } else {
       const need = circuitAt(proto.done).step.reps;
-      const got = liveReps({ activity: proto.activity });
+      // Counting is a full pass over the frames, so once a second, not twice.
+      const got = now - (proto.countedAt || 0) >= 900
+        ? (proto.countedAt = now, proto.reps = liveReps({ activity: proto.activity }))
+        : (proto.reps || 0);
       /* One extra tick after the count lands: a rep is only counted at its
        * peak, so cutting there drops the one just counted. */
       if (got >= need) proto.grace = proto.grace == null ? 1 : proto.grace - 1;
@@ -3386,7 +3414,26 @@ function protoTick() {
 const PROTO_ICON = `<svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" fill="currentColor">
   <circle cx="12" cy="5.2" r="3.2"/><path d="M12 9.2c-3.4 0-6 2.2-6 5.1V21h3v-5h6v5h3v-6.7c0-2.9-2.6-5.1-6-5.1z"/></svg>`;
 
+/** The overlay on the picture: how many reps are counted, of how many, and
+ *  which movement -- the only three things worth reading mid-set. */
+function protoHud() {
+  const hud = $("protoHud");
+  if (!hud) return;
+  const show = !!proto && !proto.summary && recording;
+  hud.classList.toggle("hidden", !show);
+  if (!show) return;
+  const th = proto.kind === "tomholland";
+  const need = th ? circuitAt(proto.done).step.reps : null;
+  const got = proto.reps || 0;
+  $("protoHudCount").textContent = String(got);
+  $("protoHudCount").parentElement.classList.toggle("done", need != null && got >= need);
+  $("protoHudOf").textContent = need != null ? tr("protoHudOf", { n: need })
+    : fmtTime(proto.workEnd ? (proto.workEnd - Date.now()) / 1000 : PROTOCOLS.tabata.workS);
+  $("protoHudAct").textContent = tr(proto.activity);
+}
+
 function protoPaint() {
+  protoHud();
   const box = $("protoBanner");
   if (!proto) { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
