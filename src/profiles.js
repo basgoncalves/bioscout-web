@@ -13,6 +13,7 @@
  * whatever sets are still in memory in full, and older ones as summaries.
  */
 import { UNITS } from "./foods.js";
+import { cleanEffort } from "./energy.js";
 import { groupPeaks } from "./muscle_groups.js";
 import { listAssessments, importAssessments, eraseAssessments } from "./assess.js";
 import { DRINKS, DRINK_KINDS } from "./water.js";
@@ -1158,6 +1159,54 @@ export function setRepRemoved(sessionStarted, setIndex, rep, removed = true) {
     write(CKEY, store);
   }
   return set;
+}
+
+/**
+ * How hard a set was, and what the heart was doing: {rpe, hr}.
+ *
+ * Written onto the stored set, next to `made` and for the same reason -- the
+ * analysis in memory is gone the moment another set is opened, and an answer
+ * given during the rest between sets has to survive that. Either field may be
+ * null ("not said"); passing null for both clears the answer, so a mis-tap is
+ * undoable and never becomes permanent data. A number out of range is dropped
+ * rather than stored, because energy.js would otherwise be asked to price a
+ * heart rate of 7.
+ *
+ * Works on the open session and on archived ones, like setRepRemoved.
+ */
+export function setSetEffort(sessionStarted, setIndex, effort) {
+  const live = getSession();
+  let sess = live && live.started === sessionStarted ? live : null;
+  let arch = null;
+  if (!sess) {
+    arch = listArchive();
+    sess = arch.find((x) => x.started === sessionStarted) || null;
+  }
+  const set = sess && sess.sets.find((x) => x.index === setIndex);
+  if (!set) return null;
+  const e = cleanEffort(effort);
+  if (e) set.effort = e; else delete set.effort;
+  sess.u = stamp();
+  if (!(arch ? writeKeep(AKEY, arch) : writeKeep(SKEY, sess))) return null;
+  return set;
+}
+
+/** The one answer for a whole session, used for any set that has none of its
+ *  own (the "ask once, at the end" setting). Stored on the session. */
+export function setSessionEffort(sessionStarted, effort) {
+  const live = getSession();
+  let sess = live && live.started === sessionStarted ? live : null;
+  let arch = null;
+  if (!sess) {
+    arch = listArchive();
+    sess = arch.find((x) => x.started === sessionStarted) || null;
+  }
+  if (!sess) return null;
+  const e = cleanEffort(effort);
+  if (e) sess.effort = e; else delete sess.effort;
+  sess.u = stamp();
+  if (!(arch ? writeKeep(AKEY, arch) : writeKeep(SKEY, sess))) return null;
+  return sess;
 }
 
 /** Now, moved onto the session's calendar day. Same clock time, so the sets of

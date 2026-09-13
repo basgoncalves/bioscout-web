@@ -754,6 +754,61 @@ function drinkHTML(kind, hit) {
   </div>`;
 }
 
+/**
+ * The energy box: what the day's training cost and what the day's intake
+ * should therefore look like.
+ *
+ * Everything here arrives pre-computed in `e` (index.html does the sums with
+ * energy.js), because the estimate needs the athlete -- mass, height, age, the
+ * effort answers -- and none of that belongs in a render function. What this
+ * does own is saying which rung of the ladder the number came from, every
+ * time: a figure from a heart rate and a figure from a table of METs are the
+ * same size on screen and are not the same claim.
+ */
+function energyHTML(e, key) {
+  if (!e) return "";
+  const rows = (e.sessions || []).map((x) => `<tr>
+      <td>${esc(x.time)}</td><td>${esc(x.what)}</td>
+      <td>${esc(fmtDuration(x.seconds))}</td>
+      <td style="text-align:right">${esc(x.kcal)}</td>
+      <td>${esc(tr("energyFrom_" + x.method))}${x.mixed ? "*" : ""}</td></tr>`).join("");
+  const m = e.macros;
+  const macroBlock = m ? `
+    <div style="font-weight:600;margin-top:14px">${esc(tr("macroTitle"))}</div>
+    <p class="sub" style="margin:2px 0 8px">${esc(tr("macroSub", {
+      kcal: m.kcalText ?? m.kcal, goal: tr("goal_" + m.goal) }))}</p>
+    <table><thead><tr><th>${esc(tr("macro"))}</th>
+      <th style="text-align:right">${esc(tr("grams"))}</th>
+      <th style="text-align:right">${esc(tr("kcal"))}</th></tr></thead><tbody>
+      <tr><td>${esc(tr("macroProtein"))}</td><td style="text-align:right">${m.protein_g} g</td>
+        <td style="text-align:right">${Math.round(m.protein_g * 4)}</td></tr>
+      <tr><td>${esc(tr("macroCarb"))}</td><td style="text-align:right">${m.carb_g} g</td>
+        <td style="text-align:right">${Math.round(m.carb_g * 4)}</td></tr>
+      <tr><td>${esc(tr("macroFat"))}</td><td style="text-align:right">${m.fat_g} g</td>
+        <td style="text-align:right">${Math.round(m.fat_g * 9)}</td></tr>
+    </tbody></table>
+    ${e.eaten != null ? `<p class="sub" style="margin:6px 0 0">${esc(tr("macroVsEaten", {
+        eaten: e.eaten, left: m.leftText ?? Math.max(0, m.kcal - e.eaten) }))}</p>` : ""}` : "";
+
+  return `<div class="daybox" id="energyBox">
+    <div style="font-weight:600">${esc(tr("energyTitle"))}</div>
+    ${rows ? `
+      <p class="sub" style="margin:2px 0 8px">${esc(tr("energyDaySub", {
+        kcal: e.trainingKcal, net: e.trainingNet ?? "—" }))}</p>
+      <table><thead><tr><th>${esc(tr("time"))}</th><th>${esc(tr("movement"))}</th>
+        <th>${esc(tr("duration"))}</th><th style="text-align:right">${esc(tr("kcal"))}</th>
+        <th>${esc(tr("energyBasis"))}</th></tr></thead><tbody>${rows}</tbody></table>`
+      : `<p class="sub" style="margin:6px 0 0">${esc(tr("energyNoTraining"))}</p>`}
+    ${e.needs ? `<p class="sub" style="margin:6px 0 0">${esc(tr("energyNeeds"))}</p>` : ""}
+    ${e.dayTotal != null ? `<p class="sub" style="margin:6px 0 0">${esc(tr("energyDayTotal", {
+        kcal: e.dayTotal, bmr: e.bmr, base: e.base }))}</p>` : ""}
+    ${macroBlock}
+    <button type="button" class="ghost" id="energySetupBtn" style="margin-top:10px">${
+      esc(tr("energySetup"))}</button>
+    <p class="note">${esc(tr("energyNote"))}</p>
+  </div>`;
+}
+
 function mealsHTML(day, key, todayKey, water = null, coffee = null) {
   const rows = (day?.meals || []).map((m) => {
     const t = new Date(m.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -1476,6 +1531,7 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
               reactionLinesHTML(view.reaction || [], view.selected, today),
               { todayKey, plans: planProgress(plansOn(view.plans || [], view.selected),
                                               days.get(view.selected)?.sets || []) })}
+    ${energyHTML(view.energy || null, view.selected)}
     ${mealsHTML(mealDays.get(view.selected), view.selected, todayKey, waterDays.get(view.selected),
                 coffeeDays.get(view.selected))}
     ${diaryHTML(diaryDays.get(view.selected), view.selected, todayKey,

@@ -914,6 +914,39 @@ try {
       <button class="ghost" id="trimAll" style="margin-top:8px" data-i18n="trimWhole">Use the whole clip</button>
       <button class="ghost" id="trimCancel" style="margin-top:8px" data-i18n="cancel">Cancel</button>
     </dialog>
+
+    <!-- Energy setup: when to ask how hard a set was, how active the rest of
+         the day is, and what the athlete wants their body mass to do. The
+         activity factor covers the day AROUND the training, because the
+         training itself is counted from the session -- picking "very active"
+         here as well is the double count that makes a calorie target
+         hundreds of kilocalories too generous. -->
+    <dialog id="energyDlg">
+      <h2 style="font-size:16px;margin:0 0 2px" data-i18n="energySetup">Energy &amp; nutrition</h2>
+      <p class="sub" style="margin:0 0 10px" data-i18n="energySetupSub">How the calorie estimate is made, and what it is turned into.</p>
+      <label for="energyMode" data-i18n="effortAsk">Ask how hard each set was</label>
+      <select id="energyMode">
+        <option value="off" data-i18n="effortAsk_off">Never</option>
+        <option value="set" data-i18n="effortAsk_set">After each set, on the rest timer</option>
+        <option value="session" data-i18n="effortAsk_session">Once, at the end of the session</option>
+      </select>
+      <label for="energyActivity" style="margin-top:10px;display:block" data-i18n="energyActivityLabel">The rest of the day (not the training)</label>
+      <select id="energyActivity">
+        <option value="sedentary" data-i18n="activity_sedentary">Sitting most of the day</option>
+        <option value="light" data-i18n="activity_light">On my feet now and then</option>
+        <option value="moderate" data-i18n="activity_moderate">On my feet most of the day</option>
+        <option value="active" data-i18n="activity_active">Physical job, always moving</option>
+      </select>
+      <label for="energyGoal" style="margin-top:10px;display:block" data-i18n="energyGoalLabel">Goal</label>
+      <select id="energyGoal">
+        <option value="lose" data-i18n="goal_lose">Lose mass (−15%)</option>
+        <option value="maintain" data-i18n="goal_maintain">Keep mass</option>
+        <option value="gain" data-i18n="goal_gain">Gain mass (+10%)</option>
+      </select>
+      <button id="energySave" style="margin-top:12px" data-i18n="save">Save</button>
+      <button class="ghost" id="energyClose" style="margin-top:8px" data-i18n="close">Close</button>
+      <p class="note" data-i18n="energySetupNote">Every figure here is an estimate from equations fitted on other people: Mifflin-St Jeor for resting metabolism, Keytel for heart rate, the Compendium of Physical Activities for everything else. Treat them as a starting point you correct against the scale, not as a measurement.</p>
+    </dialog>
   </section>
 
   <section id="viewReaction" class="hidden">
@@ -1094,6 +1127,25 @@ try {
       <button type="button" class="ghost" id="restPlus" style="margin:0">+15 s</button>
     </div>
     <button type="button" class="ghost" id="restReset" style="margin-top:8px" data-i18n="restReset">Reset</button>
+    <!-- How hard that set was. Shown only when the athlete has asked to be
+         asked (Energy setup -> after each set): the rest between sets is the
+         one moment in a session when the answer is both fresh and free, and
+         it is what lifts the calorie estimate off a table of MET values. Both
+         fields are optional and tapping the same rating twice clears it. -->
+    <div id="effortBox" style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px" hidden>
+      <div class="sub" id="effortFor" style="margin-bottom:6px"></div>
+      <div class="restPresets" id="rpeChips"></div>
+      <div class="row" style="margin-top:8px;align-items:center">
+        <input id="effortHr" type="number" inputmode="numeric" step="1" min="30" max="230"
+               style="margin:0" placeholder="bpm">
+        <button type="button" class="ghost" id="effortClear" style="margin:0;padding:9px"
+                data-i18n="effortClear">Clear</button>
+      </div>
+      <p class="note" style="margin:6px 0 0" data-i18n="effortNote">Optional. Rating of perceived
+        exertion (0 nothing, 10 maximal) and, if you counted or wore one, your heart rate at the
+        end of the set. Both make the calorie estimate less of a guess; neither makes it a
+        measurement.</p>
+    </div>
   </div>
   <button type="button" class="restPill" id="restPill" hidden></button>
 
@@ -1169,7 +1221,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 98;
+window.BUILD = 99;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1217,7 +1269,8 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          listCardio, mergeCardio, latestCardioAt,
          profileFoods, saveProfileFood,
          archiveSession, listArchive, exportAll, importAll,
-         saveCurves, getCurves, curveIndices, setRepOutcome, setRepRemoved, listLedger, eraseAthlete }
+         saveCurves, getCurves, curveIndices, setRepOutcome, setRepRemoved, setSetEffort,
+         setSessionEffort, listLedger, eraseAthlete }
        from "./src/profiles.js";
 import { achievements, repEvents, newlyEarned, repUnit } from "./src/achievements.js";
 import { plansOn, planProgress, nextPlanned, PLAN_ITEMS_MAX } from "./src/plans.js";
@@ -1225,6 +1278,9 @@ import { PROTOCOLS, TH_STEPS, TABATA_ACTIVITIES, isProtocol, circuitAt, timeLeft
          fmtTime, afterStep, protocolSummary } from "./src/protocol.js";
 import { REST_PRESETS, REST_DEFAULT, restTimer, restStart, restPause, restReset, restSet, restAdd,
          restLeft, restRunning, fmtClock } from "./src/resttimer.js";
+import { EFFORT_MODES, EFFORT_DEFAULT, RPE_MIN, RPE_MAX, GOALS, ACTIVITY_FACTORS,
+         ACTIVITY_DEFAULT, clampRpe, clampHr, cleanEffort, sessionEnergy, dayEnergy,
+         macroTargets, bmrKcalDay, fmtKcal } from "./src/energy.js";
 import { CLOUD } from "./src/cloud_config.js";
 import { makeChat } from "./src/chat.js";
 import { makeCloud, syncOnce, loadState as cloudState, saveState as saveCloudState,
@@ -3269,6 +3325,259 @@ window.addEventListener("pagehide", () => { if (stream) stopCamera(); });
 $("activity").addEventListener("change", () => renderPlanNow());
 restSync();          // a countdown still running from before a reload carries on
 
+/* ---- energy: what a session cost, and what to eat -------------------------
+ * The model is energy.js; this is the part that knows the athlete, keeps the
+ * two answers the athlete may give (RPE and heart rate), and decides when to
+ * ask for them.
+ *
+ * Nothing here is asked for by default. An app that opens a questionnaire
+ * after every set teaches people to dismiss it, and a dismissed RPE is worse
+ * than no RPE -- it looks like data. So the prompt is off until it is turned
+ * on, and the estimate says out loud which rung of the ladder it stood on.
+ */
+const ENERGY_KEY = "bioscout.energy.v1";
+const ENERGY_DEFAULTS = { mode: EFFORT_DEFAULT, goal: "maintain", activity: ACTIVITY_DEFAULT };
+let energyPrefs = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem(ENERGY_KEY) || "{}") || {};
+    return {
+      mode: EFFORT_MODES.includes(v.mode) ? v.mode : ENERGY_DEFAULTS.mode,
+      goal: GOALS.includes(v.goal) ? v.goal : ENERGY_DEFAULTS.goal,
+      activity: ACTIVITY_FACTORS[v.activity] ? v.activity : ENERGY_DEFAULTS.activity,
+    };
+  } catch { return { ...ENERGY_DEFAULTS }; }
+})();
+function saveEnergyPrefs() {
+  try { localStorage.setItem(ENERGY_KEY, JSON.stringify(energyPrefs)); } catch { /* per visit */ }
+}
+
+/* The profile's own labels, mapped onto the two the published equations were
+ * fitted on. "Non-binary" and blank both become "unspecified", which averages
+ * the two fits rather than picking one -- stated wherever the number shows. */
+const SEX_FOR_ENERGY = { F: "female", M: "male" };
+
+/** Mass, height, age and sex for the equations. Mass comes from the session's
+ *  own sets when it has any -- that is the mass the analysis actually used --
+ *  and from the profile otherwise. */
+function energyCtx(sess = null) {
+  const prof = getProfile(sess?.profile || currentAthlete()) || null;
+  const fromSets = (sess?.sets || []).find((x) => Number(x.massKg) > 0);
+  return {
+    massKg: Number(fromSets?.massKg) || Number(prof?.massKg) || null,
+    heightM: Number(prof?.heightM) || null,
+    ageY: ageFromDob(prof?.dob) ?? (prof?.ageY ?? null),
+    sex: SEX_FOR_ENERGY[prof?.sex] || "unspecified",
+  };
+}
+
+/** One session's energy, with whatever effort answers it carries. */
+function energyOf(sess) {
+  if (!sess || !sess.sets?.length) return null;
+  const effortBySet = {};
+  for (const set of sess.sets) if (set.effort) effortBySet[set.index] = set.effort;
+  return sessionEnergy(sess, energyCtx(sess), { effortBySet, sessionEffort: sess.effort || null });
+}
+
+/** The training on one calendar day, session by session, plus what the day as
+ *  a whole then needs. Fed to the dashboard's energy box. */
+function energyForDay(key) {
+  const sessions = dashboardData().filter((s) =>
+    (s.sets || []).some((x) => dayKey(x.at || s.started) === key));
+  const rows = [];
+  let kcal = 0, net = 0, haveNet = true;
+  for (const sess of sessions) {
+    const e = energyOf(sess);
+    if (!e || e.gross === null) continue;
+    kcal += e.gross;
+    if (e.net === null) haveNet = false; else net += e.net;
+    rows.push({
+      time: new Date(sess.started).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      what: sess.sport ? tr("sport_" + sess.sport)
+                       : [...new Set(sess.sets.map((x) => tr(x.activity)))].join(", "),
+      seconds: e.seconds, kcal: fmtKcal(e.gross), method: e.method, mixed: e.mixed,
+    });
+  }
+  const ctx = energyCtx();
+  const day = dayEnergy({ ctx, trainingKcal: kcal, activity: energyPrefs.activity });
+  const meals = collectMeals(myMeals()).get(key);
+  const macros = day ? macroTargets({ kcal: day.total, massKg: ctx.massKg, goal: energyPrefs.goal }) : null;
+  // Rounded the same way every other calorie figure on the page is: a target
+  // written as "2431 kcal" next to a total written as "2,430 kcal" reads as
+  // two different numbers, and only one of them is claiming precision.
+  if (macros) {
+    macros.kcalText = fmtKcal(macros.kcal);
+    macros.leftText = meals && meals.counted
+      ? fmtKcal(Math.max(0, macros.kcal - meals.kcal)) : null;
+  }
+  return {
+    sessions: rows,
+    trainingKcal: fmtKcal(kcal || null),
+    trainingNet: haveNet && kcal ? fmtKcal(net) : null,
+    dayTotal: day ? fmtKcal(day.total) : null,
+    bmr: day ? fmtKcal(day.bmr) : null,
+    base: day ? fmtKcal(day.base) : null,
+    /* What is missing, when something is: the equations need a height and a
+     * date of birth, and a day figure quietly absent is indistinguishable
+     * from one that is zero. */
+    needs: !day,
+    eaten: meals && meals.counted ? Math.round(meals.kcal) : null,
+    macros,
+  };
+}
+
+/* ---- the effort prompt ----------------------------------------------------
+ * Rating chips plus a heart-rate box, under the rest timer. `effortTarget`
+ * is the set being rated -- the last one recorded in the open session.
+ */
+let effortTarget = null;     // {started, index} or null
+
+function effortSetTarget() {
+  const sess = getSession();
+  const last = sess?.sets?.[sess.sets.length - 1];
+  effortTarget = last ? { started: sess.started, index: last.index } : null;
+}
+
+function effortCurrent() {
+  if (!effortTarget) return null;
+  const sess = getSession();
+  if (!sess || sess.started !== effortTarget.started) return null;
+  return sess.sets.find((x) => x.index === effortTarget.index) || null;
+}
+
+function paintEffort() {
+  const box = $("effortBox");
+  const set = energyPrefs.mode === "set" ? effortCurrent() : null;
+  box.hidden = !set;
+  if (!set) return;
+  const e = set.effort || {};
+  $("effortFor").textContent = tr("effortFor", { n: set.index, what: tr(set.activity) });
+  $("rpeChips").innerHTML = Array.from({ length: RPE_MAX - RPE_MIN + 1 }, (_, i) => {
+    const v = RPE_MIN + i;
+    return `<button type="button" class="chip rpeChip${e.rpe === v ? " on" : ""}" data-rpe="${v}">${v}</button>`;
+  }).join("");
+  $("rpeChips").querySelectorAll("button.rpeChip").forEach((b) => {
+    b.onclick = () => {
+      const v = +b.dataset.rpe;
+      // The same rating twice clears it: a mis-tap must be undoable, and a
+      // rating nobody meant to give is exactly the data this should not keep.
+      saveEffort({ rpe: e.rpe === v ? null : v, hr: e.hr ?? null });
+    };
+  });
+  $("effortHr").value = e.hr ?? "";
+}
+
+function saveEffort(next) {
+  if (!effortTarget) return;
+  setSetEffort(effortTarget.started, effortTarget.index, cleanEffort(next));
+  paintEffort();
+  renderDash();
+}
+
+$("effortHr").onchange = () => {
+  const set = effortCurrent();
+  if (!set) return;
+  const hr = clampHr($("effortHr").value);
+  if (hr === null && $("effortHr").value.trim() !== "") { say(tr("effortHrBad"), true); }
+  saveEffort({ rpe: set.effort?.rpe ?? null, hr });
+};
+$("effortClear").onclick = () => saveEffort(null);
+
+/* ---- the session's energy, on the summary and in the day view ------------ */
+
+/** The energy block for one session: the headline, what it is made of, and
+ *  -- when the athlete asked to be asked once -- the session rating itself. */
+function energySectionHTML(sess) {
+  const e = energyOf(sess);
+  if (!e || e.gross === null) return "";
+  const ask = energyPrefs.mode === "session";
+  const eff = sess.effort || {};
+  const chips = ask ? `
+    <div class="sub" style="margin:10px 0 6px">${esc(tr("effortSession"))}</div>
+    <div class="restPresets" id="sessRpeChips">${
+      Array.from({ length: RPE_MAX - RPE_MIN + 1 }, (_, i) => {
+        const v = RPE_MIN + i;
+        return `<button type="button" class="chip sessRpe${eff.rpe === v ? " on" : ""}" data-rpe="${v}">${v}</button>`;
+      }).join("")}</div>
+    <div class="row" style="margin-top:8px;align-items:center">
+      <input id="sessHr" type="number" inputmode="numeric" step="1" min="30" max="230"
+             style="margin:0" placeholder="bpm" value="${eff.hr ?? ""}">
+      <button type="button" class="ghost" id="sessEffortClear" style="margin:0;padding:9px">${
+        esc(tr("effortClear"))}</button>
+    </div>` : "";
+  const rows = e.perSet.filter((x) => x.kcal !== null).map((x) => `<tr>
+      <td>${esc(tr("setLabel", { n: x.index }))}</td><td>${esc(tr(x.activity))}</td>
+      <td>${Math.round(x.seconds)} s</td>
+      <td>${x.rpe ?? "—"}</td><td>${x.hr ?? "—"}</td>
+      <td style="text-align:right">${esc(fmtKcal(x.kcal))}</td></tr>`).join("");
+  return `
+    <h2 style="font-size:15px;margin:14px 0 4px">${esc(tr("energyTitle"))}</h2>
+    <p class="sub" style="margin-bottom:8px">${esc(tr("energySessionSub", {
+      kcal: fmtKcal(e.gross), net: e.net === null ? "—" : fmtKcal(e.net),
+      basis: tr("energyFrom_" + e.method),
+    }))}</p>
+    <table><thead><tr><th>${esc(tr("set"))}</th><th>${esc(tr("movement"))}</th>
+      <th>${esc(tr("duration"))}</th><th>RPE</th><th>${esc(tr("avgHrCol"))}</th>
+      <th style="text-align:right">${esc(tr("kcal"))}</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="sub" style="margin:6px 0 0">${esc(tr("energyBreakdown", {
+      work: fmtKcal(e.work_kcal), rec: fmtKcal(e.recovery_kcal),
+      mech: e.mechanical_kcal === null ? "—" : fmtKcal(e.mechanical_kcal),
+    }))}</p>
+    ${e.capped ? `<p class="sub" style="margin:4px 0 0">${esc(tr("energyCapped"))}</p>` : ""}
+    ${chips}
+    <p class="note">${esc(tr("energyNote"))}</p>`;
+}
+
+/** Wires the session-rating chips inside a card that energySectionHTML built. */
+function wireSessionEffort(card, sess, after) {
+  const save = (next) => {
+    setSessionEffort(sess.started, cleanEffort(next));
+    after();
+    renderDash();
+  };
+  card.querySelectorAll("button.sessRpe").forEach((b) => {
+    b.onclick = () => {
+      const v = +b.dataset.rpe, cur = sess.effort?.rpe ?? null;
+      save({ rpe: cur === v ? null : v, hr: sess.effort?.hr ?? null });
+    };
+  });
+  if ($("sessHr")) $("sessHr").onchange = () =>
+    save({ rpe: sess.effort?.rpe ?? null, hr: clampHr($("sessHr").value) });
+  if ($("sessEffortClear")) $("sessEffortClear").onclick = () => save(null);
+}
+
+/* ---- energy setup --------------------------------------------------------
+ * Three choices: when to ask about effort, how active the rest of the day is,
+ * and what the athlete is trying to do with their body mass. The activity
+ * factor is the one worth explaining: the training is counted from the
+ * session, so the factor must cover the REST of the day only. Picking "very
+ * active" here and adding a session on top is the double count that makes
+ * calorie targets hundreds of kilocalories too generous.
+ */
+function openEnergySetup() {
+  const dlg = $("energyDlg");
+  $("energyMode").value = energyPrefs.mode;
+  $("energyActivity").value = energyPrefs.activity;
+  $("energyGoal").value = energyPrefs.goal;
+  dlg.showModal();
+}
+$("energySave").onclick = () => {
+  energyPrefs = {
+    mode: EFFORT_MODES.includes($("energyMode").value) ? $("energyMode").value : EFFORT_DEFAULT,
+    activity: ACTIVITY_FACTORS[$("energyActivity").value] ? $("energyActivity").value : ACTIVITY_DEFAULT,
+    goal: GOALS.includes($("energyGoal").value) ? $("energyGoal").value : "maintain",
+  };
+  saveEnergyPrefs();
+  $("energyDlg").close();
+  paintEffort();
+  renderDash();
+};
+$("energyClose").onclick = () => $("energyDlg").close();
+
+// A countdown may already be running from before the reload, and the set it
+// belongs to is still the one to rate.
+effortSetTarget(); paintEffort();
+
+
 /** Second step of the picker: which movement the eight Tabata rounds are. */
 function pickTabataMovement(key) {
   const body = $("addDlgBody");
@@ -4450,7 +4759,8 @@ function renderDash(fromSync = false) {
   const prof = getProfile(currentAthlete());
   const view = { ...dashView, heightM: prof?.heightM ?? null, sex: prof?.sex ?? null,
                  ageY: prof?.ageY ?? null, achievements: myAchievements(),
-                 reaction: myReaction(), plans: myPlans() };
+                 reaction: myReaction(), plans: myPlans(),
+                 energy: energyForDay(dashView.selected) };
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
                                    myWeights(), myCycle(), mySleep(), myVitals(),
                                    myCardio(), myWater(), myCoffee(), view);
@@ -4464,6 +4774,7 @@ function renderDash(fromSync = false) {
     dashView = { ...dashView, year: d.getFullYear(), month: d.getMonth() };
     renderDash();
   };
+  if ($("energySetupBtn")) $("energySetupBtn").onclick = () => openEnergySetup();
   if ($("dashPrev")) $("dashPrev").onclick = () => step(-1);
   if ($("dashNext")) $("dashNext").onclick = () => step(1);
   card.querySelectorAll("button.day[data-day]").forEach((b) => {
@@ -5270,10 +5581,15 @@ function renderSessionView() {
           · ${esc(tr("rtBestMs", { ms: m ? m.best : "—" }))}</p>`;
       }).join("");
     })()}
+    ${energySectionHTML(sess)}
     ${sess.sets.length ? `<button id="sessionShareBtn" style="margin:14px 0 4px">${tr("shareSession")}</button>` : ""}
     ${repEditorHTML(sess)}
     ${sess.sets.some((x) => x.activity === "neck") ? neckLoadHTML() : ""}`;
   if ($("sessionShareBtn")) $("sessionShareBtn").onclick = () => shareSession(sess);
+  wireSessionEffort(card, sess, () => {
+    sessionViewSess = findSession(sess.started) || sess;
+    renderSessionView();
+  });
 
   wireRepEditor(card, sess, () => {
     sessionViewSess = findSession(sess.started) || sess;
@@ -5306,10 +5622,12 @@ function renderSummary() {
       <p class="note">${tr("noteChangeFirstLast")}</p>`
       : `<p class="note">${tr("noteNotEnoughSets")}</p>`}
     ${getSession().sets.some((x) => x.activity === "neck") ? neckLoadHTML() : ""}
+    ${energySectionHTML(getSession())}
     <button class="ghost" id="saveExportBtn" style="margin-top:12px">${tr("saveExport")}</button>
     <button class="ghost" id="closeSummaryBtn" style="margin-top:8px">${tr("close")}</button>
     <div class="status" id="sessionZipStatus"></div>`;
   $("saveExportBtn").onclick = () => exportSession();
+  wireSessionEffort($("summaryBox"), getSession(), () => renderSummary());
   // Close means done: back to the dashboard, on the day the session is filed
   // under, so the set just recorded is the first thing on screen.
   $("closeSummaryBtn").onclick = () => { $("summaryBox").innerHTML = ""; goHome(); };
@@ -6348,6 +6666,9 @@ async function finish() {
         const sess = getSession();
         if (sess) saveCurves(sess.started, set.index, lastResult);
         viewingSet = set.index;
+        // The rest between sets is when the effort question gets asked, so
+        // the prompt follows the set that was just recorded.
+        effortSetTarget(); paintEffort();
         renderTraining();
         // An assessment test is a set like any other -- it stays in the
         // training log -- and it is ALSO filed under the test it was
