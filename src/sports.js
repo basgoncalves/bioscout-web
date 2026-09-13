@@ -15,6 +15,12 @@
 export const SPORTS = {
   strength: ["squat", "slsquat", "pullup", "dip", "pushup", "kickback", "heelraise", "cmj", "sj", "neck"],
   basketball: ["jumpshot", "cmj", "sj", "sidestep", "run", "walk"],
+  /* The two scripted sessions (protocol.js). Their movement lists are what
+   * the session may contain: the circuit's three for the first, anything the
+   * app counts rep for rep for the second. The recorder picks the movement
+   * itself while a protocol runs. */
+  tomholland: ["pullup", "pushup", "squat"],
+  tabata: ["squat", "pushup", "pullup", "dip", "heelraise", "kickback", "slsquat", "cmj", "sj"],
 };
 
 export const SPORT_IDS = Object.keys(SPORTS);

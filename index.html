@@ -436,6 +436,16 @@ try {
   .planX { color:var(--muted); }
   button.chip.planChip.ok { border-color:var(--accent); color:var(--accent); }
   button.chip.planChip.on { background:var(--accent); color:#fff; border-color:transparent; }
+  /* Scripted sessions: the clock and the round count above the picture. */
+  #protoBanner .protoHead { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
+  #protoBanner .protoHead svg { color:var(--accent); flex:none; }
+  .protoBig { font-size:46px; font-weight:700; line-height:1.05; text-align:center;
+              font-variant-numeric:tabular-nums; margin:2px 0; }
+  .protoBig.rest { color:var(--muted); }
+  .protoNow { text-align:center; font-size:15px; font-weight:600; margin:0 0 8px; }
+  .protoBar { height:8px; border-radius:999px; background:var(--bg); overflow:hidden; }
+  .protoBar i { display:block; height:100%; background:var(--accent); }
+  button.sportBtn .sub { display:block; font-size:12.5px; font-weight:400; margin-top:2px; }
   /* Rest timer. */
   .restClock { font-size:44px; font-weight:700; text-align:center; font-variant-numeric:tabular-nums;
                margin:6px 0 4px; line-height:1.1; }
@@ -1006,6 +1016,10 @@ try {
     <div id="assessCountBig" style="font-size:34px;font-weight:700;line-height:1.1"></div>
     <div id="assessCountSub" class="sub" style="margin-top:2px"></div>
   </div>
+  <!-- A scripted session (protocol.js): the clock, the step on now, and how
+       many rounds are in. Sits right above the picture, which is where the
+       athlete is looking. -->
+  <div class="card hidden" id="protoBanner"></div>
   <div id="stage">
     <video id="video" playsinline muted></video>
     <canvas class="overlay" id="overlay"></canvas>
@@ -1187,6 +1201,8 @@ import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
        from "./src/profiles.js";
 import { achievements, repEvents, newlyEarned, repUnit } from "./src/achievements.js";
 import { plansOn, planProgress, nextPlanned, PLAN_ITEMS_MAX } from "./src/plans.js";
+import { PROTOCOLS, TH_STEPS, TABATA_ACTIVITIES, isProtocol, circuitAt, timeLeft,
+         fmtTime, afterStep, protocolSummary } from "./src/protocol.js";
 import { REST_PRESETS, REST_DEFAULT, restTimer, restStart, restPause, restReset, restSet, restAdd,
          restLeft, restRunning, fmtClock } from "./src/resttimer.js";
 import { CLOUD } from "./src/cloud_config.js";
@@ -2978,9 +2994,17 @@ function openAdd(step, planId = null) {
      * weight from there. */
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 12px;outline:none" tabindex="-1" autofocus>${
         tr("pickSport")}</h2>
-      ${SPORT_IDS.map((id) => `<button class="sportBtn" data-sport="${id}">${tr("sport_" + id)}</button>`).join("")}`;
+      ${SPORT_IDS.map((id) => `<button class="sportBtn" data-sport="${id}">${tr("sport_" + id)}
+        <span class="sub">${tr("sport_" + id + "_sub")}</span></button>`).join("")}`;
     body.querySelectorAll("button.sportBtn").forEach((b) => {
-      b.onclick = () => { dlg.close(); startTraining(key, b.dataset.sport); };
+      b.onclick = () => {
+        const sport = b.dataset.sport;
+        // Tabata is eight rounds of ONE movement, so it asks which before the
+        // camera opens; the other sessions choose per set.
+        if (sport === "tabata") { pickTabataMovement(key); return; }
+        dlg.close();
+        startTraining(key, sport);
+      };
     });
   }
   if (!dlg.open) dlg.showModal();
@@ -3221,6 +3245,196 @@ $("restPill").onclick = () => {
 document.addEventListener("visibilitychange", () => { if (!document.hidden) paintRest(); });
 $("activity").addEventListener("change", () => renderPlanNow());
 restSync();          // a countdown still running from before a reload carries on
+
+/** Second step of the picker: which movement the eight Tabata rounds are. */
+function pickTabataMovement(key) {
+  const body = $("addDlgBody");
+  body.innerHTML = `<h2 style="font-size:16px;margin:0 0 2px;outline:none" tabindex="-1" autofocus>${
+      tr("sport_tabata")}</h2>
+    <p class="sub" style="margin:0 0 12px">${tr("protoPickMovement")}</p>
+    ${TABATA_ACTIVITIES.map((a) => `<button class="sportBtn" data-act="${a}">${tr(a)}</button>`).join("")}`;
+  body.querySelectorAll("button.sportBtn").forEach((b) => {
+    b.onclick = () => { $("addDlg").close(); startTraining(key, "tabata", b.dataset.act); };
+  });
+  const h = body.querySelector("[autofocus]");
+  if (h) h.focus({ preventScroll: true });
+}
+
+/* ---- scripted sessions ----------------------------------------------------
+ * The Tom Holland circuit (5 pull-ups, 10 push-ups, 15 squats, on repeat for
+ * 20 minutes) and Tabata (8 x 20 s work, 10 s rest, one movement). The rules
+ * are in protocol.js; here is the part that needs a camera: start the take,
+ * watch the live rep count or the work clock, stop it, beep, and start the
+ * next one on its own so nobody has to walk back to the phone between sets.
+ *
+ * A step is one recording, analysed and logged like any other set -- which is
+ * what makes the final report an ordinary session report with the rounds
+ * written on top. */
+let proto = null;
+
+function protoBeeps(n = 1, hz = 880) {
+  try {
+    restAudio = restAudio || new (window.AudioContext || window.webkitAudioContext)();
+    restAudio.resume?.();
+    const ctx = restAudio;
+    for (let i = 0; i < n; i++) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), t0 = ctx.currentTime + i * 0.28;
+      o.type = "sine"; o.frequency.value = hz;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.24);
+      o.connect(g).connect(ctx.destination);
+      o.start(t0); o.stop(t0 + 0.3);
+    }
+  } catch { /* no sound here; the screen still counts */ }
+}
+
+function protoEnter(kind, activity) {
+  const p = PROTOCOLS[kind];
+  proto = { kind, activity: kind === "tabata" ? activity : TH_STEPS[0].activity,
+            done: 0, startedAt: null, workEnd: null, nextAt: null, grace: null,
+            summary: null, total: p.totalS };
+  $("activity").value = proto.activity;
+  $("activity").disabled = true;         // the script picks the movement
+  $("bodyMapBox").classList.add("hidden");
+  protoTimer = setInterval(protoTick, 500);
+  protoPaint();
+  if (engineReady) { if (!stream) startCamera(); } else pendingAssessCamera = true;
+}
+let protoTimer = null;
+
+function protoExit() {
+  clearInterval(protoTimer); protoTimer = null;
+  proto = null;
+  $("activity").disabled = false;
+  $("protoBanner").classList.add("hidden");
+  renderTraining();
+}
+
+/** The clock started with the first recording, not with the session. */
+function protoRecStarted() {
+  if (!proto) return;
+  if (!proto.startedAt) proto.startedAt = Date.now();
+  proto.grace = null;
+  proto.workEnd = proto.kind === "tabata" ? Date.now() + PROTOCOLS.tabata.workS * 1000 : null;
+  protoPaint();
+}
+
+/** One step is recorded (whatever the analysis made of it): move the script on. */
+function protoAfterSet() {
+  if (!proto || proto.summary) return;
+  const before = circuitAt(proto.done).roundsDone;
+  proto.done++;
+  const nxt = afterStep(proto.kind, { done: proto.done, startedAt: proto.startedAt,
+                                      now: Date.now(), activity: proto.activity });
+  if (nxt.do === "done") { protoFinish(); return; }
+  const rounds = proto.kind === "tabata" ? proto.done : (nxt.roundsDone ?? 0);
+  protoBeeps(proto.kind === "tabata" || rounds > before ? 2 : 1,
+             rounds > before ? 660 : 880);
+  proto.activity = nxt.activity;
+  $("activity").value = proto.activity;
+  // Tabata rests on the clock; the circuit has no rest, just the seconds it
+  // takes to get from the bar to the floor.
+  proto.nextAt = Date.now() + 1000 * (proto.kind === "tabata" ? nxt.restS : 3);
+  protoPaint();
+}
+
+function protoFinish() {
+  if (!proto) return;
+  proto.nextAt = null;
+  /* Rounds come from the steps that were RECORDED, reps from the sets that
+   * were analysed: a step the detector could not read still happened. */
+  const base = protocolSummary(proto.kind, getSession()?.sets || []);
+  const at = circuitAt(proto.done);
+  proto.summary = proto.kind === "tabata"
+    ? { ...base, rounds: proto.done, activity: proto.activity }
+    : { ...base, rounds: at.roundsDone, partialSteps: at.stepIndex };
+  protoBeeps(3, 660);
+  clearInterval(protoTimer); protoTimer = null;
+  $("activity").disabled = false;
+  protoPaint();
+  say(tr("protoDone"));
+}
+
+function protoTick() {
+  if (!proto) return;
+  const now = Date.now();
+  if (recording) {
+    if (proto.kind === "tabata") {
+      if (proto.workEnd && now >= proto.workEnd) { protoBeeps(1); $("recBtn").click(); }
+    } else {
+      const need = circuitAt(proto.done).step.reps;
+      const got = liveReps({ activity: proto.activity });
+      /* One extra tick after the count lands: a rep is only counted at its
+       * peak, so cutting there drops the one just counted. */
+      if (got >= need) proto.grace = proto.grace == null ? 1 : proto.grace - 1;
+      if (proto.grace != null && proto.grace <= 0) { protoBeeps(1); $("recBtn").click(); }
+      else if (timeLeft(proto.kind, proto.startedAt, now) <= 0) { $("recBtn").click(); }
+    }
+  } else if (proto.nextAt && now >= proto.nextAt) {
+    proto.nextAt = null;
+    if (stream && !$("recBtn").disabled) { proto.waits = 0; $("recBtn").click(); }
+    else if ((proto.waits = (proto.waits || 0) + 1) < 60) proto.nextAt = now + 1000;
+    // A minute with the camera closed is someone who has stopped: the script
+    // waits for a tap rather than starting a take at them.
+  }
+  protoPaint();
+}
+
+/* A silhouette, not a face: the workout is named after him, the app does not
+ * put his picture in. */
+const PROTO_ICON = `<svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true" fill="currentColor">
+  <circle cx="12" cy="5.2" r="3.2"/><path d="M12 9.2c-3.4 0-6 2.2-6 5.1V21h3v-5h6v5h3v-6.7c0-2.9-2.6-5.1-6-5.1z"/></svg>`;
+
+function protoPaint() {
+  const box = $("protoBanner");
+  if (!proto) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  const p = PROTOCOLS[proto.kind];
+  const now = Date.now();
+  const th = proto.kind === "tomholland";
+  if (proto.summary) {
+    const s = proto.summary;
+    box.innerHTML = `<div class="protoHead">${PROTO_ICON}<div><b>${tr("sport_" + proto.kind)}</b>
+        <div class="sub">${tr("protoFinished")}</div></div></div>
+      <div class="protoBig">${th ? s.rounds : s.rounds}</div>
+      <p class="sub" style="margin:0 0 8px">${th
+        ? esc(tr("protoDoneTH", { rounds: s.rounds, steps: s.partialSteps, reps: s.reps, record: s.record }))
+        : esc(tr("protoDoneTabata", { n: s.rounds, total: s.target,
+                                      activity: tr(s.activity || "movement"), reps: s.total,
+                                      best: s.best, worst: s.worst }))}</p>
+      <button type="button" class="ghost" id="protoQuit" style="margin:0">${tr("protoClose")}</button>`;
+    $("protoQuit").onclick = protoExit;
+    return;
+  }
+  const left = proto.startedAt ? timeLeft(proto.kind, proto.startedAt, now) : p.totalS;
+  const at = circuitAt(proto.done);
+  const resting = !recording && proto.nextAt ? Math.max(0, (proto.nextAt - now) / 1000) : 0;
+  const rounds = th ? at.roundsDone : proto.done;
+  const pct = Math.min(100, Math.round((100 * rounds) / (th ? p.record : p.rounds)));
+  const line = recording
+    ? (th ? tr("protoStepNow", { n: at.step.reps, activity: tr(at.step.activity) })
+          : tr("protoWork", { t: fmtTime(proto.workEnd ? (proto.workEnd - now) / 1000 : p.workS),
+                              activity: tr(proto.activity) }))
+    : resting
+      ? tr(th ? "protoNextIn" : "protoRestIn",
+           { t: fmtTime(resting), n: th ? at.step.reps : 0, activity: tr(proto.activity) })
+      : proto.startedAt ? tr("protoPaused")
+        : th ? tr("protoReady", { n: TH_STEPS[0].reps, activity: tr(proto.activity) })
+             : tr("protoReadyTabata", { s: PROTOCOLS.tabata.workS, activity: tr(proto.activity) });
+  box.innerHTML = `<div class="protoHead">${PROTO_ICON}<div><b>${tr("sport_" + proto.kind)}</b>
+      <div class="sub">${tr("sport_" + proto.kind + "_sub")}</div></div></div>
+    <div class="protoBig${!recording && resting ? " rest" : ""}">${fmtTime(
+      th ? left : (recording && proto.workEnd ? (proto.workEnd - now) / 1000 : resting || p.workS))}</div>
+    <p class="protoNow">${esc(line)}</p>
+    <div class="protoBar"><i style="width:${pct}%"></i></div>
+    <p class="sub" style="margin:4px 0 8px">${esc(th
+      ? tr("protoRoundsRecord", { n: rounds, record: p.record })
+      : tr("protoRoundOf", { n: Math.min(proto.done + 1, p.rounds), total: p.rounds }))}${
+      th && proto.startedAt ? " \u00b7 " + esc(tr("protoLeft", { t: fmtTime(left) })) : ""}</p>
+    <button type="button" class="ghost" id="protoQuit" style="margin:0">${tr("protoEnd")}</button>`;
+  $("protoQuit").onclick = () => { if (proto.done) protoFinish(); else protoExit(); };
+}
 
 const shortDate = (key) => {
   const [y, m, d] = key.split("-").map(Number);
@@ -3602,7 +3816,7 @@ $("settingsClose").onclick = () => {
   renderDash();                      // a renamed athlete, or a new mass
 };
 
-function startTraining(dayKeyStr, sport = null) {
+function startTraining(dayKeyStr, sport = null, activity = null) {
   // A day that has not happened yet can be planned, not recorded.
   if (dayKeyStr && dayKeyStr > dayKey(new Date())) { say(tr("planFutureNote"), true); return; }
   // A session with sets in it is training in progress; archive it before
@@ -3637,6 +3851,8 @@ function startTraining(dayKeyStr, sport = null) {
   $("results").innerHTML = "";
   renderTraining();
   showView("viewRecord");
+  if (isProtocol(sport)) protoEnter(sport, activity);
+  else if (proto) protoExit();
 }
 
 
@@ -4776,6 +4992,13 @@ function framesFps() {
  * on a slow tick rather than every frame. */
 function assessRepsSoFar(t) {
   if (!assessStep || frames.length < 20) return 0;
+  return liveReps(t);
+}
+
+/** The same count, for anything that needs it while recording (a scripted
+ *  session counts its 5 pull-ups exactly as the report will). */
+function liveReps(t) {
+  if (frames.length < 20) return 0;
   const spec = t && ACTIVITIES[t.activity];
   if (!spec) return 0;
   const poses = {};
@@ -5724,6 +5947,7 @@ $("recBtn").onclick = () => {
     stills.reset();
     recT0 = performance.now();
     recKept = false;
+    if (proto) protoRecStarted();
     // Opt-in, off by default. The recording is held in memory and only ever
     // written to the user's own download -- or, if they share a clip of the
     // set and then choose to post it, that clip; nothing goes up on its own.
@@ -6087,6 +6311,10 @@ async function finish() {
     say(tr("sayAnalysed", { frames: frames.length, fps: fps.toFixed(1) }));
   } catch (err) {
     say(tr("sayAnalysisFailed", { err: err.message }), true);
+  } finally {
+    // A scripted session moves on either way: a step the camera could not
+    // read is a step that happened, and the clock did not stop for it.
+    if (proto && !proto.summary) protoAfterSet();
   }
 }
 

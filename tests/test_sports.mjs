@@ -18,7 +18,8 @@ const ok = (cond, msg, extra = "") => {
 const html = readFileSync("index.html", "utf8");
 const options = new Set([...html.matchAll(/<option value="([a-z]+)" data-i18n=/g)].map((m) => m[1]));
 
-ok(SPORT_IDS.join() === "strength,basketball", "two sports for now: strength, basketball");
+ok(SPORT_IDS.join() === "strength,basketball,tomholland,tabata",
+   "two free sports and the two scripted ones", SPORT_IDS.join());
 for (const [sport, acts] of Object.entries(SPORTS)) {
   const unknown = acts.filter((a) => !ACTIVITIES[a]);
   ok(!unknown.length, `${sport}: every movement is analysable`, unknown.join(","));
