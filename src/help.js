@@ -31,7 +31,7 @@ import { achievements, repEvents, repUnit, TASK_ORDER } from "./achievements.js"
 /* Who "Talk to a professional" reaches. One place to change it; `phone` null
  * hides the phone and WhatsApp rows. Format phone as +<country><number>. */
 export const CONTACT = {
-  name: "Bas Goncalves",
+  name: "Dr. Basílio Gonçalves",
   email: "basilio.goncalves7@gmail.com",
   phone: null,
 };
