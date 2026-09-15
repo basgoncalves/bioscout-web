@@ -242,8 +242,11 @@ try {
   .bfStage video, .bfStage canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
   .bfStage video, .bfStage canvas { transform:none; }
   .bfStage video.mirror, .bfStage canvas.mirror { transform:scaleX(-1); }
-  .bfCount { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-             font-size:96px; font-weight:800; color:#fff; text-shadow:0 2px 12px #000; }
+  .bfCount { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
+             justify-content:flex-start; padding-top:6%; gap:4px; color:#fff; text-align:center;
+             text-shadow:0 2px 12px #000, 0 0 4px #000; pointer-events:none; }
+  .bfCue { font-size:clamp(30px, 9vw, 52px); font-weight:800; line-height:1.05; text-transform:uppercase; padding:0 8px; }
+  .bfNum { font-size:clamp(64px, 22vw, 120px); font-weight:800; line-height:1; font-variant-numeric:tabular-nums; }
   .bfBig { font-size:34px; font-weight:800; margin-top:10px; font-variant-numeric:tabular-nums; }
   /* The terms are a page long now: they scroll inside the dialog, and the
      I agree button stays in view under them. */
@@ -983,7 +986,7 @@ try {
          does the maths; nothing leaves the device. -->
     <dialog id="bfDlg">
       <h2 style="font-size:16px;margin:0 0 2px" data-i18n="bfTitle">Body fat from the camera</h2>
-      <p class="sub" style="margin:0 0 8px" data-i18n="bfSub">Two pictures, front and side. Wear tight clothing, stand 2–3 m away with the phone upright at waist height, and breathe out normally.</p>
+      <p class="sub" style="margin:0 0 8px" data-i18n="bfSub">Press Start, face the camera, and turn sideways when told. Wear tight clothing, stand 2–3 m away with the phone upright at waist height, and breathe out normally.</p>
       <div class="row">
         <div><label for="bfHeight" data-i18n="bfHeight">Height (m)</label>
           <input id="bfHeight" type="number" inputmode="decimal" step="0.01" min="1" max="2.4"></div>
@@ -993,13 +996,10 @@ try {
       <div class="bfStage">
         <video id="bfVideo" playsinline muted></video>
         <canvas id="bfCanvas"></canvas>
-        <div id="bfCount" class="bfCount hidden"></div>
+        <div id="bfCount" class="bfCount hidden"><div id="bfCue" class="bfCue"></div><div id="bfNum" class="bfNum"></div></div>
       </div>
       <p class="sub" id="bfLive" style="margin:6px 0 0"></p>
-      <div class="row" style="margin-top:8px">
-        <button id="bfFront" type="button" data-i18n="bfFront">Front (10 s timer)</button>
-        <button id="bfSide" type="button" data-i18n="bfSide">Side (10 s timer)</button>
-      </div>
+      <button id="bfStart" type="button" style="margin-top:8px" data-i18n="bfStart">Start</button>
       <button class="ghost" id="bfFlip" type="button" style="margin-top:8px" data-i18n="bfFlip">Switch camera</button>
       <p class="note" id="bfPose" data-i18n="bfPoseNote">Front: arms held out about 45° so they do not touch your body. Side: arms hanging relaxed at your sides, chin level.</p>
       <div id="bfResult" class="hidden">
@@ -3609,7 +3609,7 @@ async function bfOpenCamera() {
   const v = $("bfVideo");
   try {
     bf.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: bf.facing, width: { ideal: 720 }, height: { ideal: 1280 } }, audio: false });
+      video: { facingMode: bf.facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
   } catch (err) { $("bfLive").textContent = tr("sayCameraUnavailable", { err: err.message }); return false; }
   v.srcObject = bf.stream;
   const mode = bf.stream.getVideoTracks()[0]?.getSettings?.().facingMode;
@@ -3669,36 +3669,50 @@ const bfWarnText = (w) => (BF_WARN[w] ? tr(BF_WARN[w]) : w);
 const bfHeight = () => { const h = parseFloat($("bfHeight").value); return h > 1 && h < 2.4 ? h : null; };
 const bfSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function bfCapture(which) {
+/** Count down with a big cue over the picture, then average 15 frames. */
+async function bfShoot(which, heightM, seconds, cue) {
+  $("bfCue").textContent = cue;
+  for (let n = seconds; n > 0; n--) { $("bfNum").textContent = n; await bfSleep(1000); }
+  $("bfCue").textContent = tr("bfCueHold");
+  $("bfNum").textContent = "●";
+  const frames = []; let lastDet = null, views = 0;
+  for (let i = 0; i < 15; i++) {
+    const det = bfDetect();
+    if (det) {
+      const f = measureFrame({ ...det, heightM, sex: $("bfSex").value, view: which });
+      if (viewOf(det.lms, det.w, det.h) === which) views++;
+      frames.push(f); lastDet = { det, f };
+    }
+    await bfSleep(120);
+  }
+  const comb = combineFrames(frames);
+  if (comb.n < 5) return false;
+  if (views < frames.length / 2) comb.warn.push(which === "front" ? "notFront" : "notSide");
+  bf[which] = comb;
+  bfDraw(lastDet.det, lastDet.f.rows);
+  return true;
+}
+/** One button: front, then a spoken-size cue to turn, then side. */
+async function bfRun() {
   if (bf.busy) return;
   const heightM = bfHeight();
   if (!heightM) { $("bfLive").textContent = tr("bfNeedHeight"); return; }
   bf.busy = true;
+  bf.front = bf.side = bf.result = null;
+  $("bfResult").classList.add("hidden");
+  $("bfStart").disabled = true;
   const cnt = $("bfCount");
+  cnt.classList.remove("hidden");
   try {
-    cnt.classList.remove("hidden");
-    for (let s = 10; s > 0; s--) { cnt.textContent = s; await bfSleep(1000); }
-    cnt.textContent = "●";
-    const frames = []; let lastDet = null, views = 0;
-    for (let i = 0; i < 15; i++) {
-      const det = bfDetect();
-      if (det) {
-        const f = measureFrame({ ...det, heightM, sex: $("bfSex").value, view: which });
-        if (viewOf(det.lms, det.w, det.h) === which) views++;
-        frames.push(f); lastDet = { det, f };
-      }
-      await bfSleep(120);
-    }
-    cnt.classList.add("hidden");
-    const comb = combineFrames(frames);
-    if (comb.n < 5) { $("bfLive").textContent = tr("bfCaptureFailed"); return; }
-    if (views < frames.length / 2) comb.warn.push(which === "front" ? "notFront" : "notSide");
-    bf[which] = comb;
-    bfDraw(lastDet.det, lastDet.f.rows);
-    $("bfLive").textContent = tr(which === "front" ? "bfGotFront" : "bfGotSide");
+    if (!(await bfShoot("front", heightM, 10, tr("bfCueFront")))) { $("bfLive").textContent = tr("bfCaptureFailed"); return; }
+    if (!(await bfShoot("side", heightM, 6, tr("bfCueTurn")))) { $("bfLive").textContent = tr("bfCaptureFailed"); return; }
+    $("bfCue").textContent = tr("bfCueDone"); $("bfNum").textContent = "✓";
+    await bfSleep(1500);
+    $("bfLive").textContent = tr("bfGotSide");
     bf.holdUntil = performance.now() + 4000;   // let them see the measured rows
     bfCompute();
-  } finally { cnt.classList.add("hidden"); bf.busy = false; }
+    $("bfResult").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } finally { cnt.classList.add("hidden"); bf.busy = false; $("bfStart").disabled = false; }
 }
 function bfCompute() {
   const done = bf.front && bf.side;
@@ -3714,14 +3728,15 @@ function bfCompute() {
   const e = need.every((k) => circ[k] > 0) ? bodyFatEstimate({ sex, heightM, circ, calibrated }) : null;
   bf.result = e;
   const cm = (v) => (v ? v.toFixed(1) : "–");
-  $("bfBig").textContent = e ? `${e.bf.toFixed(1)} %` : tr("bfNoResult");
-  $("bfDetail").textContent = e
+  const odd = implausibleSites(circ);
+  const show = e && !odd.length;
+  $("bfBig").textContent = show ? `${e.bf.toFixed(1)} %` : tr("bfNoResult");
+  $("bfDetail").textContent = show
     ? tr("bfRange", { lo: e.low.toFixed(0), hi: e.high.toFixed(0) }) + " · " +
       tr("bfCircs", { neck: cm(circ.neck), waist: cm(circ.waist), hip: cm(circ.hip) }) +
       (calibrated ? " · " + tr("bfCalibrated") : "")
     : tr("bfCircs", { neck: cm(circ.neck), waist: cm(circ.waist), hip: cm(circ.hip) });
   const warns = [...new Set([...bf.front.warn, ...bf.side.warn])];
-  const odd = implausibleSites(circ);
   $("bfWarn").textContent = [...warns.map((w) => bfWarnText(w)),
     ...(odd.length ? [tr("bfImplausible", { sites: odd.join(", ") })] : [])].join(" ");
   $("bfUse").disabled = !e || odd.length > 0;
@@ -3744,8 +3759,7 @@ async function openBodyFat() {
   if (cam) bfLiveLoop();
 }
 $("goalBfCam").onclick = () => openBodyFat();
-$("bfFront").onclick = () => bfCapture("front");
-$("bfSide").onclick = () => bfCapture("side");
+$("bfStart").onclick = () => bfRun();
 $("bfFlip").onclick = async () => {
   bf.facing = bf.facing === "user" ? "environment" : "user";
   if (await bfOpenCamera()) bfLiveLoop();
