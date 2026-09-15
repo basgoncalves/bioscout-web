@@ -1081,6 +1081,12 @@ try {
         <div class="protoHudOf" id="protoHudOf"></div></div>
       <div class="protoHudAct" id="protoHudAct"></div>
     </div>
+    <!-- A free set (no test, no scripted session): the live rep count in the
+         corner, counted by the same detector the report uses. -->
+    <div class="protoHud hidden" id="liveHud">
+      <div class="protoHudBox"><div class="protoHudCount" id="liveHudCount">0</div></div>
+      <div class="protoHudAct" id="liveHudAct"></div>
+    </div>
   </div>
 
   <div class="card hidden" id="controls">
@@ -5398,6 +5404,52 @@ function liveReps(t) {
   }
 }
 
+/* The live count for a free set -- any movement the app can analyse.
+ *
+ * No second counter: it is liveReps(), the report's own detector run over the
+ * frames so far, so the corner and the page after it cannot disagree. With
+ * "Detect automatically" the movement is classified from the frames so far on
+ * every tick too, exactly as finish() will classify the whole take -- so the
+ * label can change early in the set, and settles as the set goes on. Until the
+ * classifier is confident the corner shows a dash rather than a guess. */
+let liveTimer = null;
+function liveHudTick() {
+  const hud = $("liveHud");
+  const show = recording && !proto && !assessStep;
+  hud.classList.toggle("hidden", !show);
+  if (!show) return;
+  let act = $("activity").value;
+  if (act === "auto") {
+    act = null;
+    if (frames.length >= 20) {
+      const poses = {};
+      frames.forEach((f, i) => { poses[i] = f.lm; });
+      try { act = classify(poses).activity; } catch { act = null; }
+    }
+  }
+  const spec = act && ACTIVITIES[act];
+  const n = spec ? liveReps({ activity: act, perLeg: !!spec.perLeg }) : 0;
+  /* Auto-detect names nothing until a rep is in: on the start of a set there
+   * is too little movement to go on, and the pull-up clip in reference.json
+   * reads as "neck" for its first four seconds of hanging. */
+  const known = spec && ($("activity").value !== "auto" || n > 0);
+  $("liveHudCount").textContent = known ? String(n) : "\u2013";
+  $("liveHudAct").textContent = known ? tr(act) : "";
+}
+function liveHudStart() {
+  clearInterval(liveTimer);
+  liveHudTick();
+  liveTimer = setInterval(() => {
+    if (!recording) { liveHudStop(); return; }
+    liveHudTick();
+  }, 1000);
+}
+function liveHudStop() {
+  clearInterval(liveTimer);
+  liveTimer = null;
+  $("liveHud").classList.add("hidden");
+}
+
 /* The HUD line during a test: what is left and what is in the bag. */
 function assessHud(secondsLeft, n, need) {
   const done = n >= need ? " \u2713" : "";
@@ -6098,6 +6150,7 @@ async function startCamera() {
 
 function stopCamera() {
   running = false; recording = false;
+  liveHudStop();
   if (stream) stream.getTracks().forEach((t) => t.stop());
   stream = null;
   $("stage").classList.remove("on");
@@ -6332,6 +6385,7 @@ $("recBtn").onclick = () => {
     recT0 = performance.now();
     recKept = false;
     if (proto) protoRecStarted();
+    else if (!assessStep) liveHudStart();
     // Opt-in, off by default. The recording is held in memory and only ever
     // written to the user's own download -- or, if they share a clip of the
     // set and then choose to post it, that clip; nothing goes up on its own.
@@ -6391,6 +6445,7 @@ $("recBtn").onclick = () => {
     recording = false;
     gesture.reset();
     clearInterval(assessTimer);
+    liveHudStop();
     $("recBtn").textContent = assessStep ? tr("assessStartTest") : tr("startRecording");
     $("hudRight").textContent = "";
     if (recorder && recorder.state !== "inactive") {
