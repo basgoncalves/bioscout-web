@@ -802,9 +802,12 @@ function energyHTML(e, key) {
     ${e.needs ? `<p class="sub" style="margin:6px 0 0">${esc(tr("energyNeeds"))}</p>` : ""}
     ${e.dayTotal != null ? `<p class="sub" style="margin:6px 0 0">${esc(tr("energyDayTotal", {
         kcal: e.dayTotal, bmr: e.bmr, base: e.base }))}</p>` : ""}
+    ${e.goalText ? `<p class="sub" style="margin:6px 0 0"><b>${esc(tr("goalTitle"))}:</b> ${esc(e.goalText)}</p>` : ""}
     ${macroBlock}
-    <button type="button" class="ghost" id="energySetupBtn" style="margin-top:10px">${
-      esc(tr("energySetup"))}</button>
+    <div class="row" style="margin-top:10px;gap:8px">
+      <button type="button" id="energyGoalBtn">${esc(tr("goalTitle"))}</button>
+      <button type="button" class="ghost" id="energySetupBtn">${esc(tr("energySetup"))}</button>
+    </div>
     <p class="note">${esc(tr("energyNote"))}</p>
   </div>`;
 }

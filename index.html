@@ -937,15 +937,39 @@ try {
         <option value="moderate" data-i18n="activity_moderate">On my feet most of the day</option>
         <option value="active" data-i18n="activity_active">Physical job, always moving</option>
       </select>
-      <label for="energyGoal" style="margin-top:10px;display:block" data-i18n="energyGoalLabel">Goal</label>
-      <select id="energyGoal">
-        <option value="lose" data-i18n="goal_lose">Lose mass (−15%)</option>
-        <option value="maintain" data-i18n="goal_maintain">Keep mass</option>
-        <option value="gain" data-i18n="goal_gain">Gain mass (+10%)</option>
-      </select>
       <button id="energySave" style="margin-top:12px" data-i18n="save">Save</button>
       <button class="ghost" id="energyClose" style="margin-top:8px" data-i18n="close">Close</button>
       <p class="note" data-i18n="energySetupNote">Every figure here is an estimate from equations fitted on other people: Mifflin-St Jeor for resting metabolism, Keytel for heart rate, the Compendium of Physical Activities for everything else. Treat them as a starting point you correct against the scale, not as a measurement.</p>
+    </dialog>
+    <!-- The goal: what the athlete wants their weight and body composition to
+         do, and by when. energy.js goalPlan turns it into a daily shift. -->
+    <dialog id="goalDlg">
+      <h2 style="font-size:16px;margin:0 0 2px" data-i18n="goalTitle">Goal</h2>
+      <p class="sub" style="margin:0 0 10px" data-i18n="goalSub">What you want your weight and body composition to do. The calorie target follows it.</p>
+      <label for="energyGoal" data-i18n="energyGoalLabel">Goal</label>
+      <select id="energyGoal">
+        <option value="lose" data-i18n="goal_lose">Lose fat</option>
+        <option value="maintain" data-i18n="goal_maintain">Keep my weight</option>
+        <option value="recomp" data-i18n="goal_recomp">Recomposition</option>
+        <option value="gain" data-i18n="goal_gain">Build muscle</option>
+      </select>
+      <p class="sub" id="goalNow" style="margin:8px 0 0"></p>
+      <div class="row" style="margin-top:8px">
+        <div><label for="goalKg" data-i18n="goalTargetKg">Target weight (kg)</label>
+          <input id="goalKg" type="number" inputmode="decimal" step="0.1" min="30" max="300"></div>
+        <div><label for="goalBy" data-i18n="goalBy">By</label>
+          <input id="goalBy" type="date"></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div><label for="goalBf" data-i18n="goalBf">Body fat now (%)</label>
+          <input id="goalBf" type="number" inputmode="decimal" step="0.5" min="3" max="60"></div>
+        <div><label for="goalBfTarget" data-i18n="goalBfTarget">Target body fat (%)</label>
+          <input id="goalBfTarget" type="number" inputmode="decimal" step="0.5" min="3" max="60"></div>
+      </div>
+      <p class="note" data-i18n="goalFieldsNote">All optional. Without a target and a date the plan uses a steady default rate; with a body-fat target and no target weight, the weight that keeps your lean mass is used.</p>
+      <p class="sub" id="goalPreview" style="margin:8px 0 0"></p>
+      <button id="goalSave" style="margin-top:12px" data-i18n="save">Save</button>
+      <button class="ghost" id="goalClose" style="margin-top:8px" data-i18n="close">Close</button>
     </dialog>
   </section>
 
@@ -1286,7 +1310,7 @@ import { REST_PRESETS, REST_DEFAULT, restTimer, restStart, restPause, restReset,
          restLeft, restRunning, fmtClock } from "./src/resttimer.js";
 import { EFFORT_MODES, EFFORT_DEFAULT, RPE_MIN, RPE_MAX, GOALS, ACTIVITY_FACTORS,
          ACTIVITY_DEFAULT, clampRpe, clampHr, cleanEffort, sessionEnergy, dayEnergy,
-         macroTargets, bmrKcalDay, fmtKcal } from "./src/energy.js";
+         macroTargets, bmrKcalDay, fmtKcal, goalPlan, cleanGoal } from "./src/energy.js";
 import { CLOUD } from "./src/cloud_config.js";
 import { makeChat } from "./src/chat.js";
 import { makeCloud, syncOnce, loadState as cloudState, saveState as saveCloudState,
@@ -1303,7 +1327,7 @@ import { probe as probeHelper, fetchClip } from "./src/fetcher.js";
 import { probe as probeStrava, authorise as authoriseStrava,
          fetchActivities, toCardioAll } from "./src/strava.js";
 import { DEFAULT_TAGS, liveTags, toggleTag, stepTag, quickMoodAt } from "./src/diary.js";
-import { collectWeights, weightNear } from "./src/weight.js";
+import { collectWeights, weightNear, latestWeight } from "./src/weight.js";
 import { collectCups } from "./src/water.js";
 import { groupFriends, relationTo, searchTerm } from "./src/friends.js";
 import { foreperiod, classify as rtClassify, summarise as rtSummarise,
@@ -3342,7 +3366,8 @@ restSync();          // a countdown still running from before a reload carries o
  * on, and the estimate says out loud which rung of the ladder it stood on.
  */
 const ENERGY_KEY = "bioscout.energy.v1";
-const ENERGY_DEFAULTS = { mode: EFFORT_DEFAULT, goal: "maintain", activity: ACTIVITY_DEFAULT };
+const ENERGY_DEFAULTS = { mode: EFFORT_DEFAULT, goal: "maintain", activity: ACTIVITY_DEFAULT,
+                          plan: cleanGoal(null) };
 let energyPrefs = (() => {
   try {
     const v = JSON.parse(localStorage.getItem(ENERGY_KEY) || "{}") || {};
@@ -3350,6 +3375,7 @@ let energyPrefs = (() => {
       mode: EFFORT_MODES.includes(v.mode) ? v.mode : ENERGY_DEFAULTS.mode,
       goal: GOALS.includes(v.goal) ? v.goal : ENERGY_DEFAULTS.goal,
       activity: ACTIVITY_FACTORS[v.activity] ? v.activity : ENERGY_DEFAULTS.activity,
+      plan: cleanGoal({ ...(v.plan || {}), goal: v.goal }),
     };
   } catch { return { ...ENERGY_DEFAULTS }; }
 })();
@@ -3406,7 +3432,9 @@ function energyForDay(key) {
   const ctx = energyCtx();
   const day = dayEnergy({ ctx, trainingKcal: kcal, activity: energyPrefs.activity });
   const meals = collectMeals(myMeals()).get(key);
-  const macros = day ? macroTargets({ kcal: day.total, massKg: ctx.massKg, goal: energyPrefs.goal }) : null;
+  const plan = currentGoalPlan(ctx);
+  const macros = day ? macroTargets({ kcal: day.total, massKg: ctx.massKg, goal: energyPrefs.goal,
+                                      shiftKcal: plan ? plan.shiftKcal : null }) : null;
   // Rounded the same way every other calorie figure on the page is: a target
   // written as "2431 kcal" next to a total written as "2,430 kcal" reads as
   // two different numbers, and only one of them is claiming precision.
@@ -3428,8 +3456,75 @@ function energyForDay(key) {
     needs: !day,
     eaten: meals && meals.counted ? Math.round(meals.kcal) : null,
     macros,
+    goalText: plan ? goalSummary(plan) : null,
   };
 }
+
+/* ---- the goal ---------------------------------------------------------------
+ * Planned from the latest logged weight when there is one (the goal is about
+ * what the scale does), the profile's mass otherwise. */
+function goalMass(ctx) {
+  const w = latestWeight(collectWeights(myWeights()));
+  return w ? w.kg : ctx.massKg;
+}
+function currentGoalPlan(ctx, plan = energyPrefs.plan) {
+  return goalPlan({ ...plan, goal: plan.goal }, goalMass(ctx), dayKey(new Date()));
+}
+function goalSummary(p) {
+  const kg = (v) => (Math.round(v * 10) / 10).toFixed(1);
+  const bits = [tr("goal_" + p.goal)];
+  if (p.targetKg !== null && Math.abs(p.targetKg - p.massKg) >= 0.1) {
+    bits.push(tr("goalFromTo", { from: kg(p.massKg), to: kg(p.targetKg) }));
+  }
+  if (p.targetBfPct !== null) bits.push(tr("goalBfTo", { from: p.bfPct ?? "?", to: p.targetBfPct }));
+  if (p.by) bits.push(tr("goalByDate", { date: new Date(p.by + "T12:00").toLocaleDateString() }));
+  if (p.rateKgWk) bits.push(tr("goalRate", { rate: (p.rateKgWk > 0 ? "+" : "−") + Math.abs(p.rateKgWk).toFixed(2) }));
+  if (p.shiftKcal) bits.push(tr("goalShift", { kcal: (p.shiftKcal > 0 ? "+" : "−") + Math.abs(p.shiftKcal) }));
+  else if (p.goal === "recomp") bits.push(tr("goalShiftRecomp"));
+  let text = bits.join(" · ");
+  if (p.capped) text += " " + tr("goalCapped");
+  if (p.by && p.weeks === 0) text += " " + tr("goalPast");
+  if (p.targetLean !== null && p.lean !== null && Math.abs(p.targetLean - p.lean) >= 0.5) {
+    text += " " + tr("goalLean", { d: (p.targetLean > p.lean ? "+" : "−") + kg(Math.abs(p.targetLean - p.lean)) });
+  }
+  return text;
+}
+
+function goalFromDialog() {
+  return cleanGoal({
+    goal: $("energyGoal").value,
+    targetKg: $("goalKg").value, by: $("goalBy").value || null,
+    bfPct: $("goalBf").value, targetBfPct: $("goalBfTarget").value,
+  });
+}
+function paintGoalPreview() {
+  const p = currentGoalPlan(energyCtx(), goalFromDialog());
+  $("goalPreview").textContent = p ? goalSummary(p) : tr("goalNoMass");
+}
+function openGoal() {
+  const g = energyPrefs.plan;
+  $("energyGoal").value = energyPrefs.goal;
+  $("goalKg").value = g.targetKg ?? "";
+  $("goalBy").value = g.by ?? "";
+  $("goalBf").value = g.bfPct ?? "";
+  $("goalBfTarget").value = g.targetBfPct ?? "";
+  const m = goalMass(energyCtx());
+  $("goalNow").textContent = m ? tr("goalNow", { kg: (+m).toFixed(1) }) : tr("goalNoMass");
+  paintGoalPreview();
+  $("goalDlg").showModal();
+}
+for (const id of ["energyGoal", "goalKg", "goalBy", "goalBf", "goalBfTarget"]) {
+  $(id).addEventListener("input", paintGoalPreview);
+  $(id).addEventListener("change", paintGoalPreview);
+}
+$("goalSave").onclick = () => {
+  const plan = goalFromDialog();
+  energyPrefs = { ...energyPrefs, goal: plan.goal, plan };
+  saveEnergyPrefs();
+  $("goalDlg").close();
+  renderDash();
+};
+$("goalClose").onclick = () => $("goalDlg").close();
 
 /* ---- the effort prompt ----------------------------------------------------
  * Rating chips plus a heart-rate box, under the rest timer. `effortTarget`
@@ -3563,14 +3658,13 @@ function openEnergySetup() {
   const dlg = $("energyDlg");
   $("energyMode").value = energyPrefs.mode;
   $("energyActivity").value = energyPrefs.activity;
-  $("energyGoal").value = energyPrefs.goal;
   dlg.showModal();
 }
 $("energySave").onclick = () => {
   energyPrefs = {
+    ...energyPrefs,
     mode: EFFORT_MODES.includes($("energyMode").value) ? $("energyMode").value : EFFORT_DEFAULT,
     activity: ACTIVITY_FACTORS[$("energyActivity").value] ? $("energyActivity").value : ACTIVITY_DEFAULT,
-    goal: GOALS.includes($("energyGoal").value) ? $("energyGoal").value : "maintain",
   };
   saveEnergyPrefs();
   $("energyDlg").close();
@@ -4781,6 +4875,7 @@ function renderDash(fromSync = false) {
     renderDash();
   };
   if ($("energySetupBtn")) $("energySetupBtn").onclick = () => openEnergySetup();
+  if ($("energyGoalBtn")) $("energyGoalBtn").onclick = () => openGoal();
   if ($("dashPrev")) $("dashPrev").onclick = () => step(-1);
   if ($("dashNext")) $("dashNext").onclick = () => step(1);
   card.querySelectorAll("button.day[data-day]").forEach((b) => {

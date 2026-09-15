@@ -108,7 +108,9 @@ export const HR_MIN = 30;
 export const HR_MAX = 230;
 
 export const SEXES = ["unspecified", "female", "male"];
-export const GOALS = ["lose", "maintain", "gain"];
+/* lose: fat loss. recomp: hold the scale, trade fat for muscle. gain: build
+ * muscle, accepting some fat with it. The order is the order they are offered. */
+export const GOALS = ["lose", "maintain", "recomp", "gain"];
 
 /** A number in range, or null. Null means "not said", which is not zero. */
 export function clampRpe(v) {
@@ -386,15 +388,20 @@ export function dayEnergy({ ctx = {}, trainingKcal = 0, activity = ACTIVITY_DEFA
  * `goal` shifts the target: -15 % to lose, +10 % to gain. Those are rates, not
  * opinions about the athlete, and the page says so.
  */
-export const GOAL_SHIFT = { lose: -0.15, maintain: 0, gain: 0.10 };
-export const PROTEIN_G_KG = { lose: 2.0, maintain: 1.8, gain: 1.8 };
+export const GOAL_SHIFT = { lose: -0.15, maintain: 0, recomp: -0.05, gain: 0.10 };
+export const PROTEIN_G_KG = { lose: 2.0, maintain: 1.8, recomp: 2.2, gain: 1.8 };
 export const FAT_ENERGY_SHARE = 0.27;
 
-export function macroTargets({ kcal, massKg, goal = "maintain" } = {}) {
+export function macroTargets({ kcal, massKg, goal = "maintain", shiftKcal = null } = {}) {
   const k = Number(kcal), m = Number(massKg);
   if (!(k > 0) || !(m > 20 && m < 400)) return null;
   const shift = GOAL_SHIFT[goal] ?? 0;
-  const target = k * (1 + shift);
+  // A goal with a target and a date prices its own daily shift (goalPlan);
+  // without one, the flat percentage stands. Never below resting-ish intake:
+  // 60 % of the day is a floor no weekly rate is allowed to push through.
+  const target = Number.isFinite(shiftKcal) && shiftKcal !== null
+    ? Math.max(k * 0.6, k + shiftKcal)
+    : k * (1 + shift);
   const protein = m * (PROTEIN_G_KG[goal] ?? PROTEIN_G_KG.maintain);
   const fat = Math.max(m * 0.5, (target * FAT_ENERGY_SHARE) / 9);
   const carb = Math.max(0, (target - protein * 4 - fat * 9) / 4);
@@ -419,4 +426,94 @@ export function fmtKcal(v) {
   const n = +v;
   const r = n >= 100 ? Math.round(n / 10) * 10 : Math.round(n);
   return r.toLocaleString() + " kcal";
+}
+
+/**
+ * A goal the athlete set: what they weigh and want to weigh, what their body
+ * fat is and should be, and by when -- turned into a weekly rate and a daily
+ * calorie shift.
+ *
+ * ~7700 kcal per kg of body mass change is the classic figure for tissue that
+ * is mostly fat; it overstates the cost of a lean-heavy gain, which is why the
+ * gain rate is capped low rather than the constant being tuned. Caps: losing
+ * more than 1 % of body mass a week costs lean mass, gaining more than 0.5 %
+ * a week is mostly fat for anyone past their first year of training. A rate
+ * past the cap is cut to the cap and the plan says so (`capped`).
+ *
+ * Body fat: with a current and a target percentage but no target mass, the
+ * target mass is the one that keeps lean mass where it is -- the definition
+ * of a fat-loss goal. For recomposition the scale is held and the plan
+ * reports the fat to trade for lean.
+ *
+ * Returns null when there is no current mass to plan from.
+ */
+export const KCAL_PER_KG = 7700;
+export const RATE_CAP = { lose: 0.010, gain: 0.005 };        // fraction of mass per week
+export const RATE_DEFAULT = { lose: 0.005, gain: 0.0025 };
+
+const num = (v, lo, hi) => {
+  const n = Number(v);
+  return v !== null && v !== "" && Number.isFinite(n) && n > lo && n < hi ? n : null;
+};
+
+export function cleanGoal(g) {
+  const o = g || {};
+  return {
+    goal: GOALS.includes(o.goal) ? o.goal : "maintain",
+    targetKg: num(o.targetKg, 20, 400),
+    bfPct: num(o.bfPct, 2, 70),
+    targetBfPct: num(o.targetBfPct, 2, 70),
+    by: typeof o.by === "string" && /^\d{4}-\d{2}-\d{2}$/.test(o.by) ? o.by : null,
+  };
+}
+
+export function goalPlan(goalIn, massKg, todayKey) {
+  const g = cleanGoal(goalIn);
+  const m = num(massKg, 20, 400);
+  if (m === null) return null;
+  const out = { ...g, massKg: m, rateKgWk: 0, shiftKcal: 0, capped: false,
+                weeks: null, derivedTarget: false, lean: null, fat: null,
+                targetLean: null, targetFat: null };
+  if (g.bfPct !== null) {
+    out.fat = m * g.bfPct / 100;
+    out.lean = m - out.fat;
+  }
+  let target = g.targetKg;
+  if (target === null && out.lean !== null && g.targetBfPct !== null && g.goal === "lose") {
+    target = out.lean / (1 - g.targetBfPct / 100);
+    out.derivedTarget = true;
+  }
+  if (g.goal === "recomp" || g.goal === "maintain") target = target ?? m;
+  out.targetKg = target !== null ? +target.toFixed(1) : null;
+  if (target !== null && g.targetBfPct !== null) {
+    out.targetFat = target * g.targetBfPct / 100;
+    out.targetLean = target - out.targetFat;
+  }
+
+  if (g.by && todayKey) {
+    const t = (k) => { const [y, mo, d] = k.split("-").map(Number); return Date.UTC(y, mo - 1, d, 12); };
+    const days = Math.round((t(g.by) - t(todayKey)) / 86400000);
+    out.weeks = days > 0 ? days / 7 : 0;
+  }
+
+  if (g.goal === "lose" || g.goal === "gain") {
+    const sign = g.goal === "lose" ? -1 : 1;
+    const cap = RATE_CAP[g.goal] * m;
+    let rate = RATE_DEFAULT[g.goal] * m;
+    if (target !== null && out.weeks) {
+      const diff = (target - m) * sign;           // positive when the goal points the right way
+      rate = diff > 0 ? diff / out.weeks : 0;
+    } else if (target !== null && (target - m) * sign <= 0) {
+      rate = 0;                                    // already there
+    }
+    if (rate > cap) { rate = cap; out.capped = true; }
+    out.rateKgWk = +(sign * rate).toFixed(2);
+    out.shiftKcal = Math.round(sign * rate * KCAL_PER_KG / 7);
+  } else if (g.goal === "recomp") {
+    out.shiftKcal = null;                          // the flat -5 % in GOAL_SHIFT
+  }
+  if (out.weeks !== null && target !== null && out.rateKgWk) {
+    out.reachWeeks = Math.abs((target - m) / out.rateKgWk);
+  }
+  return out;
 }

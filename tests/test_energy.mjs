@@ -226,5 +226,34 @@ ok(E.fmtKcal(null) === "—", "and an unknown one is a dash, not a zero");
      missing.join(", "));
 }
 
+console.log("\ngoal plan: weight and body-composition targets");
+{
+  const T = "2026-09-15";
+  ok(E.goalPlan({ goal: "lose" }, null, T) === null, "no mass, no plan");
+  const d = E.goalPlan({ goal: "lose" }, 80, T);
+  ok(d.rateKgWk === -0.4 && d.shiftKcal === -440, "lose with no target: 0.5 %/week default",
+     `${d.rateKgWk} kg/wk, ${d.shiftKcal} kcal`);
+  const bf = E.goalPlan({ goal: "lose", bfPct: 20, targetBfPct: 12 }, 80, T);
+  ok(bf.derivedTarget && Math.abs(bf.targetKg - 72.7) < 0.05, "body-fat target keeps lean mass",
+     `target ${bf.targetKg}`);
+  const fast = E.goalPlan({ goal: "lose", targetKg: 70, by: "2026-10-15" }, 80, T);
+  ok(fast.capped && fast.rateKgWk === -0.8, "a crash pace is capped at 1 %/week", `${fast.rateKgWk}`);
+  const g = E.goalPlan({ goal: "gain", targetKg: 82, by: "2026-11-24" }, 80, T);
+  ok(!g.capped && g.rateKgWk === 0.2 && g.shiftKcal > 0, "gain on schedule gives a surplus",
+     `${g.rateKgWk} kg/wk, ${g.shiftKcal} kcal`);
+  const done = E.goalPlan({ goal: "lose", targetKg: 85 }, 80, T);
+  ok(done.shiftKcal === 0, "already below a loss target: no deficit");
+  const r = E.goalPlan({ goal: "recomp" }, 80, T);
+  const mr = E.macroTargets({ kcal: 3000, massKg: 80, goal: "recomp", shiftKcal: r.shiftKcal });
+  ok(mr.kcal === 2850 && mr.protein_g === 176, "recomposition: -5 % and 2.2 g/kg protein",
+     `${mr.kcal} kcal, ${mr.protein_g} g`);
+  const ml = E.macroTargets({ kcal: 3000, massKg: 80, goal: "lose", shiftKcal: d.shiftKcal });
+  ok(ml.kcal === 2560, "the plan's shift replaces the flat percentage", `${ml.kcal}`);
+  const floor = E.macroTargets({ kcal: 2000, massKg: 80, goal: "lose", shiftKcal: -1500 });
+  ok(floor.kcal === 1200, "never below 60 % of the day", `${floor.kcal}`);
+  ok(E.cleanGoal({ goal: "x", targetKg: "abc", by: "soon" }).goal === "maintain",
+     "junk goal fields are dropped");
+}
+
 console.log(bad ? `\n${bad} check(s) failed` : "\nAll checks passed");
 process.exit(bad ? 1 : 0);
