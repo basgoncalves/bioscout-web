@@ -576,6 +576,14 @@ try {
                           object-fit:cover; }
   video { transform:scaleX(-1); }
   video.rear { transform:none; }
+  .camBar { position:absolute; left:8px; right:8px; bottom:8px; z-index:3; display:flex;
+            align-items:center; gap:8px; flex-wrap:wrap; }
+  .camBar button, .camBar select { width:auto; margin:0; padding:6px 10px; font-size:13px;
+            background:rgba(0,0,0,.55); color:#fff; border-color:rgba(255,255,255,.35); }
+  .camBar #zoomRow { flex:1; min-width:140px; display:flex; align-items:center; gap:6px;
+            background:rgba(0,0,0,.55); border-radius:8px; padding:4px 8px; color:#fff; font-size:12px; }
+  .camBar #zoomRow.hidden, .camBar #lensRow.hidden { display:none; }
+  .camBar #zoomSel { flex:1; margin:0; }
   .hud { position:absolute; left:10px; top:10px; right:10px; display:flex;
          justify-content:space-between; font-size:12px; font-weight:600;
          color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.8); pointer-events:none; }
@@ -1174,6 +1182,16 @@ try {
       <div class="protoHudBox"><div class="protoHudCount" id="liveHudCount">0</div></div>
       <div class="protoHudAct" id="liveHudAct"></div>
     </div>
+    <!-- Camera controls on the picture itself: switch, lens (only when there
+         is more than one) and zoom (only when the track reports a range). -->
+    <div class="camBar">
+      <button type="button" class="ghost" id="switchBtn" data-i18n="switchCamera">Switch camera</button>
+      <div id="lensRow" class="hidden"><select id="lensSel" aria-label="Lens"></select></div>
+      <div id="zoomRow" class="hidden">
+        <input id="zoomSel" type="range" min="0" max="100" value="0" step="1" aria-label="Zoom">
+        <span id="zoomOut"></span><span id="zoomRange" hidden></span>
+      </div>
+    </div>
   </div>
 
   <div class="card hidden" id="controls">
@@ -1185,24 +1203,6 @@ try {
     </label>
     <p class="note" style="margin:2px 0 0" data-i18n="gestureNote">Two quick fists, either hand.
       For when the phone is across the room.</p>
-    <div id="lensRow" class="hidden" style="margin-top:10px">
-      <label for="lensSel" data-i18n="lens">Lens</label>
-      <select id="lensSel"></select>
-      <p class="note" style="margin:2px 0 0" data-i18n="lensNote">An ultra-wide lens fits your whole
-        body in from much closer. Zoom starts as wide as the camera allows.</p>
-    </div>
-    <!-- Only shown when the open track actually reports a zoom range. A slider
-         that cannot move is worse than no slider. -->
-    <div id="zoomRow" class="hidden" style="margin-top:10px">
-      <label for="zoomSel"><span data-i18n="zoomLabel">Zoom</span>
-        <span class="sub" id="zoomOut"></span></label>
-      <input id="zoomSel" type="range" min="0" max="100" value="0" step="1">
-      <p class="note" id="zoomRange" style="margin:2px 0 0"></p>
-      <p class="note" style="margin:2px 0 0" data-i18n="zoomNote">Wider fits more in;
-        tighter puts more pixels on the body, which can help tracking when you are
-        far from the camera. It crops the sensor rather than adding detail.</p>
-    </div>
-    <button class="ghost" id="switchBtn" data-i18n="switchCamera">Switch camera</button>
     <button class="ghost" id="stopBtn" data-i18n="closeCamera">Close camera</button>
   </div>
 
@@ -1314,7 +1314,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 102;
+window.BUILD = 103;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
