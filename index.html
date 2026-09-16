@@ -202,6 +202,11 @@ try {
   .asmTicks { display:flex; flex-wrap:wrap; gap:6px 14px; margin:4px 0 6px; }
   .asmTick { display:inline-flex; align-items:center; gap:5px; font-size:13px; cursor:pointer; }
   .asmTick input { width:auto; margin:0; }
+  .sessSumTable tr.setRow { cursor:pointer; }
+  .sessSumTable tr.setRow.on td { background:color-mix(in srgb, var(--accent) 16%, transparent); }
+  .sessSumTable input.effIn { width:3.6em; margin:0; padding:3px 4px; text-align:right; font-size:13px; }
+  button.linkish { width:auto; margin:0; padding:0 2px; background:none; border:0; color:inherit;
+                   text-decoration:underline dotted; font:inherit; }
   .asmTable { width:100%; border-collapse:collapse; font-size:13px; }
   .asmTable th { font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; padding:4px 6px; border-bottom:1px solid var(--line); text-align:left; }
   .asmTable td { padding:5px 6px; border-bottom:1px solid var(--line); white-space:nowrap; }
@@ -1314,7 +1319,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 103;
+window.BUILD = 104;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1347,7 +1352,7 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
 import { inverseDynamics } from "./src/dynamics.js";
 import { gradeReps } from "./src/repquality.js";
 import { athleteSummary, taskStats, curveSummary, curveSVG, generalHTML, taskTableHTML,
-         ASM_WINDOWS } from "./src/athsummary.js";
+         ASM_WINDOWS, ASM_METRICS, stats as asmStats, mr as asmMR } from "./src/athsummary.js";
 import { isUpperBody, defaultJoint, jointOrder, clipAngles, clipVelocities,
          repKinematics, clipArmMoments, armMomentsForRep, addPower, jointOptions,
          armTracks,
@@ -3861,7 +3866,7 @@ $("effortClear").onclick = () => saveEffort(null);
 
 /** The energy block for one session: the headline, what it is made of, and
  *  -- when the athlete asked to be asked once -- the session rating itself. */
-function energySectionHTML(sess) {
+function energySectionHTML(sess, { compact = false } = {}) {
   const e = energyOf(sess);
   if (!e || e.gross === null) return "";
   const ask = energyPrefs.mode === "session";
@@ -3884,6 +3889,15 @@ function energySectionHTML(sess) {
       <td>${Math.round(x.seconds)} s</td>
       <td>${x.rpe ?? "—"}</td><td>${x.hr ?? "—"}</td>
       <td style="text-align:right">${esc(fmtKcal(x.kcal))}</td></tr>`).join("");
+  if (compact) {
+    return `${chips}
+    <p class="sub" style="margin:10px 0 0">${esc(tr("energyBreakdown", {
+      work: fmtKcal(e.work_kcal), rec: fmtKcal(e.recovery_kcal),
+      mech: e.mechanical_kcal === null ? "—" : fmtKcal(e.mechanical_kcal),
+    }))}</p>
+    ${e.capped ? `<p class="sub" style="margin:4px 0 0">${esc(tr("energyCapped"))}</p>` : ""}
+    <p class="note">${esc(tr("energyNote"))}</p>`;
+  }
   return `
     <h2 style="font-size:15px;margin:14px 0 4px">${esc(tr("energyTitle"))}</h2>
     <p class="sub" style="margin-bottom:8px">${esc(tr("energySessionSub", {
@@ -6013,44 +6027,81 @@ function openSessionView(id) {
   if (!sess) return;
   sessionViewSess = sess;
   sessionViewVar = null;
+  sessionViewSet = null;
   showView("viewSession");
   renderSessionView();
+}
+
+let sessionViewSet = null;   // set index opened in the session view
+let sessionSetMetric = "angle";
+const sessionSetJoints = {};
+
+/** One set's metrics, as on the athlete summary: only the measures this set
+ *  actually carries, mean (range) over its reps, plus its waveforms. */
+function sessionSetDetailHTML(sess, set) {
+  const reps = set.perRep || [];
+  const rows = [];
+  for (const [k, unit, dp] of ASM_METRICS) {
+    const st = asmStats(reps.map((r) => r[k]));
+    if (st) rows.push(`<tr><td>${esc(tr("asm_m_" + k))} <span class="sub">${esc(unit)}</span></td>
+      <td style="text-align:right">${asmMR(st, dp)}</td></tr>`);
+  }
+  const metric = sessionSetMetric;
+  const curves = curveSummary([{ ...set, session: sess.started, fatigued: false }], getCurves, metric);
+  const task = set.activity;
+  const joints = [...new Set(curves.map((c) => c.joint))]
+    .sort((x, y) => jointOrder(task).indexOf(x) - jointOrder(task).indexOf(y));
+  let sel = sessionSetJoints[`${task}|${metric}`]
+    || (joints.includes(defaultJoint(task)) ? [defaultJoint(task)] : joints.slice(0, 1));
+  sel = sel.filter((j) => joints.includes(j));
+  const lines = curves.filter((c) => sel.includes(c.joint) && c.fresh).map((c) => ({
+    y: c.fresh, color: JOINT_COLOR[c.joint] || "#888", op: c.side === "l" ? 0.6 : 1, dash: c.side === "l",
+    label: tr(JOINT_LABEL[c.joint] || c.joint) + (c.side ? " " + tr(c.side === "l" ? "leftShort" : "rightShort") : "") }));
+  const ticks = joints.map((j) => `<label class="asmTick"><input type="checkbox" class="setJoint" value="${j}"${
+    sel.includes(j) ? " checked" : ""}> <i class="dot" style="background:${JOINT_COLOR[j] || "#888"}"></i>${tr(JOINT_LABEL[j] || j)}</label>`).join("");
+  const metricOpts = ["angle", "vel", "moment", "power"].map((m) =>
+    `<option value="${m}"${m === metric ? " selected" : ""}>${tr(METRIC_META[m].title)}</option>`).join("");
+  return `<div class="daybox" id="setDetail">
+    <div style="font-weight:600;margin-bottom:6px">${esc(tr("setLabel", { n: set.index }))} · ${esc(tr(task))}
+      <span class="sub">· ${esc(tr(set.reps === 1 ? "nRep" : "nRepsCount", { n: set.reps }))}${
+        set.addedKg ? ` · +${set.addedKg} kg` : ""}${set.assistKg ? ` · −${set.assistKg} kg` : ""}</span></div>
+    ${rows.length ? `<table class="asmTable"><thead><tr><th>${esc(tr("asmMetric"))}</th>
+      <th style="text-align:right">${esc(tr("asmMeanRange"))}</th></tr></thead><tbody>${rows.join("")}</tbody></table>` : ""}
+    <select id="setMetric" style="margin:10px 0 6px">${metricOpts}</select>
+    ${curves.length ? `<div class="asmTicks">${ticks}</div>${curveSVG(lines, [], METRIC_META[metric].unit)}
+      <p class="sub" style="margin:2px 0 0">${esc(tr("setCurveKey"))}</p>`
+      : `<p class="sub" style="margin:0">${esc(tr("setNoCurves"))}</p>`}
+  </div>`;
 }
 
 function renderSessionView() {
   const sess = sessionViewSess;
   const card = $("sessionCard");
   if (!sess) { card.innerHTML = ""; return; }
-  const vars = availablePeakVars(sess);
-  if (!sessionViewVar || !vars.includes(sessionViewVar)) sessionViewVar = vars[0] || null;
-  const series = sessionViewVar ? setSeries(sess, sessionViewVar) : [];
-  const spec = sessionViewVar ? varSpec(sessionViewVar) : null;
-  const byIndex = Object.fromEntries(series.map((x) => [x.index, x]));
-
-  const rows = sess.sets.map((s) => {
-    const pv = byIndex[s.index];
-    const cell = pv && pv.mean != null
-      ? `${pv.mean.toFixed(spec.dp)}<span class="sub"> ${spec.unit}</span>` : "—";
-    return `<tr><td>${tr("setLabel", { n: s.index })}</td><td>${tr(s.activity)}</td>
-      <td>${s.reps}</td><td>${s.addedKg ? "+" + s.addedKg : ""}${s.assistKg ? " −" + s.assistKg : ""}</td>
-      <td>${cell}</td>
-      <td>${new Date(s.at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</td></tr>`;
-  }).join("");
-  const varOpts = vars.map((k) =>
-    `<option value="${k}"${k === sessionViewVar ? " selected" : ""}>${varSpec(k).label}</option>`).join("");
   const total = sess.sets.reduce((a, b) => a + b.reps, 0);
+  const e = energyOf(sess);
+  const eSet = Object.fromEntries(((e && e.perSet) || []).map((x) => [x.index, x]));
+  if (!sess.sets.some((x) => x.index === sessionViewSet)) sessionViewSet = sess.sets[0]?.index ?? null;
+  const hm = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  // Same trend table renderSummary() builds for the live session -- a
-  // finished session has nothing left to summarise on demand, so it's shown
-  // straight away rather than behind its own button.
-  const sum = summariseSession(sess);
-  const t = sum ? sum.trends.map((x) => {
-    const bad = x.lowerIsWorse ? x.change < -0.02 * Math.abs(x.first || 1)
-                               : x.change > 0.05 * Math.abs(x.first || 1);
-    const arrow = x.change > 0 ? "▲" : x.change < 0 ? "▼" : "–";
-    return `<tr><td>${x.label}</td><td>${x.first}${x.unit}</td><td>${x.last}${x.unit}</td>
-      <td style="color:${bad ? "var(--warn)" : "var(--muted)"}">${arrow} ${x.pct > 0 ? "+" : ""}${x.pct}%</td></tr>`;
-  }).join("") : "";
+  /* The session summary: one row per set. RPE and heart rate are shown when
+   * given and are an input when not, so they can be added afterwards. A row
+   * opens that set's metrics underneath. */
+  const rows = sess.sets.map((s) => {
+    const en = eSet[s.index] || {};
+    const eff = s.effort || {};
+    const rpe = eff.rpe != null ? `<button type="button" class="linkish effEdit" data-set="${s.index}" data-k="rpe">${eff.rpe}</button>`
+      : `<input class="effIn" data-set="${s.index}" data-k="rpe" type="number" inputmode="numeric" min="0" max="10" step="1" placeholder="–">`;
+    const hr = eff.hr != null ? `<button type="button" class="linkish effEdit" data-set="${s.index}" data-k="hr">${eff.hr}</button>`
+      : `<input class="effIn" data-set="${s.index}" data-k="hr" type="number" inputmode="numeric" min="30" max="230" step="1" placeholder="–">`;
+    return `<tr class="setRow${s.index === sessionViewSet ? " on" : ""}" data-set="${s.index}">
+      <td>${tr("setLabel", { n: s.index })}</td><td>${tr(s.activity)}</td>
+      <td style="text-align:right">${en.seconds != null ? Math.round(en.seconds) + " s" : "—"}</td>
+      <td style="text-align:right">${en.kcal != null ? esc(fmtKcal(en.kcal)) : "—"}</td>
+      <td style="text-align:right">${rpe}</td><td style="text-align:right">${hr}</td>
+      <td style="text-align:right">${hm(s.at)}</td></tr>`;
+  }).join("");
+  const openSet = sess.sets.find((x) => x.index === sessionViewSet);
 
   card.innerHTML = `
     <h1 style="font-size:17px;margin:0 0 2px">${tr("trainingSession")}${
@@ -6059,52 +6110,73 @@ function renderSessionView() {
       ${tr("sessionSub", {
         sets: tr(sess.sets.length === 1 ? "nSet" : "nSets", { n: sess.sets.length }),
         reps: tr(total === 1 ? "nRep" : "nRepsCount", { n: total }),
-        time: new Date(sess.started).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}),
+        time: hm(sess.started),
       })}</p>
-    <table><thead><tr><th>${tr("set")}</th><th>${tr("movement")}</th><th>${tr("reps")}</th><th>${tr("load")}</th>
-      <th>${vars.length
-            ? `<select id="sessionPeakVar" class="thsel">${varOpts}</select>`
-            : tr("peakCol")}</th><th>${tr("time")}</th></tr></thead>
-      <tbody>${rows}</tbody></table>
-    <div id="sessionChartBox" style="margin-top:10px">${
-      sessionViewVar ? setChart(series, sessionViewVar) : ""}</div>
-    ${sum ? `<h2 style="font-size:15px;margin:14px 0 4px">${tr("summary")}</h2>
-      <p class="sub" style="margin-bottom:8px">${tr("summarySub", {
-        sets: tr(sum.sets === 1 ? "nSet" : "nSets", { n: sum.sets }),
-        reps: tr(sum.total_reps === 1 ? "nRep" : "nRepsCount", { n: sum.total_reps }),
-        perSet: sum.reps_per_set.join(", "), dur: sum.mean_rep_duration_s })}</p>
-      ${t ? `<table><thead><tr><th>${tr("measure")}</th><th>${tr("firstSet")}</th><th>${tr("lastSet")}</th><th>${tr("change")}</th></tr></thead>
-        <tbody>${t}</tbody></table>
-        <p class="note">${tr("noteChangeFirstLast")}</p>`
-        : `<p class="note">${tr("noteNotEnoughSets")}</p>`}` : ""}
+    <h2 style="font-size:15px;margin:10px 0 4px">${tr("summary")}</h2>
+    ${e && e.gross !== null ? `<p class="sub" style="margin-bottom:6px">${esc(tr("energySessionSub", {
+      kcal: fmtKcal(e.gross), net: e.net === null ? "—" : fmtKcal(e.net), basis: tr("energyFrom_" + e.method) }))}</p>` : ""}
+    <div style="overflow-x:auto"><table class="sessSumTable"><thead><tr><th>${tr("set")}</th><th>${tr("movement")}</th>
+      <th style="text-align:right">${tr("duration")}</th><th style="text-align:right">${tr("kcal")}</th>
+      <th style="text-align:right">RPE</th><th style="text-align:right">BPM</th><th style="text-align:right">${tr("time")}</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <p class="note" style="margin:4px 0 0">${tr("sessTapSet")}</p>
+    ${openSet ? sessionSetDetailHTML(sess, openSet) : ""}
     ${(() => {
       /* Reaction tests done during this session (from the recorder's button). */
       const rts = myReaction().filter((x) => x.session === sess.started);
       if (!rts.length) return "";
       return `<h2 style="font-size:15px;margin:14px 0 4px">${esc(tr("rtTitle"))}</h2>` + rts.map((x) => {
         const m = rtSummarise(x.trials);
-        return `<p class="sub" style="margin:2px 0 0">${esc(new Date(x.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}
+        return `<p class="sub" style="margin:2px 0 0">${esc(hm(x.at))}
           · ${esc(tr("rtGame_" + gameOf(x)))} · ${esc(tr("rtMedianMs", { ms: m ? m.median : "—" }))}
           · ${esc(tr("rtBestMs", { ms: m ? m.best : "—" }))}</p>`;
       }).join("");
     })()}
-    ${energySectionHTML(sess)}
+    ${energySectionHTML(sess, { compact: true })}
     ${sess.sets.length ? `<button id="sessionShareBtn" style="margin:14px 0 4px">${tr("shareSession")}</button>` : ""}
     ${repEditorHTML(sess)}
     ${sess.sets.some((x) => x.activity === "neck") ? neckLoadHTML() : ""}`;
+  const redraw = () => { sessionViewSess = findSession(sess.started) || sess; renderSessionView(); };
   if ($("sessionShareBtn")) $("sessionShareBtn").onclick = () => shareSession(sess);
-  wireSessionEffort(card, sess, () => {
-    sessionViewSess = findSession(sess.started) || sess;
-    renderSessionView();
-  });
+  wireSessionEffort(card, sess, redraw);
+  wireRepEditor(card, sess, () => { redraw(); renderDash(); });
 
-  wireRepEditor(card, sess, () => {
-    sessionViewSess = findSession(sess.started) || sess;
-    renderSessionView();
-    renderDash();
+  card.querySelectorAll("tr.setRow").forEach((row) => {
+    row.onclick = (ev) => {
+      if (ev.target.closest("input,button")) return;
+      sessionViewSet = +row.dataset.set;
+      renderSessionView();
+      $("setDetail")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    };
   });
-  const pv = $("sessionPeakVar");
-  if (pv) pv.onchange = () => { sessionViewVar = pv.value; renderSessionView(); };
+  const saveEff = (idx, k, raw) => {
+    const set = sess.sets.find((x) => x.index === idx);
+    const cur = { rpe: set?.effort?.rpe ?? null, hr: set?.effort?.hr ?? null };
+    const v = raw === "" || raw == null ? null
+      : k === "hr" ? clampHr(raw) : Math.max(RPE_MIN, Math.min(RPE_MAX, Math.round(+raw)));
+    setSetEffort(sess.started, idx, cleanEffort({ ...cur, [k]: Number.isFinite(v) ? v : null }));
+    redraw(); renderDash();
+  };
+  card.querySelectorAll("input.effIn").forEach((inp) => {
+    inp.onchange = () => saveEff(+inp.dataset.set, inp.dataset.k, inp.value);
+  });
+  card.querySelectorAll("button.effEdit").forEach((b) => {
+    b.onclick = () => {
+      const td = b.parentElement;
+      td.innerHTML = `<input class="effIn" type="number" inputmode="numeric" value="${b.textContent}" style="width:4.5em">`;
+      const inp = td.querySelector("input");
+      inp.focus();
+      inp.onchange = () => saveEff(+b.dataset.set, b.dataset.k, inp.value);
+    };
+  });
+  if ($("setMetric")) $("setMetric").onchange = (ev) => { sessionSetMetric = ev.target.value; renderSessionView(); };
+  card.querySelectorAll("input.setJoint").forEach((b) => {
+    b.onchange = () => {
+      sessionSetJoints[`${openSet.activity}|${sessionSetMetric}`] =
+        [...card.querySelectorAll("input.setJoint:checked")].map((x) => x.value);
+      renderSessionView();
+    };
+  });
 }
 
 function renderSummary() {
