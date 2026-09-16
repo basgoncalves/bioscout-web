@@ -199,6 +199,9 @@ try {
   /* - [ 83.0 ] +  */
   #weightBox .stepper button.stepBtn { width:38px; flex-basis:38px; font-size:18px; margin:0; }
   #weightBox .stepper input { padding:6px; }
+  .asmTicks { display:flex; flex-wrap:wrap; gap:6px 14px; margin:4px 0 6px; }
+  .asmTick { display:inline-flex; align-items:center; gap:5px; font-size:13px; cursor:pointer; }
+  .asmTick input { width:auto; margin:0; }
   .asmTable { width:100%; border-collapse:collapse; font-size:13px; }
   .asmTable th { font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; padding:4px 6px; border-bottom:1px solid var(--line); text-align:left; }
   .asmTable td { padding:5px 6px; border-bottom:1px solid var(--line); white-space:nowrap; }
@@ -1311,7 +1314,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 100;
+window.BUILD = 101;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1343,8 +1346,9 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          jointPositionsM } from "./src/kinematics.js";
 import { inverseDynamics } from "./src/dynamics.js";
 import { gradeReps } from "./src/repquality.js";
-import { athleteSummary, athleteSummaryHTML } from "./src/athsummary.js";
-import { isUpperBody, defaultJoint, clipAngles, clipVelocities,
+import { athleteSummary, taskStats, curveSummary, curveSVG, generalHTML, taskTableHTML,
+         ASM_WINDOWS } from "./src/athsummary.js";
+import { isUpperBody, defaultJoint, jointOrder, clipAngles, clipVelocities,
          repKinematics, clipArmMoments, armMomentsForRep, addPower, jointOptions,
          armTracks,
          jmFromStored } from "./src/jointmetrics.js";
@@ -4610,14 +4614,89 @@ function startTraining(dayKeyStr, sport = null, activity = null) {
  */
 let dashView = null;
 
-/** The athlete summary page (#viewSummary). */
+/** The athlete summary page (#viewSummary). Task menu, period tick boxes,
+ *  one table, and the fresh-vs-fatigued waveform plot with joint ticks. */
+const asmState = { task: null, wins: ["week", "month", "year"], metric: "angle", joints: {} };
 function renderAthSummary() {
   const prof = getProfile(currentAthlete());
   const sum = athleteSummary({ days: collectDays(dashboardData(), myCardio()),
                                weights: collectWeights(myWeights()) });
-  $("summaryCard").innerHTML = athleteSummaryHTML(sum, {
-    name: currentAthlete() || "", heightM: prof?.heightM ?? null,
-    achievementsHTML: achievementsHTML(myAchievements()) });
+  if (!sum.tasks.includes(asmState.task)) asmState.task = sum.tasks[0] || null;
+  const task = asmState.task;
+  const winBoxes = ASM_WINDOWS.map(([w]) => `<label class="asmTick"><input type="checkbox" class="asmWin"
+      value="${w}"${asmState.wins.includes(w) ? " checked" : ""}> ${tr("asmWin_" + w)}</label>`).join("");
+  const taskOpts = sum.tasks.map((t) => `<option value="${t}"${t === task ? " selected" : ""}>${tr(t)}</option>`).join("");
+  let taskBody = `<p class="sub" style="margin:0">${tr("asmNoSets")}</p>`;
+  if (task) {
+    const ts = taskStats(sum, task);
+    const metric = asmState.metric;
+    const curves = curveSummary(ts.weekSets, getCurves, metric);
+    const joints = [...new Set(curves.map((c) => c.joint))]
+      .sort((x, y) => jointOrder(task).indexOf(x) - jointOrder(task).indexOf(y));
+    const selKey = `${task}|${metric}`;
+    let sel = asmState.joints[selKey];
+    if (!sel) sel = joints.includes(defaultJoint(task)) ? [defaultJoint(task)] : joints.slice(0, 1);
+    sel = sel.filter((j) => joints.includes(j));
+    const meta = METRIC_META[metric];
+    const lines = [], bands = [];
+    for (const c of curves) {
+      if (!sel.includes(c.joint)) continue;
+      const col = JOINT_COLOR[c.joint] || "#888";
+      const nm = tr(JOINT_LABEL[c.joint] || c.joint) + (c.side ? " " + tr(c.side === "l" ? "leftShort" : "rightShort") : "");
+      const op = c.side === "l" ? 0.6 : 1;
+      if (c.fresh) lines.push({ y: c.fresh, color: col, label: `${nm} · ${tr("asmFresh")} (${c.nFresh})`, op });
+      if (c.tired) lines.push({ y: c.tired, color: col, dash: true, label: `${nm} · ${tr("asmFatigued")} (${c.nTired})`, op });
+    }
+    // Literature/reference curves: the squat corpus in norms.json only.
+    let refNote = "";
+    if (task === "squat" && norms && (metric === "angle" || metric === "moment")) {
+      const cond = normCondition({ externalKg: 0 });
+      for (const j of sel) {
+        const n = cond && refCurve(cond, metric === "angle" ? "joint_angle" : "joint_moment", j);
+        if (!n || !n.lower || !n.upper) continue;
+        const fl = metric === "angle" && j === "knee" ? -1 : 1;
+        bands.push({ lo: n.lower.map((v, i) => Math.min(fl * v, fl * n.upper[i])),
+                     hi: n.upper.map((v, i) => Math.max(fl * v, fl * n.lower[i])), color: JOINT_COLOR[j] });
+        refNote = tr("asmCurveRef", { src: (norms.sources?.[String(n.source).replace(/_squat$/, "")]?.citation) || n.source });
+      }
+    }
+    const ticks = joints.map((j) => `<label class="asmTick"><input type="checkbox" class="asmJoint" value="${j}"${
+      sel.includes(j) ? " checked" : ""}> <i class="dot" style="background:${JOINT_COLOR[j] || "#888"}"></i>${tr(JOINT_LABEL[j] || j)}</label>`).join("");
+    const metricOpts = ["angle", "vel", "moment", "power"].map((m) =>
+      `<option value="${m}"${m === metric ? " selected" : ""}>${tr(METRIC_META[m].title)}</option>`).join("");
+    const plot = curves.length ? curveSVG(lines, bands, meta.unit) : "";
+    taskBody = taskTableHTML(sum, ts, task, asmState.wins) + `
+      <div style="font-weight:600;margin:14px 0 4px">${tr("asmCurves")}</div>
+      <select id="asmMetric" style="margin:0 0 6px">${metricOpts}</select>
+      ${curves.length ? `<div class="asmTicks">${ticks}</div>${plot}
+        <p class="sub" style="margin:2px 0 0">${tr("asmLineKey")}</p>
+        ${refNote ? `<p class="note" style="margin:2px 0 0">${esc(refNote)}</p>` : ""}`
+        : `<p class="sub" style="margin:0">${tr("asmNoCurves")}</p>`}`;
+  }
+  $("summaryCard").innerHTML = `<h2 style="font-size:17px;margin:0 0 2px">${tr("asmTitle")}</h2>
+    <p class="sub" style="margin:0 0 8px">${esc(currentAthlete() || "")}</p>
+    <div class="asmTicks" style="margin:0 0 8px">${winBoxes}</div>
+    ${generalHTML(sum, asmState.wins, prof?.heightM ?? null)}
+    <div class="daybox"><div style="font-weight:600;margin-bottom:6px">${tr("asmTask")}</div>
+      ${task ? `<select id="asmTask" style="margin:0 0 8px">${taskOpts}</select>` : ""}
+      ${taskBody}
+      <p class="note" style="margin:8px 0 0">${tr("asmMetricsNote")} ${tr("asmFatigueNote")}</p></div>
+    ${achievementsHTML(myAchievements())}
+    <p class="sub" style="margin:10px 0 0">${tr("asmMore")}</p>`;
+  const card = $("summaryCard");
+  card.querySelectorAll("input.asmWin").forEach((b) => { b.onchange = () => {
+    asmState.wins = [...card.querySelectorAll("input.asmWin:checked")].map((x) => x.value);
+    renderAthSummary();
+  }; });
+  if ($("asmTask")) $("asmTask").onchange = (e) => { asmState.task = e.target.value; renderAthSummary(); };
+  if ($("asmMetric")) $("asmMetric").onchange = (e) => { asmState.metric = e.target.value; renderAthSummary(); };
+  card.querySelectorAll("input.asmJoint").forEach((b) => { b.onchange = () => {
+    asmState.joints[`${asmState.task}|${asmState.metric}`] =
+      [...card.querySelectorAll("input.asmJoint:checked")].map((x) => x.value);
+    renderAthSummary();
+  }; });
+  // The squat reference corpus loads lazily; redraw once it is here.
+  if (task === "squat" && !normsTried) loadNorms().then(() => { if (!$("viewSummary").classList.contains("hidden")) renderAthSummary(); });
 }
 
 function dashboardData() {
