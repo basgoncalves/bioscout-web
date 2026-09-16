@@ -12,6 +12,7 @@
  * kept -- a long session would blow the storage quota -- so the export writes
  * whatever sets are still in memory in full, and older ones as summaries.
  */
+import { setWave } from "./athsummary.js";
 import { UNITS } from "./foods.js";
 import { cleanEffort } from "./energy.js";
 import { groupPeaks } from "./muscle_groups.js";
@@ -1077,6 +1078,8 @@ export function addSet(result, fps, extra = {}) {
     assess: extra.assess || null,
     perRep: result.reps.map((r) => summariseRep(r, result.activity)),
   };
+  // Mean angle/moment waveform, small enough to sync (athsummary.js).
+  try { const w = setWave(result.reps); if (w) set.wave = w; } catch { /* optional */ }
   s.sets.push(set);
   s.u = stamp();
   // Throw rather than return a set that is not in the log: the caller says so

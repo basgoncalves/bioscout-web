@@ -37,3 +37,13 @@ const html = taskTableHTML(sum, ts, "squat", ["week", "year"]) + generalHTML(sum
 assert.ok(html.includes("100–130"), "squat depth shows the app band");
 assert.ok(html.includes("stroke-dasharray"));
 console.log("athsummary ok");
+import { setWave } from "../src/athsummary.js";
+{
+  const w = setWave([{ jm: { knee_angle_r: [0, 10, 20], knee_vel_r: [1, 2, 3] } }, { jm: { knee_angle_r: [0, 30, 40] } }]);
+  assert.deepEqual(Object.keys(w), ["knee_angle_r"]);
+  assert.equal(w.knee_angle_r.length, 51); assert.equal(w.knee_angle_r[50], 30);
+  const s2 = [{ session: "x", index: 1, fatigued: false, wave: w }];
+  const c2 = curveSummary(s2, () => null, "angle");
+  assert.equal(c2.length, 1); assert.equal(c2[0].fresh[100], 30);
+  console.log("wave fallback ok");
+}

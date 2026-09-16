@@ -152,6 +152,30 @@ export function resample(a, n = 101) {
   return out.some(num) ? out : null;
 }
 
+/* Compact per-set mean waveform, stored ON the set (profiles.addSet) so it
+ * syncs with the log and outlives the 12-set curve store: angle and moment
+ * only, 51 points, 0.1 precision -- a couple of kB a set. */
+export const WAVE_METRICS = ["angle", "moment"];
+export function setWave(reps) {
+  const acc = {};
+  for (const r of reps || []) {
+    for (const [k, v] of Object.entries(r.jm || {})) {
+      const m = k.match(/^[a-z]+_([a-z]+)(?:_[lr])?$/);
+      if (!m || !WAVE_METRICS.includes(m[1])) continue;
+      const rs = resample(v, 51);
+      if (rs) (acc[k] = acc[k] || []).push(rs);
+    }
+  }
+  const out = {};
+  for (const [k, list] of Object.entries(acc)) {
+    out[k] = list[0].map((_, i) => {
+      const x = mean(list.map((c) => c[i]).filter(num));
+      return num(x) ? Math.round(x * 10) / 10 : null;
+    });
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 const meanCurve = (list) => (list.length
   ? list[0].map((_, i) => mean(list.map((c) => c[i]).filter(num))) : null);
 
@@ -166,8 +190,17 @@ export function curveSummary(weekSets, getCurves, metric) {
   for (const s of weekSets) {
     let c = null;
     try { c = getCurves(s.session, s.index); } catch { c = null; }
-    if (!c || !Array.isArray(c.reps)) continue;
     const perKey = new Map();
+    if (!c || !Array.isArray(c.reps)) {
+      // No full curves on this device (recorded elsewhere, or evicted):
+      // fall back to the compact mean the set itself carries.
+      for (const [k, v] of Object.entries(s.wave || {})) {
+        const m = k.match(/^([a-z]+)_([a-z]+)(?:_([lr]))?$/);
+        const rs = m && m[2] === metric ? resample(v) : null;
+        if (rs) perKey.set(k, [rs]);
+      }
+      c = { reps: [] };
+    }
     for (const r of c.reps) {
       for (const [k, v] of Object.entries(r.jm || {})) {
         const m = k.match(/^([a-z]+)_([a-z]+)(?:_([lr]))?$/);
