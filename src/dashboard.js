@@ -546,14 +546,17 @@ function dayHTML(day, key, reactionLines = "", { plans = [], todayKey = key } = 
       <p class="sub" style="margin:6px 0 0">${esc(tr("planFutureNote"))}</p>
       ${plansBlock}${planBtn}</div>`;
   }
-  const btns = `${plansBlock}<div class="row" style="margin-top:10px">
-      <button id="newTrainingBtn" style="margin:0">${esc(tr("newTrainingSession"))}</button>
-      <button type="button" class="ghost" id="trainImport" style="margin:0;padding:9px">${esc(tr("import"))}</button>
-    </div>
+  /* New session full width; Import and Plan as two smaller half buttons;
+   * Physical assessment under them. Reaction time is reached from inside
+   * training and the assessment, so it has no button of its own here. */
+  const small = 'style="margin:0;padding:7px;font-size:13px"';
+  const btns = `${plansBlock}
+    <button id="newTrainingBtn" style="margin:10px 0 0;width:100%">${esc(tr("newTrainingSession"))}</button>
     <div class="row" style="margin-top:8px">
-      <button type="button" class="ghost" id="assessBtn" style="margin:0">${esc(tr("assess"))}</button>
-      <button type="button" class="ghost" id="reactionBtn" style="margin:0">${esc(tr("rtTitle"))}</button>
-    </div>${key === todayKey ? planBtn : ""}`;
+      <button type="button" class="ghost" id="trainImport" ${small}>${esc(tr("import"))}</button>
+      ${key === todayKey ? `<button type="button" class="ghost" id="planAddBtn" ${small}>${esc(tr("planAdd"))}</button>` : ""}
+    </div>
+    <button type="button" class="ghost" id="assessBtn" style="margin:8px 0 0;width:100%">${esc(tr("assess"))}</button>`;
   if (!day) {
     return `<div class="daybox"><div style="font-weight:600">${esc(tr("modeTraining"))}</div>
       ${reactionLines || `<p class="sub" style="margin:6px 0 0">${esc(tr("noTrainingThatDay"))}</p>`}${btns}</div>`;
@@ -1459,14 +1462,15 @@ function weightDayHTML(wts, key, todayKey) {
   const line = on ? tr("weightOnThisDay", { kg: near.kg.toFixed(1) })
     : near ? `${tr("noWeightThatDay")} · ${weightSourceText(near)}`
     : tr("noWeightYet");
-  return `<div class="daybox" id="weightBox">
-    <div style="font-weight:600">${esc(tr("weightTitle"))}</div>
-    <p class="sub" style="margin:4px 0 8px">${esc(line)}</p>
-    <div class="row" style="align-items:center">
+  /* One compact line under the health rating: "Weight [- 83.4 +] Save". */
+  return `<div id="weightBox" style="margin:8px 0 10px">
+    <div class="row" style="align-items:center;gap:8px;margin:0">
+      <span style="font-weight:600;flex:0 0 auto">${esc(tr("weightTitle"))}</span>
       ${weightStepperHTML("weightDayKg", near ? near.kg : null)}
-      <button type="button" class="ghost" id="weightDaySave" style="margin:0;padding:9px;flex:0 0 auto;width:auto">${
+      <button type="button" class="ghost" id="weightDaySave" style="margin:0;padding:7px 10px;font-size:13px;flex:0 0 auto;width:auto">${
         esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
     </div>
+    <p class="sub" style="margin:2px 0 0;font-size:12px">${esc(line)}</p>
   </div>`;
 }
 
@@ -1518,6 +1522,7 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     ${healthHTML({ heightM: view.heightM, weightKg: nowW ? nowW.kg : null,
                    sex: view.sex, ageY: view.ageY })}
     ${intakeHTML(mealDays, wts, view.year, view.month)}
+    ${weightDayHTML(wts, view.selected, todayKey)}
     <div class="dashCols"><div class="dashLeft">
     <div id="dayHead">
       <div style="font-weight:600">${esc(localeDay(view.selected)
@@ -1526,7 +1531,7 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     ${calendarHTML({ meals: mealDays, diary: diaryDays, sleep: sleepDays, vitals: vitalsDays }[mode] || days,
                    view.year, view.month, view.selected, todayKey, mode, plannedDays(view.plans || []))}
     ${summaryHTML(days, wts, view)}
-    ${weightDayHTML(wts, view.selected, todayKey)}
+    <button type="button" class="ghost" id="athSummaryBtn" style="margin:10px 0 0;width:100%">${esc(tr("asmButton"))}</button>
     </div><div class="dashRight">
     <div class="dayHead2">${esc(localeDay(view.selected)
       .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>

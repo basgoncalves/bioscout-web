@@ -197,6 +197,11 @@ try {
   button.bmEx { display:inline-block; width:auto; margin:4px 6px 0 0; padding:7px 12px; font-size:14px; }
   button.bmEx.on { border-color:var(--accent); color:var(--accent); font-weight:700; }
   /* - [ 83.0 ] +  */
+  #weightBox .stepper button.stepBtn { width:38px; flex-basis:38px; font-size:18px; margin:0; }
+  #weightBox .stepper input { padding:6px; }
+  .asmTable { width:100%; border-collapse:collapse; font-size:13px; }
+  .asmTable th { font-size:11px; color:var(--muted); font-weight:600; text-transform:uppercase; padding:4px 6px; border-bottom:1px solid var(--line); text-align:left; }
+  .asmTable td { padding:5px 6px; border-bottom:1px solid var(--line); white-space:nowrap; }
   .stepper { display:flex; gap:6px; align-items:stretch; flex:1; min-width:0; }
   .stepper input { text-align:center; flex:1; min-width:0; }
   .stepper button.stepBtn { width:48px; flex:0 0 48px; margin:0; padding:0; font-size:22px;
@@ -1036,6 +1041,11 @@ try {
     </div>
   </section>
 
+  <!-- Athlete summary (athsummary.js): means over week/month/quarter/year. -->
+  <section id="viewSummary" class="hidden">
+    <div class="card" id="summaryCard"></div>
+  </section>
+
   <section id="viewCycle" class="hidden">
     <div class="card" id="cycleCard"></div>
   </section>
@@ -1301,7 +1311,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 99;
+window.BUILD = 100;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1333,6 +1343,7 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          jointPositionsM } from "./src/kinematics.js";
 import { inverseDynamics } from "./src/dynamics.js";
 import { gradeReps } from "./src/repquality.js";
+import { athleteSummary, athleteSummaryHTML } from "./src/athsummary.js";
 import { isUpperBody, defaultJoint, clipAngles, clipVelocities,
          repKinematics, clipArmMoments, armMomentsForRep, addPower, jointOptions,
          armTracks,
@@ -1372,7 +1383,7 @@ import { stillKeeper, makePicture, makeClip, shareFacts, postMeta, pickType,
          UPLOAD_MAX_BYTES } from "./src/sharepost.js";
 import { renderDashboard, mealFormHTML, diaryFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
-         collectDays, percentile } from "./src/dashboard.js";
+         collectDays, percentile, achievementsHTML } from "./src/dashboard.js";
 import { probe as probeHelper, fetchClip } from "./src/fetcher.js";
 import { probe as probeStrava, authorise as authoriseStrava,
          fetchActivities, toCardioAll } from "./src/strava.js";
@@ -4406,7 +4417,7 @@ $("mealShotFile").onchange = (e) => {
  * gets stored. The login screen writes to it rather than replacing it, so
  * there is still exactly one source of truth for the athlete.
  */
-const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat"];
+const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat", "viewSummary"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -4448,6 +4459,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewAssess") renderAssess();
   if (id === "viewReaction") openReaction(false);
   if (id === "viewFriends") renderFriends();
+  if (id === "viewSummary") renderAthSummary();
   if (id === "viewFeed") renderFeed();
   if (id === "viewChat") chat.open();
 });
@@ -4597,6 +4609,16 @@ function startTraining(dayKeyStr, sport = null, activity = null) {
  * follows, and recording a set must not throw the view back to today.
  */
 let dashView = null;
+
+/** The athlete summary page (#viewSummary). */
+function renderAthSummary() {
+  const prof = getProfile(currentAthlete());
+  const sum = athleteSummary({ days: collectDays(dashboardData(), myCardio()),
+                               weights: collectWeights(myWeights()) });
+  $("summaryCard").innerHTML = athleteSummaryHTML(sum, {
+    name: currentAthlete() || "", heightM: prof?.heightM ?? null,
+    achievementsHTML: achievementsHTML(myAchievements()) });
+}
 
 function dashboardData() {
   return allSessions(listArchive(), getSession(), currentAthlete());
@@ -5212,8 +5234,8 @@ function renderDash(fromSync = false) {
   };
   if ($("trainImport")) $("trainImport").onclick = () => $("importProfilesFile").click();
   if ($("assessBtn")) $("assessBtn").onclick = () => openAssess();
+  if ($("athSummaryBtn")) $("athSummaryBtn").onclick = () => { showView("viewSummary"); renderAthSummary(); };
   if ($("openCycleBtn")) $("openCycleBtn").onclick = () => openCycle(dashView.selected);
-  if ($("reactionBtn")) $("reactionBtn").onclick = () => openReaction();
   if ($("sleepSave")) $("sleepSave").onclick = () => {
     if (!setSleep({ profile: currentAthlete(), at: atOnDay(dashView.selected),
                     bed: $("sleepBed").value, wake: $("sleepWake").value })) {
@@ -6233,6 +6255,10 @@ function boot() {
       showView("viewChat", false);
       renderDash();
       chat.open();
+    } else if (resumeView === "viewSummary") {
+      showView("viewSummary", false);
+      renderDash();
+      renderAthSummary();
     } else if (resumeView === "viewAssess") {
       // Unlike viewSession, the assessment's state is stored, so a reload
       // mid-protocol comes back to the same three steps rather than home.
