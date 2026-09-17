@@ -1358,6 +1358,7 @@ import { isUpperBody, defaultJoint, jointOrder, clipAngles, clipVelocities,
          armTracks,
          jmFromStored } from "./src/jointmetrics.js";
 import { classify, MIN_CONFIDENCE } from "./src/detect.js";
+import { clipGrf, grfForRep, grfSources } from "./src/grf.js";
 import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          newSession, getSession, clearSession, addSet, summariseSession,
          listMeals, addMeal, deleteMeal,
@@ -7373,9 +7374,19 @@ async function enrich(res, poses, fps, heightM, activity) {
                                  { systemKg: massKg + res.externalKg });
       } catch (err) { console.warn("arm dynamics failed", err); }
     }
+    /* Vertical reaction force per foot and per hand -- see src/grf.js. Same
+     * gate as the moments on travel: a drifting scale fakes acceleration. */
+    let grfClip = null;
+    try {
+      const { pxPerM } = computePxPerM(poses, heightM);
+      grfClip = clipGrf(poses, activity, { pxPerM, heightM, fps,
+        systemKg: massKg + res.externalKg,
+        travels: !!(spec.travels && !res.travel?.stationary) || !!spec.openChain });
+    } catch (err) { console.warn("reaction forces failed", err); }
     for (const r of [...res.reps, ...(res.whole ? [res.whole] : [])]) {
       if (!r.bounds) continue;
       const jm = repKinematics(angles, vels, r.bounds);
+      Object.assign(jm, grfForRep(grfClip, r.bounds));
       if (r.dyn) {
         for (const j of ["hip", "knee", "ankle"]) {
           if (r.dyn[j + "_moment"]) jm[j + "_moment"] = r.dyn[j + "_moment"];
@@ -7895,6 +7906,59 @@ function drawMetric(box, rep, res) {
       drawMetric(box, rep, res);
     };
   });
+}
+
+/* Reaction force plot: a source dropdown (feet / hands) and L/R ticks.
+ * Choices persist per task while the page is open, like jointSel. */
+const grfSel = {};   // activity -> { src, sides }
+function grfPanel(rep, res) {
+  const jm = rep.jm, srcs = grfSources(jm);
+  if (!srcs.length) return "";
+  const kept = grfSel[res.activity] || {};
+  const src = srcs.includes(kept.src) ? kept.src : srcs[0];
+  const sides = kept.sides || ["l", "r"];
+  const sdj = rep.sd && rep.sd.jm;
+  const bw = (res.massKg + (res.externalKg || 0)) * 9.80665;
+  const series = [], bands = [], peaks = [];
+  for (const d of ["l", "r"]) {
+    const k = `${src}_grf_${d}`;
+    if (!sides.includes(d) || !Array.isArray(jm[k])) continue;
+    const label = tr(src === "feet" ? "grfFoot" : "grfHand") + " " + tr(d === "l" ? "leftShort" : "rightShort");
+    series.push([label, jm[k], { color: d === "l" ? SIDE_L : SIDE_R }]);
+    bands.push((sdj && sdj[k]) || null);
+    const pk = Math.max(...jm[k].filter(Number.isFinite));
+    if (Number.isFinite(pk)) peaks.push(`${label} ${pk.toFixed(0)} N (${bw > 0 ? (pk / bw).toFixed(2) : "—"} ×BW)`);
+  }
+  const opt = (v) => `<option value="${v}"${v === src ? " selected" : ""}>${
+    tr(v === "feet" ? "grfSrcFeet" : "grfSrcHands")}</option>`;
+  const tick = (d) => `<label class="${sides.includes(d) ? "on" : ""}"><input type="checkbox" value="${d}"${
+    sides.includes(d) ? " checked" : ""}><i class="swatch" style="background:${
+    d === "l" ? SIDE_L : SIDE_R};margin:0"></i>${tr(d === "l" ? "leftShort" : "rightShort")}</label>`;
+  const note = src === "hands" && res.activity === "pushup" ? "grfNotePushup"
+             : src === "hands" ? "grfNoteHang" : "grfNoteFeet";
+  return `<h2>${tr("grfTitle")}</h2>
+    <div class="jmpick" role="group" aria-label="${tr("grfTitle")}">
+      <select class="grfsrc" aria-label="${tr("grfTitle")}">${srcs.map(opt).join("")}</select>
+      ${tick("l")}${tick("r")}</div>
+    ${series.length ? curveChart(rep, res.activity, series, bands, { unit: "N", zero: true })
+                    : `<p class="note">${tr("jmNoneTicked")}</p>`}
+    ${peaks.length ? `<p class="jmpeaks">${peaks.join(" · ")}</p>` : ""}
+    <p class="note" style="margin-top:2px">${tr(note)}</p>`;
+}
+function drawGrf(box, rep, res) {
+  if (!box) return;
+  const html = grfPanel(rep, res);
+  box.innerHTML = html;
+  box.classList.toggle("hidden", !html);
+  const save = () => {
+    grfSel[res.activity] = {
+      src: box.querySelector("select.grfsrc")?.value,
+      sides: [...box.querySelectorAll('input[type="checkbox"]:checked')].map((x) => x.value),
+    };
+    drawGrf(box, rep, res);
+  };
+  box.querySelector("select.grfsrc")?.addEventListener("change", save);
+  box.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.onchange = save; });
 }
 
 function wireMetrics(root, rep, res) {
@@ -9379,7 +9443,9 @@ function render(res, fps) {
                     { n: items[i].nReps }) + tr("noteMeanBand")}</p>`
            : "");
     wireMetrics($("chartBox"), items[i], res);
-    $("dynBox").innerHTML = momentPanel(items[i], res);
+    $("dynBox").innerHTML = momentPanel(items[i], res)
+      + `<div class="grfplot jmplot"></div>`;
+    drawGrf($("dynBox").querySelector(".grfplot"), items[i], res);
     wireMetrics($("dynBox"), items[i], res);
     $("forceBox").innerHTML = forcePanel(items[i], res);
   }
