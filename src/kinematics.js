@@ -624,6 +624,10 @@ export function buildSquatFeatures(poses) {
   F.depth = F.hip_cy.map((y) => (y - standY) / scale);
 
   F._lo = lo; F._n = n; F._scale = scale; F._standY = standY;
+  // Frames the tracker actually found a body in. `n` spans the clip and now
+  // includes the holes a missed frame leaves, so a coverage measured against
+  // n would punish a clip for frames that were never tracked at all.
+  F._tracked = frames.length;
   // Floor level in image pixels: the lowest foot position observed.
   // The floor is where the feet spend their time, not the single lowest pixel
   // any foot ever reached. One dropped frame or one crouch put the floor below
@@ -950,8 +954,14 @@ export const DEFAULT_JUMP_CFG = {
   // is capped now, so the edge can stay where the physics wants it.
   edgeFrac: 0.015,
   maxEdgeWalkS: 0.10,   // the foot clears 2 cm in a frame or two, not in half a second
+  /* Flight bounds in SECONDS, not frames. In frames they meant 0.07-2.0 s at
+   * 30 fps and 0.03-1.0 s at 60 -- so the same wobble that was too short to be
+   * a jump on one phone became a jump on another, and a long hang was cut.
+   * minFlightFrames is still honoured as an absolute floor: a flight seen in
+   * one frame is not a flight whatever the rate. */
+  minFlightS: 0.067,
+  maxFlightS: 2.0,
   minFlightFrames: 2,     // 2 frames at 30 fps is a 6.7 cm jump -- the floor
-  maxFlightFrames: 60,
   // A countermovement is a dip below the starting hip height, as a fraction of
   // shank length. 0.08 is about 3 cm, past pose jitter.
   dipFrac: 0.08,
@@ -1011,7 +1021,14 @@ export function buildJumpFeatures(poses) {
     const low = Math.max(isNum(a) ? a : -Infinity, isNum(t) ? t : -Infinity);
     if (Number.isFinite(low)) { F.foot_rise[i] = F._floorY - low; F.foot_low[i] = low; seen++; }
   }
-  F._footCoverage = n ? seen / n : 0;
+  // Of the frames that HAVE a body, how many have a foot. This used to be
+  // measured against every frame in the clip's span, which was the same number
+  // until missed frames started being kept as holes (live recording, Sep 2026).
+  // After that a clip where the tracker lost the body for a tenth of the frames
+  // -- ordinary on a phone, and likeliest mid-jump -- was refused outright with
+  // "the feet were not in the picture", which was not what had happened.
+  F._footCoverage = F._tracked ? seen / F._tracked : (n ? seen / n : 0);
+  F._trackCoverage = n ? (F._tracked ?? n) / n : 1;
   return F;
 }
 
@@ -1151,7 +1168,9 @@ export function fitParabola(xs, ys) {
 }
 
 /** Contiguous runs where the feet are off the floor. */
-function flightRuns(rise, thresh, cfg) {
+function flightRuns(rise, thresh, cfg, fps = 30) {
+  const lo = Math.max(cfg.minFlightFrames, Math.round((cfg.minFlightS ?? 0.067) * fps));
+  const hi = Math.max(lo, Math.round((cfg.maxFlightS ?? 2) * fps));
   const runs = [];
   let start = -1;
   for (let i = 0; i < rise.length; i++) {
@@ -1160,7 +1179,7 @@ function flightRuns(rise, thresh, cfg) {
     if ((!air || i === rise.length - 1) && start >= 0) {
       const end = air ? i : i - 1;
       const len = end - start + 1;
-      if (len >= cfg.minFlightFrames && len <= cfg.maxFlightFrames) {
+      if (len >= lo && len <= hi) {
         runs.push([start, end]);
       }
       start = -1;
@@ -1184,7 +1203,7 @@ export function findJumpReps(F, cfg = DEFAULT_JUMP_CFG) {
   const thresh = sig.thresh;
   const reps = [];
   let prevEnd = -1;
-  const runs = flightRuns(rise, thresh, cfg);
+  const runs = flightRuns(rise, thresh, cfg, F._fps || 30);
   /* How high the hip gets while the feet are demonstrably on the floor. The
    * 10th percentile rather than the minimum, so one noisy frame cannot raise
    * the bar the jump has to clear. Taken from the stretch of standing just
@@ -1256,7 +1275,8 @@ export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
   let land = takeoff;
   while (land + 1 <= t1 && rise[land + 1] > thresh) land++;
   const flightFrames = land - takeoff + 1;
-  if (flightFrames < cfg.minFlightFrames) return null;
+  if (flightFrames < Math.max(cfg.minFlightFrames,
+                              Math.round((cfg.minFlightS ?? 0.067) * (fps || 30)))) return null;
 
   // Walk out to the near-floor crossings, then interpolate between the two
   // frames that straddle each one for a sub-frame instant.
@@ -1432,7 +1452,7 @@ export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
   const notFalling = freeFallA != null
     && (freeFallA < cfg.freeFallMin || freeFallA > cfg.freeFallMax);
 
-  const tooLong = flight_s > cfg.maxFlightFrames / fps;
+  const tooLong = flight_s > (cfg.maxFlightS ?? cfg.maxFlightFrames / fps);
   const tooHigh = height_flight_m > cfg.maxHeightM
     || (Number.isFinite(height_com_m) && height_com_m > cfg.maxHeightM);
   const comH = Number.isFinite(height_com_m) ? height_com_m : null;
