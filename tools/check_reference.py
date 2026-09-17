@@ -95,8 +95,11 @@ def run_case(name, c):
 
 def main():
     if not os.path.exists(REFERENCE):
-        print("reference.json not found at %s" % REFERENCE)
-        return 1
+        # Not in the public repository since it holds a participant
+        # recording (see .gitignore), so CI has nothing to compare. Skip, as
+        # test_port.mjs does, rather than fail every push.
+        print("skip  reference.json is not in this checkout (%s)" % REFERENCE)
+        return 0
     with open(REFERENCE) as f:
         cases = json.load(f)["cases"]
 
