@@ -343,6 +343,14 @@ export function mergeSides(left, right) {
   if (names && (ll || lr) && (!ll || !lr || ll.length === lr.length)) {
     const isL = names.map((nm) => /_l_/.test(nm));
     out.loadNames = names;
+    // the magnitudes travel with them, by the same rule (jointload.js reads both)
+    const jl_ = left && left.jrf, jr_ = right && right.jrf;
+    const jn = (left && left.jrfNames) || (right && right.jrfNames);
+    if (jn && (jl_ || jr_) && (!jl_ || !jr_ || jl_.length === jr_.length)) {
+      out.jrfNames = jn;
+      out.jrf = (jl_ || jr_).map((_, k) => jn.map((nm, c) =>
+        ((/_l_/.test(nm) ? (jl_ || jr_) : (jr_ || jl_))[k][c])));
+    }
     out.loads = (ll || lr).map((_, k) => names.map((_, c) => {
       const src = isL[c] ? (ll || lr) : (lr || ll);
       return src[k][c];

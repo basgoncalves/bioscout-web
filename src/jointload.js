@@ -340,7 +340,17 @@ export function jointLoadSVG(rep, opts) {
     const v = jointVectors(rep, j, side);
     if (!v) continue;
     vec[j] = v;
-    mag[j] = v.map((p) => Math.hypot(p[0], p[1], p[2]));
+    /* LENGTH is the model's own magnitude target (hip_r_mag ...), the number
+     * the joint-contact table reports; the components give the DIRECTION only.
+     * The network predicts the two separately, and the norm of predicted
+     * components is systematically smaller than the predicted norm (errors in
+     * a component partly cancel; in a magnitude they cannot) -- 6.2 against
+     * 7.5 BW at the hip on the first phone trial. One figure and one table
+     * about the same joint must not disagree, so both read the same target. */
+    const mi = rep.jrf && rep.jrfNames && rep.jrf.length === v.length
+      ? rep.jrfNames.indexOf(`${j}_${side}_mag`) : -1;
+    mag[j] = mi >= 0 ? rep.jrf.map((row) => Math.abs(row[mi]))
+                     : v.map((p) => Math.hypot(p[0], p[1], p[2]));
     rimRaw = Math.max(rimRaw, ...mag[j].filter(isNum));
   }
   const joints = JOINTS.filter((j) => vec[j]);

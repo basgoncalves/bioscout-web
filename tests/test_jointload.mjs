@@ -82,5 +82,13 @@ for (const plane of ["sagittal", "frontal"]) {
   check(fig.events.length === 4 && fig.rim === 4, `${plane}: 4 events, shared rim ${fig.rim} BW`);
   check(fig.svg.includes(plane === "frontal" ? ">LAT<" : ">ANT<"), `${plane}: axis labelled for its plane`);
 }
+// the dial's length is the table's number: the model's *_mag target
+{
+  const jrfNames = ["hip_r_mag", "knee_r_mag", "ankle_r_mag", "hip_l_mag", "knee_l_mag", "ankle_l_mag"];
+  const jrf = loads.map((_, i) => Float64Array.from([5 + i / 100, 6, 7, 1, 1, 1]));
+  const fig = jointLoadSVG({ ...rep, jrf, jrfNames }, { plane: "sagittal", side: "r", activity: "squat", massKg: 80, tr: i18n.t });
+  check(Math.abs(fig.peaks.hip - 6) < 1e-9 && fig.peaks.knee === 6 && fig.peaks.ankle === 7,
+        `peaks come from the magnitude targets (hip ${fig.peaks.hip}, knee ${fig.peaks.knee}, ankle ${fig.peaks.ankle})`);
+}
 console.log(failed ? `\n${failed} check(s) failed` : "\nall checks passed");
 process.exit(failed ? 1 : 0);
