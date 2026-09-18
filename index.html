@@ -1332,7 +1332,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 105;
+window.BUILD = 106;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1488,6 +1488,22 @@ const say = (t, warn) => {
  * and bar(0..1) fills. The point is that a stage which takes ten seconds and a
  * stage which has hung look different: before this, both were a line of text
  * that never changed. */
+/* A bar that advances on the clock, for a wait with a known deadline.
+ *
+ * Used where the app is waiting on something it cannot measure the progress of
+ * -- the browser decoding a file -- but does know when it will give up. The
+ * bar filling toward that deadline is the honest picture: it says "still
+ * working, and here is how much patience is left" rather than sitting still
+ * and looking identical to a hang. Returns a stop function. */
+const barClock = (ms) => {
+  const t0 = performance.now();
+  const id = setInterval(() => {
+    bar(Math.min(0.98, (performance.now() - t0) / ms));
+  }, 100);
+  bar(0);
+  return () => clearInterval(id);
+};
+
 const bar = (frac) => {
   const el = $("statusBar"), fill = $("statusBarFill");
   if (!el || !fill) return;
@@ -7173,7 +7189,19 @@ function askTrim(file, dt, duration) {
                          { once: true });
     v.onloadeddata = () => { v.currentTime = 0; paint(); };
     paint();
-    dlg.showModal();
+    /* showModal() throws if the dialog is already open.
+     *
+     * A take abandoned midway can leave it open, and the throw happened inside
+     * this executor -- so the promise never settled and the analysis hung with
+     * no dialog on screen and no message (Bas, 2026-09-19). Close it first, and
+     * if it still will not open, analyse the whole clip rather than hang. */
+    try {
+      if (dlg.open) dlg.close();
+      dlg.showModal();
+    } catch (err) {
+      console.warn("trim dialog would not open:", err);
+      done([0, duration]);
+    }
   });
 }
 
@@ -7190,6 +7218,7 @@ async function analyseVideoBlob(file, { trim = true } = {}) {
    * video" line (Bas, HEVC clip from a phone, 2026-09-18). Whichever comes
    * first wins, and a file that does neither gives up after METADATA_TIMEOUT_MS
    * and says so. */
+  const stopClock = barClock(METADATA_TIMEOUT_MS);
   const readable = await new Promise((resolve) => {
     let settled = false;
     const done = (ok) => { if (!settled) { settled = true; resolve(ok); } };
@@ -7197,6 +7226,7 @@ async function analyseVideoBlob(file, { trim = true } = {}) {
     v.addEventListener("error", () => done(false), { once: true });
     setTimeout(() => done(false), METADATA_TIMEOUT_MS);
   });
+  stopClock();
   if (!readable) {
     say(tr("sayVideoUnreadable"), true);
     bar(null);
@@ -7225,7 +7255,14 @@ async function analyseVideoBlob(file, { trim = true } = {}) {
    * resolution in the timings, and is stated. */
   let from = 0, to = duration;
   if (trim) {
-    bar(null);
+    /* The bar stays up and the status changes.
+     *
+     * Hiding it here left the athlete looking at "Reading video" with nothing
+     * moving, which is the exact picture a hang makes (Bas, 2026-09-19). The
+     * app is not reading any more -- it is waiting for a person -- so it says
+     * that instead. */
+    say(tr("sayChooseRange"));
+    bar(1);
     const range = await askTrim(file, dt, duration);
     if (!range) { say(tr("sayTrimCancelled")); bar(null); return; }
     [from, to] = range;
@@ -7246,6 +7283,8 @@ async function analyseVideoBlob(file, { trim = true } = {}) {
   });
 
   const n = Math.max(1, Math.floor(span / dt));
+  say(tr("sayTrackingProgress", { t: "0.0", dur: span.toFixed(1), frames: 0 }));
+  bar(0);
   for (let i = 0; i < n; i++) {
     const t = from + i * dt;
     if (t > to) break;
@@ -7262,11 +7301,11 @@ async function analyseVideoBlob(file, { trim = true } = {}) {
       frames.push({ i, t: t * 1000,
                     lm: toNamed(res.landmarks[0], v.videoWidth, v.videoHeight) });
     }
+    bar((i + 1) / n);
     if (i % 5 === 0) {
       say(tr("sayTrackingProgress", { t: (t - from).toFixed(1),
                                       dur: span.toFixed(1),
                                       frames: frames.length }));
-      bar((i + 1) / n);
     }
   }
   bar(null);
