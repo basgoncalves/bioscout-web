@@ -1359,6 +1359,7 @@ import { isUpperBody, defaultJoint, jointOrder, clipAngles, clipVelocities,
          jmFromStored } from "./src/jointmetrics.js";
 import { classify, MIN_CONFIDENCE } from "./src/detect.js";
 import { clipGrf, grfForRep, grfSources } from "./src/grf.js";
+import { jointLoadSVG, hasJointLoad } from "./src/jointload.js";
 import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
          newSession, getSession, clearSession, addSet, summariseSession,
          listMeals, addMeal, deleteMeal,
@@ -7509,6 +7510,8 @@ async function enrich(res, poses, fps, heightM, activity) {
       r.forceNames = out.muscleNames;
       r.jrf = out.jrf;
       r.jrfNames = out.jrfNames;
+      r.loads = out.loads;            // force vectors, for the joint-load figure
+      r.loadNames = out.loadNames;
       r.forceMissing = out.missing;
       r.forceModel = fm;
       r.forceImplausible = implausibleFraction(out.forces);
@@ -7991,6 +7994,50 @@ function drawGrf(box, rep, res) {
   };
   box.querySelector("select.grfsrc")?.addEventListener("change", save);
   box.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.onchange = save; });
+}
+
+/* Joint-load summary (src/jointload.js): poses at the task's key instants, the
+ * vertical GRF, and a hip/knee/ankle contact-force dial per instant. A
+ * sagittal/frontal toggle and an L/R leg toggle, kept per task like jointSel. */
+const loadSel = {};  // activity -> { plane, side }
+function drawJointLoad(box, rep, res) {
+  if (!box) return;
+  const ok = hasJointLoad(rep, res.activity);
+  box.classList.toggle("hidden", !ok);
+  if (!ok) { box.innerHTML = ""; return; }
+  const kept = loadSel[res.activity] || {};
+  const plane = kept.plane || "sagittal";
+  const side = kept.side || (rep.stance_side === "l" ? "l" : "r");
+  const fig = jointLoadSVG(rep, {
+    plane, side, activity: res.activity, spec: ACTIVITIES[res.activity] || {},
+    massKg: res.massKg, externalKg: res.externalKg || 0,
+    heightM: parseFloat($("height").value) || 1.75,
+    colors: { l: SIDE_L, r: SIDE_R }, tr,
+  });
+  if (!fig) { box.innerHTML = ""; box.classList.add("hidden"); return; }
+  const btn = (grp, v, label, col) => `<label class="${(grp === "plane" ? plane : side) === v ? "on" : ""}">
+      <input type="radio" name="jl_${grp}" value="${v}"${(grp === "plane" ? plane : side) === v ? " checked" : ""}>${
+      col ? `<i class="swatch" style="background:${col};margin:0"></i>` : ""}${label}</label>`;
+  const pk = Object.entries(fig.peaks).map(([j, v]) => `${tr("jl_" + j)} ${v.toFixed(1)}`).join(" · ");
+  box.innerHTML = `<h2>${tr("jlTitle")}</h2>
+    <div class="jmpick" role="group" aria-label="${tr("jlTitle")}">
+      ${btn("plane", "sagittal", tr("jlViewSagittal"))}${btn("plane", "frontal", tr("jlViewFrontal"))}
+      <span style="flex:0 0 8px"></span>
+      ${btn("side", "l", tr("leftShort"), SIDE_L)}${btn("side", "r", tr("rightShort"), SIDE_R)}</div>
+    ${fig.svg}
+    <p class="jmpeaks">${tr("jlPeaks", { peaks: pk })}</p>
+    <p class="note" style="margin-top:2px">${tr("jlNote")} ${
+      tr(fig.grfSource === "newton" ? "jlNoteGrfNewton" : "jlNoteGrfModel")}${
+      plane === "frontal" ? " " + tr("jlNoteFrontal") : ""}</p>`;
+  box.querySelectorAll('input[type="radio"]').forEach((rb) => {
+    rb.onchange = () => {
+      loadSel[res.activity] = {
+        plane: box.querySelector('input[name="jl_plane"]:checked')?.value || plane,
+        side: box.querySelector('input[name="jl_side"]:checked')?.value || side,
+      };
+      drawJointLoad(box, rep, res);
+    };
+  });
 }
 
 function wireMetrics(root, rep, res) {
@@ -9422,6 +9469,7 @@ function render(res, fps) {
     ${viewNote(res)}
     <div id="dynBox"></div>
     <div id="forceBox"></div>
+    <div id="loadBox" class="jmplot hidden"></div>
     ${isJump ? `<p class="note">${tr("noteTwoHeights")}</p>` : ""}
     <p class="note">${tr(res.fromFile ? "noteAnglesFile" : "noteAnglesMeasured",
                           { fps: fps.toFixed(1), ms: (1000 / fps).toFixed(0) })}</p>`;
@@ -9480,6 +9528,7 @@ function render(res, fps) {
     drawGrf($("dynBox").querySelector(".grfplot"), items[i], res);
     wireMetrics($("dynBox"), items[i], res);
     $("forceBox").innerHTML = forcePanel(items[i], res);
+    drawJointLoad($("loadBox"), items[i], res);
   }
   select(0);
 

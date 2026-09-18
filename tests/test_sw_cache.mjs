@@ -37,7 +37,7 @@ const OPTIONAL = new Set([
    * panel is skipped rather than drawn from nothing. Listing them here records
    * that as a decision rather than leaving them looking like an oversight. */
   "data/reference.json",
-  "data/force_model.json",
+  "data/force_model_v2.json",
 ]);
 
 const norm = (p) => p.replace(/^\.\//, "").replace(/^\//, "");

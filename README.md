@@ -327,7 +327,7 @@ data/                      fixtures and tables the app fetches at runtime
   review/                  MSK-modelling literature review + studies.json
   reference.json           the fixture both implementations are pinned to
   norms.json               reference ranges
-  force_model.json         the trained force model
+  force_model_v2.json      the trained force model (tools/export_force_model.py)
 assets/                    large, vendored, and not to be edited by hand
   vendor/                  MediaPipe tasks-vision (not a CDN)
   pose_landmarker_full.task

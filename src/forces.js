@@ -43,12 +43,19 @@ function unpack(m) {
  * happened when the tree was reorganised and force_model.json moved into
  * data/ while this default stayed at the root. tests/test_force_model.mjs now
  * checks the default resolves to a file that exists. */
-export async function loadForceModel(url = "data/force_model.json") {
+/* v2 (2026-09-18): data/force_model_v2.json, written by
+ * tools/export_force_model.py. A NEW NAME on purpose -- sw.js serves the model
+ * cache-first from a cache that is almost never bumped, so a changed file
+ * under the old name would never reach a phone that already has one. The v2
+ * network also predicts joint-reaction COMPONENTS in anatomical frames, the
+ * hip contact force in the pelvis frame and the GRF of each foot, which is
+ * what src/jointload.js draws. */
+export async function loadForceModel(url = "data/force_model_v2.json") {
   if (cached) return cached;
   const r = await fetch(url);
   if (!r.ok) throw new Error(`force model not available (${r.status} for ${url})`);
   const j = await r.json();
-  if (j.format !== "fais-forcenet/1") {
+  if (j.format !== "fais-forcenet/1" && j.format !== "fais-forcenet/2") {
     throw new Error(`unsupported force model format ${j.format}`);
   }
   cached = {
@@ -57,6 +64,7 @@ export async function loadForceModel(url = "data/force_model.json") {
     feat: j.feat, targ: j.targ,
     muscles: j.muscles, jrfComponents: j.jrf_components,
     jrfMagnitudes: j.jrf_magnitudes, cameraCoords: j.camera_coords,
+    targetBlocks: j.target_blocks || null, frames: j.frames || "",
     xMean: unpack(j.x_mean).data, xStd: unpack(j.x_std).data,
     yMean: unpack(j.y_mean).data, yStd: unpack(j.y_std).data,
     stem: { W: unpack(j.stem.W), b: unpack(j.stem.b) },
@@ -197,6 +205,11 @@ export function predictForces(m, coords, nFrames, opts = {}) {
 
   const muscleIdx = m.muscles.map((n) => m.targ.indexOf(n));
   const magIdx = m.jrfMagnitudes.map((n) => m.targ.indexOf(n));
+  // Force VECTORS (bodyweight, native frames) for jointload.js -- only from a
+  // model that predicts them; a /1 file simply yields no `loads`.
+  const loadNames = loadTargetNames(m);
+  const loadIdx = loadNames.map((n) => m.targ.indexOf(n));
+  const loads = loadNames.length ? new Array(nFrames) : null;
 
   for (let t = 0; t < nFrames; t++) {
     for (let j = 0; j < nIn; j++) {
@@ -206,8 +219,21 @@ export function predictForces(m, coords, nFrames, opts = {}) {
     const y = forwardOne(m, z, scratch);
     forces[t] = Float64Array.from(muscleIdx, (i) => y[i] * bw);
     jrf[t] = Float64Array.from(magIdx, (i) => y[i]);          // bodyweight
+    if (loads) loads[t] = Float64Array.from(loadIdx, (i) => y[i]);
   }
-  return { forces, muscleNames: m.muscles, jrf, jrfNames: m.jrfMagnitudes, missing };
+  return { forces, muscleNames: m.muscles, jrf, jrfNames: m.jrfMagnitudes, missing,
+           loads, loadNames: loads ? loadNames : null };
+}
+
+/** The vector targets jointload.js needs, in the order `loads` rows carry them. */
+export function loadTargetNames(m) {
+  const want = [];
+  for (const s of ["r", "l"]) {
+    for (const c of ["fx", "fy", "fz"]) want.push(`hip_${s}_pelvis_${c}`);
+    for (const j of ["knee", "ankle"]) for (const c of ["fx", "fy", "fz"]) want.push(`${j}_${s}_${c}`);
+    for (const c of ["fx", "fy", "fz"]) want.push(`grf_${s}_${c}`);
+  }
+  return want.every((n) => m.targ.includes(n)) ? want : [];
 }
 
 export function implausibleFraction(forces, ceiling = MAX_PLAUSIBLE_FORCE_N) {

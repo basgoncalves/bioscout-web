@@ -9,9 +9,8 @@
  * `ref.json` carries inputs and the predictions Python makes from the pickled
  * weights, and this test requires forces.js to reproduce them.
  *
- * Regenerate ref.json from the FAIS repo:
- *   python -m machine_learning.export_json --model ... --out force_model.json
- *   python -m machine_learning.reference   --model ... --out web/ref.json
+ * Regenerate both from the trained pickle (one command, so they cannot drift):
+ *   python tools/export_force_model.py <FAIS repo>/results/ml_training/kinematics_only_model.pkl
  */
 import { readFileSync, existsSync } from "node:fs";
 
@@ -28,8 +27,8 @@ const { loadForceModel, predictForces, selfTest, peakJRF } = await import("../sr
  * ignore is worse than an honest skip. It runs in full wherever the file is,
  * which is where the numbers are actually being changed.
  */
-if (!existsSync("data/force_model.json")) {
-  console.log("skip  data/force_model.json is not in this checkout (see .gitignore)");
+if (!existsSync("data/force_model_v2.json")) {
+  console.log("skip  data/force_model_v2.json is not in this checkout (see .gitignore)");
   process.exit(0);
 }
 /* The DEFAULT url, not the one this test passes.
@@ -50,7 +49,7 @@ if (!existsSync("data/force_model.json")) {
   if (!ok) process.exit(1);
 }
 
-const m = await loadForceModel("data/force_model.json");
+const m = await loadForceModel("data/force_model_v2.json");
 let failed = 0;
 const check = (ok, msg) => { console.log(`${ok ? "ok  " : "FAIL"}  ${msg}`); if (!ok) failed++; };
 
@@ -99,6 +98,16 @@ if (existsSync("data/ref.json")) {
     for (let i = 0; i < out.muscleNames.length; i++)
       worst = Math.max(worst, Math.abs(out.forces[t][i] - ref.expected_N[t][i]));
   check(worst < 1e-2, `matches the Python forward pass to ${worst.toExponential(2)} N`);
+  // v2: the force VECTORS jointload.js draws must match Python too.
+  if (ref.expected_all && out.loads) {
+    let w2 = 0;
+    for (let t = 0; t < ref.times.length; t++)
+      out.loadNames.forEach((n, k) => {
+        w2 = Math.max(w2, Math.abs(out.loads[t][k] - ref.expected_all[t][m.targ.indexOf(n)]));
+      });
+    check(out.loadNames.length === 24, `${out.loadNames.length} load-vector components`);
+    check(w2 < 1e-4, `load vectors match Python to ${w2.toExponential(2)} BW`);
+  }
   console.log("  peak joint contact force, bodyweight: " +
     peakJRF(out.jrf, out.jrfNames).map(([n, v]) => `${n.replace("_mag", "")} ${v.toFixed(2)}`).join("  "));
 } else {

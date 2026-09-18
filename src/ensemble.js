@@ -257,6 +257,9 @@ export function ensembleRep(reps) {
   }
   const jrf = meanMatrix(usable, "jrf", align);
   if (jrf) { out.jrf = jrf; out.jrfNames = usable[0].jrfNames; }
+  // Force vectors for the joint-load figure (jointload.js), averaged like jrf.
+  const loads = meanMatrix(usable, "loads", align);
+  if (loads) { out.loads = loads; out.loadNames = usable[0].loadNames; }
 
   // Scalar per-rep measures: mean, and the spread that says whether the mean
   // means anything.
@@ -333,6 +336,18 @@ export function mergeSides(left, right) {
     }
   }
   if (Object.values(sd.coords).some(Boolean)) out.sd = { ...(out.sd || {}), ...sd };
+  /* Force vectors: each leg's columns from ITS OWN cycle, like the coords --
+   * the left hip over the left stride, the right hip over the right. */
+  const ll = left && left.loads, lr = right && right.loads;
+  const names = (left && left.loadNames) || (right && right.loadNames);
+  if (names && (ll || lr) && (!ll || !lr || ll.length === lr.length)) {
+    const isL = names.map((nm) => /_l_/.test(nm));
+    out.loadNames = names;
+    out.loads = (ll || lr).map((_, k) => names.map((_, c) => {
+      const src = isL[c] ? (ll || lr) : (lr || ll);
+      return src[k][c];
+    }));
+  }
   if (left && left.dyn) out.dyn = left.dyn;
   if (right && right.dyn) out.dynRight = right.dyn;
   return out;
