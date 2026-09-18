@@ -7153,7 +7153,12 @@ async function analyseVideoBlob(file, { trim = true } = {}) {
   v.src = URL.createObjectURL(file); v.muted = true; v.playsInline = true;
   await new Promise((r) => { v.onloadedmetadata = r; });
   frames = [];
+  /* The engine is 34 MB of wasm and a 9.4 MB model. On a first visit -- or the
+   * first one after a cache bump -- that download happens HERE, behind a status
+   * line that said "Reading video", so the app looked stuck on a 3 MB clip. */
+  if (!PoseLandmarker) say(tr("sayLoadingEngine"));
   if (!(await loadMediaPipe())) return;
+  say(tr("sayReadingVideo"));
 
   let dt = await probeFrameRate(v);
   const assumed = !dt;
