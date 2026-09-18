@@ -1333,7 +1333,7 @@ const EN = {
   "setNotSaved": "The analysis is below, but this set could NOT be saved to your training log ({err}). Export your data from Edit profile to free space, then record again.",
   "pickSport": "Which sport?",
   "sport_strength": "Strength training",
-  "sport_basketball": "Basketball",
+  "sport_basketball": "Sports",
   // --- sports and body map (2026-09-10) ---
   "bmTitle": "Choose by body part",
   "bmHint": "Tap a muscle group to see the exercises BioScout can track for it. Shaded: trained in this session.",
@@ -2817,7 +2817,7 @@ const PT = {
   "setNotSaved": "A an\u00e1lise est\u00e1 abaixo, mas esta s\u00e9rie N\u00c3O foi guardada no registo de treino ({err}). Exporte os seus dados em Editar perfil para libertar espa\u00e7o e grave outra vez.",
   "pickSport": "Que desporto?",
   "sport_strength": "Treino de for\u00e7a",
-  "sport_basketball": "Basquetebol",
+  "sport_basketball": "Desporto",
   // --- sports and body map (2026-09-10) ---
   "bmTitle": "Escolher por parte do corpo",
   "bmHint": "Toque num grupo muscular para ver os exerc\u00edcios que o BioScout consegue seguir. Sombreado: treinado nesta sess\u00e3o.",
@@ -4300,7 +4300,7 @@ const DE = {
   "setNotSaved": "Die Auswertung steht unten, aber dieser Satz konnte NICHT im Trainingsprotokoll gespeichert werden ({err}). Exportieren Sie Ihre Daten unter Profil bearbeiten, um Platz zu schaffen, und nehmen Sie erneut auf.",
   "pickSport": "Welche Sportart?",
   "sport_strength": "Krafttraining",
-  "sport_basketball": "Basketball",
+  "sport_basketball": "Sport",
   // --- sports and body map (2026-09-10) ---
   "bmTitle": "Nach K\u00f6rperteil w\u00e4hlen",
   "bmHint": "Tippen Sie auf eine Muskelgruppe, um die \u00dcbungen zu sehen, die BioScout daf\u00fcr erfassen kann. Schattiert: in dieser Einheit trainiert.",
