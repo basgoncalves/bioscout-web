@@ -4,8 +4,8 @@
  *   node tests/test_trainsummary.mjs
  */
 process.env.TZ = process.env.TZ || "Europe/Vienna";
-import { windowDays, timeOfDay, intensity, weekdayVolume, movementMix, restGaps, SUMMARY_CHARTS }
-  from "../src/trainsummary.js";
+import { windowDays, timeOfDay, intensity, weekdayVolume, movementMix, restGaps, SUMMARY_CHARTS,
+         muscleBalance, BALANCE_REGIONS } from "../src/trainsummary.js";
 import { collectDays } from "../src/dashboard.js";
 
 let bad = 0;
@@ -30,7 +30,7 @@ const sessions = [
 const days = collectDays(sessions);
 const today = new Date(2026, 8, 10);
 
-ok(SUMMARY_CHARTS.length === 6 && SUMMARY_CHARTS[0] === "weight", "six charts to choose from, weight first");
+ok(SUMMARY_CHARTS.length === 7 && SUMMARY_CHARTS[0] === "weight", "seven charts to choose from, weight first");
 ok(windowDays(days, 7, today).map((d) => d.key).join() === "2026-09-08,2026-09-10",
    "the week is the last seven days, today included");
 ok(windowDays(days, 30, today).length === 4, "the month holds all four training days");
@@ -72,6 +72,39 @@ ok(windowDays(days, 30, today).length === 4, "the month holds all four training 
   const wk = restGaps(days, 7, today);
   ok(wk.n === 2 && wk.bins[4] === 1, "the week's first day is measured from the one before it");
 }
+
+/* --- the muscle-group balance radar ---------------------------------------
+ *
+ * The month holds: 10 squat reps, 20 push-ups, 14 pull-ups, 10 dips.
+ * By REGION_EXERCISES that is
+ *   quads     10 (squat)
+ *   glutes    10 (squat)
+ *   chest     30 (pushup 20 + dip 10)
+ *   triceps   30 (pushup 20 + dip 10)
+ *   shoulders 44 (pushup 20 + dip 10 + pullup 14)
+ *   back      14 (pullup)   biceps 14 (pullup)
+ *   neck/hamstrings/calves 0
+ */
+const bal = muscleBalance(windowDays(days, 30, today));
+const reps = Object.fromEntries(bal.regions.map((r) => [r.region, r.reps]));
+ok(reps.quads === 10 && reps.glutes === 10, "a squat rep counts for quads AND glutes", JSON.stringify([reps.quads, reps.glutes]));
+ok(reps.chest === 30 && reps.triceps === 30, "push-ups and dips both reach chest and triceps", String(reps.chest));
+ok(reps.shoulders === 44, "shoulders take from all three upper-body movements", String(reps.shoulders));
+ok(bal.max === 44, "the rim is the busiest group", String(bal.max));
+ok(reps.hamstrings === 0 && reps.neck === 0, "a group nothing trained is zero, not missing");
+ok(!BALANCE_REGIONS.includes("core"), "core has no trackable movement, so it gets no axis");
+ok(bal.sets === 6, "every set with a group behind it is counted once", String(bal.sets));
+
+const none = muscleBalance([]);
+ok(none.max === 0 && none.regions.length === BALANCE_REGIONS.length,
+   "no training: every axis present, all zero");
+
+/* Walking and running train no group in REGION_EXERCISES -- they must not be
+ * counted as a set the radar is "from", or the caption overstates it. */
+const cardioDays = collectDays([{ started: at(9, 9), sets: [
+  { at: at(9, 9, 0), activity: "run", reps: 200, massKg: 80 }] }]);
+const cardio = muscleBalance(windowDays(cardioDays, 30, today));
+ok(cardio.sets === 0 && cardio.max === 0, "running claims no muscle group, so it is not in the radar");
 
 console.log(bad ? `\n${bad} check(s) failed` : "\nAll checks passed");
 process.exit(bad ? 1 : 0);

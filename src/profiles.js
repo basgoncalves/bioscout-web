@@ -1089,6 +1089,47 @@ export function addSet(result, fps, extra = {}) {
 }
 
 /**
+ * Append a set the athlete counted themselves, with no recording behind it.
+ *
+ * Training away from the phone, a movement BioScout cannot track, or a set
+ * where setting the camera up is not worth it: the reps still happened, and a
+ * volume record with those sets missing is wrong in a way that is worse than
+ * having no measurements for them.
+ *
+ * `perRep` is EMPTY, not faked. Everything that reports a measurement reads
+ * perRep, so a manual set contributes its reps to volume, movement mix and
+ * the muscle-group balance -- and contributes nothing to any mean, trend or
+ * assessment, which is exactly right: nothing was measured. `manual: true`
+ * marks it so the day view can say so rather than showing a set that looks
+ * tracked but has no numbers in it.
+ */
+export function addManualSet(activity, reps, extra = {}) {
+  const n = Math.max(1, Math.round(+reps || 0));
+  const s = getSession() || newSession(extra.profile);
+  if (!s.sets.length) s.started = uniqueStarted(s.started);
+  const set = {
+    index: s.sets.length + 1,
+    at: onSessionDay(s.started),
+    activity,
+    fps: null,                 // nothing was sampled; not 0, which reads as a rate
+    reps: n,
+    massKg: extra.massKg ?? null,
+    addedKg: extra.addedKg ?? 0,
+    assistKg: extra.assistKg ?? 0,
+    ageY: extra.ageY ?? null,
+    view: null,
+    detected: null,
+    assess: null,              // an assessment needs measurements, so never
+    manual: true,
+    perRep: [],
+  };
+  s.sets.push(set);
+  s.u = stamp();
+  if (!writeKeep(SKEY, s)) throw new Error("storage full: the set could not be saved");
+  return set;
+}
+
+/**
  * Record whether an attempt went in.
  *
  * Writes onto the stored set, because the analysis in memory is gone as soon

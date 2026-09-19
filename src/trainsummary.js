@@ -7,6 +7,7 @@
  *   weekday    how much was done on each day of the week
  *   movements  which movements the work went into
  *   rest       how many days you usually leave between training days
+ *   balance    which muscle groups the work went into (a radar)
  *   (weight    the body-weight timeline -- same menu, drawn by dashboard.js)
  *
  * Everything here is counting and smoothing of what was logged -- nothing is
@@ -16,9 +17,11 @@
  * Pure: takes collectDays()'s map, returns numbers; dashboard.js draws them.
  */
 
+import { REGIONS, REGION_EXERCISES, regionsFor } from "./bodymap.js";
+
 /* "weight" is drawn from the weigh-ins (weight.js), not from here; it is in
  * the list because it is picked from the same menu. */
-export const SUMMARY_CHARTS = ["weight", "time", "intensity", "weekday", "movements", "rest"];
+export const SUMMARY_CHARTS = ["weight", "time", "intensity", "weekday", "movements", "rest", "balance"];
 export const SUMMARY_WINDOWS = { week: 7, month: 30, year: 365 };
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -145,4 +148,42 @@ export function restGaps(days, n, today = new Date()) {
     sum += gap; count++;
   }
   return { bins, n: count, mean: count ? sum / count : null, days: inWin.length };
+}
+
+/* The groups a radar can have an axis for.
+ *
+ * `core` is in REGION_EXERCISES with an empty list -- the app cannot track a
+ * core movement yet -- and an axis pinned at zero forever reads as a training
+ * hole rather than a gap in what BioScout measures. It is left out until
+ * something trains it. */
+export const BALANCE_REGIONS = REGIONS.filter((r) => REGION_EXERCISES[r].length);
+
+/**
+ * Reps per muscle group over the window, for the balance radar.
+ *
+ * A rep counts once for EVERY group its movement trains: a squat rep is a rep
+ * for the quads and a rep for the glutes, because it is. So the axes do not
+ * sum to the session's rep count and are not meant to -- the shape is what
+ * carries, not the total, and a movement that trains three groups genuinely
+ * does more work than one that trains one.
+ *
+ * What it cannot see: load. Ten bodyweight squats and ten with 60 kg are the
+ * same ten reps here. Intensity is its own chart.
+ *
+ * Returns { regions: [{region, reps}] in BALANCE_REGIONS order, sets, max }.
+ */
+export function muscleBalance(list) {
+  const by = new Map(BALANCE_REGIONS.map((r) => [r, 0]));
+  let sets = 0;
+  for (const d of list) {
+    for (const s of d.sets || []) {
+      if (!s.activity || !s.reps) continue;
+      const regs = regionsFor(s.activity).filter((r) => by.has(r));
+      if (!regs.length) continue;      // a movement no group claims (walk, run)
+      sets++;
+      for (const r of regs) by.set(r, by.get(r) + s.reps);
+    }
+  }
+  const regions = BALANCE_REGIONS.map((r) => ({ region: r, reps: by.get(r) }));
+  return { regions, sets, max: Math.max(0, ...regions.map((r) => r.reps)) };
 }

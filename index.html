@@ -1157,6 +1157,7 @@ try {
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
     <button class="ghost trainOnly" id="setupReactionBtn" data-i18n="rtInSession">Reaction time test (no camera)</button>
+    <button class="ghost trainOnly" id="manualBtn" data-i18n="manualSet">Count reps by hand (no camera)</button>
     <div id="linkRow" class="hidden" style="margin-top:11px">
       <label for="linkUrl" data-i18n="videoLink">Video link</label>
       <input id="linkUrl" type="url" placeholder="https://youtube.com/shorts/…" autocomplete="off" inputmode="url">
@@ -1322,6 +1323,23 @@ try {
     <p class="note" id="postNote" style="margin:6px 0 0"></p>
     <button class="ghost" id="postClose" style="margin-top:10px" data-i18n="close">Close</button>
   </dialog>
+
+  <!-- A set counted by hand: reps only, no recording behind it. -->
+  <dialog id="manualDlg">
+    <h2 style="font-size:16px;margin:0 0 2px" data-i18n="manualTitle">Count by hand</h2>
+    <p class="sub" style="margin:0 0 10px" id="manualSub"></p>
+    <div style="display:flex;align-items:center;gap:12px;justify-content:center;margin:6px 0 2px">
+      <button class="ghost" id="manualMinus" type="button" aria-label="−1"
+              style="margin:0;width:64px;font-size:22px;padding:6px">−</button>
+      <output id="manualCount" for="manualMinus manualPlus" aria-live="polite"
+              style="font-size:46px;font-weight:700;min-width:96px;text-align:center">1</output>
+      <button class="ghost" id="manualPlus" type="button" aria-label="+1"
+              style="margin:0;width:64px;font-size:22px;padding:6px">+</button>
+    </div>
+    <p class="note" style="margin:8px 0 0" data-i18n="manualNote">Only the rep count is saved. A set counted by hand has no measurements, so it counts towards your volume but never towards a mean or a trend.</p>
+    <button id="manualGo" style="margin-top:10px" data-i18n="manualSave">Save this set</button>
+    <button class="ghost" id="manualCancel" style="margin-top:8px" data-i18n="cancel">Cancel</button>
+  </dialog>
 </div>
 
 <script>
@@ -1337,7 +1355,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 109;
+window.BUILD = 110;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1392,7 +1410,7 @@ import { classify, MIN_CONFIDENCE } from "./src/detect.js";
 import { clipGrf, grfForRep, grfSources } from "./src/grf.js";
 import { jointLoadSVG, hasJointLoad } from "./src/jointload.js";
 import { listProfiles, saveProfile, deleteProfile, getProfile, lastUsedProfile,
-         newSession, getSession, clearSession, addSet, summariseSession,
+         newSession, getSession, clearSession, addSet, addManualSet, summariseSession,
          listMeals, addMeal, deleteMeal,
          listDiary, addDiary, deleteDiary, profileTags, saveProfileTags,
          listWeights, addWeight, listCycle, setCycleDay, clearCycleDay,
@@ -7091,6 +7109,57 @@ $("setupReactionBtn").onclick = () => {
   openReaction(true, sess.started);
 };
 $("fileBtn").onclick = () => $("fileInput").click();
+
+/* Counting a set by hand.
+ *
+ * The movement and the loads come from the same controls a recorded set uses,
+ * so a hand-counted set of weighted pull-ups is logged with its load like any
+ * other -- the only thing missing is the measurement. */
+{
+  let manualN = 1;
+  const paintManual = () => {
+    $("manualCount").textContent = String(manualN);
+    $("manualMinus").disabled = manualN <= 1;
+    $("manualSub").textContent = tr("manualSub", { movement: tr($("activity").value) });
+  };
+  $("manualBtn").onclick = () => {
+    if ($("activity").value === "auto") {
+      // "Detect automatically" has nothing to detect from without a recording.
+      say(tr("sayManualPickMovement"), true);
+      return;
+    }
+    manualN = 1;
+    paintManual();
+    $("manualDlg").showModal();
+  };
+  $("manualMinus").onclick = () => { manualN = Math.max(1, manualN - 1); paintManual(); };
+  $("manualPlus").onclick = () => { manualN = Math.min(999, manualN + 1); paintManual(); };
+  $("manualCancel").onclick = () => $("manualDlg").close();
+  $("manualGo").onclick = () => {
+    const activity = $("activity").value;
+    try {
+      const badgesBefore = myAchievements();
+      const set = addManualSet(activity, manualN, {
+        profile: $("profile").value || null,
+        massKg: parseFloat($("mass").value) || null,
+        addedKg: parseFloat($("added").value) || 0,
+        assistKg: parseFloat($("assist").value) || 0,
+      });
+      $("manualDlg").close();
+      say(tr("sayManualSaved", { n: manualN, movement: tr(activity), set: set.index }));
+      // Badges count reps, and a hand-counted rep is a rep.
+      announceBadges(newlyEarned(badgesBefore, myAchievements()));
+      scheduleSync();
+      renderTraining();
+    } catch (err) {
+      // Reported exactly as a recorded set that did not reach the log is:
+      // silence would let the athlete believe the set was saved.
+      $("manualDlg").close();
+      say(tr("setNotSaved", { err: err.message || String(err) }), true);
+      console.warn("manual set not saved:", err);
+    }
+  };
+}
 $("fileInput").onchange = async (e) => {
   const file = e.target.files[0];
   if (file) await analyseVideoBlob(file);

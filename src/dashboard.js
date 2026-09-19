@@ -32,7 +32,7 @@ import { collectVitals, meanSteps } from "./vitals.js";
 import { collectWater, collectCoffee, fmtVolume, DRINKS } from "./water.js";
 import { collectReaction, reactionTrend } from "./reaction.js";
 import { plansOn, planProgress, plannedDays } from "./plans.js";
-import { SUMMARY_CHARTS, SUMMARY_WINDOWS, windowDays, timeOfDay, intensity, weekdayVolume,
+import { SUMMARY_CHARTS, SUMMARY_WINDOWS, windowDays, timeOfDay, intensity, weekdayVolume, muscleBalance,
          movementMix, restGaps } from "./trainsummary.js";
 import { collectCardio, fmtDuration, fmtDistance, pace } from "./cardio.js";
 import { rate, scoreColour } from "./health.js";
@@ -410,6 +410,54 @@ const hhmm = (h) => {
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 };
 
+/**
+ * The muscle-balance radar.
+ *
+ * Square on purpose: the shared svgWrap stretches with
+ * preserveAspectRatio="none", which is right for a bar chart and wrong here --
+ * a stretched radar turns a balanced shape into a lopsided one, which is the
+ * single thing the plot exists to show. So it gets its own wrapper.
+ *
+ * The rim is the busiest group, not a fixed number of reps, so the shape reads
+ * as proportion. The busiest group's rep count is printed under the plot, or
+ * the rim would be a scale with no units.
+ */
+const RADAR = { w: 320, h: 208, cx: 160, cy: 100, r: 66 };
+function radarSVG(regions, max) {
+  const n = regions.length;
+  const ang = (i) => (2 * Math.PI * i) / n - Math.PI / 2;   // first axis at the top
+  const at = (i, f) => [RADAR.cx + Math.cos(ang(i)) * RADAR.r * f,
+                        RADAR.cy + Math.sin(ang(i)) * RADAR.r * f];
+  const poly = (f, cls) => `<polygon points="${regions.map((_, i) =>
+    at(i, f).map((v) => v.toFixed(1)).join(",")).join(" ")}" ${cls}/>`;
+  let out = poly(1, 'fill="none" stroke="var(--line)"')
+          + poly(0.5, 'fill="none" stroke="var(--line)" opacity=".6"');
+  regions.forEach((_, i) => {
+    const [x, y] = at(i, 1);
+    out += `<line x1="${RADAR.cx}" y1="${RADAR.cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)" opacity=".6"/>`;
+  });
+  // With nothing trained every point sits at the centre, which is a dot, not a
+  // shape -- the caller shows the empty line instead and never gets here.
+  const pts = regions.map((r, i) => at(i, max ? r.reps / max : 0));
+  out += `<polygon points="${pts.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}"
+           fill="var(--accent)" fill-opacity=".28" stroke="var(--accent)" stroke-width="2"/>`;
+  pts.forEach(([x, y], i) => {
+    out += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="var(--accent)"><title>${
+      esc(tr("bm_" + regions[i].region))}: ${regions[i].reps}</title></circle>`;
+  });
+  regions.forEach((r, i) => {
+    const [x, y] = at(i, 1.17);
+    // Anchor by which side of the circle the label sits on, or the long names
+    // (hamstrings, shoulders) run off the edge of the picture.
+    const dx = Math.cos(ang(i));
+    const anchor = dx > 0.25 ? "start" : dx < -0.25 ? "end" : "middle";
+    out += `<text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" text-anchor="${anchor}"
+             font-size="10" fill="var(--muted)">${esc(tr("bm_" + r.region))}</text>`;
+  });
+  return `<svg class="sumChart" viewBox="0 0 ${RADAR.w} ${RADAR.h}" role="img"
+           aria-label="${esc(tr("sumChart_balance"))}">${out}</svg>`;
+}
+
 /* The window ends on the selected day -- today unless another day is picked --
  * so a past month can be looked back on by picking a day in it. */
 function summaryHTML(days, wts, view) {
@@ -450,6 +498,13 @@ function summaryHTML(days, wts, view) {
       `<div class="sumRow"><span class="sumName">${esc(tr(r.activity))}</span>
         <span class="sumBar"><i style="width:${Math.max(3, Math.round((100 * r.reps) / max))}%"></i></span>
         <span class="sumVal">${esc(tr(r.reps === 1 ? "nRep" : "nRepsCount", { n: r.reps }))}</span></div>`).join("")}</div>`;
+  } else if (chart === "balance") {
+    const b = muscleBalance(list);
+    const top = b.regions.reduce((a, r) => (r.reps > a.reps ? r : a), b.regions[0]);
+    body = !b.max ? empty("sumNone") : radarSVG(b.regions, b.max)
+      + `<p class="sub" style="margin:4px 0 0">${esc(tr("sumBalance", {
+          group: tr("bm_" + top.region), n: top.reps, sets: b.sets }))}</p>
+      <p class="note" style="margin:2px 0 0">${esc(tr("sumBalanceHow"))}</p>`;
   } else if (chart === "rest") {
     const r = restGaps(days, n, today);
     body = !r.n ? empty("sumNoRest") : barsSVG(r.bins, ["1", "2", "3", "4", "5", "6", "7+"])
