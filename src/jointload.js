@@ -322,7 +322,8 @@ function skeletonSVG(pose, plane, cx, footY, scale, colR, colL, lift = 0) {
  */
 export function jointLoadSVG(rep, opts) {
   const { plane = "sagittal", side = "r", activity, spec = {},
-          kneeSign = kneeSignOf(rep), colors = { l: "#2f9e5f", r: "#d1493f" }, tr = (k) => k } = opts;
+          kneeSign = kneeSignOf(rep), colors = { l: "#2f9e5f", r: "#d1493f" }, tr = (k) => k,
+          refPeaks = null, refColor = "#9aa4b8" } = opts;
   if (!hasJointLoad(rep, activity)) return null;
   const n = rep.loads.length, t = Array.from(rep.times).slice(0, n);
   const pct = rep.timeUnit === "%";
@@ -355,6 +356,17 @@ export function jointLoadSVG(rep, opts) {
   }
   const joints = JOINTS.filter((j) => vec[j]);
   if (!joints.length) return null;
+  /* The reference rings are inside the rim, not clipped by it.
+   *
+   * A reference larger than the athlete's own peak would be drawn outside the
+   * dial and clipped, which reads as "there is no reference" -- the opposite
+   * of what it means. It joins the scale instead. */
+  if (refPeaks) {
+    for (const j of JOINTS) {
+      const v = refPeaks[j];
+      if (isNum(v) && v > rimRaw) rimRaw = v;
+    }
+  }
   const rim = niceCeiling(rimRaw);
 
   // ── layout ────────────────────────────────────────────────────────────────
@@ -434,6 +446,14 @@ export function jointLoadSVG(rep, opts) {
       }
       g += `<line x1="${f1(cx - R)}" y1="${cy}" x2="${f1(cx + R)}" y2="${cy}" stroke="var(--muted)" stroke-opacity=".45" stroke-width=".5"/>`
          + `<line x1="${f1(cx)}" y1="${cy - R}" x2="${f1(cx)}" y2="${cy + R}" stroke="var(--muted)" stroke-opacity=".45" stroke-width=".5"/>`;
+      /* The reference is a MAGNITUDE, so it is a ring, not an arrow: the
+       * corpus reports how big the contact force gets, not which way it
+       * pointed in this plane. Drawing it as a vector would invent a
+       * direction nobody measured. */
+      if (refPeaks && isNum(refPeaks[j])) {
+        g += `<circle cx="${f1(cx)}" cy="${cy}" r="${f1((refPeaks[j] / rim) * R)}"
+               fill="none" stroke="${refColor}" stroke-width="1.1" stroke-dasharray="3 2.5"/>`;
+      }
       const tip = (i) => {
         // length = |F| (3-D) on the shared rim; direction = its in-plane angle
         const p = vec[j][i], a = p[cols[0]], b = p[cols[1]], inPlane = Math.hypot(a, b) || 1;
@@ -475,6 +495,7 @@ export function jointLoadSVG(rep, opts) {
     svg: `<svg class="jlsvg" viewBox="0 0 ${W} ${f1(H)}" role="img" aria-label="${tr("jlTitle")}" style="width:100%;height:auto;display:block">${g}</svg>`,
     events: ev.map((e) => ({ label: evLabel(e), t: t[e.i] })),
     rim, grfSource: grfS.source, side, plane,
+    refShown: !!(refPeaks && JOINTS.some((j) => isNum(refPeaks[j]))),
     peaks: Object.fromEntries(joints.map((j) => [j, Math.max(...mag[j].filter(isNum))])),
   };
 }

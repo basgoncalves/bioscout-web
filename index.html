@@ -1356,7 +1356,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 115;
+window.BUILD = 116;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -8459,7 +8459,42 @@ function drawGrf(box, rep, res) {
 /* Joint-load summary (src/jointload.js): poses at the task's key instants, the
  * vertical GRF, and a hip/knee/ankle contact-force dial per instant. A
  * sagittal/frontal toggle and an L/R leg toggle, kept per task like jointSel. */
-const loadSel = {};  // activity -> { plane, side }
+const loadSel = {};  // activity -> { plane, side, ref }
+
+/**
+ * Reference contact-force peaks for THIS task, in bodyweights, per joint.
+ *
+ * Two sources, and neither is a general one:
+ *   squat      the corpus (norms.squat), which is the only task it holds --
+ *              the peak of the reference mean curve.
+ *   walk/run   the gait levels in norms.levels.
+ *
+ * Every other movement has nothing, and that is the common case rather than
+ * the exception: there is no published contact-force corpus for a glute kick
+ * back. Returning null is the answer the caller shows in red, instead of
+ * quietly borrowing a squat reference for a pull-up -- the comparison that
+ * would be worse than no comparison at all.
+ */
+function jcfReference(res) {
+  const out = {};
+  let label = null;
+  const cond = res && res.activity === "squat" ? normCondition(res) : null;
+  if (cond) {
+    for (const j of ["hip", "knee", "ankle"]) {
+      const c = refCurve(cond, "joint_contact_force", j);
+      if (c && c.mean && c.mean.length) out[j] = Math.max(...c.mean);
+    }
+    label = tr("refSuffix", { cond });
+  } else if (res && (res.activity === "walk" || res.activity === "run")) {
+    const re = res.activity === "walk" ? /walk/i : /run/i;
+    const hits = (norms && norms.levels ? norms.levels : [])
+      .filter((L) => L.variable === "joint_contact_force" && L.unit === "xBW" && re.test(L.label));
+    for (const L of hits) out[L.entity] = Math.max(out[L.entity] ?? 0, L.value);
+    if (hits.length) label = [...new Set(hits.map((h) => h.label))].join(", ");
+  }
+  return Object.keys(out).length ? { peaks: out, label } : null;
+}
+
 function drawJointLoad(box, rep, res) {
   if (!box) return;
   const ok = hasJointLoad(rep, res.activity);
@@ -8468,8 +8503,11 @@ function drawJointLoad(box, rep, res) {
   const kept = loadSel[res.activity] || {};
   const plane = kept.plane || "sagittal";
   const side = kept.side || (rep.stance_side === "l" ? "l" : "r");
+  const wantRef = !!kept.ref;
+  const ref = wantRef ? jcfReference(res) : null;
   const fig = jointLoadSVG(rep, {
     plane, side, activity: res.activity, spec: ACTIVITIES[res.activity] || {},
+    refPeaks: ref ? ref.peaks : null, refColor: REF_COLOR,
     massKg: res.massKg, externalKg: res.externalKg || 0,
     heightM: parseFloat($("height").value) || 1.75,
     colors: { l: SIDE_L, r: SIDE_R }, tr,
@@ -8484,14 +8522,28 @@ function drawJointLoad(box, rep, res) {
       ${btn("plane", "sagittal", tr("jlViewSagittal"))}${btn("plane", "frontal", tr("jlViewFrontal"))}
       <span style="flex:0 0 8px"></span>
       ${btn("side", "l", tr("leftShort"), SIDE_L)}${btn("side", "r", tr("rightShort"), SIDE_R)}</div>
+    <div class="jmpick" role="group" aria-label="${tr("jlRefTick")}">
+      <label class="${wantRef ? "on" : ""}"><input type="checkbox" id="jlRef"${wantRef ? " checked" : ""}>
+        <i class="swatch" style="${swatchStyle(REF_COLOR, { dash: true })};margin:0"></i>${tr("jlRefTick")}</label></div>
+    ${wantRef && !ref
+      ? `<p class="note" style="margin:4px 0 0;color:var(--warn)">${
+          tr("jlRefNone", { activity: tr(res.activity) })}</p>` : ""}
     ${fig.svg}
     <p class="jmpeaks">${tr("jlPeaks", { peaks: pk })}</p>
+    ${ref ? `<p class="note" style="margin-top:2px">${tr("jlRefNote", {
+        src: ref.label || tr("refShort") })}</p>` : ""}
     <p class="note" style="margin-top:2px">${tr("jlNote")} ${
       tr(fig.grfSource === "newton" ? "jlNoteGrfNewton" : "jlNoteGrfModel")}${
       plane === "frontal" ? " " + tr("jlNoteFrontal") : ""}</p>`;
+  const refTick = box.querySelector("#jlRef");
+  if (refTick) refTick.onchange = () => {
+    loadSel[res.activity] = { plane, side, ref: refTick.checked };
+    drawJointLoad(box, rep, res);
+  };
   box.querySelectorAll('input[type="radio"]').forEach((rb) => {
     rb.onchange = () => {
       loadSel[res.activity] = {
+        ref: wantRef,
         plane: box.querySelector('input[name="jl_plane"]:checked')?.value || plane,
         side: box.querySelector('input[name="jl_side"]:checked')?.value || side,
       };
