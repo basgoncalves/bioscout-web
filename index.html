@@ -1356,7 +1356,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 116;
+window.BUILD = 117;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1570,6 +1570,16 @@ const barClock = (ms) => {
  * machine -- the privacy notice says so -- and an upload to a stranger's
  * server is a different thing from the rest of the app, so it is named as
  * one rather than offered as the easy default. */
+/* One link, to the page that carries what the notes used to say.
+ *
+ * The notes on the results page are now one line each. Everything they used
+ * to spell out -- what the surrogate was trained on, why the frontal view is
+ * the weakest thing on the page, which assumptions the inverse dynamics rests
+ * on -- lives in limitations.html, because a caveat nobody finishes reading
+ * protects nobody (Bas, 2026-09-19). */
+const limitsLink = () =>
+  `<a href="./limitations.html" target="_blank" rel="noopener">${esc(tr("limitsLink"))}</a>`;
+
 const showConvertHint = (show = true) => {
   const el = $("convertHint");
   if (!el) return;
@@ -8534,7 +8544,7 @@ function drawJointLoad(box, rep, res) {
         src: ref.label || tr("refShort") })}</p>` : ""}
     <p class="note" style="margin-top:2px">${tr("jlNote")} ${
       tr(fig.grfSource === "newton" ? "jlNoteGrfNewton" : "jlNoteGrfModel")}${
-      plane === "frontal" ? " " + tr("jlNoteFrontal") : ""}</p>`;
+      plane === "frontal" ? " " + tr("jlNoteFrontal") : ""} ${limitsLink()}</p>`;
   const refTick = box.querySelector("#jlRef");
   if (refTick) refTick.onchange = () => {
     loadSel[res.activity] = { plane, side, ref: refTick.checked };
@@ -8987,7 +8997,7 @@ function momentPanel(rep, res) {
     <p class="sub" style="margin-bottom:4px">${bits.join(" · ")} ${loadNote(res)}</p>
     ${res.massKg + res.externalKg <= 0
       ? `<p class="note banner">${tr("noteAssistExceeds", { kg: res.assistKg })}</p>` : ""}
-    ${legs ? `<p class="note">${tr("noteInverseDynamics")}</p>` : ""}
+    ${legs ? `<p class="note">${tr("noteInverseDynamics")} ${limitsLink()}</p>` : ""}
     ${arms ? `<p class="note">${tr(res.activity === "jumpshot"
                                    ? "noteArmDynamicsShot" : "noteArmDynamicsHang")}</p>` : ""}
     ${arms && !armSideOn(res) ? `<p class="note banner">${tr("noteArmFaceOn")}</p>` : ""}
@@ -9114,7 +9124,7 @@ function forcePanel(rep, res) {
     <h1 style="font-size:16px;margin:16px 0 2px">${tr("muscleAndJointForces")}</h1>
     <p class="note banner">${tr("noteSurrogate", {
       r2: r2 == null ? "—" : r2.toFixed(2),
-      r2j: r2j == null ? "—" : r2j.toFixed(2) })}</p>
+      r2j: r2j == null ? "—" : r2j.toFixed(2) })} ${limitsLink()}</p>
     ${impulseBars}
     <h1 style="font-size:14px;margin:14px 0 2px">${tr("musclePeakTitle")}</h1>
     <table><thead><tr><th>${tr("muscle")}</th><th>${tr("rightPeakN")}</th><th>${tr("leftPeakN")}</th></tr></thead>

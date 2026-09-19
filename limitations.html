@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c4a48">
+<title>Limitations — BioScout Web</title>
+<link rel="icon" href="assets/icons/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="assets/icons/icon-192.png">
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --ink:#14161a; --muted:#5d626e;
+    --line:#e2e5ea; --accent:#2d706c; --warn:#b4540f; --good:#1d7a45;
+    --shadow:0 1px 3px rgba(0,0,0,.07), 0 6px 20px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111318; --card:#191c22; --ink:#eceef2; --muted:#9aa1ae;
+            --line:#2a2e37; --accent:#4fa79e; --warn:#e08a4a; --good:#4fbd7d;
+            --shadow:0 1px 3px rgba(0,0,0,.4); }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:640px; margin:0 auto; padding:20px 14px 48px; }
+  h1 { font-size:21px; margin:0 0 2px; letter-spacing:-.01em; }
+  h2 { font-size:16px; margin:0 0 8px; }
+  .sub { color:var(--muted); font-size:13px; margin:0 0 18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+          padding:14px 16px; margin-bottom:12px; box-shadow:var(--shadow); }
+  .note { color:var(--muted); font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; margin:6px 0 4px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line);
+           vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12.5px; }
+  tr:last-child td { border-bottom:0; }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px;
+         background:rgba(127,127,127,.14); padding:1px 5px; border-radius:5px; }
+  a { color:var(--accent); }
+  ul { margin:6px 0 0; padding-left:20px; }
+  li { margin-bottom:4px; }
+  .back { display:inline-block; margin-bottom:14px; font-size:13.5px;
+          text-decoration:none; color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>What these numbers are, and are not</h1>
+  <p class="sub">BioScout Web · the long version of every "model estimate" line in the app · <a href="./">back to the app</a></p>
+
+  <div class="card">
+    <h2>The one-sentence version</h2>
+    <p>BioScout measures <b>kinematics</b> — where your joints were, and when — from phone video.
+    Everything else on the results page (muscle forces, joint moments, joint contact forces, ground
+    reaction) is <b>computed or predicted</b> from those kinematics plus your body mass. None of it is
+    a force measurement. There is no force plate, no EMG, and no motion-capture rig.</p>
+    <p class="note">This page exists so the notes in the app can stay short. Nothing here is a
+    disclaimer in the legal sense — it is the list of things that would make a number wrong, written
+    by someone who would rather you knew.</p>
+  </div>
+
+  <div class="card">
+    <h2>Muscle and joint contact forces</h2>
+    <p>These come from a <b>neural-network surrogate</b> of OpenSim static optimisation, trained on
+    running and single-leg squats. On subjects it never saw, the predicted curve tracks the real one
+    with a median within-trial R² of about <b>0.42</b> for muscle force and <b>0.79</b> for joint
+    contact force. The figures shown in the app are the model's own, read from the force model it
+    loaded, so they are the ones that apply to your session rather than these.</p>
+    <p>Within-trial R² is the honest number and the lower one. A pooled R² is computed across every
+    held-out frame at once, so it is rewarded for telling a sprint from a squat — which is not the
+    question anyone reading this panel is asking.</p>
+    <h2 style="margin-top:14px">Two limits that no amount of data fixes</h2>
+    <ul>
+      <li><b>It cannot know external load.</b> The input is kinematics. An empty bar and a loaded bar
+      at the same depth, at the same speed, produce the same prediction. If you train with added load,
+      the absolute newtons are wrong — the app still asks for the load because everything else on the
+      page uses it, but the surrogate does not.</li>
+      <li><b>Every output is a lower-limb muscle.</b> A pull-up, a dip or a push-up is outside its
+      domain entirely. The app will still draw curves, because the model returns numbers for anything
+      you hand it; those numbers are not about your arms.</li>
+    </ul>
+    <p>Squats are a short extrapolation from single-leg squats and are the best-supported case after
+    running. In every case, treat the <b>ranking</b> — which muscle is working hardest, which joint is
+    loaded most, how that changes between your own sets — as more reliable than the absolute value.</p>
+  </div>
+
+  <div class="card">
+    <h2>The joint-load dials</h2>
+    <p>Each arrow is the predicted joint contact force at one instant: length is the force in
+    bodyweights on a rim shared by every dial, direction is its angle in the chosen anatomical plane.
+    The last column traces the arrow tip over the whole cycle (dot = start, cross = end). Hip is the
+    load on the socket, in the pelvis frame; knee on the tibia; ankle on the talus. The bone outlines
+    are schematic drawings, not your anatomy.</p>
+    <p><b>The frontal view is the weakest thing on the page.</b> The side-to-side component is inferred
+    from side-on motion alone — hip adduction and rotation are not visible to a single camera — so it
+    shows the training group's typical frontal loading at your sagittal state, not yours. Read it as a
+    pattern. It is <b>not</b> a knee-valgus measure and <b>not</b> an injury-risk measure, and using it
+    as one would be inventing a finding.</p>
+    <p>The <b>Reference</b> ring, when a task has one, is a magnitude and not a direction: it says how
+    large the force gets in the literature, not which way it pointed. Most movements have no reference
+    at all — the corpus holds squats, the gait literature holds walking and running — and the app says
+    so in red rather than borrowing a squat reference for a different task.</p>
+  </div>
+
+  <div class="card">
+    <h2>Joint moments and the ground reaction</h2>
+    <p>Moments are <b>inverse dynamics</b> from your body mass, and the ground reaction is derived from
+    whole-body centre-of-mass acceleration rather than assumed. That is a real calculation, not a
+    prediction — but it rests on assumptions:</p>
+    <ul>
+      <li>Centre of pressure is taken as the midfoot.</li>
+      <li>The two legs are assumed symmetric. A visible lean breaks that, and the app cannot tell.</li>
+      <li>A small flexor knee moment in a shallow squat is physical, not an error.</li>
+    </ul>
+    <p>For hanging and pressing movements, the hands carry the whole body and the feet nothing, so the
+    force at the hands is derived the same way and split <b>equally between the two arms</b>. Forearm
+    and hand are one segment and the grip is taken at the wrist. Each arm is solved in the plane the
+    camera sees; an oblique camera mixes the two planes and understates both.</p>
+    <p>For a jump shot, the ball is taken as 0.6 kg, carried by the shooting hand until release and
+    nothing after. The guide hand's share is ignored, so the moment before release is slightly
+    overstated. Release is the peak-wrist-height proxy used everywhere else in the report.</p>
+  </div>
+
+  <div class="card">
+    <h2>Muscle contributions to a moment</h2>
+    <p>Where the app shows contributions, they are predicted muscle force times the moment arm read
+    from the OpenSim model at that joint angle. The arms are the model's; the forces are the
+    surrogate's and carry its errors. Read them as a ranking of who is doing the work, not as
+    newton-metres you could publish.</p>
+    <p>They will not sum to the net moment, and are not meant to: only the muscles crossing the joint
+    are drawn, co-contraction is not resolved, and the two legs are lumped. Where moment arms are not
+    available, the app ranks the muscles that <b>cross</b> the joint by predicted peak force instead,
+    which is a different and weaker statement.</p>
+  </div>
+
+  <div class="card">
+    <h2>The force-time integral</h2>
+    <p>The ranked bars are ∫|F|dt over the rep, in newton-seconds, both sides summed. This is
+    <b>not work</b>, and is not called work anywhere in the app: work needs the fibre's velocity, and
+    the surrogate predicts force only. It answers "which muscle did the most over the whole rep"
+    rather than "at one instant", and it inherits every limitation of the forces above.</p>
+  </div>
+
+  <div class="card">
+    <h2>Reference data</h2>
+    <p>Reference columns and curves are <b>not measurements of you</b>. The squat reference is this
+    project's own CEINMS run; walking and running peaks come from the gait literature. Walking and
+    running are different tasks from whatever you recorded — they are there to answer one question,
+    which is whether a predicted force is even the right size.</p>
+  </div>
+
+  <div class="card">
+    <h2>Kinematics, which is the part that is measured</h2>
+    <p>Angles come from pose landmarks and are clipped to the OpenSim model's range. They are sagittal
+    measurements and are only valid filmed from the side; the app warns you when a clip looks frontal.
+    An ankle angle cannot be measured when the foot points toward or away from the camera, and is
+    written as 0 in the export rather than as a fabricated value.</p>
+    <p>Timing resolution is the frame rate. A clip filmed at 30 fps locates take-off and landing to
+    ±33 ms, and jump height goes as the square of flight time, so a low frame rate degrades it faster
+    than it looks. This is the one limitation you can fix yourself: film at 60 fps or more.</p>
+  </div>
+
+  <div class="card">
+    <h2>Not a medical device</h2>
+    <p>BioScout does not diagnose, treat or give medical advice, and nothing on the results page is a
+    clinical measurement. If something hurts, ask a professional — not a surrogate model of a
+    simulation of someone else's squat.</p>
+  </div>
+</div>
+</body>
+</html>
