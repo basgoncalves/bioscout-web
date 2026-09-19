@@ -108,5 +108,17 @@ const bld = html.match(/window\.BUILD\s*=\s*(\d+)/);
 if (!rel) { bad++; console.error("FAIL  no window.RELEASE"); }
 if (!bld) { bad++; console.error("FAIL  window.BUILD is not a number -- it has to increment"); }
 
+/* A dialog written inside a view is invisible whenever that view is hidden:
+ * showModal() does not render under a display:none ancestor. trimDlg sat in
+ * #viewDash and was opened from the recorder -- an unseen modal that ate every
+ * click. Dialogs nested in a <section> are fine only while the page hoists
+ * them to <body> at start-up. */
+const nested = [...markup.matchAll(/<section\b[\s\S]*?<\/section>/g)]
+  .some((m) => /<dialog\b/.test(m[0]));
+if (nested && !/querySelectorAll\("section dialog"\)[\s\S]{0,120}document\.body\.appendChild/.test(html)) {
+  bad++;
+  console.error("FAIL  a <dialog> sits inside a <section> and nothing moves it to <body>");
+}
+
 if (bad) process.exit(1);
 console.log(`ok    ${used.size} referenced ids, 5 views, ${LAID_OUT.length} laid-out buttons reset`);

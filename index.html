@@ -1332,12 +1332,25 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 107;
+window.BUILD = 108;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
 try {
   document.getElementById("build").textContent = window.RELEASE + " \u00b7 build " + window.BUILD;
+} catch (e) {}
+/* Every dialog lives on <body>, not inside the screen it was written next to.
+ *
+ * showModal() puts a dialog in the top layer, but a dialog whose ancestor is
+ * display:none is still not rendered. trimDlg (and energyDlg, hrDlg, ...) sat
+ * inside #viewDash, which is hidden while the recorder is on screen -- so
+ * "Analyse a video file" opened a modal nobody could see: the status said
+ * "Waiting for you -- choose the part to analyse", there was nothing to choose
+ * from, and the invisible modal swallowed every click (Bas, 2026-09-19).
+ * Handlers look dialogs up by id, so where they sit in the tree is free. */
+try {
+  Array.prototype.forEach.call(document.querySelectorAll("section dialog"),
+    function (d) { document.body.appendChild(d); });
 } catch (e) {}
 window.__mlBooted = false;
 setTimeout(function () {
