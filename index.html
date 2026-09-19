@@ -1355,7 +1355,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 110;
+window.BUILD = 111;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1497,14 +1497,32 @@ async function loadMediaPipe() {
     return false;
   }
 }
+/* The pose model, on the GPU when the browser has one to give.
+ *
+ * This is where the 34 MB of wasm and the 9.4 MB model are actually FETCHED --
+ * loadMediaPipe() above only imports the JavaScript. On a cold cache that is a
+ * long silent wait, and the callers say so before calling.
+ *
+ * GPU is asked for first and CPU is the fallback, rather than GPU being the
+ * only answer: createFromOptions REJECTS where WebGL is unavailable -- a
+ * blocklisted driver, hardware acceleration switched off, some remote desktop
+ * sessions -- and that rejection used to take the whole analysis down without
+ * a word (Bas, 2026-09-19). CPU is slower and complete; a slow analysis beats
+ * a page that stops. */
 async function makeLandmarker() {
   const fileset = await FilesetResolver.forVisionTasks("./assets/vendor/wasm");
-  return PoseLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: "assets/pose_landmarker_full.task", delegate: "GPU" },
+  const opts = (delegate) => ({
+    baseOptions: { modelAssetPath: "assets/pose_landmarker_full.task", delegate },
     runningMode: "VIDEO", numPoses: 1,
     minPoseDetectionConfidence: 0.3, minPosePresenceConfidence: 0.3,
     minTrackingConfidence: 0.3,
   });
+  try {
+    return await PoseLandmarker.createFromOptions(fileset, opts("GPU"));
+  } catch (err) {
+    console.warn("pose model on GPU failed, falling back to CPU:", err);
+    return PoseLandmarker.createFromOptions(fileset, opts("CPU"));
+  }
 }
 
 const $ = (id) => document.getElementById(id);
@@ -7298,7 +7316,25 @@ function askTrim(file, dt, duration) {
   });
 }
 
-async function analyseVideoBlob(file, { trim = true } = {}) {
+/* Nothing in here may fail silently.
+ *
+ * Every stage of a file analysis is a promise, the page has no
+ * unhandledrejection handler, and the callers do not catch either -- so one
+ * rejection anywhere below used to stop the analysis dead with the last
+ * status line still on screen, which is indistinguishable from a hang. The
+ * work is in analyseVideoFile(); this wrapper's only job is that a failure
+ * ends up on the page. */
+async function analyseVideoBlob(file, opts = {}) {
+  try {
+    await analyseVideoFile(file, opts);
+  } catch (err) {
+    console.error("video analysis failed:", err);
+    say(tr("sayAnalysisFailed", { err: err && err.message ? err.message : String(err) }), true);
+    bar(null);
+  }
+}
+
+async function analyseVideoFile(file, { trim = true } = {}) {
   say(tr("sayReadingVideo"));
   bar(-1);
   takeNo++; shareSrc = null; shareFile = file; videoBlob = null;
@@ -7366,6 +7402,14 @@ async function analyseVideoBlob(file, { trim = true } = {}) {
   fileFps = fpsGrid;
   if (assumed) say(tr("sayAssumedFps", { fps: fpsGrid.toFixed(0) }), true);
 
+  /* Said BEFORE the await, not after.
+   *
+   * On a cold cache this call downloads the wasm and the model, which on a
+   * slow line is tens of seconds with the trim dialog just closed -- the
+   * picture the athlete gets is the first frame of their clip and then
+   * nothing at all (Bas, 2026-09-19). */
+  say(tr("sayLoadingEngine"));
+  bar(-1);
   const off = await makeLandmarker();
   const seekTo = (t) => new Promise((resolve) => {
     let settled = false;
