@@ -577,10 +577,15 @@ try {
   #stage { position:relative; border-radius:12px; overflow:hidden;
            background:#000; aspect-ratio:3/4; display:none; }
   #stage.on { display:block; }
-  video, canvas.overlay { position:absolute; inset:0; width:100%; height:100%;
+  /* Scoped to the recorder's stage. As a bare `video` rule it reached every
+   * video on the page: the trim dialog's preview was stretched absolutely over
+   * its own dialog -- mirrored -- hiding the title, both sliders and all three
+   * buttons, so the athlete saw a picture and no way to go on (Bas, 2026-09-19).
+   * .bfStage, .sharePreview and .post had each already had to undo it. */
+  #stage video, canvas.overlay { position:absolute; inset:0; width:100%; height:100%;
                           object-fit:cover; }
-  video { transform:scaleX(-1); }
-  video.rear { transform:none; }
+  #stage video { transform:scaleX(-1); }
+  #stage video.rear { transform:none; }
   .camBar { position:absolute; left:8px; right:8px; bottom:8px; z-index:3; display:flex;
             align-items:center; gap:8px; flex-wrap:wrap; }
   .camBar button, .camBar select { width:auto; margin:0; padding:6px 10px; font-size:13px;
@@ -941,7 +946,7 @@ try {
       <h2 style="font-size:16px;margin:0 0 2px" data-i18n="trimTitle">Which part?</h2>
       <p class="sub" style="margin:0 0 10px" data-i18n="trimSub">Analyse only the frames you need. Everything outside the range is skipped.</p>
       <video id="trimVid" playsinline muted preload="metadata"
-             style="width:100%;max-height:46vh;background:#000;border-radius:10px"></video>
+             style="display:block;width:100%;max-height:46vh;object-fit:contain;background:#000;border-radius:10px"></video>
       <div class="row" style="margin:10px 0 0">
         <div>
           <label for="trimStart"><span data-i18n="trimFrom">From</span> <span class="sub" id="trimStartOut"></span></label>
@@ -1332,7 +1337,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 108;
+window.BUILD = 109;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -7116,6 +7121,12 @@ $("fileInput").onchange = async (e) => {
 const PROBE_MS = 700;              // long enough for several frames at any rate
 const MAX_SAMPLE_FRAMES = 3000;    // ~100 s at 30 Hz; beyond that, sample coarser
 const SEEK_TIMEOUT_MS = 3000;
+/* Up to this long, a clip is analysed whole without asking.
+ *
+ * A short clip IS the movement -- a jump, a set -- and a dialog in front of it
+ * is a question with one answer. The trim step is for the long ones, where the
+ * walking-in and walking-out cost a minute of tracking and two fake reps. */
+const AUTO_WHOLE_CLIP_S = 30;
 const METADATA_TIMEOUT_MS = 15000;  // a file that never decodes must not hang the app
 
 /** The clip's own frame interval in seconds, or null if it cannot be told. */
@@ -7267,7 +7278,7 @@ async function analyseVideoBlob(file, { trim = true } = {}) {
    * analysis of the clip. A coarser grid keeps the whole movement, costs
    * resolution in the timings, and is stated. */
   let from = 0, to = duration;
-  if (trim) {
+  if (trim && duration > AUTO_WHOLE_CLIP_S) {
     /* The bar stays up and the status changes.
      *
      * Hiding it here left the athlete looking at "Reading video" with nothing
