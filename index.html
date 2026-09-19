@@ -1355,7 +1355,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 111;
+window.BUILD = 112;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -8151,10 +8151,35 @@ function metricPlot(rep, res, metric) {
 /** Draw one .jmplot box and wire its tick boxes and muscle buttons. Only the
  *  box redraws: rebuilding the whole card would scroll the athlete away from
  *  the plot they are looking at. */
+/* The metrics the results page offers in one plot, in menu order.
+ *
+ * `power` is deliberately absent. It is moment x angular velocity, so it is
+ * the product of two curves already on this menu and adds no independent
+ * information -- and it carried the error of both (Bas, 2026-09-19).
+ * jointmetrics.js still computes it; the export still contains it. */
+const PLOT_METRICS = ["angle", "vel", "moment"];
+const metricSel = {};   // activity -> the metric last picked
+
 function drawMetric(box, rep, res) {
-  const metric = box.dataset.metric;
+  /* A box with data-metrics is the interactive one: it draws a menu and
+   * remembers the choice per task, so flipping between reps does not throw
+   * the athlete back to angle every time. */
+  const menu = box.dataset.metrics ? box.dataset.metrics.split(",") : null;
+  let metric = box.dataset.metric;
+  if (menu) {
+    const avail = menu.filter((m) => jointOptions(rep.jm, m, res.activity).length);
+    if (!avail.length) { box.innerHTML = ""; box.classList.add("hidden"); return; }
+    metric = avail.includes(metricSel[res.activity]) ? metricSel[res.activity] : avail[0];
+    box.dataset.metric = metric;
+  }
   const html = metricPlot(rep, res, metric);
-  box.innerHTML = html;
+  box.innerHTML = (menu && html
+    ? `<div class="jmpick" style="margin-bottom:6px"><select class="jmmetric"
+        aria-label="${tr("jmPickMetric")}">${menu
+        .filter((m) => jointOptions(rep.jm, m, res.activity).length)
+        .map((m) => `<option value="${m}"${m === metric ? " selected" : ""}>${
+          tr(METRIC_META[m].title)}</option>`).join("")}</select></div>`
+    : "") + html;
   box.classList.toggle("hidden", !html);
   box.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
     cb.onchange = () => {
@@ -8171,6 +8196,12 @@ function drawMetric(box, rep, res) {
       drawMetric(box, rep, res);
     };
   });
+  const pick = box.querySelector("select.jmmetric");
+  if (pick) pick.onchange = () => {
+    metricSel[res.activity] = pick.value;
+    box.dataset.metric = pick.value;
+    drawMetric(box, rep, res);
+  };
 }
 
 /* Reaction force plot: a source dropdown (feet / hands) and L/R ticks.
@@ -8705,8 +8736,6 @@ function momentPanel(rep, res) {
     <p class="sub" style="margin-bottom:4px">${bits.join(" · ")} ${loadNote(res)}</p>
     ${res.massKg + res.externalKg <= 0
       ? `<p class="note banner">${tr("noteAssistExceeds", { kg: res.assistKg })}</p>` : ""}
-    <div class="jmplot" data-metric="moment"></div>
-    <div class="jmplot" data-metric="power"></div>
     ${legs ? `<p class="note">${tr("noteInverseDynamics")}</p>` : ""}
     ${arms ? `<p class="note">${tr(res.activity === "jumpshot"
                                    ? "noteArmDynamicsShot" : "noteArmDynamicsHang")}</p>` : ""}
@@ -8771,69 +8800,56 @@ function forcePanel(rep, res) {
       <td class="ref">${n2(levelFor(g.base, /walk/i))}</td>
       <td class="ref">${n2(levelFor(g.base, /run/i))}</td></tr>`).join("");
 
-  // Muscle force as a percentage of each muscle's OWN peak in this rep.
-  // Normalising sidesteps the surrogate's magnitude problem: the shapes are
-  // the part that survived validation, and on a shared newton axis the largest
-  // muscle flattens every other curve onto the floor.
-  let pctChart = "";
-  if (groups.length) {
-    const series = [];
-    groups.forEach((g, k) => {
-      const col = MCOLORS[k % MCOLORS.length];
-      for (const side of ["r", "l"]) {
-        const hit = g[side];
-        if (!hit) continue;
-        const raw = rep.forces.map((r) => Math.abs(r[hit.index]));
-        const mx = Math.max(...raw) || 1;
-        series.push([side === "r" ? g.base : hit.name,
-                     raw.map((v) => (100 * v) / mx),
-                     sideOpt(col, side, side === "r" || !g.r)]);
-      }
-    });
-    pctChart = `<h1 style="font-size:14px;margin:14px 0 2px">${tr("musclePctPeak")}</h1>` +
-      lineChart(rep.times, series, tr("unitPctPeak"), MCOLORS) +
-      `<p class="note" style="margin-top:2px">${tr("notePctPeak")}</p>`;
-  }
-
-  // Joint contact forces, already in bodyweights.
-  let jrfChart = "";
-  if (rep.jrf && rep.jrf.length && rep.jrfNames) {
-    const jcol = {};
-    jGroups.forEach((g, k) => { jcol[g.base] = COLORS[k % COLORS.length]; });
-    const series = [];
-    for (const g of jGroups) {
+  /* Force-time integral per muscle, ranked.
+   *
+   * NOT work, and not called work: work is force times the FIBRE's velocity,
+   * and the surrogate predicts force only -- there are no fibre velocities to
+   * integrate against. The force-time integral is what this data can honestly
+   * support, it carries the units it has (N.s), and for "which muscle did the
+   * most over this rep" it ranks the same way work would in the cases where
+   * both can be computed.
+   *
+   * Trapezoidal over the rep's own time base, summed over both sides, so the
+   * bar is the muscle's total for the rep rather than one leg's.
+   */
+  const integrate = (y, t) => {
+    let sum = 0;
+    for (let k = 1; k < y.length && k < t.length; k++) {
+      const dtk = t[k] - t[k - 1];
+      if (dtk > 0) sum += ((Math.abs(y[k]) + Math.abs(y[k - 1])) / 2) * dtk;
+    }
+    return sum;
+  };
+  // A mean rep is on a 0-100% time base, where an integral would be N.%, which
+  // is not a quantity. Only a rep in seconds gets the panel.
+  const inSeconds = rep.timeUnit !== "%";
+  let impulseBars = "";
+  if (inSeconds && rep.times && rep.times.length > 1) {
+    const tt = Array.from(rep.times);
+    const totals = groups.map((g) => {
+      let v = 0;
       for (const side of ["r", "l"]) {
         if (!g[side]) continue;
-        series.push([side === "r" ? prettyBase(g.base) : g[side].name,
-                     rep.jrf.map((r) => r[g[side].index]),
-                     sideOpt(jcol[g.base], side, side === "r" || !g.r)]);
+        v += integrate(rep.forces.map((r) => r[g[side].index]), tt);
       }
+      return { base: g.base, v };
+    }).filter((x) => x.v > 0).sort((a, b) => b.v - a.v);
+    if (totals.length) {
+      const mx = totals[0].v;
+      impulseBars = `<h1 style="font-size:14px;margin:14px 0 2px">${tr("muscleImpulseTitle")}</h1>
+        <div class="sumRows">${totals.map((x) => `<div class="sumRow">
+          <span class="sumName">${x.base}</span>
+          <span class="sumBar"><i style="width:${Math.max(3, Math.round((100 * x.v) / mx))}%"></i></span>
+          <span class="sumVal">${x.v.toFixed(0)}</span></div>`).join("")}</div>
+        <p class="note" style="margin-top:2px">${tr("noteMuscleImpulse")}</p>`;
     }
-    const bands = series.map(() => null);
-    const refCond = rep.isMean && res && res.activity === "squat"
-      ? normCondition(res) : null;
-    if (refCond) {
-      for (const ent of ["hip", "knee", "ankle"]) {
-        const c = refCurve(refCond, "joint_contact_force", ent);
-        if (!c) continue;
-        series.push([`${ent} (ref)`, c.mean,
-                     { dash: true, color: jcol[ent] || REF_COLOR }]);
-        bands.push(refBand(c));
-      }
-    }
-    // Horizontal lines from the GAIT literature. Deliberately not curves: a
-    // gait cycle is not a rep, and drawing one across a squat would invite
-    // exactly the comparison that is not valid. As levels they do the one job
-    // worth doing here -- showing when a predicted force cannot be true.
-    const hl = (norms && norms.levels ? norms.levels : [])
-      .filter((L) => L.variable === "joint_contact_force" && L.unit === "xBW")
-      .map((L) => ({ y: L.value, label: `${L.entity} ${L.label}` }));
-    jrfChart = lineChart(rep.times, series, tr("unitBodyweight"), COLORS, bands,
-                         { hlines: hl })
-      + (hl.length ? `<p class="note">${tr("noteGaitDotted", {
-          n: [...new Set(hl.map((h) => h.label))].length })}</p>` : "")
-      + (refCond ? refNote(refCond) : "");
   }
+
+  /* The joint-contact CURVES are gone; the polar dials above carry the
+   * vector, which is strictly more than a magnitude trace, and the peak table
+   * below carries the numbers. Two pictures of one quantity was one too many
+   * (Bas, 2026-09-19). The gait reference LEVELS moved onto the table, where
+   * they are read as numbers next to numbers. */
 
   // The WITHIN-TRIAL figure, not the pooled one. Pooled R2 is computed across
   // every held-out frame at once, so it is rewarded for telling a sprint from a
@@ -8848,11 +8864,11 @@ function forcePanel(rep, res) {
     <p class="note banner">${tr("noteSurrogate", {
       r2: r2 == null ? "—" : r2.toFixed(2),
       r2j: r2j == null ? "—" : r2j.toFixed(2) })}</p>
+    ${impulseBars}
+    <h1 style="font-size:14px;margin:14px 0 2px">${tr("musclePeakTitle")}</h1>
     <table><thead><tr><th>${tr("muscle")}</th><th>${tr("rightPeakN")}</th><th>${tr("leftPeakN")}</th></tr></thead>
       <tbody>${rows}</tbody></table>
-    ${pctChart}
     <h1 style="font-size:14px;margin:14px 0 2px">${tr("jointContactForce")}</h1>
-    ${jrfChart}
     <table class="jcf"><thead><tr><th>${tr("joint")}</th><th>${tr("right")}</th><th>${tr("left")}</th>
       <th class="ref">${refCondT ? tr("refSuffix", { cond: refCondT }) : tr("squatRef")}</th>
       <th class="ref">${tr("walking")}</th><th class="ref">${tr("running")}</th></tr></thead>
@@ -9684,6 +9700,12 @@ function render(res, fps) {
       tr(res.activity === "sj" ? "hadCountermovement" : "noCountermovement",
         { n: mismatched.length, total: n })}</p>` : ""}
     <div class="tabs" id="repTabs" style="margin-top:14px"></div>
+    <!-- Order, as the athlete reads it (Bas, 2026-09-19): the reps, then where
+         the load pointed (polar dials), then one time-varying plot they choose
+         the variable on, then the muscle panel. The dials come first because
+         they are the summary -- a whole rep in one picture -- and the curve is
+         what you open when the summary raises a question. -->
+    <div id="loadBox" class="jmplot hidden"></div>
     <div id="chartBox"></div>
     <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMot")}</button>
     <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
@@ -9699,7 +9721,6 @@ function render(res, fps) {
     ${viewNote(res)}
     <div id="dynBox"></div>
     <div id="forceBox"></div>
-    <div id="loadBox" class="jmplot hidden"></div>
     ${isJump ? `<p class="note">${tr("noteTwoHeights")}</p>` : ""}
     <p class="note">${tr(res.fromFile ? "noteAnglesFile" : "noteAnglesMeasured",
                           { fps: fps.toFixed(1), ms: (1000 / fps).toFixed(0) })}</p>`;
@@ -9738,8 +9759,8 @@ function render(res, fps) {
      * fixed angle chart rather than showing nothing. */
     const hasJm = jointOptions(items[i].jm, "angle", res.activity).length > 0;
     $("chartBox").innerHTML = qualityLine(items[i]) + (hasJm
-        ? `<div class="jmplot" data-metric="angle" style="border-top:0;margin-top:0"></div>
-           <div class="jmplot" data-metric="vel"></div>`
+        ? `<div class="jmplot" data-metrics="${PLOT_METRICS.join(",")}"
+                style="border-top:0;margin-top:0"></div>`
         : chart(items[i], res.activity, res))
       + (items[i].wholeTrial
            ? `<p class="note">${tr("noteWholeTrial")}</p>`

@@ -1,0 +1,146 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>BioScout vision-model harness</title>
+<link rel="icon" href="data:,">
+<!--
+  The page the benchmark runs in.
+
+  It is deliberately NOT index.html. Loading the app would drag in the terms
+  dialog, storage, i18n, the service worker and a camera permission prompt --
+  none of which the measurement needs, all of which can fail in headless
+  Chromium for reasons that have nothing to do with the model. What it DOES
+  share with the app is the part that matters: the same vendored MediaPipe
+  bundle, the same wasm, the same createFromOptions call, the same
+  seek-on-a-fixed-grid loop and the same visibility cut. If any of those drift
+  from index.html the comparison stops being about the app, so selftest.mjs
+  asserts the options and the cut still match.
+
+  Everything is driven from Playwright through window.__vm.
+-->
+<body style="margin:0;background:#111;color:#eee;font:13px system-ui">
+<video id="v" playsinline muted style="max-width:100%"></video>
+<pre id="log" style="white-space:pre-wrap"></pre>
+<script type="module">
+const LANDMARK_NAMES = [
+  "nose", "left_eye_inner", "left_eye", "left_eye_outer",
+  "right_eye_inner", "right_eye", "right_eye_outer",
+  "left_ear", "right_ear", "mouth_left", "mouth_right",
+  "left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+  "left_wrist", "right_wrist", "left_pinky", "right_pinky",
+  "left_index", "right_index", "left_thumb", "right_thumb",
+  "left_hip", "right_hip", "left_knee", "right_knee",
+  "left_ankle", "right_ankle", "left_heel", "right_heel",
+  "left_foot_index", "right_foot_index",
+];
+const VIS_CUT = 0.3;
+const MAX_SAMPLE_FRAMES = 3000;
+const SEEK_TIMEOUT_MS = 3000;
+
+const log = (m) => { document.getElementById("log").textContent += m + "\n"; };
+let FilesetResolver = null, PoseLandmarker = null;
+
+async function loadEngine(bundleUrl) {
+  if (PoseLandmarker) return;
+  const mp = await import(bundleUrl);
+  FilesetResolver = mp.FilesetResolver; PoseLandmarker = mp.PoseLandmarker;
+}
+
+/** The app's options, with only the model file and the delegate varying. */
+async function makeLandmarker({ wasmUrl, modelUrl, delegate = "GPU",
+                                numPoses = 1, minDet = 0.3, minPres = 0.3,
+                                minTrack = 0.3 }) {
+  const fileset = await FilesetResolver.forVisionTasks(wasmUrl);
+  return PoseLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: modelUrl, delegate },
+    runningMode: "VIDEO", numPoses,
+    minPoseDetectionConfidence: minDet, minPosePresenceConfidence: minPres,
+    minTrackingConfidence: minTrack,
+  });
+}
+
+function toNamed(lms, w, h) {
+  const out = {};
+  lms.forEach((l, i) => {
+    if ((l.visibility ?? 1) >= VIS_CUT) out[LANDMARK_NAMES[i]] = [l.x * w, l.y * h];
+  });
+  return out;
+}
+
+const seekTo = (v, t) => new Promise((resolve) => {
+  let settled = false;
+  const done = () => { if (!settled) { settled = true; resolve(); } };
+  v.addEventListener("seeked", done, { once: true });
+  setTimeout(done, SEEK_TIMEOUT_MS);
+  v.currentTime = t;
+});
+
+/**
+ * Track one clip with one model.
+ *
+ * The sampling grid is the app's: a fixed dt from the stated frame rate,
+ * coarsened only if the clip would exceed MAX_SAMPLE_FRAMES, and the timestamp
+ * handed to the model is the GRID time -- feeding detectForVideo a timestamp
+ * that goes backwards makes it drop the frame outright.
+ *
+ * Per-frame inference time is measured around detectForVideo ONLY: the seek
+ * dominates a file run and has nothing to do with the model. It is a fair
+ * comparison BETWEEN models on one machine, not a prediction of phone
+ * performance -- headless Chromium's GPU is not a phone's.
+ */
+async function track({ video, model, fps = null, from = 0, to = null, warmup = 3 }) {
+  const v = document.getElementById("v");
+  v.src = video;
+  await new Promise((res, rej) => {
+    v.addEventListener("loadedmetadata", res, { once: true });
+    v.addEventListener("error", () => rej(new Error("video failed to load: " + video)), { once: true });
+  });
+  const duration = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+  if (!duration) throw new Error("video has no duration");
+  const t0 = performance.now();
+  const lm = await makeLandmarker(model);
+  const loadMs = performance.now() - t0;
+
+  const end = to === null ? duration : Math.min(to, duration);
+  const span = Math.max(0, end - from);
+  let dt = 1 / (fps || 30);
+  if (span / dt > MAX_SAMPLE_FRAMES) dt = span / MAX_SAMPLE_FRAMES;
+  const n = Math.max(1, Math.floor(span / dt));
+
+  // A cold first inference includes shader compilation and is not the model's
+  // steady-state cost; it is measured and reported separately rather than
+  // averaged into it.
+  const times = [];
+  let firstMs = null, offered = 0;
+  const frames = [];
+  for (let i = 0; i < n; i++) {
+    const t = from + i * dt;
+    if (t > end) break;
+    await seekTo(v, t);
+    offered++;
+    const a = performance.now();
+    const res = lm.detectForVideo(v, Math.round(t * 1000));
+    const ms = performance.now() - a;
+    if (i === 0) firstMs = ms; else if (i >= warmup) times.push(ms);
+    if (res.landmarks && res.landmarks.length) {
+      frames.push({ i, t: t * 1000,
+                    lm: toNamed(res.landmarks[0], v.videoWidth, v.videoHeight) });
+    }
+    if (i % 25 === 0) log(`${model.id}  ${t.toFixed(1)}/${span.toFixed(1)} s  ${frames.length} frames`);
+  }
+  lm.close();
+  times.sort((a, b) => a - b);
+  const q = (p) => (times.length ? times[Math.min(times.length - 1, Math.floor(p * times.length))] : NaN);
+  return {
+    frames, offered, gridFps: 1 / dt,
+    width: v.videoWidth, height: v.videoHeight, duration,
+    timing: { loadMs, firstMs, medianMs: q(0.5), p95Ms: q(0.95),
+              meanMs: times.length ? times.reduce((s, x) => s + x, 0) / times.length : NaN,
+              samples: times.length },
+  };
+}
+
+window.__vm = { loadEngine, track, log };
+window.__vmReady = true;
+log("harness ready");
+</script>
+</body>

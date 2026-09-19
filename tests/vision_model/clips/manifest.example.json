@@ -1,0 +1,68 @@
+{
+  "_comment": [
+    "Copy to manifest.json and point it at your own clips. Paths are from the",
+    "repo root. One entry per CLIP, not per model -- every model in the run is",
+    "put through every clip.",
+    "",
+    "activity must be a key of ACTIVITIES in src/kinematics.js: pullup, dip,",
+    "pushup, squat, slsquat, cmj, sj, walk, run, heelraise, kickback, sidestep,",
+    "jumpshot, neck.",
+    "",
+    "fps is the rate the phone FILMED at. Get it wrong and every velocity,",
+    "moment and power in the comparison is scaled wrong -- ffprobe -show_streams",
+    "will tell you. A slow-motion clip must state its real rate (120, 240),",
+    "not the container's playback rate.",
+    "",
+    "groundTruth.offsetS is (lab clock - video clock). Leave it null and the",
+    "harness recovers it by cross-correlation and reports the r it achieved;",
+    "state it when you have a genuine sync signal (a clap, a trigger, an LED).",
+    "",
+    "expect is what YOU know about the clip: how many reps are in it, and what",
+    "movement it is. It is scored against the app's own classify() and rep",
+    "detector, which is where most of the practical difference between models",
+    "shows up."
+  ],
+  "clips": [
+    {
+      "id": "sub01_squat_sideon",
+      "video": "tests/vision_model/clips/sub01_squat.mp4",
+      "activity": "squat",
+      "fps": 60,
+      "from": 2.0,
+      "to": 14.5,
+      "heightM": 1.81,
+      "massKg": 78,
+      "groundTruth": {
+        "file": "tests/vision_model/gt/sub01_squat_ik.mot",
+        "convention": "rajagopal",
+        "offsetS": null,
+        "syncChannel": null
+      },
+      "expect": { "activity": "squat", "reps": 5 }
+    },
+    {
+      "id": "sub01_walk_overground",
+      "video": "tests/vision_model/clips/sub01_walk.mp4",
+      "activity": "walk",
+      "fps": 60,
+      "heightM": 1.81,
+      "massKg": 78,
+      "groundTruth": {
+        "file": "tests/vision_model/gt/sub01_walk_ik.mot",
+        "convention": "rajagopal",
+        "offsetS": 0.412,
+        "syncChannel": "knee_r"
+      },
+      "expect": { "activity": "walk", "reps": 8 }
+    },
+    {
+      "id": "sub02_cmj_no_lab",
+      "video": "tests/vision_model/clips/sub02_cmj.mp4",
+      "activity": "cmj",
+      "fps": 240,
+      "heightM": 1.74,
+      "massKg": 69,
+      "expect": { "activity": "cmj", "reps": 3 }
+    }
+  ]
+}

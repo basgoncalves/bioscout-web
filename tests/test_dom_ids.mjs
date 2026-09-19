@@ -120,5 +120,13 @@ if (nested && !/querySelectorAll\("section dialog"\)[\s\S]{0,120}document\.body\
   console.error("FAIL  a <dialog> sits inside a <section> and nothing moves it to <body>");
 }
 
+/* No bare `video` rule. One that positioned every <video> absolutely and
+ * mirrored it was written for the recorder's stage and then reached the trim
+ * dialog's preview, which covered its own sliders and buttons. Scope it. */
+if (style.split("}").some((blk) => /(^|,)\s*video(\.[\w-]+)?\s*(,|\{)/.test(blk.split("{")[0] + "{"))) {
+  bad++;
+  console.error("FAIL  a CSS rule targets every <video> on the page -- scope it (e.g. #stage video)");
+}
+
 if (bad) process.exit(1);
 console.log(`ok    ${used.size} referenced ids, 5 views, ${LAID_OUT.length} laid-out buttons reset`);
