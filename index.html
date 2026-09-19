@@ -1355,7 +1355,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 112;
+window.BUILD = 113;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -7983,8 +7983,147 @@ const METRIC_META = {
   vel:    { title: "jmVelTitle", unit: "°/s", note: "jmVelNote", zero: true },
   moment: { title: "jointMoments", unit: "N·m", note: null, zero: true },
   power:  { title: "jmPowerTitle", unit: "W", note: "jmPowerNote", zero: true },
+  /* These two do not come from rep.jm: they read rep.forces and rep.jrf, and
+   * have their own tick rows (per muscle and per leg; per joint and per leg).
+   * They are on the same menu because to the athlete they are the same
+   * question -- what happened over this rep -- and splitting the page by where
+   * the numbers happen to be stored was never their problem. */
+  muscle: { title: "jmMuscleTitle", unit: "N", note: null, zero: true, src: "forces" },
+  jrf:    { title: "jointContactForce", unit: "unitBodyweight", note: null, zero: true, src: "jrf" },
 };
 const jointSel = {};   // "<activity>|<metric>" -> joints ticked
+const muscleTicks = {};  // activity -> { muscles: [base], sides: ["l","r"] }
+const jrfTicks = {};     // activity -> { joints: [base], sides: ["l","r"] }
+
+/** Whether a rep can draw `metric` at all -- what the menu is built from. */
+function metricAvailable(rep, res, metric) {
+  const src = METRIC_META[metric] && METRIC_META[metric].src;
+  if (src === "forces") return !!(rep.forces && rep.forces.length && rep.forceNames);
+  if (src === "jrf") return !!(rep.jrf && rep.jrf.length && rep.jrfNames);
+  return jointOptions(rep.jm, metric, res.activity).length > 0;
+}
+
+/* A tick row shared by the muscle and contact-force plots: the thing itself,
+ * then the legs. Same markup and classes as the joint ticks, so it inherits
+ * .jmpick styling and reads as the same control. */
+const tickLabel = (cls, value, on, colour, text) =>
+  `<label class="${on ? "on" : ""}"><input type="checkbox" class="${cls}" value="${value}"${
+    on ? " checked" : ""}>${colour ? `<i class="swatch" style="background:${colour};margin:0"></i>` : ""}${text}</label>`;
+
+const sideTicks = (sides) => `<span style="flex:0 0 8px"></span>` +
+  ["l", "r"].map((d) => tickLabel("stick", d, sides.includes(d),
+    d === "l" ? SIDE_L : SIDE_R, tr(d === "l" ? "leftShort" : "rightShort"))).join("");
+
+/**
+ * Muscle forces over the rep, in newtons, with a tick per muscle and per leg.
+ *
+ * Newtons rather than the old percent-of-own-peak: that normalisation existed
+ * because five muscles on one axis flattened the small ones onto the floor,
+ * and ticks solve the same problem without throwing the magnitude away. The
+ * surrogate's magnitudes are the weaker part of it -- the banner above says
+ * so, and the peaks are printed so the reader can see what they are trusting.
+ */
+function musclePlot(rep, res) {
+  const allPeaks = new Map(peakByMuscle(rep.forces, rep.forceNames, rep.forceNames.length));
+  const groups = groupBySide(rep.forceNames, (n) => allPeaks.get(n) || 0).slice(0, MCOLORS.length);
+  if (!groups.length) return "";
+  const kept = muscleTicks[res.activity] || {};
+  const avail = groups.map((g) => g.base);
+  let picked = (kept.muscles || []).filter((b) => avail.includes(b));
+  if (!picked.length && !kept.muscles) picked = avail.slice(0, 2);
+  const sides = kept.sides || ["l", "r"];
+  const series = [], bands = [], peaks = [];
+  groups.forEach((g, k) => {
+    if (!picked.includes(g.base)) return;
+    const col = MCOLORS[k % MCOLORS.length];
+    let first = true;
+    for (const side of ["r", "l"]) {
+      if (!sides.includes(side) || !g[side]) continue;
+      const label = `${g.base} ${tr(side === "l" ? "leftShort" : "rightShort")}`;
+      series.push([label, rep.forces.map((r) => Math.abs(r[g[side].index])),
+                   sideOpt(col, side, first)]);
+      bands.push(null);
+      peaks.push(`${label} ${g[side].peak.toFixed(0)} N`);
+      first = false;
+    }
+  });
+  const ticks = groups.map((g, k) => tickLabel("mtick", g.base, picked.includes(g.base),
+    MCOLORS[k % MCOLORS.length], g.base)).join("") + sideTicks(sides);
+  const body = series.length
+    ? curveChart(rep, res.activity, series, bands, { unit: "N", zero: true })
+    : `<p class="note">${tr("jmNoneTicked")}</p>`;
+  return `<h2>${tr("jmMuscleTitle")}</h2>
+    <div class="jmpick" role="group" aria-label="${tr("jmMuscleTitle")}">${ticks}</div>
+    ${body}
+    ${peaks.length ? `<p class="jmpeaks">${peaks.join(" \u00b7 ")}</p>` : ""}
+    <p class="note" style="margin-top:2px">${tr("noteMuscleCurves")}</p>`;
+}
+
+/**
+ * Joint contact force over the rep, in bodyweights, against the corpus.
+ *
+ * Two kinds of reference, and they are not interchangeable. The CURVE (squat
+ * mean rep only -- the corpus holds squats) is a waveform from the same task
+ * and is comparable point for point, with its spread as a band. The gait
+ * LEVELS are horizontal lines: a gait cycle is not a squat rep, so drawing
+ * one across this plot would invite exactly the comparison that is invalid.
+ * As levels they answer the one question worth asking of a surrogate -- is
+ * this the right order of magnitude at all.
+ */
+function jrfPlot(rep, res) {
+  const jrfPeaks = new Map(peakJRF(rep.jrf, rep.jrfNames).map(([n, v]) => [n, v]));
+  const groups = groupBySide(rep.jrfNames.map((n) => n.replace("_mag", "")),
+                             (n) => jrfPeaks.get(n + "_mag") ?? jrfPeaks.get(n) ?? 0);
+  if (!groups.length) return "";
+  const kept = jrfTicks[res.activity] || {};
+  const avail = groups.map((g) => g.base);
+  let picked = (kept.joints || []).filter((b) => avail.includes(b));
+  if (!picked.length && !kept.joints) picked = avail.slice(0, 3);
+  const sides = kept.sides || ["l", "r"];
+  const col = {};
+  groups.forEach((g, k) => { col[g.base] = JOINT_COLOR[g.base] || COLORS[k % COLORS.length]; });
+  const series = [], bands = [], peaks = [];
+  for (const g of groups) {
+    if (!picked.includes(g.base)) continue;
+    let first = true;
+    for (const side of ["r", "l"]) {
+      if (!sides.includes(side) || !g[side]) continue;
+      const label = `${prettyBase(g.base)} ${tr(side === "l" ? "leftShort" : "rightShort")}`;
+      series.push([label, rep.jrf.map((r) => r[g[side].index]), sideOpt(col[g.base], side, first)]);
+      bands.push(null);
+      peaks.push(`${label} ${g[side].peak.toFixed(2)}`);
+      first = false;
+    }
+  }
+  const refCond = rep.isMean && res.activity === "squat" ? normCondition(res) : null;
+  let refs = 0;
+  if (refCond) {
+    for (const ent of picked) {
+      const c = refCurve(refCond, "joint_contact_force", ent);
+      if (!c) continue;
+      series.push([`${prettyBase(ent)} (${tr("refShort")})`, c.mean,
+                   { dash: true, color: col[ent] || REF_COLOR }]);
+      bands.push(refBand(c));
+      refs++;
+    }
+  }
+  const hl = (norms && norms.levels ? norms.levels : [])
+    .filter((L) => L.variable === "joint_contact_force" && L.unit === "xBW"
+                   && picked.includes(L.entity))
+    .map((L) => ({ y: L.value, label: `${L.entity} ${L.label}` }));
+  const ticks = groups.map((g) => tickLabel("jtick", g.base, picked.includes(g.base),
+    col[g.base], prettyBase(g.base))).join("") + sideTicks(sides);
+  const body = series.length
+    ? lineChart(rep.times, series, tr("unitBodyweight"), COLORS, bands, { hlines: hl })
+    : `<p class="note">${tr("jmNoneTicked")}</p>`;
+  return `<h2>${tr("jointContactForce")}</h2>
+    <div class="jmpick" role="group" aria-label="${tr("jointContactForce")}">${ticks}</div>
+    ${body}
+    ${peaks.length ? `<p class="jmpeaks">${tr("jlPeaksShort")} ${peaks.join(" \u00b7 ")}</p>` : ""}
+    ${hl.length ? `<p class="note">${tr("noteGaitDotted", {
+        n: [...new Set(hl.map((h) => h.label))].length })}</p>` : ""}
+    ${refs ? refNote(refCond) : ""}`;
+}
 
 function selectedJoints(activity, metric, opts) {
   const avail = opts.map((o) => o.joint);
@@ -8056,6 +8195,9 @@ function peakText(metric, name, v, massKg) {
 
 /** One metric's plot for one rep: tick boxes, the curves, their peaks. */
 function metricPlot(rep, res, metric) {
+  // The two that read their own arrays rather than rep.jm.
+  if (metric === "muscle") return metricAvailable(rep, res, "muscle") ? musclePlot(rep, res) : "";
+  if (metric === "jrf") return metricAvailable(rep, res, "jrf") ? jrfPlot(rep, res) : "";
   const jm = rep.jm;
   const opts = jointOptions(jm, metric, res.activity);
   if (!opts.length) return "";
@@ -8157,7 +8299,7 @@ function metricPlot(rep, res, metric) {
  * the product of two curves already on this menu and adds no independent
  * information -- and it carried the error of both (Bas, 2026-09-19).
  * jointmetrics.js still computes it; the export still contains it. */
-const PLOT_METRICS = ["angle", "vel", "moment"];
+const PLOT_METRICS = ["angle", "vel", "moment", "power", "muscle", "jrf"];
 const metricSel = {};   // activity -> the metric last picked
 
 function drawMetric(box, rep, res) {
@@ -8167,7 +8309,7 @@ function drawMetric(box, rep, res) {
   const menu = box.dataset.metrics ? box.dataset.metrics.split(",") : null;
   let metric = box.dataset.metric;
   if (menu) {
-    const avail = menu.filter((m) => jointOptions(rep.jm, m, res.activity).length);
+    const avail = menu.filter((m) => metricAvailable(rep, res, m));
     if (!avail.length) { box.innerHTML = ""; box.classList.add("hidden"); return; }
     metric = avail.includes(metricSel[res.activity]) ? metricSel[res.activity] : avail[0];
     box.dataset.metric = metric;
@@ -8176,18 +8318,36 @@ function drawMetric(box, rep, res) {
   box.innerHTML = (menu && html
     ? `<div class="jmpick" style="margin-bottom:6px"><select class="jmmetric"
         aria-label="${tr("jmPickMetric")}">${menu
-        .filter((m) => jointOptions(rep.jm, m, res.activity).length)
+        .filter((m) => metricAvailable(rep, res, m))
         .map((m) => `<option value="${m}"${m === metric ? " selected" : ""}>${
           tr(METRIC_META[m].title)}</option>`).join("")}</select></div>`
     : "") + html;
   box.classList.toggle("hidden", !html);
-  box.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
-    cb.onchange = () => {
-      jointSel[`${res.activity}|${metric}`] =
-        [...box.querySelectorAll('input[type="checkbox"]:checked')].map((x) => x.value);
-      drawMetric(box, rep, res);
-    };
-  });
+  if (metric === "muscle" || metric === "jrf") {
+    /* Two independent groups in one box: WHAT to draw and WHICH LEGS. Reading
+     * every checked box into one list, as the joint plots do, would mix them
+     * and lose both. */
+    const pick = (cls) => [...box.querySelectorAll(`input.${cls}:checked`)].map((x) => x.value);
+    const store = metric === "muscle" ? muscleTicks : jrfTicks;
+    const key = metric === "muscle" ? "muscles" : "joints";
+    box.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.onchange = () => {
+        store[res.activity] = {
+          [key]: pick(metric === "muscle" ? "mtick" : "jtick"),
+          sides: pick("stick"),
+        };
+        drawMetric(box, rep, res);
+      };
+    });
+  } else {
+    box.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.onchange = () => {
+        jointSel[`${res.activity}|${metric}`] =
+          [...box.querySelectorAll('input[type="checkbox"]:checked')].map((x) => x.value);
+        drawMetric(box, rep, res);
+      };
+    });
+  }
   box.querySelectorAll("button.muscle").forEach((b) => {
     b.onclick = () => {
       const j = b.dataset.joint, idx = +b.dataset.idx;
