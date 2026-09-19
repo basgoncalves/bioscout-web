@@ -1173,6 +1173,7 @@ try {
     </div>
     <div class="status" id="status" style="margin:0 2px 10px" data-i18n="statusStarting">Starting…</div>
     <div class="sbar" id="statusBar" hidden><span id="statusBarFill"></span></div>
+    <p class="note hidden" id="convertHint" style="margin:0 2px 10px"></p>
   <!-- Directly above the picture: this is the number the athlete is watching
        while they work, and it was sitting up in the banner with the setup
        text, out of eyeline of the thing it counts. -->
@@ -1355,7 +1356,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 114;
+window.BUILD = 115;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1556,6 +1557,30 @@ const barClock = (ms) => {
   }, 100);
   bar(0);
   return () => clearInterval(id);
+};
+
+/* What to do with a video this browser cannot decode.
+ *
+ * Shown only on that failure. The links are built here rather than in the
+ * dictionaries: they are names and URLs, not prose, and a translator should
+ * not have to carry an <a> tag through three languages to change a sentence.
+ *
+ * The desktop converters come FIRST, and the warning about the online one is
+ * not a footnote. Everything else in BioScout happens on the athlete's own
+ * machine -- the privacy notice says so -- and an upload to a stranger's
+ * server is a different thing from the rest of the app, so it is named as
+ * one rather than offered as the easy default. */
+const showConvertHint = (show = true) => {
+  const el = $("convertHint");
+  if (!el) return;
+  el.classList.toggle("hidden", !show);
+  if (!show) { el.innerHTML = ""; return; }
+  const a = (href, text) =>
+    `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+  el.innerHTML = `${esc(tr("convertOffline"))} ${a("https://handbrake.fr/", "HandBrake")}
+    ${esc(tr("convertOr"))} ${a("https://www.videolan.org/vlc/", "VLC")}.
+    <br>${esc(tr("convertOnline"))} ${a("https://cloudconvert.com/mp4-converter", "CloudConvert")}
+    \u2014 ${esc(tr("convertOnlineWarn"))}`;
 };
 
 const bar = (frac) => {
@@ -7336,6 +7361,7 @@ async function analyseVideoBlob(file, opts = {}) {
 
 async function analyseVideoFile(file, { trim = true } = {}) {
   say(tr("sayReadingVideo"));
+  showConvertHint(false);
   bar(-1);
   takeNo++; shareSrc = null; shareFile = file; videoBlob = null;
   const v = document.createElement("video");
@@ -7358,6 +7384,7 @@ async function analyseVideoFile(file, { trim = true } = {}) {
   stopClock();
   if (!readable) {
     say(tr("sayVideoUnreadable"), true);
+    showConvertHint();
     bar(null);
     try { URL.revokeObjectURL(v.src); } catch { /* already gone */ }
     return;
