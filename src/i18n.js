@@ -869,6 +869,7 @@ const EN = {
   "noStridesWalk": "The body was tracked, but the feet never resolved into separate steps \u2014 so there are no strides to measure. A stride is one foot touching down to the next time that same foot touches down, found from the feet, so they have to be in frame and on a floor for the whole clip: step back until your shoes are visible with room underneath, keep the camera still, and walk past the camera rather than towards it.",
   "sidestep": "Side step",
   // --- results tables ------------------------------------------------------
+  "sideLabel": "Which leg",
   "leftShort": "L",
   "rightShort": "R",
   "refShort": "ref",
@@ -2370,6 +2371,7 @@ const PT = {
   "noStridesWalk": "O corpo foi seguido, mas os p\u00e9s nunca se separaram em passos distintos \u2014 por isso n\u00e3o h\u00e1 passadas para medir. Uma passada vai do apoio de um p\u00e9 at\u00e9 ao apoio seguinte do mesmo p\u00e9 e \u00e9 encontrada a partir dos p\u00e9s, logo t\u00eam de estar no enquadramento e sobre um ch\u00e3o durante todo o clipe: afasta-te at\u00e9 os sapatos ficarem vis\u00edveis com espa\u00e7o por baixo e mant\u00e9m a c\u00e2mara fixa.",
   "sidestep": "Mudan\u00e7a de dire\u00e7\u00e3o lateral",
   // --- tabelas de resultados ----------------------------------------------
+  "sideLabel": "Que perna",
   "leftShort": "E",
   "rightShort": "D",
   "refShort": "ref",
@@ -3870,6 +3872,7 @@ const DE = {
   "noStridesWalk": "Der K\u00f6rper wurde erfasst, aber die F\u00fc\u00dfe lie\u00dfen sich nie in einzelne Schritte trennen \u2014 es gibt also keine Schritte zu messen. Ein Doppelschritt geht vom Aufsetzen eines Fu\u00dfes bis zum n\u00e4chsten Aufsetzen desselben Fu\u00dfes und wird an den F\u00fc\u00dfen erkannt: sie m\u00fcssen den ganzen Clip \u00fcber im Bild und auf einem Boden sein. Tritt zur\u00fcck, bis die Schuhe mit Platz darunter sichtbar sind, und halte die Kamera ruhig.",
   "sidestep": "Seitlicher Richtungswechsel",
   // --- Ergebnistabellen ----------------------------------------------------
+  "sideLabel": "Welches Bein",
   "leftShort": "L",
   "rightShort": "R",
   "refShort": "Ref.",

@@ -1355,7 +1355,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 113;
+window.BUILD = 114;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -8010,9 +8010,19 @@ const tickLabel = (cls, value, on, colour, text) =>
   `<label class="${on ? "on" : ""}"><input type="checkbox" class="${cls}" value="${value}"${
     on ? " checked" : ""}>${colour ? `<i class="swatch" style="background:${colour};margin:0"></i>` : ""}${text}</label>`;
 
-const sideTicks = (sides) => `<span style="flex:0 0 8px"></span>` +
-  ["l", "r"].map((d) => tickLabel("stick", d, sides.includes(d),
-    d === "l" ? SIDE_L : SIDE_R, tr(d === "l" ? "leftShort" : "rightShort"))).join("");
+/* The legs get their OWN row, and their swatches are drawn in the line style
+ * the curve actually uses -- solid for the right leg, dotted for the left.
+ *
+ * On one row with the muscles they read as a sixth and seventh muscle, and in
+ * red and green they promised a colour coding the chart does not use: colour
+ * on these plots means WHICH MUSCLE, and the leg is carried by the dash
+ * pattern (Bas, 2026-09-19). A swatch has to be drawn in its line's own style
+ * or it describes a line that is not there. */
+const sideTicks = (sides) => `<div class="jmpick" role="group" aria-label="${tr("sideLabel")}">` +
+  ["r", "l"].map((d) => `<label class="${sides.includes(d) ? "on" : ""}">
+    <input type="checkbox" class="stick" value="${d}"${sides.includes(d) ? " checked" : ""}>
+    <i class="swatch" style="${swatchStyle("var(--ink)", { dot: d === "l" })};margin:0"></i>${
+    tr(d === "l" ? "leftShort" : "rightShort")}</label>`).join("") + `</div>`;
 
 /**
  * Muscle forces over the rep, in newtons, with a tick per muscle and per leg.
@@ -8048,12 +8058,13 @@ function musclePlot(rep, res) {
     }
   });
   const ticks = groups.map((g, k) => tickLabel("mtick", g.base, picked.includes(g.base),
-    MCOLORS[k % MCOLORS.length], g.base)).join("") + sideTicks(sides);
+    MCOLORS[k % MCOLORS.length], g.base)).join("");
   const body = series.length
     ? curveChart(rep, res.activity, series, bands, { unit: "N", zero: true })
     : `<p class="note">${tr("jmNoneTicked")}</p>`;
   return `<h2>${tr("jmMuscleTitle")}</h2>
     <div class="jmpick" role="group" aria-label="${tr("jmMuscleTitle")}">${ticks}</div>
+    ${sideTicks(sides)}
     ${body}
     ${peaks.length ? `<p class="jmpeaks">${peaks.join(" \u00b7 ")}</p>` : ""}
     <p class="note" style="margin-top:2px">${tr("noteMuscleCurves")}</p>`;
@@ -8112,12 +8123,13 @@ function jrfPlot(rep, res) {
                    && picked.includes(L.entity))
     .map((L) => ({ y: L.value, label: `${L.entity} ${L.label}` }));
   const ticks = groups.map((g) => tickLabel("jtick", g.base, picked.includes(g.base),
-    col[g.base], prettyBase(g.base))).join("") + sideTicks(sides);
+    col[g.base], prettyBase(g.base))).join("");
   const body = series.length
     ? lineChart(rep.times, series, tr("unitBodyweight"), COLORS, bands, { hlines: hl })
     : `<p class="note">${tr("jmNoneTicked")}</p>`;
   return `<h2>${tr("jointContactForce")}</h2>
     <div class="jmpick" role="group" aria-label="${tr("jointContactForce")}">${ticks}</div>
+    ${sideTicks(sides)}
     ${body}
     ${peaks.length ? `<p class="jmpeaks">${tr("jlPeaksShort")} ${peaks.join(" \u00b7 ")}</p>` : ""}
     ${hl.length ? `<p class="note">${tr("noteGaitDotted", {
