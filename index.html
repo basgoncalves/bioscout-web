@@ -651,6 +651,25 @@ try {
   .swatch { display:inline-block; width:11px; height:3px; border-radius:2px;
             vertical-align:middle; margin-right:5px; }
   .hidden { display:none !important; }
+  /* Added-load direction dial: a circle seen from behind the athlete, so their
+   * left is on the left. Rim = left / right / down, centre = forward (away from
+   * the viewer, into the page, ⊗) and backward (out of it, ⊙). */
+  .loadDialWrap { display:flex; align-items:center; gap:14px; padding:0 0 22px 22px; }
+  .loadDial { position:relative; width:156px; height:156px; flex:none; border-radius:50%;
+    border:2px solid var(--line); }
+  .loadDial .ldBtn { position:absolute; width:40px; height:40px; margin:0; padding:0;
+    border-radius:50%; border:1px solid var(--line); background:var(--bg);
+    color:var(--ink); font-size:20px; line-height:1; cursor:pointer; }
+  .loadDial .ldBtn[aria-checked="true"] { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .loadDial .ldLeft  { left:-21px; top:57px; }
+  .loadDial .ldRight { right:-21px; top:57px; }
+  .loadDial .ldDown  { left:57px; bottom:-21px; }
+  .loadDial .ldFwd, .loadDial .ldBk { width:34px; height:34px; font-size:17px; left:60px; }
+  .loadDial .ldFwd   { top:38px; }
+  .loadDial .ldBk    { top:80px; }
+  .loadDial .ldBack  { position:absolute; left:0; right:0; top:14px; text-align:center;
+    font-size:10.5px; color:var(--muted); }
+  .loadDialText { font-size:13.5px; color:var(--ink); margin-left:18px; }
   .banner { border-left:3px solid var(--warn); padding-left:11px; font-size:13px;
             color:var(--warn); }
   .subplot { border-top:1px solid var(--line); padding-top:10px; margin-top:10px; }
@@ -1147,14 +1166,22 @@ try {
       </div>
     </div>
     <div class="trainOnly" style="margin-bottom:11px">
-      <label for="loadDir" data-i18n="loadDirLabel">Added load direction</label>
-      <select id="loadDir">
-        <option value="down" data-i18n="loadDir_down">Down (gravity) — bar, vest, belt</option>
-        <option value="left" data-i18n="loadDir_left">Horizontal — athlete pushes to their left</option>
-        <option value="right" data-i18n="loadDir_right">Horizontal — athlete pushes to their right</option>
-        <option value="forward" data-i18n="loadDir_forward">Horizontal — athlete pushes forward</option>
-        <option value="back" data-i18n="loadDir_back">Horizontal — athlete pushes backward</option>
-      </select>
+      <div id="loadDirLabel" style="font-size:13px;color:var(--muted);margin-bottom:6px"
+           data-i18n="loadDirLabel">Added load direction</div>
+      <!-- The value lives in a hidden input so every reader keeps using
+           $("loadDir").value; the dial below only writes it (paintLoadDial). -->
+      <input type="hidden" id="loadDir" value="down">
+      <div class="loadDialWrap">
+        <div class="loadDial" id="loadDial" role="radiogroup" aria-labelledby="loadDirLabel">
+          <span class="ldBack" data-i18n="loadDialView">seen from behind</span>
+          <button type="button" class="ldBtn ldLeft" data-dir="left" role="radio">←</button>
+          <button type="button" class="ldBtn ldRight" data-dir="right" role="radio">→</button>
+          <button type="button" class="ldBtn ldDown" data-dir="down" role="radio">↓</button>
+          <button type="button" class="ldBtn ldFwd" data-dir="forward" role="radio">⊗</button>
+          <button type="button" class="ldBtn ldBk" data-dir="back" role="radio">⊙</button>
+        </div>
+        <div class="loadDialText" id="loadDialText" aria-live="polite"></div>
+      </div>
     </div>
     <p class="note trainOnly" style="margin:-4px 0 10px" data-i18n-html="noteLoad">Barbell, vest or belt in
       <b>Added</b>; band or machine offload in <b>Assistance</b>. Both apply at
@@ -1366,7 +1393,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 118;
+window.BUILD = 119;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1745,6 +1772,23 @@ function currentSettings() {
   };
 }
 
+/* The load-direction dial writes the hidden #loadDir; this repaints it from
+ * that value (after a click, a profile load or a language change). */
+function paintLoadDial() {
+  const d = normLoadDir($("loadDir").value);
+  $("loadDir").value = d;
+  for (const b of document.querySelectorAll("#loadDial .ldBtn")) {
+    const on = b.dataset.dir === d;
+    b.setAttribute("aria-checked", on ? "true" : "false");
+    b.setAttribute("aria-label", tr("loadDir_" + b.dataset.dir));
+    b.title = tr("loadDir_" + b.dataset.dir);
+  }
+  $("loadDialText").textContent = tr("loadDir_" + d);
+}
+for (const b of document.querySelectorAll("#loadDial .ldBtn")) {
+  b.onclick = () => { $("loadDir").value = b.dataset.dir; paintLoadDial(); };
+}
+
 function applyProfile(p) {
   if (!p) return;
   $("profileName").value = p.name || "";
@@ -1760,6 +1804,7 @@ function applyProfile(p) {
   if (p.addedKg != null) $("added").value = p.addedKg;
   if (p.assistKg != null) $("assist").value = p.assistKg;
   $("loadDir").value = normLoadDir(p.loadDir);
+  paintLoadDial();
   if (p.headScale) {
     $("headSize").value = p.headScale;
     $("headSizeVal").textContent = (+p.headScale).toFixed(2) + "×";
@@ -1864,6 +1909,7 @@ function applyStaticI18n() {
     el.innerHTML = tr(el.dataset.i18nHtml);
   }
   document.documentElement.lang = getLang();
+  paintLoadDial();                      // its button labels are translated too
 }
 
 (function initLang() {
