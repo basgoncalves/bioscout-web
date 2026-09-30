@@ -316,9 +316,18 @@ for (const [label, raw] of files) {
   if (from < 0 || to < from) fail("index.html: cannot find analyseVideoBlob to check");
   else {
     const body = whole.slice(from, to);
+    /* Playing is allowed in one form only (2026-09-30, for phones where every
+     * seek re-decodes from a keyframe seconds back): the video is paused on
+     * each frame the GRID needs, that frame is picked by its presentation time
+     * against the grid, and a slot playback went past is seeked. Free-running
+     * playback that tracks whatever was presented is still the bug. */
     if (/\.play\(\)/.test(body)) {
-      fail("analyseVideoBlob plays the video; it must seek frame by frame so the "
-           + "same file gives the same answer");
+      const playPath = body.slice(body.indexOf("const playFrom"), body.indexOf("say(tr(\"sayTrackingProgress\", { t: \"0.0\""));
+      if (!/requestVideoFrameCallback/.test(playPath) || !/v\.pause\(\);\s*while \(i < n && tOf\(i\) < m \+ half\)/.test(playPath)
+          || !/tOf\(i\) < m - half - EPS\) return end\(\)/.test(playPath)) {
+        fail("analyseVideoBlob plays the video without pausing on grid frames; it must "
+             + "step the grid so the same file gives the same answer");
+      }
     }
     if (!/currentTime = /.test(body)) {
       fail("analyseVideoBlob does not seek: frames would be whatever the machine "
@@ -328,7 +337,7 @@ for (const [label, raw] of files) {
       fail("analyseVideoBlob must record each frame's grid index, or an "
            + "untracked frame silently shortens the clip");
     }
-    if (!bad) console.log("ok    video files are stepped frame by frame, not played");
+    if (!bad) console.log("ok    video files are stepped on the frame grid (seeked, or paused on each grid frame)");
   }
 }
 

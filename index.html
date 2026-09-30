@@ -1146,6 +1146,16 @@ try {
         <input id="assist" type="number" step="0.5" value="0" min="0" inputmode="decimal">
       </div>
     </div>
+    <div class="trainOnly" style="margin-bottom:11px">
+      <label for="loadDir" data-i18n="loadDirLabel">Added load direction</label>
+      <select id="loadDir">
+        <option value="down" data-i18n="loadDir_down">Down (gravity) — bar, vest, belt</option>
+        <option value="left" data-i18n="loadDir_left">Horizontal — athlete pushes to their left</option>
+        <option value="right" data-i18n="loadDir_right">Horizontal — athlete pushes to their right</option>
+        <option value="forward" data-i18n="loadDir_forward">Horizontal — athlete pushes forward</option>
+        <option value="back" data-i18n="loadDir_back">Horizontal — athlete pushes backward</option>
+      </select>
+    </div>
     <p class="note trainOnly" style="margin:-4px 0 10px" data-i18n-html="noteLoad">Barbell, vest or belt in
       <b>Added</b>; band or machine offload in <b>Assistance</b>. Both apply at
       once — a loaded bar with a band assist is added minus assist.</p>
@@ -1356,7 +1366,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 117;
+window.BUILD = 118;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1470,6 +1480,7 @@ import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
 import { ensembleRep, mergeSides } from "./src/ensemble.js";
 import { neckLoadHTML } from "./src/neckload.js";
+import { normLoadDir, isHorizontal, netVerticalKg, loadText, neckPush } from "./src/loaddir.js";
 import { framingWatcher } from "./src/framing.js";
 import { gestureWatcher } from "./src/gesture.js";
 import { neckLoadHTML as neckTrainingHTML, setNeckLoadTr } from "./src/neck_load.js";
@@ -1730,6 +1741,7 @@ function currentSettings() {
     headScale: parseFloat($("headSize").value) || 1,
     addedKg: parseFloat($("added").value) || 0,
     assistKg: parseFloat($("assist").value) || 0,
+    loadDir: normLoadDir($("loadDir").value),
   };
 }
 
@@ -1747,6 +1759,7 @@ function applyProfile(p) {
   if (p.activity) $("activity").value = p.activity;
   if (p.addedKg != null) $("added").value = p.addedKg;
   if (p.assistKg != null) $("assist").value = p.assistKg;
+  $("loadDir").value = normLoadDir(p.loadDir);
   if (p.headScale) {
     $("headSize").value = p.headScale;
     $("headSizeVal").textContent = (+p.headScale).toFixed(2) + "×";
@@ -5600,7 +5613,7 @@ function renderTraining() {
     const pp = pairSeries ? pairSeries.find((x) => x.index === s.index) : null;
     const cell = pv && pv.mean != null ? peakCell(pv, spec, pp) : "—";
     return `<tr><td>${tr("setLabel", { n: s.index })}</td><td>${tr(s.activity)}</td>
-      <td>${s.reps}</td><td>${s.addedKg ? "+" + s.addedKg : ""}${s.assistKg ? " −" + s.assistKg : ""}</td>
+      <td>${s.reps}</td><td>${s.addedKg ? esc(loadText(s, tr)).replace(" kg", "") : ""}${s.assistKg ? " −" + s.assistKg : ""}</td>
       <td>${cell}</td>
       <td>${new Date(s.at).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</td></tr>`;
   }).join("");
@@ -6204,7 +6217,7 @@ function sessionSetDetailHTML(sess, set) {
   return `<div class="daybox" id="setDetail">
     <div style="font-weight:600;margin-bottom:6px">${esc(tr("setLabel", { n: set.index }))} · ${esc(tr(task))}
       <span class="sub">· ${esc(tr(set.reps === 1 ? "nRep" : "nRepsCount", { n: set.reps }))}${
-        set.addedKg ? ` · +${set.addedKg} kg` : ""}${set.assistKg ? ` · −${set.assistKg} kg` : ""}</span></div>
+        set.addedKg ? ` · ${esc(loadText(set, tr))}` : ""}${set.assistKg ? ` · −${set.assistKg} kg` : ""}</span></div>
     ${rows.length ? `<table class="asmTable"><thead><tr><th>${esc(tr("asmMetric"))}</th>
       <th style="text-align:right">${esc(tr("asmMeanRange"))}</th></tr></thead><tbody>${rows.join("")}</tbody></table>` : ""}
     <select id="setMetric" style="margin:10px 0 6px">${metricOpts}</select>
@@ -7197,6 +7210,7 @@ $("fileBtn").onclick = () => $("fileInput").click();
         massKg: parseFloat($("mass").value) || null,
         addedKg: parseFloat($("added").value) || 0,
         assistKg: parseFloat($("assist").value) || 0,
+        loadDir: normLoadDir($("loadDir").value),
       });
       $("manualDlg").close();
       say(tr("sayManualSaved", { n: manualN, movement: tr(activity), set: set.index }));
@@ -7250,6 +7264,11 @@ const SEEK_TIMEOUT_MS = 3000;
  * walking-in and walking-out cost a minute of tracking and two fake reps. */
 const AUTO_WHOLE_CLIP_S = 30;
 const METADATA_TIMEOUT_MS = 15000;  // a file that never decodes must not hang the app
+/* Mean seek time above which the rest of the clip is played instead of
+ * seeked (see analyseVideoFile). Slower than a 30 fps clip plays. */
+const SLOW_SEEK_MS = 40;
+const PLAY_STALL_MS = 2500;         // no new frame for this long: seek instead
+let lastTrackStats = null;          // how the last file was tracked, for the result
 
 /** The clip's own frame interval in seconds, or null if it cannot be told. */
 async function probeFrameRate(v) {
@@ -7410,6 +7429,7 @@ async function analyseVideoFile(file, { trim = true } = {}) {
 
   let dt = await probeFrameRate(v);
   const assumed = !dt;
+  const probedDt = dt;
   if (!dt) dt = 1 / 30;
   v.pause();
   const duration = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
@@ -7457,16 +7477,29 @@ async function analyseVideoFile(file, { trim = true } = {}) {
   });
 
   const n = Math.max(1, Math.floor(span / dt));
-  say(tr("sayTrackingProgress", { t: "0.0", dur: span.toFixed(1), frames: 0 }));
-  bar(0);
-  for (let i = 0; i < n; i++) {
-    const t = from + i * dt;
-    if (t > to) break;
-    await seekTo(t);
+  const tOf = (i) => from + i * dt;
+  /* Each grid slot takes the frame NEAREST its time, whichever path fetches
+   * it. A seek shows the frame whose display interval contains the target, so
+   * seeking half a frame past the slot lands on the nearest one; playback
+   * picks the presented frame within half a frame of the slot. Seeking exactly
+   * to the slot time instead split on container rounding: a WebM stores times
+   * in whole milliseconds, so frame 2 of a 30 fps clip sits at 0.067 s, just
+   * after the slot at 0.0667 s, and a seek there returned frame 1. Measured
+   * in headless Chromium, 2026-09-30: with this rule both paths return the
+   * identical frame for all 89 slots of a 3 s clip. */
+  const half = assumed ? 0 : probedDt / 2;
+  const seekOf = (i) => Math.min(tOf(i) + half, Math.max(0, duration - 1e-3));
+  const stats = { frames: n, seeks: 0, seekMs: 0, detectMs: 0, played: 0, mode: "seek" };
+  const t0 = performance.now();
+  /** Track grid slot i on whatever frame the element is showing now. */
+  const track = (i) => {
+    const t = tOf(i);
+    const d0 = performance.now();
     // The timestamp handed to the model is the GRID time, not v.currentTime:
     // a seek lands on the nearest keyframe-decoded frame, and feeding the model
     // a timestamp that goes backwards makes it drop the frame outright.
     const res = off.detectForVideo(v, Math.round(t * 1000));
+    stats.detectMs += performance.now() - d0;
     if (res.landmarks && res.landmarks.length) {
       // `i` is the GRID index, and it is what the analysis keys off. A frame
       // the model found no body in is then a hole at its own place in time
@@ -7481,11 +7514,139 @@ async function analyseVideoFile(file, { trim = true } = {}) {
                                       dur: span.toFixed(1),
                                       frames: frames.length }));
     }
+  };
+
+  /* Seek per frame where seeking is cheap, decode in order where it is not.
+   *
+   * A seek decodes from the keyframe before the target. A desktop browser does
+   * that in well under a millisecond, but a phone's hardware decoder is flushed
+   * and restarted on every seek, and phone and WhatsApp clips put a keyframe
+   * only every few seconds -- Bas's 14.6 s neck video (2026-09-30) has three, 5 s
+   * apart. Every one of its 439 seeks then decoded, on average, 75 frames of
+   * 1080p to show one: tens of thousands of decoded frames for a 15 s clip,
+   * which is minutes on a phone.
+   *
+   * So the seek time is watched, and once it is slower than just playing the
+   * clip, the rest is PLAYED: each presented frame (requestVideoFrameCallback)
+   * is checked against the grid, the video is paused on the ones the grid needs
+   * while they are tracked, and resumed. The grid, the timestamps and the
+   * frame picked for each slot are exactly those a seek would give -- the frame
+   * whose display interval contains the grid time -- so the answer does not
+   * depend on which path ran. A slot the playback went past without presenting
+   * (a dropped frame) is seeked, one seek instead of hundreds, and the playback
+   * slows down so it drops fewer.
+   *
+   * Needs the clip's own frame interval from the probe; a clip whose rate was
+   * assumed stays on seeks, which are always right, only slower. */
+  const nativeDt = assumed ? null : probedDt;
+  const canPlay = !!(nativeDt && v.requestVideoFrameCallback && v.cancelVideoFrameCallback)
+    && window.__bsNoPlay !== true;       // test hook: force the seek path
+  const EPS = 1e-6;
+  let usePlay = canPlay && window.__bsForcePlay === true;
+  /* Real time for an ordinary clip, slower for a high-speed one. Faster than
+   * real time drops frames between the pause and the next play() -- at 2x
+   * every slot was missed and seeked, which is the slow path again. */
+  let rate = nativeDt ? Math.min(1, Math.max(0.0625, 30 * nativeDt)) : 1;
+  const recent = [];
+  const playFrom = (i0) => new Promise((resolve) => {
+    let i = i0, id = 0, timer = 0, over = false;
+    const end = () => {
+      if (over) return;
+      over = true;
+      clearTimeout(timer);
+      if (id) v.cancelVideoFrameCallback(id);
+      v.removeEventListener("ended", end);
+      v.pause();
+      resolve(i);
+    };
+    const arm = () => { clearTimeout(timer); timer = setTimeout(end, PLAY_STALL_MS); };
+    const onFrame = (_, meta) => {
+      id = 0;
+      if (over) return;
+      const m = meta.mediaTime;
+      // The frame covering slot i went by unseen: stop, and let it be seeked.
+      if (tOf(i) < m - half - EPS) return end();
+      if (tOf(i) < m + half) {
+        v.pause();
+        while (i < n && tOf(i) < m + half) { track(i); stats.played++; i++; }
+        if (i >= n) return end();
+        v.play().catch(end);
+      }
+      arm();
+      id = v.requestVideoFrameCallback(onFrame);
+    };
+    v.addEventListener("ended", end);
+    v.playbackRate = rate;
+    arm();
+    id = v.requestVideoFrameCallback(onFrame);
+    v.play().catch(end);
+  });
+
+  say(tr("sayTrackingProgress", { t: "0.0", dur: span.toFixed(1), frames: 0 }));
+  bar(0);
+  let i = 0;
+  while (i < n) {
+    if (usePlay && i > 0) {
+      const before = i;
+      i = await playFrom(i);
+      if (i >= n) break;
+      // Stopped early: a dropped frame, or the end of the stream a hair before
+      // the last slot. Slow down if playback is outrunning the decoder.
+      if (i - before < 30) rate = Math.max(0.0625, rate / 2);
+    }
+    const s0 = performance.now();
+    await seekTo(seekOf(i));
+    const ms = performance.now() - s0;
+    stats.seeks++; stats.seekMs += ms;
+    track(i);
+    i++;
+    if (canPlay && !usePlay) {
+      recent.push(ms);
+      if (recent.length > 8) recent.shift();
+      if (recent.length === 8 && recent.reduce((a, b) => a + b, 0) / 8 > SLOW_SEEK_MS) {
+        usePlay = true;
+      }
+    }
   }
+  try { v.playbackRate = 1; } catch { /* gone */ }
+  stats.mode = stats.played ? "play" : "seek";
+  stats.totalMs = performance.now() - t0;
+  lastTrackStats = stats;
+  console.info("video tracking:", JSON.stringify({
+    frames: n, total_s: +(stats.totalMs / 1000).toFixed(1),
+    seek_s: +(stats.seekMs / 1000).toFixed(1), seeks: stats.seeks,
+    model_s: +(stats.detectMs / 1000).toFixed(1), played: stats.played,
+    size: `${v.videoWidth}x${v.videoHeight}` }));
   bar(null);
   off.close();
   try { v.pause(); URL.revokeObjectURL(v.src); } catch { /* already gone */ }
   finish();
+}
+
+/** The horizontal load on the head for a neck set: the force, and the lateral
+ *  g it matches on this athlete's head (loaddir.js). Empty for anything else. */
+function neckPushHTML(res) {
+  if (!res || res.activity !== "neck") return "";
+  // The profile stores F / M / NB; the head fraction is split by sex only.
+  const sex = { F: "female", M: "male" }[$("sex").value] || null;
+  const p = neckPush(res, { massKg: res.massKg, sex });
+  if (!p) return "";
+  const pct = sex === "female" ? "6.7" : sex === "male" ? "6.9" : "6.8";
+  return `<div class="daybox" id="neckPushBox" style="margin-top:10px">
+    <div style="font-weight:600">${esc(tr("neckPushTitle"))}</div>
+    <p style="margin:4px 0">${esc(tr("neckPushLine", { kg: p.kg, dir: tr("loadDirShort_" + p.dir),
+      n: p.forceN.toFixed(0) }))}</p>
+    ${p.gEquiv ? `<p style="margin:4px 0">${esc(tr("neckPushG", { g: p.gEquiv.toFixed(1),
+      head: p.headKg.toFixed(1), pct }))}</p>` : ""}
+    <p class="note">${esc(tr("neckPushNote"))}</p>
+  </div>`;
+}
+
+/** "Tracked in 21 s (seeking 3 s, pose model 16 s)". */
+function trackStatsText(st) {
+  const s1 = (ms) => (ms / 1000).toFixed(ms < 10000 ? 1 : 0);
+  return tr(st.played ? "sayTrackedPlayed" : "sayTrackedIn", {
+    s: s1(st.totalMs), seek: s1(st.seekMs), model: s1(st.detectMs) });
 }
 
 // --- analysis --------------------------------------------------------------
@@ -7537,6 +7698,10 @@ async function finish() {
     // timing: a file was sampled on a grid we chose, a camera delivered
     // whatever it managed.
     lastResult.fromFile = !!fromFile;
+    // How long tracking took and where the time went, so a slow clip can be
+    // pinned on the decoder or on the pose model from the status line alone.
+    lastResult.trackStats = fromFile ? lastTrackStats : null;
+    lastTrackStats = null;
     await enrich(lastResult, poses, fps, heightM, activity);
     if (lastResult.reps.length && !DEMO) {
       // Never let the training log take the analysis down with it: the results
@@ -7582,7 +7747,8 @@ async function finish() {
       kept: live ? recKept : !!shareFile,
     } : null;
     render(lastResult, fps);
-    say(tr("sayAnalysed", { frames: frames.length, fps: fps.toFixed(1) }));
+    say(tr("sayAnalysed", { frames: frames.length, fps: fps.toFixed(1) }) +
+        (lastResult.trackStats ? " " + trackStatsText(lastResult.trackStats) : ""));
   } catch (err) {
     say(tr("sayAnalysisFailed", { err: err.message }), true);
   } finally {
@@ -7610,7 +7776,10 @@ async function enrich(res, poses, fps, heightM, activity) {
   res.ageY = ageFromDob($("dob").value);
   res.addedKg = addedKg;
   res.assistKg = assistKg;
-  res.externalKg = addedKg - assistKg;
+  // A horizontal load (a neck strap pulled sideways) is a force, not weight:
+  // it stays out of the system mass every vertical model below is built on.
+  res.loadDir = normLoadDir($("loadDir").value);
+  res.externalKg = netVerticalKg(res);
 
   // Inverse dynamics: squats only. A pull-up has no ground reaction, so the
   // whole-body-COM derivation of the external load does not apply.
@@ -8965,7 +9134,7 @@ function shotSummary(res) {
 
 function loadNote(res) {
   const bits = [];
-  if (res.addedKg) bits.push(`+${res.addedKg} kg load`);
+  if (res.addedKg) bits.push(isHorizontal(res.loadDir) ? loadText(res, tr) : `+${res.addedKg} kg load`);
   if (res.assistKg) bits.push(`−${res.assistKg} kg assist`);
   if (!bits.length) return "";
   return `· ${bits.join(" ")} (net ${res.externalKg > 0 ? "+" : ""}${res.externalKg} kg,
@@ -9590,6 +9759,7 @@ function render(res, fps) {
         <tbody>${nrows}</tbody></table>
       ${removedLine(res)}
       ${qualitySummary(qCounts)}
+      ${neckPushHTML(res)}
       <div class="tabs" id="repTabs" style="margin-top:14px"></div>
       <div id="chartBox"></div>
       <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMotOnly")}</button>

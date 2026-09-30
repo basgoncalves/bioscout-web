@@ -146,7 +146,12 @@ export function shareFacts(res, tr, { name = "", when = new Date() } = {}) {
   const n = reps.length;
   const clean = reps.filter((r) => r.quality === "clean").length;
   const graded = reps.some((r) => r.quality);
-  const load = res && res.externalKg ? Math.round(res.externalKg * 10) / 10 : 0;
+  // The load the athlete worked against, whichever way it pulled: a sideways
+  // neck pull is not in externalKg (that is weight only) but is still the load.
+  const ext = !res ? 0 : res.addedKg != null
+    ? (Number(res.addedKg) || 0) - (Number(res.assistKg) || 0)
+    : Number(res.externalKg) || 0;
+  const load = ext ? Math.round(ext * 10) / 10 : 0;
   let best = null;
   const jumps = reps.map((r) => (!r.implausible && Number.isFinite(r.height_flight_m) ? r.height_flight_m : null))
     .filter((v) => v != null);

@@ -18,6 +18,7 @@
  */
 
 import { REGIONS, REGION_EXERCISES, regionsFor } from "./bodymap.js";
+import { netVerticalKg } from "./loaddir.js";
 
 /* "weight" is drawn from the weigh-ins (weight.js), not from here; it is in
  * the list because it is picked from the same menu. */
@@ -90,7 +91,7 @@ export function intensity(list, { binW = 0.1, maxX = 3 } = {}) {
     for (const s of d.sets || []) {
       const m = Number(s.massKg);
       if (!(m > 0)) { skipped++; continue; }
-      const x = (m + (Number(s.addedKg) || 0) - (Number(s.assistKg) || 0)) / m;
+      const x = (m + netVerticalKg(s)) / m;   // a sideways pull is not weight
       if (!Number.isFinite(x) || x < 0) { skipped++; continue; }
       bins[Math.min(nb - 1, Math.floor(x / binW + 1e-9))]++;
       n++; sum += x;

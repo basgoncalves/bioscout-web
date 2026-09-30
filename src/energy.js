@@ -39,6 +39,8 @@
  * Everything here is pure arithmetic on a stored session; the page draws it.
  */
 
+import { netVerticalKg } from "./loaddir.js";
+
 /** Gravity, and the thermal equivalent of a kilocalorie. */
 const G = 9.80665;
 const J_PER_KCAL = 4184;
@@ -192,7 +194,8 @@ export function liftedKg(set) {
   const spec = MOVEMENT_MECH[set.activity];
   const m = Number(set.massKg);
   if (!spec || !(m > 0)) return null;
-  const v = m * spec.massFrac + (Number(set.addedKg) || 0) - (Number(set.assistKg) || 0);
+  // Only weight is lifted: a sideways pull (loaddir.js) does no work against gravity.
+  const v = m * spec.massFrac + netVerticalKg(set);
   return v > 0 ? v : null;
 }
 
