@@ -669,6 +669,7 @@ try {
   .loadDial .ldBk    { top:80px; }
   .loadDial .ldBack  { position:absolute; left:0; right:0; top:14px; text-align:center;
     font-size:10.5px; color:var(--muted); }
+  #loadBtn.loadSet { border-color:var(--accent); color:var(--accent); font-weight:600; }
   .loadDialText { font-size:13.5px; color:var(--ink); margin-left:18px; }
   .banner { border-left:3px solid var(--warn); padding-left:11px; font-size:13px;
             color:var(--warn); }
@@ -1155,37 +1156,10 @@ try {
         </select>
       </div>
     </div>
-    <div class="row trainOnly" style="margin-bottom:11px">
-      <div>
-        <label for="added" data-i18n="addedLoad">Added load (kg)</label>
-        <input id="added" type="number" step="0.5" value="0" min="0" inputmode="decimal">
-      </div>
-      <div>
-        <label for="assist" data-i18n="assistance">Assistance (kg)</label>
-        <input id="assist" type="number" step="0.5" value="0" min="0" inputmode="decimal">
-      </div>
-    </div>
-    <div class="trainOnly" style="margin-bottom:11px">
-      <div id="loadDirLabel" style="font-size:13px;color:var(--muted);margin-bottom:6px"
-           data-i18n="loadDirLabel">Added load direction</div>
-      <!-- The value lives in a hidden input so every reader keeps using
-           $("loadDir").value; the dial below only writes it (paintLoadDial). -->
-      <input type="hidden" id="loadDir" value="down">
-      <div class="loadDialWrap">
-        <div class="loadDial" id="loadDial" role="radiogroup" aria-labelledby="loadDirLabel">
-          <span class="ldBack" data-i18n="loadDialView">seen from behind</span>
-          <button type="button" class="ldBtn ldLeft" data-dir="left" role="radio">←</button>
-          <button type="button" class="ldBtn ldRight" data-dir="right" role="radio">→</button>
-          <button type="button" class="ldBtn ldDown" data-dir="down" role="radio">↓</button>
-          <button type="button" class="ldBtn ldFwd" data-dir="forward" role="radio">⊗</button>
-          <button type="button" class="ldBtn ldBk" data-dir="back" role="radio">⊙</button>
-        </div>
-        <div class="loadDialText" id="loadDialText" aria-live="polite"></div>
-      </div>
-    </div>
-    <p class="note trainOnly" style="margin:-4px 0 10px" data-i18n-html="noteLoad">Barbell, vest or belt in
-      <b>Added</b>; band or machine offload in <b>Assistance</b>. Both apply at
-      once — a loaded bar with a band assist is added minus assist.</p>
+    <!-- Added load, assistance and their direction live in #loadDlg; this
+         button opens it and reads back what is set (paintLoadSummary). -->
+    <button type="button" class="ghost trainOnly" id="loadBtn" style="margin-bottom:11px">
+      <span id="loadSummary" data-i18n="addLoadBtn">Add load</span></button>
     <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="saveVideo" style="width:auto;margin:0">
@@ -1193,7 +1167,6 @@ try {
     </label>
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
-    <button class="ghost trainOnly" id="setupReactionBtn" data-i18n="rtInSession">Reaction time test (no camera)</button>
     <button class="ghost trainOnly" id="manualBtn" data-i18n="manualSet">Count reps by hand (no camera)</button>
     <div id="linkRow" class="hidden" style="margin-top:11px">
       <label for="linkUrl" data-i18n="videoLink">Video link</label>
@@ -1363,6 +1336,41 @@ try {
   </dialog>
 
   <!-- A set counted by hand: reps only, no recording behind it. -->
+  <dialog id="loadDlg" style="max-width:380px">
+    <h2 style="font-size:16px;margin:0 0 10px" data-i18n="loadDlgTitle">Load</h2>
+    <div class="row" style="margin-bottom:11px">
+      <div>
+        <label for="added" data-i18n="addedLoad">Added load (kg)</label>
+        <input id="added" type="number" step="0.5" value="0" min="0" inputmode="decimal">
+      </div>
+      <div>
+        <label for="assist" data-i18n="assistance">Assistance (kg)</label>
+        <input id="assist" type="number" step="0.5" value="0" min="0" inputmode="decimal">
+      </div>
+    </div>
+    <div class="trainOnly" style="margin-bottom:11px">
+      <div id="loadDirLabel" style="font-size:13px;color:var(--muted);margin-bottom:6px"
+           data-i18n="loadDirLabel">Added load direction</div>
+      <!-- The value lives in a hidden input so every reader keeps using
+           $("loadDir").value; the dial below only writes it (paintLoadDial). -->
+      <input type="hidden" id="loadDir" value="down">
+      <div class="loadDialWrap">
+        <div class="loadDial" id="loadDial" role="radiogroup" aria-labelledby="loadDirLabel">
+          <span class="ldBack" data-i18n="loadDialView">seen from behind</span>
+          <button type="button" class="ldBtn ldLeft" data-dir="left" role="radio">←</button>
+          <button type="button" class="ldBtn ldRight" data-dir="right" role="radio">→</button>
+          <button type="button" class="ldBtn ldDown" data-dir="down" role="radio">↓</button>
+          <button type="button" class="ldBtn ldFwd" data-dir="forward" role="radio">⊗</button>
+          <button type="button" class="ldBtn ldBk" data-dir="back" role="radio">⊙</button>
+        </div>
+        <div class="loadDialText" id="loadDialText" aria-live="polite"></div>
+      </div>
+    </div>
+    <p class="note" style="margin:6px 0 10px" data-i18n-html="noteLoad">Barbell, vest or belt in
+      <b>Added</b>; band or machine offload in <b>Assistance</b>. Both apply at
+      once — a loaded bar with a band assist is added minus assist.</p>
+    <button id="loadDone" type="button" data-i18n="loadDone">Done</button>
+  </dialog>
   <dialog id="manualDlg">
     <h2 style="font-size:16px;margin:0 0 2px" data-i18n="manualTitle">Count by hand</h2>
     <p class="sub" style="margin:0 0 10px" id="manualSub"></p>
@@ -1393,7 +1401,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 119;
+window.BUILD = 120;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1784,7 +1792,24 @@ function paintLoadDial() {
     b.title = tr("loadDir_" + b.dataset.dir);
   }
   $("loadDialText").textContent = tr("loadDir_" + d);
+  paintLoadSummary();
 }
+/** The setup button says what load is set, or "Add load" when none is. */
+function paintLoadSummary() {
+  const set = { addedKg: Math.max(0, parseFloat($("added").value) || 0),
+                assistKg: Math.max(0, parseFloat($("assist").value) || 0),
+                loadDir: normLoadDir($("loadDir").value) };
+  const bits = [];
+  if (set.addedKg) bits.push(loadText(set, tr));
+  if (set.assistKg) bits.push(tr("loadAssistShort", { kg: set.assistKg }));
+  $("loadSummary").textContent = bits.length
+    ? tr("loadSummary", { load: bits.join(" · ") }) : tr("addLoadBtn");
+  $("loadBtn").classList.toggle("loadSet", bits.length > 0);
+}
+$("loadBtn").onclick = () => $("loadDlg").showModal();
+$("loadDone").onclick = () => $("loadDlg").close();
+$("loadDlg").addEventListener("close", paintLoadSummary);
+for (const id of ["added", "assist"]) $(id).addEventListener("input", paintLoadSummary);
 for (const b of document.querySelectorAll("#loadDial .ldBtn")) {
   b.onclick = () => { $("loadDir").value = b.dataset.dir; paintLoadDial(); };
 }
@@ -3503,6 +3528,7 @@ function pickPlanned(it) {
   sel.value = it.activity;
   sel.dispatchEvent(new Event("change"));
   $("added").value = it.kg || 0;
+  paintLoadSummary();
 }
 
 /* Today's plans on the recorder, as chips: planned vs done, and a tap picks
@@ -7216,10 +7242,6 @@ $("recBtn").onclick = () => {
 };
 
 // --- video file ------------------------------------------------------------
-$("setupReactionBtn").onclick = () => {
-  const sess = getSession() || newSession(currentAthlete());
-  openReaction(true, sess.started);
-};
 $("fileBtn").onclick = () => $("fileInput").click();
 
 /* Counting a set by hand.
