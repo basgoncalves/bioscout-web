@@ -1401,7 +1401,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 120;
+window.BUILD = 121;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1516,6 +1516,7 @@ import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from
 import { ensembleRep, mergeSides } from "./src/ensemble.js";
 import { neckLoadHTML } from "./src/neckload.js";
 import { normLoadDir, isHorizontal, netVerticalKg, loadText, neckPush } from "./src/loaddir.js";
+import { loadNeckModel, neckHold } from "./src/neckmuscles.js";
 import { framingWatcher } from "./src/framing.js";
 import { gestureWatcher } from "./src/gesture.js";
 import { neckLoadHTML as neckTrainingHTML, setNeckLoadTr } from "./src/neck_load.js";
@@ -3075,6 +3076,12 @@ const PEAK_VARS = {
   flex_ext_deg:       { label: "Flex/ext range", unit: "°", dp: 0 },
   bend_deg:           { label: "Side-bend range", unit: "°", dp: 0 },
   rotation_deg:       { label: "Rotation range", unit: "°", dp: 0 },
+  hold_s:             { label: "Hold time", unit: "s", dp: 1 },
+  neck_lat_Nm:        { label: "Neck side-bend moment (C7/T1)", unit: "N·m", dp: 1 },
+  neck_flex_Nm:       { label: "Neck flex/ext moment (C7/T1)", unit: "N·m", dp: 1 },
+  neck_muscle_N:      { label: "Peak neck muscle force (model)", unit: "N", dp: 0, modelled: true },
+  neck_cap_pct:       { label: "Share of model neck capacity", unit: "%", dp: 0, modelled: true },
+  bend_drift_deg:     { label: "Side-bend drift in hold", unit: "°", dp: 1 },
 };
 /** A measure's name and unit in the current language. Falls back to the raw
  *  key, which is what an unrecognised field deserves: visible, not invented. */
@@ -7710,6 +7717,88 @@ function neckPushHTML(res) {
   </div>`;
 }
 
+let neckModel = null;     // data/neck_muscles.json, once fetched
+
+/** The per-rep numbers a neck hold carries into the session log. */
+function neckRepLoad(h) {
+  if (!h) return {};
+  const top = h.groups[0];
+  return {
+    neck_lat_Nm: +Math.abs(h.moment.lateral).toFixed(1),
+    neck_flex_Nm: +Math.abs(h.moment.flexion).toFixed(1),
+    neck_muscle_N: top ? +top.F.toFixed(0) : null,
+    neck_cap_pct: h.pct != null ? +h.pct.toFixed(0) : null,
+  };
+}
+
+const NECK_GROUP_KEYS = ["scm", "trapezius", "levator", "scalenes", "splenius_cap",
+  "splenius_cerv", "semispinalis_cap", "semispinalis_cerv", "longissimus", "iliocostalis",
+  "longus", "suboccipital", "suprahyoid", "infrahyoid"];
+
+/** Moments at C7/T1 and the muscle forces of the cervical model for a neck
+ *  set with a load on the head. Recomputed from the set when it was restored
+ *  from storage (curves keep the load, not the solution). */
+function neckMusclesHTML(res) {
+  if (!res || res.activity !== "neck" || !(res.addedKg > 0)) return "";
+  let h = res.neckHold;
+  if (!h && neckModel) h = res.neckHold = neckHold(neckModel, { kg: res.addedKg, dir: res.loadDir });
+  if (!h) return res.neckUnavailable ? `<p class="note">${esc(tr("neckModelUnavailable"))}</p>` : "";
+  const side = (sd) => tr(sd === "L" ? "sideLeftShort" : "sideRightShort");
+  const mom = (v, pos, neg) => Math.abs(v) < 0.05 ? "0"
+    : `${Math.abs(v).toFixed(1)} <span class="sub">${esc(tr(v > 0 ? pos : neg))}</span>`;
+  const rows = h.groups.slice(0, 8).map((g) => {
+    const pct = Math.round(100 * g.F / g.fmax);
+    return `<tr><td>${esc(tr("nm_" + g.group))} <span class="sub">${side(g.side)}</span></td>
+      <td style="text-align:right">${g.F.toFixed(0)}</td>
+      <td style="text-align:right${g.aMax >= 0.98 ? ";color:var(--warn)" : ""}">${pct}%</td></tr>`;
+  }).join("");
+  const cap = h.capacityKg == null ? "" : h.ok
+    ? tr("neckCapacityOk", { pct: h.pct.toFixed(0), cap: h.capacityKg.toFixed(1) })
+    : tr("neckCapacityOver", { pct: h.pct.toFixed(0), cap: h.capacityKg.toFixed(1) });
+  return `<div class="daybox" id="neckMuscleBox" style="margin-top:10px">
+    <div style="font-weight:600">${esc(tr("neckMomentTitle"))}</div>
+    <p class="sub" style="margin:2px 0 8px">${esc(tr("neckMomentSub", { lever: (h.leverM * 100).toFixed(0) }))}</p>
+    <table><tbody>
+      <tr><td>${esc(tr("neckMomLateral"))}</td><td style="text-align:right">${mom(h.moment.lateral, "towardsRight", "towardsLeft")} N·m</td></tr>
+      <tr><td>${esc(tr("neckMomFlex"))}</td><td style="text-align:right">${mom(h.moment.flexion, "neckFlexDir", "neckExtDir")} N·m</td></tr>
+      <tr><td>${esc(tr("neckMomAxial"))}</td><td style="text-align:right">${mom(h.moment.axial, "towardsLeft", "towardsRight")} N·m</td></tr>
+    </tbody></table>
+    <p class="${h.ok ? "note" : "note banner"}" style="margin-top:8px">${esc(cap)}</p>
+    <div style="font-weight:600;margin-top:10px">${esc(tr("neckMusclesTitle"))}</div>
+    <table><thead><tr><th>${esc(tr("neckMuscleCol"))}</th><th style="text-align:right">N</th>
+      <th style="text-align:right">${esc(tr("neckActCol"))}</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="note">${esc(tr("neckMusclesNote"))}</p>
+  </div>`;
+}
+
+/** The isometric-hold version of the neck results: one row, how still the
+ *  head stayed, then the load, moments and muscles. */
+function neckHoldResultsHTML(res, fps) {
+  const r = res.reps[0];
+  const cell = (m, sd, dr) => m == null ? "—"
+    : `${m.toFixed(1)}° <span class="sub">±${sd.toFixed(1)} · ${tr("maxShort")} ${dr.toFixed(1)}°</span>`;
+  return `
+    <h1 style="font-size:19px;margin-bottom:2px">${esc(tr("neckHoldTitle", { s: r.hold_s.toFixed(1) }))}</h1>
+    <p class="sub" style="margin-bottom:12px">${fps.toFixed(0)} fps ·
+      ${(res.coverage * 100).toFixed(0)}% ${tr("trackedWord")} ·
+      ${tr("motSignedFor", { model: res.osimModel })}</p>
+    ${setSwitcher(res)}
+    <p class="note" style="border-left:3px solid var(--good);padding-left:11px">${esc(tr("neckHoldWhy"))}</p>
+    <table><thead><tr><th></th><th style="text-align:right">${esc(tr("neckHoldPosture"))}</th></tr></thead><tbody>
+      <tr><td>${esc(tr("colSideBend"))}</td><td style="text-align:right">${cell(r.bend_hold_deg, r.bend_sd_deg, r.bend_drift_deg)}</td></tr>
+      <tr><td>${esc(tr("colFlexExt"))}</td><td style="text-align:right">${cell(r.flex_hold_deg, r.flex_sd_deg, r.flex_drift_deg)}</td></tr>
+      <tr><td>${esc(tr("colRotation"))}</td><td style="text-align:right">${cell(r.rot_hold_deg, r.rot_sd_deg, r.rot_drift_deg)}</td></tr>
+    </tbody></table>
+    <p class="note">${esc(tr("neckHoldPostureNote"))}</p>
+    ${neckPushHTML(res)}
+    ${neckMusclesHTML(res)}
+    <div id="chartBox"></div>
+    <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMotOnly")}</button>
+    <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
+    <div class="status" id="zipStatus"></div>
+    <p class="note">${tr("noteCervical")}</p>`;
+}
+
 /** "Tracked in 21 s (seeking 3 s, pose model 16 s)". */
 function trackStatsText(st) {
   const s1 = (ms) => (ms / 1000).toFixed(ms < 10000 ? 1 : 0);
@@ -7759,8 +7848,12 @@ async function finish() {
     activity = detection.activity;
   }
   try {
+    /* A neck take against a sideways load is an isometric hold: one rep, the
+     * whole take, with how still the head stayed instead of ranges. */
+    const isNeckHold = activity === "neck" && isHorizontal($("loadDir").value)
+      && (parseFloat($("added").value) || 0) > 0;
     lastResult = analyse(poses, fps, { heightM, activity,
-                                       osimModel: OSIM_MODEL });
+                                       osimModel: OSIM_MODEL, hold: isNeckHold });
     lastResult.detection = detection;
     // Where the frames came from decides what can honestly be said about the
     // timing: a file was sampled on a grid we chose, a camera delivered
@@ -7978,7 +8071,20 @@ async function enrich(res, poses, fps, heightM, activity) {
   // Not for push-ups: the surrogate learnt upright legs carrying the body, and
   // a body lying on hands and toes is nothing it has seen -- no forces rather
   // than invented ones.
-  if (activity === "pushup") { /* no muscle or joint forces for this task */ }
+  /* The neck: the leg surrogate has nothing to say about it (it was producing
+   * "hip muscle forces" for a neck set). With a known load on the head the
+   * cervical model does: moments at C7/T1 and the muscle forces that hold
+   * them (neckmuscles.js). Without a load there is nothing to balance. */
+  if (activity === "neck") {
+    if ((res.addedKg || 0) > 0) {
+      try {
+        neckModel = await loadNeckModel();
+        res.neckHold = neckHold(neckModel, { kg: res.addedKg, dir: res.loadDir });
+        for (const r of res.reps) Object.assign(r, neckRepLoad(res.neckHold));
+      } catch (err) { console.warn("neck model failed", err); res.neckUnavailable = String(err.message || err); }
+    }
+  }
+  else if (activity === "pushup") { /* no muscle or joint forces for this task */ }
   else try {
     const fm = await loadForceModel();
     const st = forceSelfTest(fm);
@@ -9804,6 +9910,26 @@ function render(res, fps) {
    * restored set is graded by the same rules as a fresh one. */
   const qCounts = gradeReps(res);
   const isNeck = res.activity === "neck";
+  if (isNeck && res.hold && res.reps.length) {
+    el.innerHTML = neckHoldResultsHTML(res, fps);
+    const r = res.reps[0];
+    const sum = (a, b2) => r.coords[a].map((v, k) => v + r.coords[b2][k]);
+    $("chartBox").innerHTML = lineChart(r.times, [
+      ["flexion / extension", sum("pitch1", "pitch2")],
+      ["lateral bend", sum("roll1", "roll2")],
+      ["rotation", sum("yaw1", "yaw2")]], "deg", null, null);
+    wireSetSwitcher();
+    $("zipBtn").onclick = () => exportZip(res, fps);
+    $("dlBtn").onclick = () => {
+      const txt = writeMot("joint_angles", ACTIVITIES.neck.columns, r.times, r.coords);
+      const u = URL.createObjectURL(new Blob([txt], { type: "text/plain" }));
+      const a = document.createElement("a");
+      a.href = u; a.download = `neck_hold_joint_angles.mot`;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(u); a.remove(); }, 4000);
+    };
+    return;
+  }
   if (isNeck) {
     const nrows = res.reps.map((r) =>
       `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td><td>${r.out_s.toFixed(2)}</td><td>${r.back_s.toFixed(2)}</td>
@@ -9828,6 +9954,7 @@ function render(res, fps) {
       ${removedLine(res)}
       ${qualitySummary(qCounts)}
       ${neckPushHTML(res)}
+      ${neckMusclesHTML(res)}
       <div class="tabs" id="repTabs" style="margin-top:14px"></div>
       <div id="chartBox"></div>
       <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMotOnly")}</button>

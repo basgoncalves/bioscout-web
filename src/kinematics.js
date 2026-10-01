@@ -745,8 +745,21 @@ export function buildNeckFeatures(poses) {
     const ea = (Math.atan2(ev[1], ev[0]) * 180) / Math.PI;
     if (ls && rs) {
       const sa = (Math.atan2(rs[1] - ls[1], rs[0] - ls[0]) * 180) / Math.PI;
-      F.roll[i] = ((ea - sa + 180) % 360) - 180;
-    } else F.roll[i] = ea;
+      // Wrapped into [-180, 180). JS `%` keeps the sign of the dividend, so the
+      // old ((d + 180) % 360) - 180 returned -359 deg whenever the ear line sat
+      // just past -180 and the shoulder line just short of +180 -- which is a
+      // level head facing the camera. A held head then read as flipping
+      // between 0 and -360, and the detector cut those flips into "movements"
+      // (Bas's isometric hold, 2026-10-01: four reps, side bend -39 +- 18 deg).
+      F.roll[i] = ((((ea - sa + 180) % 360) + 360) % 360) - 180;
+    } else {
+      // No shoulders: the ear line against the horizontal. Facing the camera
+      // the ear line points ~180 deg (the right ear is on the image's left),
+      // mirrored ~0 deg; fold both so a level head reads 0.
+      let r = ((((ea + 180) % 360) + 360) % 360) - 180;
+      if (r > 90) r -= 180; else if (r < -90) r += 180;
+      F.roll[i] = r;
+    }
   }
   let scale = nanmedian(F.head_px);
   if (!(scale > 1e-6)) scale = 1;
@@ -2822,7 +2835,8 @@ function restJointSeries(activity, F, found, i) {
 }
 
 export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
-                                      cfg = null, osimModel = "gpk", trim = true } = {}) {
+                                      cfg = null, osimModel = "gpk", trim = true,
+                                      hold = false } = {}) {
   const spec = ACTIVITIES[activity];
   if (!spec) throw new Error(`unknown activity ${activity}`);
   const conf = cfg || spec.defaultCfg;
@@ -2832,7 +2846,17 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   catch (err) { if (activity !== "neck") throw err; }
   const [refA, refB] = spec.reference(F);
   F._fps = fps;          // the jump detector sizes its floor window in seconds
-  const found = spec.findReps(F, conf);
+  let found = spec.findReps(F, conf);
+  /* An isometric neck hold is ONE rep: the whole take. The movement detector
+   * looks for the head going out and coming back, and a held head under a
+   * sideways pull wobbles by a few degrees -- which it dutifully cut into four
+   * "movements" (Bas's lateral hold, 2026-10-01). There is nothing to cut; the
+   * hold is the set. */
+  const isHold = hold && activity === "neck";
+  if (isHold) {
+    const n = F._n || 0;
+    found = { reps: n >= 2 ? [[0, n - 1, n - 1]] : [], axis: "roll", depth: [] };
+  }
   // Cut every rep down to the movement (see trimToMovement). `trim: false` is
   // for test_port.mjs, which checks the detector against the Python pipeline
   // -- that pipeline does not crop, and the parity it guards is the detector's.
@@ -2891,6 +2915,25 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       s.flexion_extension_range_deg = span("pitch1", "pitch2");
       s.lateral_bend_range_deg = span("roll1", "roll2");
       s.rotation_range_deg = span("yaw1", "yaw2");
+      if (isHold) {
+        /* How still the head stayed: the posture held (median), its spread,
+         * and the furthest it strayed from that posture. A hold that drifts
+         * 15 degrees is a different test from one that drifts 2. */
+        const stat = (a, b2) => {
+          const t = coords[a].map((v, k) => v + coords[b2][k]).filter(isNum);
+          if (!t.length) return [null, null, null];
+          const med = nanmedian(t);
+          const m = t.reduce((x, y) => x + y, 0) / t.length;
+          const sd = Math.sqrt(t.reduce((x, y) => x + (y - m) ** 2, 0) / t.length);
+          const drift = Math.max(...t.map((v) => Math.abs(v - med)));
+          return [+med.toFixed(1), +sd.toFixed(1), +drift.toFixed(1)];
+        };
+        s.hold = true;
+        s.hold_s = +((b1 - b0) / fps).toFixed(2);
+        [s.bend_hold_deg, s.bend_sd_deg, s.bend_drift_deg] = stat("roll1", "roll2");
+        [s.flex_hold_deg, s.flex_sd_deg, s.flex_drift_deg] = stat("pitch1", "pitch2");
+        [s.rot_hold_deg, s.rot_sd_deg, s.rot_drift_deg] = stat("yaw1", "yaw2");
+      }
     } else if (activity === "squat" || spec.jump || spec.perLeg || spec.shot) {
       // knee_angle is SIGNED per model family, so report peak flexion as a
       // magnitude; otherwise a GPK export summarises as "-2 deg".
@@ -3019,5 +3062,6 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
            // Whether the athlete held station. Only running asks -- it is the
            // one task whose kinetics are refused for travel alone.
            travel: spec.gait ? runTravel(F, pxPerM, conf) : null,
-           footCoverage: F._footCoverage ?? null };
+           footCoverage: F._footCoverage ?? null,
+           hold: isHold || undefined };
 }

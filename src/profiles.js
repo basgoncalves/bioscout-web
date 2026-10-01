@@ -1414,6 +1414,16 @@ function summariseRep(r, activity) {
     o.flex_ext_deg = r.flexion_extension_range_deg;
     o.bend_deg = r.lateral_bend_range_deg;
     o.rotation_deg = r.rotation_range_deg;
+    // An isometric hold (a sideways load on the head): its length, how far
+    // the head strayed, and what the cervical model says it took.
+    if (r.hold) {
+      o.hold = true;
+      o.hold_s = r.hold_s ?? null;
+      o.bend_drift_deg = r.bend_drift_deg ?? null;
+    }
+    for (const k of ["neck_lat_Nm", "neck_flex_Nm", "neck_muscle_N", "neck_cap_pct"]) {
+      if (r[k] != null) o[k] = r[k];
+    }
   }
   return o;
 }
