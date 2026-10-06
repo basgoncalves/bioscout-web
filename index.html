@@ -511,6 +511,13 @@ try {
   body.labMode #navBar, body.labMode #restCard, body.labMode #restPill, body.labMode #loadBtn,
   body.labMode #manualBtn, body.labMode #bodyMapBox, body.labMode #planNow,
   body.labMode #shareSetBtn { display:none !important; }
+  .osimStep { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:10px 0 0; }
+  .osimStep h3 { font-size:14px; margin:0 0 6px; }
+  .osimState { font-size:12.5px; margin:6px 0 0; }
+  .osimState.err { color:var(--warn); }
+  .osimLog { font:11px/1.35 ui-monospace,Consolas,monospace; white-space:pre-wrap; word-break:break-word;
+             max-height:160px; overflow:auto; margin:6px 0 0; padding:6px 8px; border-radius:8px;
+             background:var(--bg); border:1px solid var(--line); }
   .daybox { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
   .accountBox { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:0 0 11px; }
   .sharePreview { min-height:120px; display:flex; align-items:center; justify-content:center;
@@ -1148,6 +1155,12 @@ try {
       </div>
       <button type="button" class="ghost" id="labNewBtn" data-i18n="labNew">Next person (clear results)</button>
     </div>
+    <!-- Marker and force-plate trials through OpenSim, run by the lab engine on
+         a PC (src/osimlab.js). Lab demo only; folded away until asked for. -->
+    <div class="card hidden" id="osimCard">
+      <button type="button" class="ghost" id="osimToggle" style="margin:0" data-i18n="osimOpen">OpenSim trial (markers and force plates)</button>
+      <div id="osimBody" class="hidden" style="margin-top:12px"></div>
+    </div>
     <div class="card hidden" id="assessBanner"></div>
     <div class="card trainOnly" id="setup">
     <!-- Strength sessions only: pick the exercise by body part (bodymap.js). -->
@@ -1429,7 +1442,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 124;
+window.BUILD = 125;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1531,6 +1544,10 @@ import { foreperiod, classify as rtClassify, summarise as rtSummarise,
          reactionTrend, sequence, GAMES, GAME_IDS, gameOf } from "./src/reaction.js";
 import { SPORT_IDS, allowedIn, sportActivities } from "./src/sports.js";
 import { makeBallTracker, ballAfterStrokes, bodyBox, strokeSummary } from "./src/balltrack.js";
+import { cleanEngineUrl, engineFromSearch, fileKind, makeEngineClient, EngineError,
+         pickAngles, pickMoments, markerErrors, topMuscles, worstReserve, reactionJoints,
+         defaultReactionJoint, reactionForce, scaleRows, lineChartSVG, legendHTML,
+         MUSCLE_COLORS } from "./src/osimlab.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
          dayOfCycle } from "./src/cycle.js";
@@ -6759,6 +6776,232 @@ function boot() {
   }
 }
 
+/* --- OpenSim trial (lab demo) ------------------------------------------------
+ * Scale -> IK -> ID -> static optimisation -> joint reactions on marker and
+ * force-plate data. The page uploads and plots; OpenSim itself runs in the lab
+ * engine on a PC (see src/osimlab.js). `osim.job` is the engine's own record
+ * of this trial and is the only state that matters: every button sends one
+ * request and repaints from what comes back. */
+const osim = { client: null, health: null, job: null, res: {}, err: null, joint: null, timer: null };
+function osimErrText(e) {
+  const map = { offline: "osimErrOffline", bad_code: "osimErrCode", no_job: "osimErrNoJob" };
+  return map[e && e.code] ? tr(map[e.code]) : tr("osimErr", { err: (e && e.message) || String(e) });
+}
+async function osimConnect(url, code) {
+  osim.err = null;
+  clearTimeout(osim.timer);
+  try {
+    const client = makeEngineClient({ url, code });
+    const h = await client.health();
+    if (!h || h.name !== "bioscout-lab-engine") throw new EngineError("offline");
+    if (!h.authed) throw new EngineError("bad_code");
+    osim.client = client; osim.health = h; osim.res = {}; osim.joint = null;
+    osim.job = await client.newJob();
+    try { sessionStorage.setItem("bioscout.osim", JSON.stringify({ url, code })); } catch { /* private window */ }
+  } catch (e) { osim.client = null; osim.job = null; osim.err = osimErrText(e); }
+  renderOsim();
+}
+/** Send one request, take the engine's new record of the trial, repaint. */
+async function osimDo(fn) {
+  osim.err = null;
+  try {
+    const st = await fn();
+    if (st && st.steps) osim.job = st;
+  } catch (e) {
+    osim.err = osimErrText(e);
+    // The engine restarted and forgot this trial: nothing here can be resumed.
+    if (e.code === "no_job" || e.code === "bad_code") { osim.client = null; osim.job = null; }
+  }
+  await osimSync();
+}
+const OSIM_RESULTS = { scale: ["scale"], ikid: ["ik", "id", "ik_errors"], so: ["so", "jra"] };
+async function osimSync() {
+  clearTimeout(osim.timer);
+  if (!osim.client || !osim.job) { renderOsim(); return; }
+  const s = osim.job.steps || {};
+  for (const [step, keys] of Object.entries(OSIM_RESULTS)) {
+    for (const k of keys) {
+      if (!s[step] || s[step].state !== "done") { delete osim.res[k]; continue; }
+      if (osim.res[k] === undefined) {
+        try { osim.res[k] = await osim.client.result(osim.job.id, k); } catch { osim.res[k] = null; }
+      }
+    }
+  }
+  renderOsim();
+  if (Object.values(s).some((x) => x.state === "queued" || x.state === "running")) {
+    osim.timer = setTimeout(async () => {
+      try { osim.job = await osim.client.status(osim.job.id); }
+      catch (e) { osim.err = osimErrText(e); if (e.code === "no_job") { osim.client = null; osim.job = null; } }
+      osimSync();
+    }, 1500);
+  }
+}
+function osimStateLine(id) {
+  const sp = (osim.job.steps || {})[id] || { state: "idle" };
+  const log = sp.log && sp.log.length
+    ? `<details><summary class="sub" style="font-size:12px;cursor:pointer">${tr("osimLog")}</summary>
+       <div class="osimLog">${sp.log.map(esc).join("\n")}</div></details>` : "";
+  const text = sp.state === "queued" ? tr("osimQueued", { n: sp.ahead || 0 })
+    : sp.state === "running" ? tr("osimRunning", { s: Math.max(0, Math.round(Date.now() / 1000 - sp.started)) })
+    : sp.state === "done" ? tr("osimDone", { s: sp.seconds ?? 0 })
+    : sp.state === "error" ? tr("osimFailed", { err: sp.error || "" }) : "";
+  return text ? `<p class="osimState${sp.state === "error" ? " err" : ""}">${esc(text)}</p>${
+    sp.state === "error" || sp.state === "done" ? log : ""}` : "";
+}
+function osimRunBtn(id, label, enabled) {
+  const sp = (osim.job.steps || {})[id] || {};
+  const busy = sp.state === "queued" || sp.state === "running";
+  return `<button type="button" class="${sp.state === "done" ? "ghost" : ""}" data-osim-run="${id}" style="margin:0"${
+    enabled && !busy ? "" : " disabled"}>${esc(sp.state === "done" ? tr("osimRunAgain", { step: label }) : label)}</button>`;
+}
+const osimSideName = (s) => tr(JOINT_LABEL[s.joint] || s.joint) + " " + tr(s.side === "l" ? "leftShort" : "rightShort");
+function renderOsim() {
+  const box = $("osimBody");
+  if (box.classList.contains("hidden")) return;
+  const err = osim.err ? `<p class="note banner" style="margin:8px 0 0">${esc(osim.err)}</p>` : "";
+  if (!osim.client || !osim.job) {
+    let saved = {};
+    try { saved = JSON.parse(sessionStorage.getItem("bioscout.osim") || "{}"); } catch { /* none */ }
+    box.innerHTML = `<p class="note" style="margin:0 0 10px">${tr("osimIntro")}</p>
+      <label for="osimUrl">${tr("osimLink")}</label>
+      <input id="osimUrl" type="url" autocomplete="off" placeholder="https://\u2026" value="${esc(saved.url || "")}">
+      <label for="osimCode" style="margin-top:8px">${tr("osimCode")}</label>
+      <input id="osimCode" type="text" inputmode="numeric" autocomplete="off" value="${esc(saved.code || "")}">
+      <button type="button" id="osimConnectBtn" style="margin-top:10px">${tr("osimConnect")}</button>${err}`;
+    $("osimConnectBtn").onclick = () => {
+      const raw = $("osimUrl").value.trim();
+      // The whole link the engine printed works too, not just the address.
+      let both = null;
+      try { both = engineFromSearch(new URL(raw).search); } catch { /* not a link */ }
+      const url = both ? both.url : cleanEngineUrl(raw);
+      const code = both ? both.code : $("osimCode").value.trim();
+      if (!url || !code) { osim.err = tr("osimErrLink"); renderOsim(); return; }
+      osimConnect(url, code);
+    };
+    return;
+  }
+  const st = osim.job, h = osim.health, s = st.steps, r = osim.res;
+  const done = (id) => s[id] && s[id].state === "done";
+  const tick = (ok) => (ok ? "\u2713" : "\u2014");
+  // 1. data
+  const data = `<div class="osimStep"><h3>1 \u00b7 ${tr("osimStepData")}</h3>
+    <p class="note" style="margin:0 0 8px">${tr("osimDataNote", { markerset: esc(h.markerset) })}</p>
+    <label for="osimStatic">${tick(st.ready.static)} ${tr("osimStatic")}</label>
+    <input id="osimStatic" type="file" accept=".c3d,.trc">
+    <label for="osimMotion" style="margin-top:8px">${tick(st.ready.motion)} ${tr("osimMotion")}</label>
+    <input id="osimMotion" type="file" accept=".c3d,.trc,.mot,.sto" multiple>
+    <div class="row" style="margin-top:8px;align-items:flex-end">
+      <div><label for="osimMass">${tr("labMass")}</label>
+        <input id="osimMass" type="number" step="0.1" inputmode="decimal" value="${st.mass}"></div>
+      ${h.example ? `<div><button type="button" class="ghost" id="osimExample" style="margin:0">${tr("osimExample")}</button></div>` : ""}
+    </div>
+    ${st.example ? `<p class="sub" style="font-size:12.5px;margin:6px 0 0">${tr("osimUsingExample")}</p>` : ""}
+    <div style="margin-top:10px">${osimRunBtn("export", tr("osimRunData"), st.ready.static && st.ready.motion)}</div>
+    ${osimStateLine("export")}</div>`;
+  // 2. scale
+  let scaleOut = "";
+  if (r.scale) {
+    const rows = scaleRows(r.scale.factors);
+    scaleOut = rows.length ? `<table style="margin-top:8px"><thead><tr><th>${tr("osimSegment")}</th><th>x</th><th>y</th><th>z</th></tr></thead>
+      <tbody>${rows.map((x) => `<tr><td>${esc(x.segment)}</td>${x.scales.map((v) => `<td>${v.toFixed(3)}</td>`).join("")}</tr>`).join("")}</tbody></table>
+      <p class="note" style="margin:6px 0 0">${tr("osimScaleNote", { mass: r.scale.mass })}</p>` : `<p class="note">${tr("osimScaleNoFactors")}</p>`;
+  }
+  const scale = `<div class="osimStep"><h3>2 \u00b7 ${tr("osimStepScale")}</h3>
+    <p class="note" style="margin:0 0 8px">${tr("osimScaleIntro", { model: esc(h.model) })}</p>
+    ${osimRunBtn("scale", tr("osimRunScale"), done("export"))}${osimStateLine("scale")}${scaleOut}</div>`;
+  // 3. IK + ID
+  let ikOut = "";
+  if (r.ik) {
+    const a = pickAngles(r.ik);
+    const ser = a.series.map((x) => ({ ...x, label: osimSideName(x) }));
+    const me = r.ik_errors ? markerErrors(r.ik_errors) : null;
+    ikOut += `<b style="font-size:13.5px;display:block;margin-top:10px">${tr("osimAngles")}</b>
+      ${lineChartSVG({ time: r.ik.time, series: ser, yUnit: "\u00b0" })}${legendHTML(ser)}
+      ${me ? `<p class="note${me.max_cm > 4 || me.rms_cm > 2 ? " banner" : ""}" style="margin:6px 0 0">${
+        tr("osimMarkerErr", { rms: me.rms_cm.toFixed(1), max: me.max_cm.toFixed(1) })}</p>` : ""}
+      ${a.flipped ? `<p class="note" style="margin:4px 0 0">${tr("osimKneeFlipped")}</p>` : ""}`;
+  }
+  if (r.id) {
+    const m = pickMoments(r.id, r.id.mass);
+    const ser = m.series.map((x) => ({ ...x, label: osimSideName(x) }));
+    ikOut += `<b style="font-size:13.5px;display:block;margin-top:12px">${tr("osimMoments")}</b>
+      ${lineChartSVG({ time: r.id.time, series: ser, yUnit: "N\u00b7m/kg" })}${legendHTML(ser)}
+      <p class="note" style="margin:4px 0 0">${tr("osimMomentNote")}</p>`;
+  }
+  const ikid = `<div class="osimStep"><h3>3 \u00b7 ${tr("osimStepIkId")}</h3>
+    ${osimRunBtn("ikid", tr("osimRunIkId"), done("scale"))}${osimStateLine("ikid")}${ikOut}</div>`;
+  // 4. SO + JRL
+  let soOut = "";
+  if (r.so) {
+    const top = topMuscles(r.so, 6);
+    const ser = top.map((x, i) => ({ label: x.column, y: x.y, color: MUSCLE_COLORS[i % MUSCLE_COLORS.length] }));
+    const res = worstReserve(r.so);
+    soOut += `<b style="font-size:13.5px;display:block;margin-top:10px">${tr("osimMuscles")}</b>
+      ${lineChartSVG({ time: r.so.time, series: ser, yUnit: "N" })}${legendHTML(ser)}
+      ${res ? `<p class="note${res.peak > 30 ? " banner" : ""}" style="margin:6px 0 0">${
+        tr("osimReserve", { nm: res.peak.toFixed(0), col: esc(res.column) })}</p>` : ""}`;
+  }
+  if (r.jra) {
+    const joints = reactionJoints(r.jra);
+    if (!joints.some((j) => j.key === osim.joint)) osim.joint = defaultReactionJoint(joints);
+    const f = osim.joint ? reactionForce(r.jra, osim.joint, r.jra.mass) : null;
+    if (f) {
+      const ser = [{ label: tr("osimResultant"), y: f.resultant, color: "#2f6fe4" }];
+      soOut += `<b style="font-size:13.5px;display:block;margin-top:12px">${tr("osimJrl")}</b>
+        <select id="osimJoint" style="margin:4px 0 6px">${joints.map((j) =>
+          `<option value="${esc(j.key)}"${j.key === osim.joint ? " selected" : ""}>${esc(j.joint)}</option>`).join("")}</select>
+        ${lineChartSVG({ time: r.jra.time, series: ser, yUnit: "BW" })}
+        <p class="note" style="margin:4px 0 0">${tr("osimJrlNote", { peak: f.peak.toFixed(2) })}</p>`;
+    }
+  }
+  const so = `<div class="osimStep"><h3>4 \u00b7 ${tr("osimStepSo")}</h3>
+    <p class="note" style="margin:0 0 8px">${tr("osimSoIntro")}</p>
+    ${osimRunBtn("so", tr("osimRunSo"), done("ikid"))}${osimStateLine("so")}${soOut}</div>`;
+  const any = ["scale", "ikid", "so"].some(done);
+  box.innerHTML = `<p class="sub" style="font-size:12.5px;margin:0">${tr("osimConnected", { model: esc(h.model) })}
+      <a href="#" id="osimDisconnect">${tr("osimDisconnect")}</a></p>
+    ${h.fake ? `<p class="note banner" style="margin:8px 0 0">${tr("osimFake")}</p>` : ""}${err}
+    ${data}${scale}${ikid}${so}
+    ${any ? `<a class="ghost" href="${esc(osim.client.bundleUrl(st.id))}" style="display:block;text-align:center;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:10px;text-decoration:none;color:var(--ink)">${tr("osimDownload")}</a>` : ""}
+    <p class="note" style="margin:10px 0 0">${tr("osimHonest")}</p>`;
+  const id = st.id, c = osim.client;
+  $("osimDisconnect").onclick = (e) => {
+    e.preventDefault();
+    clearTimeout(osim.timer);
+    try { sessionStorage.removeItem("bioscout.osim"); } catch { /* nothing kept */ }
+    osim.client = null; osim.job = null; osim.res = {}; osim.err = null;
+    renderOsim();
+  };
+  const sendFiles = (input, slot) => async () => {
+    for (const f of input.files) {
+      const kind = fileKind(f.name, slot);
+      if (!kind) { osim.err = tr("osimErrFile", { name: f.name }); renderOsim(); return; }
+      await osimDo(() => c.upload(id, kind, f));
+      if (osim.err) return;
+    }
+  };
+  $("osimStatic").onchange = sendFiles($("osimStatic"), "static");
+  $("osimMotion").onchange = sendFiles($("osimMotion"), "motion");
+  $("osimMass").onchange = () => osimDo(() => c.setMass(id, parseFloat($("osimMass").value)));
+  if ($("osimExample")) $("osimExample").onclick = () => osimDo(() => c.example(id));
+  box.querySelectorAll("[data-osim-run]").forEach((b) => {
+    b.onclick = () => osimDo(() => c.run(id, b.dataset.osimRun));
+  });
+  if ($("osimJoint")) $("osimJoint").onchange = () => { osim.joint = $("osimJoint").value; renderOsim(); };
+}
+function osimInit() {
+  $("osimCard").classList.remove("hidden");
+  const open = () => {
+    $("osimBody").classList.remove("hidden");
+    $("osimToggle").classList.add("hidden");
+    renderOsim();
+  };
+  $("osimToggle").onclick = open;
+  // Arriving by the engine's own link opens the card already connected.
+  const linked = engineFromSearch(location.search);
+  if (linked) { open(); osimConnect(linked.url, linked.code); }
+}
+
 /* The lab demo: one local athlete, straight into the recorder. A reload keeps
  * the sets already on the page; "Next person" wipes that athlete and starts
  * clean, so one student's numbers are never the next one's. */
@@ -6787,6 +7030,7 @@ function enterLab() {
     eraseAthlete(LAB_NAME);
     location.reload();
   };
+  osimInit();
 }
 
 if (LAB) {
