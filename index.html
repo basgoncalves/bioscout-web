@@ -506,6 +506,11 @@ try {
   /* The recorder, put to work by the assessment: everything that belongs to
      free training goes away, because the protocol chose all of it already. */
   body.assessMode .trainOnly { display:none !important; }
+  /* Lab demo (the default without ?full=1): the recorder and its results,
+     nothing that leads to the dashboard, an account or the feed. */
+  body.labMode #navBar, body.labMode #restCard, body.labMode #restPill, body.labMode #loadBtn,
+  body.labMode #manualBtn, body.labMode #bodyMapBox, body.labMode #planNow,
+  body.labMode #shareSetBtn { display:none !important; }
   .daybox { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
   .accountBox { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:0 0 11px; }
   .sharePreview { min-height:120px; display:flex; align-items:center; justify-content:center;
@@ -1128,6 +1133,21 @@ try {
   </section>
 
   <section id="viewRecord" class="hidden">
+    <div class="card hidden" id="labCard">
+      <b data-i18n="labTitle">Lab demo</b>
+      <p class="note" style="margin:4px 0 10px" data-i18n="labNote">Record a movement and read its joint angles, moments and estimated loads. No account, nothing uploaded: it all stays on this device. The numbers are estimates from video, not measurements, and this is not a medical device.</p>
+      <div class="row" style="margin-bottom:11px">
+        <div>
+          <label for="labHeight" data-i18n="height">Height (m)</label>
+          <input id="labHeight" type="number" step="0.01" inputmode="decimal">
+        </div>
+        <div>
+          <label for="labMass" data-i18n="labMass">Body mass (kg)</label>
+          <input id="labMass" type="number" step="0.1" inputmode="decimal" placeholder="75">
+        </div>
+      </div>
+      <button type="button" class="ghost" id="labNewBtn" data-i18n="labNew">Next person (clear results)</button>
+    </div>
     <div class="card hidden" id="assessBanner"></div>
     <div class="card trainOnly" id="setup">
     <!-- Strength sessions only: pick the exercise by body part (bodymap.js). -->
@@ -1401,7 +1421,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 121;
+window.BUILD = 122;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1719,6 +1739,22 @@ window.__mlBooted = true;   // the watchdog above can stand down
 const OSIM_MODEL = "gpk";
 const DEMO = new URLSearchParams(location.search).get("demo");
 
+/* Lab demo is what a visitor gets. The full app (athletes, dashboard,
+ * accounts, feed) opens only on a device that has once been to ?full=1;
+ * ?lab=1 puts it back. This keeps a classroom of students in the recorder --
+ * it is a front door, not a lock: the page source is public, so the thing
+ * that actually stops new accounts is the server refusing sign-ups. */
+const FULL_KEY = "bioscout.full.v1";
+const LAB_NAME = "Lab demo";
+const LAB = !DEMO && (() => {
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.has("full")) localStorage.setItem(FULL_KEY, "1");
+    if (q.has("lab")) localStorage.removeItem(FULL_KEY);
+    return localStorage.getItem(FULL_KEY) !== "1";
+  } catch { return true; }
+})();
+
 // ?fresh=1 tears out every service worker and cache for this origin, then
 // reloads. A cache-first worker can strand a browser on an old build with no
 // way back from inside the page, so this escape hatch is not optional.
@@ -2026,7 +2062,8 @@ $("delProfileBtn").onclick = () => {
  * seconds after something is logged (renderDash / a new set), every minute
  * while open, and on "Sync now". A sync that fails says why in the box and
  * changes nothing locally -- the device copy is always the one in use. */
-const cloud = makeCloud(CLOUD);
+// No server in the lab demo: no account box, no feed, no sync.
+const cloud = makeCloud(LAB ? { url: "", key: "" } : CLOUD);
 let syncing = false, syncTimer = null;
 
 function cloudErrText(e) {
@@ -4688,6 +4725,7 @@ function leaveRecorder() {
 }
 
 function showView(id, push = true) {
+  if (LAB) id = "viewRecord";          // the lab demo has one screen
   if (id !== "viewRecord") leaveRecorder();
   if (id !== "viewRecord" && assessStep) exitAssessMode();
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
@@ -4732,7 +4770,8 @@ const currentAthlete = () => $("profile").value || null;
 
 /** The login screen: every saved athlete as a button. */
 function renderLogin() {
-  const { profiles } = listProfiles();
+  // The lab demo's stand-in athlete is not somebody to log in as.
+  const profiles = listProfiles().profiles.filter((p) => p.name !== LAB_NAME);
   const list = $("profileList");
   list.innerHTML = profiles.length
     ? profiles.map((p) => `<button class="ghost athlete" data-name="${esc(p.name)}">${esc(p.name)}</button>`).join("")
@@ -6658,7 +6697,39 @@ function boot() {
   }
 }
 
-if (termsAccepted()) {
+/* The lab demo: one local athlete, straight into the recorder. A reload keeps
+ * the sets already on the page; "Next person" wipes that athlete and starts
+ * clean, so one student's numbers are never the next one's. */
+function enterLab() {
+  document.body.classList.add("labMode");
+  $("labCard").classList.remove("hidden");
+  if (!getProfile(LAB_NAME)) saveProfile({ name: LAB_NAME });
+  refreshProfiles(LAB_NAME);
+  $("profile").value = LAB_NAME;
+  applyProfile(getProfile(LAB_NAME));
+  refreshDerived();
+  const open = getSession();
+  if (open && open.profile === LAB_NAME) { renderTraining(); showView("viewRecord"); }
+  else startTraining(null);
+  $("labHeight").value = $("height").value;
+  $("labMass").value = $("mass").value;
+  for (const [from, to] of [["labHeight", "height"], ["labMass", "mass"]]) {
+    $(from).addEventListener("change", () => {
+      $(to).value = $(from).value;
+      $(to).dispatchEvent(new Event("input", { bubbles: true }));
+      $(to).dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+  $("labNewBtn").onclick = () => {
+    leaveRecorder();
+    eraseAthlete(LAB_NAME);
+    location.reload();
+  };
+}
+
+if (LAB) {
+  enterLab();
+} else if (termsAccepted()) {
   boot();
 } else {
   $("termsDlg").showModal();
@@ -7871,7 +7942,7 @@ async function finish() {
         const badgesBefore = myAchievements();
         const set = addSet(lastResult, fps, { profile: $("profile").value || null,
                                              assess: assessStep });
-        announceBadges(newlyEarned(badgesBefore, myAchievements()));
+        if (!LAB) announceBadges(newlyEarned(badgesBefore, myAchievements()));
         scheduleSync();
         lastResult.setIndex = set.index;
         lastResult.sessionStarted = getSession()?.started ?? null;
