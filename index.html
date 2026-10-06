@@ -1163,6 +1163,7 @@ try {
           <option value="dip" data-i18n="dip">Dip</option>
           <option value="pushup" data-i18n="pushup">Push-up</option>
           <option value="jumpshot" data-i18n="jumpshot">Basketball jump shot</option>
+          <option value="stroke" data-i18n="stroke">Tennis / padel strokes</option>
           <option value="squat" data-i18n="squat">Squat</option>
           <option value="cmj" data-i18n="cmj">Countermovement jump</option>
           <option value="sj" data-i18n="sj">Squat jump</option>
@@ -1175,6 +1176,13 @@ try {
           <option value="neck" data-i18n="neck">Neck (close-up)</option>
         </select>
       </div>
+    </div>
+    <!-- Racket strokes only: the one number the ball's speed needs that the
+         camera cannot give, and how to film it. -->
+    <div id="strokeBox" class="trainOnly hidden" style="margin-bottom:11px">
+      <label for="wallDist" data-i18n="wallDist">Distance from you to the wall (m) — optional</label>
+      <input id="wallDist" type="number" step="0.5" min="1" max="30" inputmode="decimal" placeholder="e.g. 8">
+      <p class="note" style="margin:6px 0 0" data-i18n="strokeSetupNote">Fix the phone so it does not move, with you and the wall (or the court) both in the picture. Strokes are counted from your body; the ball is followed by its colour, so a yellow ball against a plain background works best. With the wall distance filled in, ball speed is the distance divided by the flight time.</p>
     </div>
     <!-- Added load, assistance and their direction live in #loadDlg; this
          button opens it and reads back what is set (paintLoadSummary). -->
@@ -1421,7 +1429,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 122;
+window.BUILD = 123;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1522,6 +1530,7 @@ import { groupFriends, relationTo, searchTerm } from "./src/friends.js";
 import { foreperiod, classify as rtClassify, summarise as rtSummarise,
          reactionTrend, sequence, GAMES, GAME_IDS, gameOf } from "./src/reaction.js";
 import { SPORT_IDS, allowedIn, sportActivities } from "./src/sports.js";
+import { makeBallTracker, ballAfterStrokes, bodyBox, strokeSummary } from "./src/balltrack.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
          dayOfCycle } from "./src/cycle.js";
@@ -1724,6 +1733,53 @@ async function setAvatar(name) {
 }
 let facing = "user";
 let frames = [];          // { t_ms, lm } per detected frame
+
+/* The ball, for racket strokes only (src/balltrack.js). Each frame of the
+ * take is drawn small and handed to the tracker with the player's box; the
+ * rest happens after the take, once the strokes are known. */
+const ballTracker = makeBallTracker();
+const ballView = { canvas: null, ctx: null, vw: 0, vh: 0 };
+function ballGrab(src, t, lm) {
+  if ($("activity").value !== "stroke") return;
+  const vw = src.videoWidth, vh = src.videoHeight;
+  if (!vw || !vh) return;
+  const k = 480 / Math.max(vw, vh);
+  const w = Math.max(2, Math.round(vw * k)), h = Math.max(2, Math.round(vh * k));
+  try {
+    if (!ballView.canvas) {
+      ballView.canvas = document.createElement("canvas");
+      ballView.ctx = ballView.canvas.getContext("2d", { willReadFrequently: true });
+    }
+    if (ballView.canvas.width !== w || ballView.canvas.height !== h) {
+      ballView.canvas.width = w; ballView.canvas.height = h;
+    }
+    ballView.vw = vw; ballView.vh = vh;
+    ballView.ctx.drawImage(src, 0, 0, w, h);
+    ballTracker.push(ballView.ctx.getImageData(0, 0, w, h).data, w, h, t, lm ? bodyBox(lm, vw, vh) : null);
+  } catch (err) { console.warn("ball tracking failed", err); }
+}
+/** Line the ball track up with the strokes just found and write each
+ *  stroke's ball speed and placement onto its rep. */
+function attachBall(res, fps) {
+  if (!frames.length) return;
+  const tOf = new Map();
+  frames.forEach((f, k) => tOf.set(f.i ?? k, f.t));
+  const f0 = frames[0], i0 = f0.i ?? 0;
+  const tAt = (fi) => (tOf.has(fi) ? tOf.get(fi) : f0.t + ((fi - i0) * 1000) / fps);
+  const wallM = parseFloat($("wallDist").value) || null;
+  const out = ballAfterStrokes(ballTracker.track, res.reps.map((r) => tAt(r.contact_frame)),
+    { w: ballView.vw || 1, h: ballView.vh || 1, pxPerM: res.pxPerM, wallM });
+  res.reps.forEach((r, k) => {
+    const b = out[k];
+    r.ball_speed_ms = b.speed_ms;
+    r.ball_speed_kmh = b.speed_ms != null ? +(b.speed_ms * 3.6).toFixed(1) : null;
+    r.ball_method = b.method;
+    r.impact = b.impact;
+  });
+  res.wallM = wallM;
+  res.ballPoints = ballTracker.track.length;
+  res.frameAspect = ballView.vw && ballView.vh ? ballView.vw / ballView.vh : 16 / 9;
+}
 let lastResult = null;
 
 // ?demo=1 renders a stored result with no camera and no model download, so you
@@ -3690,6 +3746,8 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) pain
  * camera go rather than leaving the track to the browser's own clean-up. */
 window.addEventListener("pagehide", () => { if (stream) stopCamera(); });
 $("activity").addEventListener("change", () => renderPlanNow());
+const paintStrokeBox = () => $("strokeBox").classList.toggle("hidden", $("activity").value !== "stroke");
+$("activity").addEventListener("change", paintStrokeBox);
 restSync();          // a countdown still running from before a reload carries on
 
 /* ---- energy: what a session cost, and what to eat -------------------------
@@ -5715,6 +5773,7 @@ function renderTraining() {
   applySport(assessStep ? null : (sess?.sport || null));
   renderBodyMap();
   renderPlanNow();
+  paintStrokeBox();
   paintRest();
   if (!sess || !sess.sets.length) { card.classList.add("hidden"); return; }
   card.classList.remove("hidden");
@@ -7048,10 +7107,13 @@ function loop(now, meta) {
                       video.videoWidth, video.videoHeight, mirrored);
       }
       if (recording) stills.grab(video, ts);
-      if (recording && res.landmarks && res.landmarks.length) {
+      const named = recording && res.landmarks && res.landmarks.length
+        ? toNamed(res.landmarks[0], video.videoWidth, video.videoHeight) : null;
+      if (recording) ballGrab(video, ts, named);
+      if (named) {
         if (pf !== null && pf0 === null) pf0 = pf;
         frames.push({ i: pf !== null && pf0 !== null ? pf - pf0 : undefined, t: ts,
-                      lm: toNamed(res.landmarks[0], video.videoWidth, video.videoHeight) });
+                      lm: named });
         // During a test the athlete needs the rep count, not the frame count.
         // Both used to write here and the once-a-second counter lost every
         // time, fifty frames to one.
@@ -7066,7 +7128,10 @@ function loop(now, meta) {
 function toNamed(lms, w, h) {
   const out = {};
   lms.forEach((l, i) => {
-    if ((l.visibility ?? 1) >= 0.3) out[LANDMARK_NAMES[i]] = [l.x * w, l.y * h];
+    // The third number is the pose model's own depth guess, in the same units
+    // as x. Only the racket strokes read it (which way the hand crosses the
+    // chest when the player is side-on); everything else uses [0] and [1].
+    if ((l.visibility ?? 1) >= 0.3) out[LANDMARK_NAMES[i]] = [l.x * w, l.y * h, (l.z ?? 0) * w];
   });
   return out;
 }
@@ -7233,6 +7298,7 @@ $("recBtn").onclick = () => {
       }
     }
     frames = []; pf0 = null; recording = true;
+    ballTracker.reset();
     leadDone = false;
     framing.reset();
     gesture.reset();
@@ -7565,6 +7631,7 @@ async function analyseVideoFile(file, { trim = true } = {}) {
     return;
   }
   frames = [];
+  ballTracker.reset();
   /* The engine is 34 MB of wasm and a 9.4 MB model. On a first visit -- or the
    * first one after a cache bump -- that download happens HERE, behind a status
    * line that said "Reading video", so the app looked stuck on a 3 MB clip. */
@@ -7646,13 +7713,15 @@ async function analyseVideoFile(file, { trim = true } = {}) {
     // a timestamp that goes backwards makes it drop the frame outright.
     const res = off.detectForVideo(v, Math.round(t * 1000));
     stats.detectMs += performance.now() - d0;
-    if (res.landmarks && res.landmarks.length) {
+    const named = res.landmarks && res.landmarks.length
+      ? toNamed(res.landmarks[0], v.videoWidth, v.videoHeight) : null;
+    ballGrab(v, t * 1000, named);
+    if (named) {
       // `i` is the GRID index, and it is what the analysis keys off. A frame
       // the model found no body in is then a hole at its own place in time
       // rather than a frame quietly removed -- which used to shorten the clip
       // and speed up every movement in it by however many frames were missed.
-      frames.push({ i, t: t * 1000,
-                    lm: toNamed(res.landmarks[0], v.videoWidth, v.videoHeight) });
+      frames.push({ i, t: t * 1000, lm: named });
     }
     bar((i + 1) / n);
     if (i % 5 === 0) {
@@ -7926,6 +7995,7 @@ async function finish() {
     lastResult = analyse(poses, fps, { heightM, activity,
                                        osimModel: OSIM_MODEL, hold: isNeckHold });
     lastResult.detection = detection;
+    if (activity === "stroke") attachBall(lastResult, fps);
     // Where the frames came from decides what can honestly be said about the
     // timing: a file was sampled on a grid we chose, a camera delivered
     // whatever it managed.
@@ -9342,6 +9412,71 @@ function topMusclesForJoint(rep, joint, n = 5) {
  * it up with a mean and an arrow would invite exactly the reading it cannot
  * support.
  */
+/* Racket strokes: the tiles, the speed of each stroke in order, and where
+ * each ball turned round. Colour says which stroke it was; the number under
+ * each bar says the same thing for anyone who cannot tell the colours apart. */
+const STROKE_COLOR = { forehand: "#2f6fe4", backhand: "#e8871a", overhead: "#1d7a45" };
+function strokePanel(res) {
+  const s = strokeSummary(res.reps);
+  const live = res.reps.filter((r) => !r.removed);
+  const kmh = (v, d = 0) => (v == null ? "\u2014" : (v * 3.6).toFixed(d));
+  const tile = (label, big, small = "") => `<div style="border:1px solid var(--line);border-radius:10px;padding:9px 10px">
+      <div class="sub" style="font-size:12px">${label}</div>
+      <div style="font-size:26px;font-weight:700;line-height:1.15">${big}</div>
+      ${small ? `<div class="sub" style="font-size:12px">${small}</div>` : ""}</div>`;
+  const hasBall = s.nBall > 0;
+  const tiles = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 0">
+    ${tile(tr("strokesTile"), s.strokes, s.overhead ? tr("strokeOverheadN", { n: s.overhead }) : "")}
+    ${tile(tr("fhBhTile"), `${s.forehand} / ${s.backhand}`, s.unnamed ? tr("strokeUnnamedN", { n: s.unnamed }) : "")}
+    ${hasBall
+      ? tile(tr("ballSpeedTile"), `${kmh(s.ball_mean_ms)}<span class="sub" style="font-size:12px"> km/h</span>`,
+             tr("strokePeakFhBh", { peak: kmh(s.ball_peak_ms), fh: kmh(s.ball_forehand_ms), bh: kmh(s.ball_backhand_ms) }))
+      : tile(tr("handSpeedTile"), `${kmh(s.hand_mean_ms)}<span class="sub" style="font-size:12px"> km/h</span>`,
+             tr("strokePeak", { peak: kmh(s.hand_peak_ms) }))}
+  </div>`;
+  // Speed history: the ball's where it was followed, else the hand's.
+  const key = hasBall ? "ball_speed_kmh" : "hand_speed_kmh";
+  const vals = live.map((r) => r[key]);
+  const top = Math.max(1, ...vals.filter((v) => v != null));
+  const W = 320, H = 120, L = 28, B = 22, bw = Math.min(26, (W - L - 6) / Math.max(1, live.length));
+  const bars = live.map((r, i) => {
+    const v = r[key], x = L + 4 + i * ((W - L - 6) / Math.max(1, live.length));
+    const hgt = v == null ? 0 : ((H - B - 12) * v) / top;
+    return `${v == null ? "" : `<rect x="${x.toFixed(1)}" y="${(H - B - hgt).toFixed(1)}" width="${(bw * 0.8).toFixed(1)}"
+        height="${hgt.toFixed(1)}" rx="2" fill="${STROKE_COLOR[r.stroke_type] || "#8a8f99"}"><title>${
+        r.rep}: ${tr(r.stroke_type || "strokeUnnamed")} ${v.toFixed(0)} km/h</title></rect>`}
+      <text x="${(x + bw * 0.4).toFixed(1)}" y="${H - 8}" font-size="9" text-anchor="middle" fill="var(--muted)">${r.rep}</text>`;
+  }).join("");
+  const chart = `<div style="margin-top:12px"><div style="display:flex;justify-content:space-between;align-items:baseline">
+      <b style="font-size:13.5px">${tr(hasBall ? "strokeBallHistory" : "strokeHandHistory")}</b>
+      <span class="sub" style="font-size:12px">max ${top.toFixed(0)} km/h</span></div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" role="img">
+      <line x1="${L}" y1="${H - B}" x2="${W}" y2="${H - B}" stroke="var(--line)"/>
+      <line x1="${L}" y1="12" x2="${W}" y2="12" stroke="var(--line)" stroke-dasharray="3 3"/>
+      <text x="${L - 4}" y="15" font-size="9" text-anchor="end" fill="var(--muted)">${top.toFixed(0)}</text>
+      <text x="${L - 4}" y="${H - B + 3}" font-size="9" text-anchor="end" fill="var(--muted)">0</text>
+      ${bars}</svg>
+    <div class="sub" style="font-size:12px">${["forehand", "backhand", "overhead"].map((t) =>
+      `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${STROKE_COLOR[t]};margin:0 4px 0 8px"></span>${tr(t)}`).join("")}</div></div>`;
+  // Placement: the picture's own rectangle, a numbered dot where each ball turned round.
+  const hits = live.filter((r) => r.impact);
+  const asp = res.frameAspect || 16 / 9, PW = 320, PH = Math.round(PW / asp);
+  const place = !hits.length ? "" : `<div style="margin-top:12px"><b style="font-size:13.5px">${tr("strokePlacement")}</b>
+    <svg viewBox="0 0 ${PW} ${PH}" style="width:100%;height:auto;display:block;margin-top:4px" role="img">
+      <rect x="0.5" y="0.5" width="${PW - 1}" height="${PH - 1}" fill="none" stroke="var(--line)"/>
+      ${hits.map((r) => `<g><circle cx="${(r.impact.x * PW).toFixed(1)}" cy="${(r.impact.y * PH).toFixed(1)}" r="8"
+          fill="var(--card)" stroke="${STROKE_COLOR[r.stroke_type] || "#8a8f99"}" stroke-width="2"/>
+        <text x="${(r.impact.x * PW).toFixed(1)}" y="${(r.impact.y * PH + 3).toFixed(1)}" font-size="9"
+          text-anchor="middle" fill="var(--ink)">${r.rep}</text></g>`).join("")}</svg>
+    <p class="note" style="margin:4px 0 0">${tr("strokePlacementNote")}</p></div>`;
+  const how = !hasBall ? tr("strokeNoteNoBall")
+    : s.methods.includes("tof") && s.methods.length === 1 ? tr("strokeNoteTof", { m: res.wallM })
+    : s.methods.includes("tof") ? tr("strokeNoteMixed", { m: res.wallM })
+    : tr("strokeNotePlane");
+  return `${tiles}${chart}${place}
+    <p class="note" style="margin-top:10px">${how} ${tr("strokeNoteHand")}</p>`;
+}
+
 function shotSummary(res) {
   const tapped = res.reps.filter((r) => r.made === true || r.made === false);
   if (!tapped.length) return `<p class="note">${tr("noteTapOutcome")}</p>`;
@@ -9966,6 +10101,7 @@ function render(res, fps) {
       : res.refused === "notLying" ? `<p class="note banner">${tr("pushupNotLying")}</p>`
       : res.refused === "noPushups" ? `<p class="note banner">${tr("noPushupsFound")}</p>`
       : res.refused === "noShots" ? `<p class="note banner">${tr("noShotsFound")}</p>`
+      : res.refused === "noStrokes" ? `<p class="note banner">${tr("noStrokesFound")}</p>`
       : res.refused === "noHeelRaises" ? `<p class="note banner">${tr("noHeelRaises")}</p>`
       : res.refused === "noKickbacks" ? `<p class="note banner">${tr("noKickbacks")}</p>`
       : res.refused === "noStrides" ? `<p class="note banner">${
@@ -10188,6 +10324,14 @@ function render(res, fps) {
       <td>${nn(r.knee_flex_at_dip_deg, 0)}\u00b0</td>
       ${madeCell(r)}</tr>`).join("");
 
+  const isStroke = res.activity === "stroke";
+  const strokeRows = !isStroke ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
+      <td>${tr(r.stroke_type || "strokeUnnamed")}</td>
+      <td>${nn(r.ball_speed_kmh, 0)}</td>
+      <td>${nn(r.hand_speed_kmh, 0)}</td>
+      <td>${nn(r.swing_s)}</td>
+      <td>${nn(r.contact_height_m)}</td></tr>`).join("");
+
   /* Kick back and heel raise: per leg, so the leg is the second column, as it
    * is for a single-leg squat. The heel raise had no row of its own and fell
    * through to the pull-up's, which read fields it does not have. */
@@ -10227,7 +10371,10 @@ function render(res, fps) {
     : `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td><td>${r.concentric_s.toFixed(2)}</td><td>${r.eccentric_s.toFixed(2)}</td>
          <td>${r.elbow_flex_max_deg.toFixed(0)}°</td><td>${r.arm_flex_range_deg.toFixed(0)}°</td>
          <td>${r.pelvis_travel_m.toFixed(2)}</td></tr>`).join("");
-  const head = isShot
+  const head = isStroke
+    ? `<tr><th>${tr("strokeN")}</th><th>${tr("strokeType")}</th><th>${tr("ballKmh")}</th>
+        <th>${tr("handKmh")}</th><th>${tr("swingS")}</th><th>${tr("contactM")}</th></tr>`
+    : isShot
     ? `<tr><th>${tr("shotN")}</th><th>${tr("releaseH")}</th><th>${tr("vsApex")}</th>
         <th>${tr("elbowAtRelease")}</th><th>${tr("kneeAtDip")}</th>
         <th>${tr("madeCol")}</th></tr>`
@@ -10324,7 +10471,11 @@ function render(res, fps) {
     const st = meanRep && meanRep.stats[k];
     return st ? `${st.mean.toFixed(d)}<span class="sub"> ±${st.sd.toFixed(d)}</span>` : "—";
   };
-  const meanRow = !meanRep ? "" : isShot
+  const meanRow = !meanRep ? "" : isStroke
+    ? `<tr class="meanrow"><td>${tr("mean")}</td><td>\u2014</td>
+         <td>${ms("ball_speed_kmh", 0)}</td><td>${ms("hand_speed_kmh", 0)}</td>
+         <td>${ms("swing_s")}</td><td>${ms("contact_height_m")}</td></tr>`
+    : isShot
     ? `<tr class="meanrow"><td>${tr("mean")}</td>
          <td>${ms("release_height_m")}</td><td>${ms("apex_offset_s")}</td>
          <td>${ms("release_elbow_deg", 0)}\u00b0</td>
@@ -10384,12 +10535,13 @@ function render(res, fps) {
       ${tr("motSignedFor", { model: res.osimModel })}</p>
     ${setSwitcher(res)}
     <table><thead>${head}</thead><tbody>${
-      isShot ? shotRows : isDip ? dipRows : isSL ? slRows : isRun ? runRows
+      isStroke ? strokeRows : isShot ? shotRows : isDip ? dipRows : isSL ? slRows : isRun ? runRows
              : isKick ? kickRows : isHR ? hrRows
              : isSide ? sideRows : isJump ? jumpRows : rows()}${meanRow}</tbody></table>
     ${removedLine(res)}
     ${qualitySummary(qCounts)}
     <div id="shotSummaryBox">${isShot ? shotSummary(res) : ""}</div>
+    ${isStroke ? strokePanel(res) : ""}
     ${runPanel}
     ${suspect.length ? `<p class="note banner">${
       tr("heightsDisagree", { n: suspect.length, total: n })}</p>` : ""}

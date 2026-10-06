@@ -1338,6 +1338,14 @@ function summariseRep(r, activity) {
      * untapped attempt has no outcome, and a make percentage computed over
      * untapped shots would be a number invented out of silence. */
     o.made = r.made ?? null;
+  } else if (activity === "stroke") {
+    o.stroke_type = r.stroke_type ?? null;
+    o.hand_speed_ms = r.hand_speed_ms ?? null;
+    // null when the ball was not followed; `ball_method` says how it was got.
+    o.ball_speed_ms = r.ball_speed_ms ?? null;
+    o.ball_method = r.ball_method ?? null;
+    o.swing_s = r.swing_s != null ? +(+r.swing_s).toFixed(2) : null;
+    o.contact_height_m = r.contact_height_m ?? null;
   } else if (activity === "pushup") {
     // Depth from the shoulders (the hips travel half as far), and how far the
     // body bent at the hip -- the plank line.

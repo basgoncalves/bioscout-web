@@ -2600,6 +2600,209 @@ export function shotMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_SHOT_CFG) {
   };
 }
 
+/* ---- racket strokes (tennis, padel) ------------------------------------------
+ *
+ * A stroke is found from the BODY: the racket hand is the fastest thing on a
+ * player, and a swing is a burst of hand speed with a quiet arm either side.
+ * Hand speed is measured against the hips, so running to the ball is not a
+ * swing, and in hip-heights per second, so it holds at any camera distance.
+ *
+ * What this cannot see is the racket or the ball. "Hand speed" is the wrist,
+ * in the picture plane -- a floor under the true speed whenever the swing has
+ * a component toward or away from the camera, and well below racket-head
+ * speed always. The ball's numbers come from src/balltrack.js, separately.
+ *
+ * Forehand or backhand is which way the hand crosses the chest: a forehand
+ * starts out on the racket side and finishes across the body, a backhand
+ * starts across and finishes out. That is read along the shoulder line. From
+ * behind or in front the shoulder line is in the picture; side-on it points
+ * at the camera, and the pose model's depth (third element of a landmark,
+ * when the recorder kept it) is what is left. With neither, the stroke is
+ * counted and left unnamed rather than guessed. */
+export const DEFAULT_STROKE_CFG = {
+  smoothWin: 3,
+  // Peak hand speed a swing must reach, in hip-heights per second. A hip is
+  // about 0.95 m up, so this is roughly 4 m/s: above an arm swinging on a run
+  // (2-3), below any stroke hit with intent (6-15).
+  minSpeed: 4.0,
+  // ...and at least this share of the clip's own fastest swings, so a clip of
+  // hard hitting does not count every recovery step of the arm.
+  relPeak: 0.5,
+  // The arm coming back to ready after a stroke is fast too. A burst within
+  // this long of a stroke, and under this share of its speed, is that.
+  recoverS: 1.0, recoverFrac: 0.6,
+  // Two strokes cannot be closer than this.
+  minGapS: 0.6,
+  // The swing runs out from the peak to where speed falls to this share of it,
+  edgeFrac: 0.3,
+  // and no further than this either side.
+  maxHalfS: 0.7,
+  // Wrist this far above the shoulders at some point in the swing: a serve or
+  // a smash. A topspin forehand finishes by the ear, 0.2 at most.
+  minOverhead: 0.5,
+  // How far across the chest (in shoulder widths) the hand must travel for
+  // the stroke to be named.
+  minCross: 0.25,
+  // "l" or "r" to fix the racket hand; null picks the faster hand of the clip.
+  side: null,
+};
+
+/** Stroke features: the jump shot's (both wrists, hand above shoulder) plus
+ *  the shoulders one by one and, where the frames carry it, depth. */
+export function buildStrokeFeatures(poses) {
+  const F = buildShotFeatures(poses);
+  const frames = Object.keys(poses).map(Number).sort((a, b) => a - b);
+  const n = F._n, lo = F._lo;
+  for (const k of ["sh_x_l", "sh_x_r", "sh_z_l", "sh_z_r", "wrist_z_l", "wrist_z_r"]) {
+    F[k] = new Array(n).fill(NaN);
+  }
+  for (const fi of frames) {
+    const i = fi - lo, lm = poses[fi];
+    for (const [sd, name] of [["l", "left"], ["r", "right"]]) {
+      const sh = lm[name + "_shoulder"], wr = lm[name + "_wrist"];
+      if (sh) { F["sh_x_" + sd][i] = sh[0]; if (isNum(sh[2])) F["sh_z_" + sd][i] = sh[2]; }
+      if (wr && isNum(wr[2])) F["wrist_z_" + sd][i] = wr[2];
+    }
+  }
+  return F;
+}
+
+/** Hand speed against the hips, hip-heights per second, for one side. */
+function handSpeed(F, sd, fps, win) {
+  const n = F._n;
+  const hx = interpNan(F.hip_cx), hy = interpNan(F.hip_cy);
+  const x = smooth(interpNan(F["wrist_x_" + sd]).map((v, i) => v - hx[i]), win);
+  const y = smooth(interpNan(F["wrist_y_" + sd]).map((v, i) => v - hy[i]), win);
+  const v = new Array(n).fill(NaN);
+  for (let i = 1; i < n - 1; i++) {
+    const d = Math.hypot(x[i + 1] - x[i - 1], y[i + 1] - y[i - 1]);
+    if (isNum(d)) v[i] = (d * fps) / 2 / (F._scale || 1);
+  }
+  if (n > 2) { v[0] = v[1]; v[n - 1] = v[n - 2]; }
+  return v;
+}
+
+/** Where the racket hand is along the shoulder line, in shoulder widths from
+ *  the middle of the chest: positive out on the racket side, negative across
+ *  the body. NaN where the shoulder line cannot be placed. */
+function crossBody(F, side) {
+  const o = side === "r" ? "l" : "r", n = F._n, scale = F._scale || 1;
+  const sx = interpNan(F["sh_x_" + side]), ox = interpNan(F["sh_x_" + o]);
+  const sz = interpNan(F["sh_z_" + side]), oz = interpNan(F["sh_z_" + o]);
+  const wx = interpNan(F["wrist_x_" + side]), wz = interpNan(F["wrist_z_" + side]);
+  const hasZ = sz.some(isNum) && oz.some(isNum) && wz.some(isNum);
+  // Without depth: the shoulder line's direction in the picture, one sign for
+  // the whole clip, and only if the shoulders are actually apart in it.
+  const gaps = sx.map((v, i) => v - ox[i]).filter(isNum);
+  const med = gaps.length ? nanmedian(gaps) : NaN;
+  const flat = isNum(med) && Math.abs(med) >= 0.12 * scale ? Math.sign(med) : 0;
+  const u = new Array(n).fill(NaN);
+  for (let i = 0; i < n; i++) {
+    const mx = (sx[i] + ox[i]) / 2;
+    if (hasZ && isNum(sz[i]) && isNum(oz[i]) && isNum(wz[i])) {
+      const ax = sx[i] - ox[i], az = sz[i] - oz[i], aa = ax * ax + az * az;
+      if (aa > (0.1 * scale) ** 2) {
+        u[i] = ((wx[i] - mx) * ax + (wz[i] - (sz[i] + oz[i]) / 2) * az) / aa;
+        continue;
+      }
+    }
+    // Shoulder breadth is about half a hip-height.
+    if (flat && isNum(wx[i]) && isNum(mx)) u[i] = (flat * (wx[i] - mx)) / (0.49 * scale);
+  }
+  return u;
+}
+
+/**
+ * One "rep" per stroke: [swing start, fastest hand (taken as contact), end of
+ * the follow-through]. `types[i]` is "forehand", "backhand", "overhead" or
+ * null (counted, not named).
+ */
+export function findStrokeReps(F, cfg = DEFAULT_STROKE_CFG) {
+  const n = F._n, fps = F._fps || 30;
+  const c = { ...DEFAULT_STROKE_CFG, ...cfg };
+  const sec = (s) => Math.max(1, Math.round(s * fps));
+  const sp = { l: handSpeed(F, "l", fps, c.smoothWin), r: handSpeed(F, "r", fps, c.smoothWin) };
+  const p98 = (a) => { const v = a.filter(isNum); return v.length ? nanpercentile(v, 98) : 0; };
+  const side = c.side === "l" || c.side === "r" ? c.side : (p98(sp.r) >= p98(sp.l) ? "r" : "l");
+  const v = sp[side];
+  const thr = Math.max(c.minSpeed, c.relPeak * p98(v));
+
+  let peaks = [];
+  for (let i = 1; i < n - 1; i++) {
+    if (!(isNum(v[i]) && v[i] >= thr && v[i] >= v[i - 1] && v[i] > v[i + 1])) continue;
+    // One frame of a wrist flung across the picture by the tracker is not a
+    // swing: its neighbours have to be moving too.
+    if (Math.min(v[i - 1], v[i + 1]) < 0.4 * v[i]) continue;
+    peaks.push(i);
+  }
+  const merged = [];
+  for (const p of peaks) {
+    const q = merged[merged.length - 1];
+    if (q !== undefined && p - q < sec(c.minGapS)) {
+      if (v[p] > v[q]) merged[merged.length - 1] = p;
+      continue;
+    }
+    if (q !== undefined && p - q < sec(c.recoverS) && v[p] < c.recoverFrac * v[q]) continue;
+    merged.push(p);
+  }
+
+  const u = crossBody(F, side);
+  const over = interpNan(F["over_" + side]);
+  const meanOf = (a, from, to) => {
+    const w = a.slice(from, to + 1).filter(isNum);
+    return w.length ? w.reduce((x, y) => x + y, 0) / w.length : NaN;
+  };
+  const reps = [], types = [];
+  let prevEnd = 0;
+  for (const p of merged) {
+    let a = p, b = p;
+    while (a > prevEnd && p - a < sec(c.maxHalfS) && v[a - 1] > c.edgeFrac * v[p]) a--;
+    while (b < n - 1 && b - p < sec(c.maxHalfS) && v[b + 1] > c.edgeFrac * v[p]) b++;
+    if (a > prevEnd) a--;
+    if (b < n - 1) b++;
+    if (p - a < 1 || b - p < 1) continue;
+    let type = null;
+    let top = -Infinity;
+    for (let k = a; k <= b; k++) if (isNum(over[k]) && over[k] > top) top = over[k];
+    if (top >= c.minOverhead) type = "overhead";
+    else {
+      const before = meanOf(u, a, a + Math.floor((p - a) / 2));
+      const after = meanOf(u, p + Math.ceil((b - p) / 2), b);
+      const du = after - before;
+      if (isNum(du) && Math.abs(du) >= c.minCross) type = du < 0 ? "forehand" : "backhand";
+    }
+    reps.push([a, p, b]);
+    types.push(type);
+    prevEnd = b;
+  }
+  return { reps, types, speed: v, cross: u, racketSide: side,
+           refused: reps.length ? null : "noStrokes" };
+}
+
+/** What one stroke did. Speeds are the WRIST's, in the picture plane. */
+export function strokeMetrics(F, rep, fps, pxPerM, found, i) {
+  const [a, p, b] = rep;
+  const side = found.racketSide;
+  const v = found.speed[p];
+  const ms = isNum(v) && pxPerM > 0 ? (v * (F._scale || 1)) / pxPerM : null;
+  const wy = interpNan(F["wrist_y_" + side]);
+  const knee = interpNan(F.knee_flex);
+  let kneeMax = NaN;
+  for (let k = a; k <= p; k++) if (isNum(knee[k]) && !(knee[k] <= kneeMax)) kneeMax = knee[k];
+  return {
+    stroke_type: found.types[i] ?? null,
+    racket_side: side,
+    hand_speed_ms: ms != null ? +ms.toFixed(2) : null,
+    hand_speed_kmh: ms != null ? +(ms * 3.6).toFixed(1) : null,
+    contact_height_m: pxPerM > 0 && isNum(wy[p]) ? +((F._floorY - wy[p]) / pxPerM).toFixed(2) : null,
+    knee_flex_load_deg: isNum(kneeMax) ? +kneeMax.toFixed(1) : null,
+    // The frame the hand was fastest on, in the clip's own frame numbering:
+    // what the ball track is lined up against.
+    contact_frame: (F._lo || 0) + p,
+    contact_s: +(p / fps).toFixed(3),
+  };
+}
+
 export const ACTIVITIES = {
   pullup: {
     label: "pull-up", columns: DRIVEN_COORDS, defaultCfg: DEFAULT_PULLUP_CFG,
@@ -2703,6 +2906,15 @@ export const ACTIVITIES = {
     features: buildShotFeatures, findReps: findShotReps,
     coords: squatRepCoordinates, reference: jumpReferencePositions,
     phases: ["load_s", "follow_s"], shot: true,
+  },
+  /* A racket stroke borrows the shot's coordinate set for the legs. The
+   * player travels and the arm is free, so nothing here is fed to the force
+   * models: `openChain` keeps the reaction force and muscle panels off. */
+  stroke: {
+    label: "racket stroke", columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_STROKE_CFG,
+    features: buildStrokeFeatures, findReps: findStrokeReps,
+    coords: squatRepCoordinates, reference: jumpReferencePositions,
+    phases: ["swing_s", "follow_s"], stroke: true, openChain: true,
   },
   /* Glute kick back. Per leg, like the heel raise: one clip, each rep tagged
    * with the leg that kicked. `openChain` because the working leg is in the
@@ -2873,7 +3085,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
 
   const reps = bounds.map((b, i) => {
     const { times, coords } = (activity === "squat" || spec.jump || spec.perLeg
-                               || spec.shot)
+                               || spec.shot || spec.stroke)
       ? spec.coords(F, b, fps, pxPerM, refA, refB,
                     { model: osimModel, ankleValid: view.ankle_usable })
       : activity === "neck"
@@ -2934,7 +3146,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
         [s.flex_hold_deg, s.flex_sd_deg, s.flex_drift_deg] = stat("pitch1", "pitch2");
         [s.rot_hold_deg, s.rot_sd_deg, s.rot_drift_deg] = stat("yaw1", "yaw2");
       }
-    } else if (activity === "squat" || spec.jump || spec.perLeg || spec.shot) {
+    } else if (activity === "squat" || spec.jump || spec.perLeg || spec.shot || spec.stroke) {
       // knee_angle is SIGNED per model family, so report peak flexion as a
       // magnitude; otherwise a GPK export summarises as "-2 deg".
       s.knee_flex_max_deg = Math.max(...coords.knee_angle_r.map(Math.abs));
@@ -2986,6 +3198,9 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       }
       if (spec.shot) {
         Object.assign(s, shotMetrics(F, b, fps, pxPerM, conf));
+      }
+      if (spec.stroke) {
+        Object.assign(s, strokeMetrics(F, b, fps, pxPerM, found, i));
       }
       if (activity === "sidestep") {
         Object.assign(s, sidestepMetrics(F, b, fps, pxPerM, found.midX ?? refB));
