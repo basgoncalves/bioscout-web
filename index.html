@@ -469,6 +469,15 @@ try {
   .protoBar { height:8px; border-radius:999px; background:var(--bg); overflow:hidden; }
   .protoBar i { display:block; height:100%; background:var(--accent); }
   button.sportBtn .sub { display:block; font-size:12.5px; font-weight:400; margin-top:2px; }
+  /* The sport picker: names only, large. The grey line under each name could
+     not be read on the accent fill and was dropped (Bas, 2026-10-08). */
+  button.sportBtn.big { font-size:20px; font-weight:700; padding:20px; }
+  /* Return to play (rtp.js) */
+  .rtpPhases { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin-top:6px; }
+  button.rtpPhase { display:flex; flex-direction:column; align-items:center; gap:4px; margin:0; padding:8px 2px;
+    font-size:11.5px; line-height:1.15; background:transparent; color:var(--ink); border:1px solid var(--line); }
+  button.rtpPhase.on { border-color:var(--accent); color:var(--accent); font-weight:700; }
+  .rtpBlock { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-top:10px; }
   /* Rest timer. */
   .restClock { font-size:44px; font-weight:700; text-align:center; font-variant-numeric:tabular-nums;
                margin:6px 0 4px; line-height:1.1; }
@@ -1165,6 +1174,8 @@ try {
     <div class="card trainOnly" id="setup">
     <!-- Strength sessions only: pick the exercise by body part (bodymap.js). -->
     <div id="bodyMapBox" class="trainOnly hidden" style="margin-bottom:12px"></div>
+    <!-- Return-to-play sessions only: body part, injury, phase (rtp.js). -->
+    <div id="rtpBox" class="trainOnly hidden" style="margin-bottom:12px"></div>
     <!-- Today's plan, if there is one: planned vs done, tap to pick. -->
     <div id="planNow" class="trainOnly hidden" style="margin-bottom:12px"></div>
     <div class="row trainOnly" style="margin-bottom:11px">
@@ -1442,7 +1453,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 126;
+window.BUILD = 127;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1550,6 +1561,7 @@ import { cleanEngineUrl, engineFromSearch, fileKind, makeEngineClient, EngineErr
          MUSCLE_COLORS } from "./src/osimlab.js";
 import { buildSessionFiles } from "./src/osimexport.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
+import { RTP_REGIONS, rtpPanelHTML, recentTest, INJURY } from "./src/rtp.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
          dayOfCycle } from "./src/cycle.js";
 import { densityFor, foodNames, describe, mealKcal, toGrams, unitStep } from "./src/foods.js";
@@ -3513,8 +3525,7 @@ function openAdd(step, planId = null) {
      * weight from there. */
     body.innerHTML = `<h2 style="font-size:16px;margin:0 0 12px;outline:none" tabindex="-1" autofocus>${
         tr("pickSport")}</h2>
-      ${SPORT_IDS.map((id) => `<button class="sportBtn" data-sport="${id}">${tr("sport_" + id)}
-        <span class="sub">${tr("sport_" + id + "_sub")}</span></button>`).join("")}`;
+      ${SPORT_IDS.map((id) => `<button class="sportBtn big" data-sport="${id}">${tr("sport_" + id)}</button>`).join("")}`;
     body.querySelectorAll("button.sportBtn").forEach((b) => {
       b.onclick = () => {
         const sport = b.dataset.sport;
@@ -5787,12 +5798,78 @@ function renderBodyMap() {
 }
 $("activity").addEventListener("change", () => { if (!$("bodyMapBox").classList.contains("hidden")) renderBodyMap(); });
 
+/* Return to play. The choice of injury and phase is kept per athlete
+ * (bioscout.rtp.v1) so the next session opens where the last one left off,
+ * and stamped on the session so the log says what it was for. */
+const RTP_KEY = "bioscout.rtp.v1";
+function rtpState() {
+  try { return (JSON.parse(localStorage.getItem(RTP_KEY) || "{}"))[currentAthlete() || ""] || {}; } catch { return {}; }
+}
+function setRtpState(patch) {
+  let all = {};
+  try { all = JSON.parse(localStorage.getItem(RTP_KEY) || "{}"); } catch { /* start over */ }
+  const who = currentAthlete() || "";
+  all[who] = { ...(all[who] || {}), ...patch };
+  try { localStorage.setItem(RTP_KEY, JSON.stringify(all)); } catch { /* storage full: this visit only */ }
+  const sess = getSession();
+  if (sess && sess.sport === "rtp") { sess.rtp = { injury: all[who].injury || null, phase: all[who].phase || null }; }
+  renderRtp();
+}
+let rtpShowEx = false;
+function pickMovement(a) {
+  $("activity").value = a;
+  $("activity").dispatchEvent(new Event("change"));
+  $("startBtn").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+function renderRtp() {
+  const box = $("rtpBox");
+  const sess = getSession();
+  const show = !!sess && sess.sport === "rtp" && !assessStep;
+  box.classList.toggle("hidden", !show);
+  if (!show) { box.innerHTML = ""; return; }
+  const s = rtpState();
+  const inj = s.injury && INJURY[s.injury];
+  const recent = inj ? recentTest(inj.tests, { sessions: dashboardData(), reactions: myReaction() }) : null;
+  box.innerHTML = `<div style="font-weight:600;margin-bottom:4px">${tr("rtpTitle")}</div>`
+    + bodyMapHTML(tr, { selected: s.region || null, trained: inj ? inj.regions : [], regions: RTP_REGIONS, list: false,
+                        female: getProfile(sess.profile || currentAthlete())?.sex === "F" })
+    + rtpPanelHTML(tr, { ...s, showEx: rtpShowEx }, { recent,
+        fmtDate: (t) => new Date(t).toLocaleDateString([], { day: "numeric", month: "short" }) })
+    + `<p class="note" style="margin:10px 0 0">${tr("rtpDisclaimer")}</p>`;
+  box.querySelectorAll("g.bm-part").forEach((g) => {
+    const pick = () => setRtpState({ region: g.dataset.region === s.region ? null : g.dataset.region });
+    g.addEventListener("click", pick);
+    g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+  });
+  box.querySelectorAll("[data-rtp-injury]").forEach((b) => {
+    b.onclick = () => { rtpShowEx = false; setRtpState({ injury: b.dataset.rtpInjury, phase: null }); };
+  });
+  $("rtpInjury").onchange = () => {
+    const id = $("rtpInjury").value || null;
+    rtpShowEx = false;
+    setRtpState({ injury: id, phase: null, region: id ? INJURY[id].regions[0] : s.region });
+  };
+  box.querySelectorAll("[data-rtp-phase]").forEach((b) => {
+    b.onclick = () => { rtpShowEx = false; setRtpState({ phase: b.dataset.rtpPhase }); };
+  });
+  const ex = box.querySelector("[data-rtp-showex]");
+  if (ex) ex.onclick = () => { rtpShowEx = !rtpShowEx; renderRtp(); };
+  box.querySelectorAll("[data-rtp-test], [data-rtp-ex]").forEach((b) => {
+    b.onclick = () => {
+      const a = b.dataset.rtpTest || b.dataset.rtpEx;
+      if (a === "reaction") { openReaction(); return; }
+      pickMovement(a);
+    };
+  });
+}
+
 function renderTraining() {
   const card = $("trainingCard");
   const sess = getSession();
   // An assessment test picks its own movement, whatever the session's sport.
   applySport(assessStep ? null : (sess?.sport || null));
   renderBodyMap();
+  renderRtp();
   renderPlanNow();
   paintStrokeBox();
   paintRest();

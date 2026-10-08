@@ -20,6 +20,9 @@ export const SPORTS = {
    * app counts rep for rep for the second. The recorder picks the movement
    * itself while a protocol runs. */
   tomholland: ["pullup", "pushup", "squat"],
+  /* Return to play (rtp.js): every movement an injury's tests or phase
+   * exercises can name. The figure and the injury pick the movement. */
+  rtp: ["heelraise", "slsquat", "squat", "cmj", "sj", "sidestep", "run", "walk", "kickback", "pushup", "dip", "pullup", "neck"],
   tabata: ["squat", "pushup", "pullup", "dip", "heelraise", "kickback", "slsquat", "cmj", "sj"],
 };
 

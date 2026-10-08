@@ -85,10 +85,10 @@ function figure(cx, back, female = false) {
       ["core", female
         ? P(`M${L(11)},71 L${Rt(11)},71 Q${Rt(8)},92 ${Rt(12)},113 L${L(12)},113 Q${L(8)},92 ${L(11)},71 Z`)
         : R(cx - b.core, 71, 2 * b.core, 42, 7)],
-      [null, P(`M${L(b.pelvis)},113 L${Rt(b.pelvis)},113 L${Rt(b.pelvis + 2)},128 L${L(b.pelvis + 2)},128 Z`)],   // hips
+      ["hip", P(`M${L(b.pelvis)},113 L${Rt(b.pelvis)},113 L${Rt(b.pelvis + 2)},128 L${L(b.pelvis + 2)},128 Z`)],   // hips
       ["quads", E(L(b.thigh), 160, b.thighR, 30) + E(Rt(b.thigh), 160, b.thighR, 30)],
-      [null, E(L(b.knee), 193, 6, 5) + E(Rt(b.knee), 193, 6, 5)],               // knees
-      [null, E(L(b.shin), 220, b.shinR, 22) + E(Rt(b.shin), 220, b.shinR, 22)], // shins
+      ["knee", E(L(b.knee), 193, 6, 5) + E(Rt(b.knee), 193, 6, 5)],               // knees
+      ["shin", E(L(b.shin), 220, b.shinR, 22) + E(Rt(b.shin), 220, b.shinR, 22)], // shins
     );
   } else {
     parts.push(
@@ -98,11 +98,11 @@ function figure(cx, back, female = false) {
       ["core", R(cx - (female ? 10 : 11), 100, female ? 20 : 22, 16, 5)],     // lower back
       ["glutes", E(L(b.glute), 128, b.gluteR, 12) + E(Rt(b.glute), 128, b.gluteR, 12)],
       ["hamstrings", E(L(b.thigh + 1), 166, b.thighR, 25) + E(Rt(b.thigh + 1), 166, b.thighR, 25)],
-      [null, E(L(b.knee), 195, 6, 5) + E(Rt(b.knee), 195, 6, 5)],               // knees
+      ["knee", E(L(b.knee), 195, 6, 5) + E(Rt(b.knee), 195, 6, 5)],               // knees
       ["calves", E(L(b.shin), 218, b.calfR, 20) + E(Rt(b.shin), 218, b.calfR, 20)],
     );
   }
-  parts.push([null, E(L(12), 246, female ? 6 : 7, 4) + E(Rt(12), 246, female ? 6 : 7, 4)]);   // feet
+  parts.push(["ankle", E(L(12), 246, female ? 6 : 7, 4) + E(Rt(12), 246, female ? 6 : 7, 4)]);   // feet
   return parts;
 }
 
@@ -115,23 +115,32 @@ function figure(cx, back, female = false) {
  *   female    draw the female figure (the athlete's profile says sex F)
  */
 export function bodyMapHTML(tr, { selected = null, trained = [], current = null,
-                                  female = false } = {}) {
+                                  female = false, regions = REGIONS, list: withList = true } = {}) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const done = new Set(trained);
+  /* The figure also carries joints (knee, hip, ankle, shin) for return to
+   * play. Only the parts `regions` names can be tapped; the rest are drawn
+   * as plain body, so strength still offers muscle groups alone. */
+  const tappable = new Set(regions);
   const draw = (cx, back) => figure(cx, back, female).map(([reg, shape]) =>
     reg === "hair" ? `<g class="bm-hair">${shape}</g>`
-    : reg
+    : reg && tappable.has(reg)
     ? `<g class="bm-part${reg === selected ? " sel" : done.has(reg) ? " done" : ""}" data-region="${reg}"
          role="button" tabindex="0" aria-label="${esc(tr("bm_" + reg))}"><title>${esc(tr("bm_" + reg))}</title>${shape}</g>`
     : `<g class="bm-base">${shape}</g>`).join("");
-  const ex = selected ? REGION_EXERCISES[selected] : null;
+  const ex = selected ? (REGION_EXERCISES[selected] || []) : null;
   const list = !selected
     ? `<p class="sub" style="margin:6px 0 0">${esc(tr("bmHint"))}</p>`
     : `<div style="margin-top:6px"><b>${esc(tr("bm_" + selected))}</b>${ex.length
         ? `<div style="margin-top:4px">${ex.map((a) => `<button type="button"
             class="ghost bmEx${a === current ? " on" : ""}" data-activity="${a}">${esc(tr(a))}</button>`).join("")}</div>`
         : `<p class="sub" style="margin:4px 0 0">${esc(tr("bmNone"))}</p>`}</div>`;
+  if (!withList) return `<svg class="bodymap${female ? " female" : ""}" viewBox="0 0 260 262" role="group" aria-label="${esc(tr("bmTitle"))}">
+      ${draw(60, false)}${draw(200, true)}
+      <text x="60" y="260" text-anchor="middle">${esc(tr("bmFront"))}</text>
+      <text x="200" y="260" text-anchor="middle">${esc(tr("bmBack"))}</text>
+    </svg>`;
   return `<svg class="bodymap${female ? " female" : ""}" viewBox="0 0 260 262" role="group" aria-label="${esc(tr("bmTitle"))}">
       ${draw(60, false)}${draw(200, true)}
       <text x="60" y="260" text-anchor="middle">${esc(tr("bmFront"))}</text>
