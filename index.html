@@ -1442,7 +1442,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 125;
+window.BUILD = 126;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1548,6 +1548,7 @@ import { cleanEngineUrl, engineFromSearch, fileKind, makeEngineClient, EngineErr
          pickAngles, pickMoments, markerErrors, topMuscles, worstReserve, reactionJoints,
          defaultReactionJoint, reactionForce, scaleRows, lineChartSVG, legendHTML,
          MUSCLE_COLORS } from "./src/osimlab.js";
+import { buildSessionFiles } from "./src/osimexport.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
          dayOfCycle } from "./src/cycle.js";
@@ -8513,6 +8514,11 @@ async function enrich(res, poses, fps, heightM, activity) {
       r.forceMissing = out.missing;
       r.forceModel = fm;
       r.forceImplausible = implausibleFraction(out.forces);
+      // For the OpenSim-style export (src/osimexport.js) only.
+      r.osimOut = { activations: out.activations, activationNames: out.activationNames,
+                    moments: out.moments, momentNames: out.momentNames,
+                    grf: out.grf, grfNames: out.grfNames,
+                    jrfComp: out.jrfComp, jrfCompNames: out.jrfCompNames };
     }
   } catch (err) {
     /* Say so on the page. A missing or refused force model used to remove the
@@ -9963,6 +9969,50 @@ function csvFromColumns(header, cols, n) {
 
 /** Everything from this session in one archive: data, plots and (optionally)
  *  the video. Built locally -- nothing is uploaded at any point. */
+/** Two figures for the top of 4_outputs: joint angles and the most active
+ *  muscles, every rep over the clip's own time. */
+async function summaryFigures(res) {
+  const out = [];
+  const items = res.whole && res.whole.times ? [res.whole] : res.reps;
+  if (!items.length || !items[0].times) return out;
+  const join = (get) => items.flatMap((r, k) => [...get(r), ...(k < items.length - 1 ? [NaN] : [])]);
+  const T = items.flatMap((r, k) => [...r.times, ...(k < items.length - 1 ? [r.times[r.times.length - 1]] : [])]);
+  const draw = async (name, series, yUnit) => {
+    if (!series.length) return;
+    const host = document.createElement("div");
+    host.style.cssText = "position:fixed;left:-9999px;top:0;width:700px";
+    host.innerHTML = lineChartSVG({ time: T, series, yUnit, zero: false });
+    document.body.appendChild(host);
+    const svg = host.querySelector("svg");
+    // The on-page charts carry their key in HTML beside them; a PNG has to
+    // carry it inside, so the picture grows a strip underneath for it.
+    if (svg) {
+      const rows = Math.ceil(series.length / 3);
+      svg.setAttribute("viewBox", `0 0 340 ${170 + rows * 12 + 4}`);
+      svg.insertAdjacentHTML("beforeend", series.map((x, k) => {
+        const lx = 40 + (k % 3) * 100, ly = 178 + Math.floor(k / 3) * 12;
+        return `<line x1="${lx}" y1="${ly - 3}" x2="${lx + 12}" y2="${ly - 3}" stroke="${x.color}" stroke-width="2"/>`
+          + `<text x="${lx + 16}" y="${ly}" font-size="8.5" fill="#333">${esc(x.label)}</text>`;
+      }).join(""));
+    }
+    const png = svg ? await svgToPng(svg, 1400) : null;
+    host.remove();
+    if (png) out.push({ name, data: await blobBytes(png) });
+  };
+  const ang = [["hip_flexion_r", "#2f6fe4"], ["knee_angle_r", "#e8871a"], ["ankle_angle_r", "#1d7a45"]]
+    .filter(([c]) => items[0].coords && items[0].coords[c])
+    .map(([c, color]) => ({ label: c, color, y: join((r) => r.coords[c].map((v) => (c.startsWith("knee") ? Math.abs(v) : v))) }));
+  await draw("summary_joint_angles.png", ang, "deg");
+  const o = items[0].osimOut;
+  if (o && o.activations && items.every((r) => r.osimOut && r.osimOut.activations)) {
+    const peak = o.activationNames.map((n, j) => [n, j, Math.max(...items.flatMap((r) => r.osimOut.activations.map((a) => a[j])))])
+      .sort((x, y) => y[2] - x[2]).slice(0, 6);
+    await draw("summary_muscle_activations.png", peak.map(([n, j], k) => ({ label: n, color: MUSCLE_COLORS[k % MUSCLE_COLORS.length],
+      y: join((r) => r.osimOut.activations.map((a) => a[j])) })), "0-1");
+  }
+  return out;
+}
+
 async function exportZip(res, fps) {
   const st = $("zipStatus");
   const note = (t) => { st.textContent = t; };
@@ -9971,36 +10021,6 @@ async function exportZip(res, fps) {
     const files = [];
     const cols = ACTIVITIES[res.activity].columns;
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-
-    for (const r of res.reps) {
-      const d = `rep${r.rep}/`;
-      files.push({ name: d + "joint_angles.mot",
-                   data: writeMot("joint_angles", cols, r.times, r.coords) });
-      if (r.dyn) {
-        const dc = ["hip_moment", "knee_moment", "ankle_moment",
-                    "grf_vertical", "grf_horizontal"];
-        files.push({ name: d + "joint_moments.sto",
-                     data: writeMot("joint_moments", dc, r.times,
-                       Object.fromEntries(dc.map((k) => [k, r.dyn[k]]))) });
-      }
-      if (r.jm) {
-        // Angle, velocity, moment and power per joint, one column each.
-        const keys = Object.keys(r.jm).filter((k) => Array.isArray(r.jm[k])
-          && r.jm[k].length === r.times.length && /_(angle|vel|moment|power)(_[lr])?$/.test(k));
-        if (keys.length) {
-          files.push({ name: d + "joint_metrics.csv",
-                       data: csvFromColumns(["time", ...keys],
-                                            [r.times, ...keys.map((k) => r.jm[k])],
-                                            r.times.length) });
-        }
-      }
-      if (r.forces && r.forces.length) {
-        const header = ["time", ...r.forceNames];
-        const colArr = [r.times, ...r.forceNames.map((_, j) => r.forces.map((row) => row[j]))];
-        files.push({ name: d + "muscle_forces.csv",
-                     data: csvFromColumns(header, colArr, r.times.length) });
-      }
-    }
 
     // Plots: page through the reps so each one's charts are in the DOM.
     note("Rendering plots…");
@@ -10039,10 +10059,8 @@ async function exportZip(res, fps) {
       }
     }
 
-    if (videoBlob && videoBlob.size) {
-      note(`Adding video (${(videoBlob.size / 1e6).toFixed(1)} MB)…`);
-      files.push({ name: "video." + extFor(videoBlob.type), data: await blobBytes(videoBlob) });
-    }
+    const video = videoBlob && videoBlob.size
+      ? { name: "video." + extFor(videoBlob.type), data: await blobBytes(videoBlob) } : null;
 
     const summary = {
       generated: new Date().toISOString(),
@@ -10084,22 +10102,28 @@ async function exportZip(res, fps) {
 Activity: ${res.activity}   frame rate: ${fps.toFixed(1)} fps
 Camera view: ${res.view?.view ?? "?"} (frontality ${res.view?.frontality ?? "?"})
 
-repN/joint_angles.mot    OpenSim coordinates, signed for ${res.osimModel}
+LAYOUT                   The zip is a bioscout session folder, <athlete>/<YY_MM_DD>/,
+                         the same layout the Python pipeline writes for a Vicon
+                         session. Trial files are under
+                         3_iterations/bioscout_web/<Trial>/ (one folder per rep,
+                         plus the whole clip for gait); this README, the charts
+                         and the training data are in 4_outputs/.
+external_biomechanics/joint_angles.mot   OpenSim coordinates, signed for ${res.osimModel}
                          (knee flexion NEGATIVE). pelvis_ty is an ABSOLUTE
                          height above the floor, not a displacement.
-repN/joint_moments.sto   hip/knee/ankle moments (N.m, extension positive, per
-                         leg) and ground reaction (N, both legs).
-repN/joint_metrics.csv   per joint: angle (deg, flexion positive, measured --
-                         not clipped like the .mot), angular velocity (deg/s),
-                         moment (N.m, extension positive, per leg / per arm)
-                         and power (W, positive = concentric). Arm moments on
-                         pull-ups and dips assume the hands carry the whole
-                         body, split equally; on a jump shot, the ball
-                         (0.6 kg) in the shooting hand until release.
-repN/muscle_forces.csv   80 muscles, per frame, in newtons. SEE WARNING BELOW.
-plots/                   PNG of every chart shown in the app.
-session.json             summary and settings used.
-${videoBlob ? `video.${extFor(videoBlob.type).padEnd(4)}              the recorded clip.\n` : ""}
+external_biomechanics/inverse_dynamics.sto     net joint moments (N.m), OpenSim names
+external_biomechanics/inverse_dynamics_2d.sto  planar inverse dynamics from video (N.m, N)
+static_optimisation/StaticOptimization_force.sto       muscle forces (N) + predicted GRF
+static_optimisation/StaticOptimization_activation.sto  muscle activations (0-1)
+joint_contact_forces/output_so.sto             joint reaction forces (N), components + resultants
+2_experimental/<Trial>/marker_experimental.trc pose landmarks in metres (depth is the pose
+                         model's guess), and the video when it was kept.
+4_outputs/               summary figures, every chart in the app (plots/), session.json,
+                         training/ (the whole training session).
+All .sto/.mot open in the OpenSim GUI (File > Load Motion / Preview Experimental Data).
+Forces, activations, moments and joint loads come from the static-optimisation
+surrogate, not from an OpenSim solve; each file's header says so.
+
 WHAT TO TRUST
   Joint angles, range of motion, rep count and depth are measured.
   Joint moments are inverse dynamics from body mass; the ground reaction is
@@ -10110,7 +10134,7 @@ WHAT TO TRUST
   Left and right are mirrored: one camera cannot separate the sides.
 
 WHAT NOT TO TRUST
-  muscle_forces.csv comes from a surrogate that FAILS ITS OWN AUDIT: on a real
+  The muscle forces come from a surrogate that FAILS ITS OWN AUDIT: on a real
   trial from its own gait training set it predicts 113,250 N, where the largest
   human muscle produces a few thousand. The waveform SHAPES look plausible; the
   magnitudes are wrong by orders of magnitude. Do not publish these numbers.
@@ -10120,7 +10144,20 @@ WHAT NOT TO TRUST
 ` });
 
     note("Packing…");
-    const blob = makeZip(files);
+    /* Laid out like a lab session from the Python pipeline (osimexport.js):
+     * the trial's OpenSim files under 3_iterations/bioscout_web, everything
+     * above (charts, summaries, training) under 4_outputs. */
+    note("Writing OpenSim files…");
+    for (const fig of await summaryFigures(res)) files.push(fig);
+    const built = buildSessionFiles({
+      athlete: currentAthlete() || "athlete",
+      date: getSession()?.started || new Date(),
+      massKg: res.massKg,
+      set: { res, fps, setIndex: res.setIndex ?? 1,
+             frames: res === lastResult ? frames : null, video },
+      extra: files,
+    });
+    const blob = makeZip(built.files);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;

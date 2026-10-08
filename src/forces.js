@@ -210,6 +210,17 @@ export function predictForces(m, coords, nFrames, opts = {}) {
   const loadNames = loadTargetNames(m);
   const loadIdx = loadNames.map((n) => m.targ.indexOf(n));
   const loads = loadNames.length ? new Array(nFrames) : null;
+  /* Everything else the surrogate predicts, for the OpenSim-style export:
+   * activations (0-1), the joint reaction components (BW, child-body frames),
+   * net joint moments (N.m/kg) and the ground reaction (BW). Names without
+   * their target prefix, so they read like OpenSim columns. Empty for a model
+   * file that does not carry a block. */
+  const pick = (pre) => m.targ.filter((n) => n.startsWith(pre));
+  const actT = pick("act_"), momT = pick("mom_"), grfT = pick("grf_");
+  const compT = m.targ.filter((n) => /^(hip|knee|ankle)_[rl]_f[xyz]$/.test(n));
+  const idx = (names) => names.map((n) => m.targ.indexOf(n));
+  const actI = idx(actT), momI = idx(momT), grfI = idx(grfT), compI = idx(compT);
+  const extra = { activations: [], moments: [], grf: [], jrfComp: [] };
 
   for (let t = 0; t < nFrames; t++) {
     for (let j = 0; j < nIn; j++) {
@@ -220,9 +231,17 @@ export function predictForces(m, coords, nFrames, opts = {}) {
     forces[t] = Float64Array.from(muscleIdx, (i) => y[i] * bw);
     jrf[t] = Float64Array.from(magIdx, (i) => y[i]);          // bodyweight
     if (loads) loads[t] = Float64Array.from(loadIdx, (i) => y[i]);
+    extra.activations.push(Float64Array.from(actI, (i) => Math.min(1, Math.max(0, y[i]))));
+    extra.moments.push(Float64Array.from(momI, (i) => y[i] * massKg));      // N.m
+    extra.grf.push(Float64Array.from(grfI, (i) => y[i] * bw));              // N
+    extra.jrfComp.push(Float64Array.from(compI, (i) => y[i] * bw));         // N
   }
   return { forces, muscleNames: m.muscles, jrf, jrfNames: m.jrfMagnitudes, missing,
-           loads, loadNames: loads ? loadNames : null };
+           loads, loadNames: loads ? loadNames : null,
+           activations: actT.length ? extra.activations : null, activationNames: actT.map((n) => n.slice(4)),
+           moments: momT.length ? extra.moments : null, momentNames: momT.map((n) => n.slice(4) + "_moment"),
+           grf: grfT.length ? extra.grf : null, grfNames: grfT,
+           jrfComp: compT.length ? extra.jrfComp : null, jrfCompNames: compT };
 }
 
 /** The vector targets jointload.js needs, in the order `loads` rows carry them. */
