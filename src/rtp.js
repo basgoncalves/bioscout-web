@@ -18,7 +18,7 @@
  */
 
 /** Body parts the return-to-play figure lets you tap. */
-export const RTP_REGIONS = ["neck", "shoulders", "hip", "glutes", "quads", "hamstrings", "knee", "shin", "calves", "ankle"];
+export const RTP_REGIONS = ["neck", "shoulders", "core", "hip", "glutes", "quads", "hamstrings", "knee", "shin", "calves", "ankle"];
 
 /** The recovery phases, in order, each with an icon (inline SVG paths, 24 px). */
 export const RTP_PHASES = [
@@ -80,6 +80,18 @@ export const INJURIES = [
     exercises: { protect: ["walk"], mobility: ["walk", "heelraise"], strength: ["heelraise", "squat"], power: ["run"], sport: ["run"] } },
   { id: "shoulderDislocation", regions: ["shoulders"], common: true, tests: ["pushup"],
     exercises: { protect: [], mobility: [], strength: ["pushup"], power: ["pushup", "dip"], sport: ["pushup", "pullup"] } },
+  /* Lower back. What the camera can follow: hip-hinge and squat patterns,
+   * the kick back (a standing stand-in for the bird dog / hip extension
+   * work most low-back programmes use), walking and running tolerance. */
+  { id: "lowBackPain", regions: ["core"], common: true, tests: ["squat", "kickback", "walk"],
+    exercises: { protect: ["walk"], mobility: ["walk", "kickback"], strength: ["kickback", "squat", "slsquat"],
+                 power: ["cmj", "run"], sport: ["run", "sidestep", "cmj"] } },
+  { id: "discHerniation", regions: ["core"], common: true, tests: ["walk", "squat"],
+    exercises: { protect: ["walk"], mobility: ["walk"], strength: ["kickback", "squat"],
+                 power: ["run", "sj"], sport: ["run", "sidestep"] } },
+  { id: "spondylolysis", regions: ["core"], common: false, tests: ["squat", "kickback"],
+    exercises: { protect: [], mobility: ["walk"], strength: ["kickback", "squat"],
+                 power: ["run", "cmj"], sport: ["run", "sidestep"] } },
   { id: "concussion", regions: ["neck"], common: true, tests: ["reaction"],
     exercises: { protect: [], mobility: ["walk"], strength: ["walk", "squat"], power: ["run"], sport: ["run", "sidestep"] } },
   { id: "neckStrain", regions: ["neck"], common: false, tests: ["neck"],
@@ -131,7 +143,7 @@ export function rtpPanelHTML(tr, state, { recent = null, fmtDate = (t) => new Da
   let h = "";
   if (region) {
     const list = injuriesFor(region);
-    h += `<div style="margin-top:6px"><b>${esc(tr("bm_" + region))}</b><div style="margin-top:4px">${
+    h += `<div style="margin-top:6px"><b>${esc(tr(region === "core" ? "rtpLowBack" : "bm_" + region))}</b><div style="margin-top:4px">${
       list.map((i) => `<button type="button" class="ghost bmEx${i.id === injury ? " on" : ""}" data-rtp-injury="${i.id}">${
         esc(tr("inj_" + i.id))}</button>`).join("") || `<span class="sub">${esc(tr("rtpNoCommon"))}</span>`}</div></div>`;
   } else {
