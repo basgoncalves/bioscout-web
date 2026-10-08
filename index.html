@@ -1453,7 +1453,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 127;
+window.BUILD = 128;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -7068,6 +7068,10 @@ function renderOsim() {
   if ($("osimJoint")) $("osimJoint").onchange = () => { osim.joint = $("osimJoint").value; renderOsim(); };
 }
 function osimInit() {
+  /* Only reachable through the lab engine's own link: without an engine
+   * running on a PC the card cannot do anything, so the plain lab demo does
+   * not show it (Bas, 2026-10-08). */
+  if (!engineFromSearch(location.search)) return;
   $("osimCard").classList.remove("hidden");
   const open = () => {
     $("osimBody").classList.remove("hidden");
