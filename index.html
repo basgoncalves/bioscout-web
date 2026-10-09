@@ -296,10 +296,18 @@ try {
   .hrCount { font-size:48px; font-weight:700; text-align:center; line-height:1.1;
              font-variant-numeric:tabular-nums; margin:8px 0 0; }
   .hrCount.live { color:var(--accent); }
-  .health { display:flex; align-items:center; gap:12px; margin:6px 0 10px; }
-  .dial { width:78px; height:78px; flex:none; }
+  .healthWeight { display:flex; align-items:center; gap:12px; margin:6px 0 4px; }
+  .hwRight { flex:1; min-width:0; max-width:340px; display:flex; flex-direction:column; gap:6px; }
+  .hwRight #weightBox .stepper { flex:0 1 150px; }
+  .hwRight #weightBox .stepper button.stepBtn { width:30px; flex-basis:30px; font-size:16px; }
+  .hwRight #weightBox .stepper input { padding:4px; }
+  .hwRight #weightBox .row { flex-wrap:nowrap !important; }
+  .hwRight #weightDaySave { padding:6px 8px !important; font-size:12px !important; }
+  #athSummaryBtn { margin:0; padding:6px 10px; font-size:13px; width:100%; }
+  .health { display:flex; flex-direction:column; align-items:center; flex:none; gap:2px; }
+  .dial { width:64px; height:64px; flex:none; }
   .dialText { font-size:22px; font-weight:700; }
-  .healthText { min-width:0; }
+  .healthText { font-size:11px; font-weight:600; color:var(--muted); text-align:center; white-space:nowrap; }
   .intake { display:flex; align-items:flex-end; gap:2px; height:64px; position:relative;
             margin-bottom:4px; }
   .ibar { flex:1; height:100%; display:flex; align-items:flex-end; }
@@ -404,18 +412,18 @@ try {
           padding:8px 6px; text-align:center; min-width:0; }
   .tile b { display:block; font-size:19px; line-height:1.15; }
   .tile span { display:block; font-size:11px; color:var(--muted); }
-  .calnav { display:flex; align-items:center; gap:8px; margin:14px 0 6px; }
+  .calnav { display:flex; align-items:center; gap:8px; margin:6px 0 6px; }
   .calmonth { flex:1; text-align:center; font-weight:600; }
   button.calbtn { width:38px; flex:none; margin:0; padding:6px 0; font-size:18px; line-height:1; }
   .cal { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
-  .dow { text-align:center; font-size:11px; color:var(--muted); padding-bottom:2px; }
+  .dow { text-align:center; font-size:13px; color:var(--muted); padding-bottom:2px; }
   /* Square cells without a fixed pixel size, so the grid survives a 320px
      phone and a tablet without a media query for each. */
   /* margin:0 matters more than it looks: the global `button + button` rule
      adds 8px above every button that follows another, which in a grid pushes
      each cell down inside its own row until the last row spills out of the
      container and lands on the text below it. */
-  button.day { width:100%; aspect-ratio:1; margin:0; padding:0; font-size:13px; font-weight:500;
+  button.day { width:100%; aspect-ratio:1; margin:0; padding:0; font-size:16px; font-weight:500;
                border-radius:8px; background:var(--bg); color:var(--ink);
                border:1px solid transparent; display:flex; align-items:center;
                justify-content:center; }
@@ -1334,6 +1342,7 @@ try {
   <!-- Only for the take just analysed: its stills and video are in memory. -->
   <button class="hidden" id="shareSetBtn" style="margin:0 0 14px" data-i18n="shareSet">Share this set</button>
   </section>
+  <dialog id="rpeDlg"></dialog>
   <dialog id="shareDlg">
     <h2 style="font-size:16px;margin:0 0 10px" id="shareTitle">Share this set</h2>
     <div class="tabs" id="shareTabs">
@@ -1453,7 +1462,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 129;
+window.BUILD = 133;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1586,6 +1595,7 @@ import { makeZip, svgToPng, blobBytes } from "./src/zip.js";
 import { loadForceModel, predictForces, implausibleFraction, peakByMuscle,
          peakJRF, selfTest as forceSelfTest,
          MAX_PLAUSIBLE_FORCE_N } from "./src/forces.js";
+import { armMuscleForces, ARM_TASKS, ARM_BY_JOINT, ARM_MUSCLES } from "./src/armmuscles.js";
 
 // MediaPipe is vendored into vendor/ rather than pulled from a CDN: the app
 // then works offline, loads faster on a second visit, and cannot be broken by
@@ -3782,6 +3792,38 @@ const paintStrokeBox = () => $("strokeBox").classList.toggle("hidden", $("activi
 $("activity").addEventListener("change", paintStrokeBox);
 restSync();          // a countdown still running from before a reload carries on
 
+/* The RPE scale pop-up: 1-10, words at 1, 3, 5, 8 and 10. Picking a number
+ * saves it; "Clear" puts the set back to 0 (not rated). Built on demand and
+ * appended to <body>, like every other dialog (see the note at the top). */
+const RPE_WORDS = { 1: "rpeW1", 3: "rpeW3", 5: "rpeW5", 8: "rpeW8", 10: "rpeW10" };
+function openRpeScale(current, onPick) {
+  const dlg = $("rpeDlg");
+  const rows = Array.from({ length: 10 }, (_, i) => 10 - i).map((v) => {
+    const hue = Math.round(120 - (v - 1) * 13);
+    return `<button type="button" class="rpePick" data-v="${v}" style="display:flex;align-items:center;gap:10px;
+        width:100%;margin:3px 0;padding:8px 10px;text-align:left;border-radius:8px;
+        background:${v === current ? `hsl(${hue} 65% 45%)` : "transparent"};color:${v === current ? "#fff" : "var(--ink)"};
+        border:1px solid ${v === current ? `hsl(${hue} 65% 45%)` : "var(--line)"}">
+      <b style="display:inline-block;width:1.6em;text-align:center;border-radius:6px;padding:2px 0;
+        background:hsl(${hue} 65% 45%);color:#fff">${v}</b>
+      <span>${RPE_WORDS[v] ? esc(tr(RPE_WORDS[v])) : ""}</span></button>`;
+  }).join("");
+  dlg.innerHTML = `<h2 style="font-size:16px;margin:0 0 6px">${esc(tr("rpeScaleTitle"))}</h2>
+    <p class="sub" style="margin:0 0 6px">${esc(tr("rpeScaleSub"))}</p>
+    ${rows}
+    <div class="row" style="margin-top:8px">
+      <button type="button" class="ghost" id="rpeClear" style="margin:0">${esc(tr("effortClear"))}</button>
+      <button type="button" class="ghost" id="rpeClose" style="margin:0">${esc(tr("close"))}</button>
+    </div>`;
+  dlg.querySelectorAll("button.rpePick").forEach((b) => {
+    b.onclick = () => { dlg.close(); onPick(+b.dataset.v); };
+  });
+  dlg.querySelector("#rpeClear").onclick = () => { dlg.close(); onPick(""); };
+  dlg.querySelector("#rpeClose").onclick = () => dlg.close();
+  dlg.onclick = (ev) => { if (ev.target === dlg) dlg.close(); };
+  dlg.showModal();
+}
+
 /* ---- energy: what a session cost, and what to eat -------------------------
  * The model is energy.js; this is the part that knows the athlete, keeps the
  * two answers the athlete may give (RPE and heart rate), and decides when to
@@ -5625,10 +5667,6 @@ function renderDash(fromSync = false) {
   card.querySelectorAll("button.sumWin").forEach((b) => {
     b.onclick = () => { dashView = { ...dashView, summaryWin: b.dataset.win }; saveSum(); renderDash(); };
   });
-  if ($("dashMode")) $("dashMode").onchange = (e) => {
-    dashView = { ...dashView, mode: e.target.value };
-    renderDash();
-  };
 
   card.querySelectorAll("button.mealDel").forEach((b) => {
     b.onclick = async () => {
@@ -6518,8 +6556,9 @@ function renderSessionView() {
   const rows = sess.sets.map((s) => {
     const en = eSet[s.index] || {};
     const eff = s.effort || {};
-    const rpe = eff.rpe != null ? `<button type="button" class="linkish effEdit" data-set="${s.index}" data-k="rpe">${eff.rpe}</button>`
-      : `<input class="effIn" data-set="${s.index}" data-k="rpe" type="number" inputmode="numeric" min="0" max="10" step="1" placeholder="–">`;
+    /* RPE is always a number: 0 until rated, tap it for the 1-10 scale. */
+    const rpe = `<button type="button" class="linkish rpeEdit" data-set="${s.index}"
+      aria-label="RPE" style="min-width:2em;text-decoration:underline dotted">${eff.rpe ?? 0}</button>`;
     const hr = eff.hr != null ? `<button type="button" class="linkish effEdit" data-set="${s.index}" data-k="hr">${eff.hr}</button>`
       : `<input class="effIn" data-set="${s.index}" data-k="hr" type="number" inputmode="numeric" min="30" max="230" step="1" placeholder="–">`;
     return `<tr class="setRow${s.index === sessionViewSet ? " on" : ""}" data-set="${s.index}">
@@ -6587,6 +6626,14 @@ function renderSessionView() {
   };
   card.querySelectorAll("input.effIn").forEach((inp) => {
     inp.onchange = () => saveEff(+inp.dataset.set, inp.dataset.k, inp.value);
+  });
+  card.querySelectorAll("button.rpeEdit").forEach((b) => {
+    b.onclick = (ev) => {
+      ev.stopPropagation();
+      const idx = +b.dataset.set;
+      const set = sess.sets.find((x) => x.index === idx);
+      openRpeScale(set?.effort?.rpe ?? null, (v) => saveEff(idx, "rpe", v));
+    };
   });
   card.querySelectorAll("button.effEdit").forEach((b) => {
     b.onclick = () => {
@@ -8555,6 +8602,10 @@ async function enrich(res, poses, fps, heightM, activity) {
     }
   }
   else if (activity === "pushup") { /* no muscle or joint forces for this task */ }
+  /* Pull-up and dip: the leg surrogate was reporting soleus and vasti for an
+   * arm movement. These get the Digital Athlete's upper-body muscles instead,
+   * from the arm moments (src/armmuscles.js), and no leg forces at all. */
+  else if (activity === "pullup" || activity === "dip") { /* arm muscles below */ }
   else try {
     const fm = await loadForceModel();
     const st = forceSelfTest(fm);
@@ -8609,6 +8660,30 @@ async function enrich(res, poses, fps, heightM, activity) {
     console.warn("force model failed", err);
     res.forcesUnavailable = String(err && err.message || err);
   }
+  if (ARM_TASKS.has(activity)) addArmMuscles(res, activity);
+}
+
+/* Upper-body muscle forces from the arm moments in rep.jm. Pull-up and dip
+ * replace the forces outright; the jump shot keeps its leg surrogate forces
+ * and gets the shooting arm's muscles appended beside them. */
+const ARM_FORCE_MODEL = { arm: true };
+function addArmMuscles(res, activity) {
+  for (const r of [...res.reps, ...(res.whole ? [res.whole] : [])]) {
+    const out = armMuscleForces(r.jm);
+    if (!out) continue;
+    if (activity === "jumpshot" && r.forces && r.forces.length === out.forces.length && r.forceNames) {
+      r.forces = r.forces.map((row, t) => [...row, ...out.forces[t]]);
+      r.forceNames = [...r.forceNames, ...out.muscleNames];
+    } else {
+      r.forces = out.forces;
+      r.forceNames = out.muscleNames;
+      r.forceModel = ARM_FORCE_MODEL;
+      r.forceImplausible = implausibleFraction(out.forces);
+      r.forceMissing = [];
+      r.jrf = null; r.jrfNames = null; r.loads = null; r.loadNames = null;
+    }
+  }
+  if (activity !== "jumpshot") delete res.forcesUnavailable;
 }
 
 // A squat filmed face-on still yields plausible-looking knee and hip numbers
@@ -9725,8 +9800,8 @@ const JOINTS = [
  *  Deliberately not called a moment contribution: that needs moment arms,
  *  which the surrogate does not provide -- see the note rendered below. */
 function topMusclesForJoint(rep, joint, n = 5) {
-  if (!rep.forces || !muscleJoints) return [];
-  const names = new Set(muscleJoints.byJoint?.[joint] || []);
+  if (!rep.forces) return [];
+  const names = new Set([...(muscleJoints?.byJoint?.[joint] || []), ...(ARM_BY_JOINT[joint] || [])]);
   const peaks = rep.forceNames.map((nm, i) => {
     if (!names.has(nm)) return null;
     let p = 0;
@@ -9897,6 +9972,7 @@ function forcePanel(rep, res) {
       ? `<p class="note banner">${tr("noteNoForceModel")}</p>` : "";
   }
   const fm = rep.forceModel;
+  if (fm && fm.arm) return armForcePanel(rep);
   const bad = rep.forceImplausible || 0;
   // Peaks per muscle NAME first, then folded onto the muscle itself: one row
   // per muscle with a column per leg, rather than the same muscle twice.
@@ -10024,6 +10100,25 @@ function forcePanel(rep, res) {
       flagged: bad > 0 ? tr("noteFlagged", { pct: (bad * 100).toFixed(1),
                                              max: MAX_PLAUSIBLE_FORCE_N }) : "",
     })}</p>`;
+}
+
+/* The arm tasks' muscle panel: peak per muscle (per arm -- the moments are
+ * the two arms' average) and the force-time integral, under a banner that
+ * says where the numbers come from. */
+function armForcePanel(rep) {
+  const label = (n) => (ARM_MUSCLES.find((m) => m.name === n) || {}).label || n;
+  const peaks = peakByMuscle(rep.forces, rep.forceNames, rep.forceNames.length)
+    .filter(([, v]) => v > 0.5);
+  if (!peaks.length) return "";
+  const mx = peaks[0][1];
+  const rows = peaks.map(([n, v]) => `<div class="sumRow">
+      <span class="sumName">${label(n)}</span>
+      <span class="sumBar"><i style="width:${Math.max(3, Math.round((100 * v) / mx))}%"></i></span>
+      <span class="sumVal">${v.toFixed(0)} N</span></div>`).join("");
+  return `
+    <h1 style="font-size:16px;margin:16px 0 2px">${tr("armMuscleTitle")}</h1>
+    <p class="note banner">${tr("noteArmMuscles")} ${limitsLink()}</p>
+    <div class="sumRows">${rows}</div>`;
 }
 
 /** Peak |value| per joint for one metric, or null if the rep has none. */

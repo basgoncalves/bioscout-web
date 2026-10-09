@@ -43,6 +43,20 @@ export const MUSCLE_GROUPS = {
                members: ["gasmed", "gaslat", "soleus", "tibpost"] },
 };
 
+/* Upper-body groups for the arm tasks (src/armmuscles.js, Digital Athlete
+ * names). Kept apart from MUSCLE_GROUPS, whose members must exist in the leg
+ * surrogate's muscle_joints.json. */
+export const UPPER_MUSCLE_GROUPS = {
+  elbow_flex: { label: "Elbow flexors",
+                members: ["bic", "brachialis", "brachiorad"] },
+  elbow_ext:  { label: "Elbow extensors",
+                members: ["tric_long", "tric_lat", "tric_med"] },
+  shoulder_ext: { label: "Shoulder extensors",
+                members: ["ter_maj", "pect_maj_t", "delt_post", "tric_long"] },
+  shoulder_flex: { label: "Shoulder flexors",
+                members: ["delt_clav", "pect_maj_c", "coracobr", "bic"] },
+};
+
 /** "vaslat_r" -> "vaslat"; anything without a side suffix is left alone. */
 export const baseMuscle = (n) => String(n).replace(/_[lr]$/, "");
 export const muscleSide = (n) => (/_l$/.test(n) ? "l" : /_r$/.test(n) ? "r" : null);
@@ -69,7 +83,7 @@ export function groupPeaks(forces, names, side = null) {
     cols.get(b).push(i);
   });
   const out = {};
-  for (const [key, g] of Object.entries(MUSCLE_GROUPS)) {
+  for (const [key, g] of Object.entries({ ...MUSCLE_GROUPS, ...UPPER_MUSCLE_GROUPS })) {
     const idx = g.members.flatMap((m) => cols.get(m) || []);
     if (!idx.length) continue;
     let peak = 0, seen = false;

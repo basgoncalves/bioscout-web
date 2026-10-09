@@ -272,12 +272,29 @@ function level(reps, max) {
 const weightOf = (mode) => (d) =>
   mode === "sleep" ? (d.minutes || 1)       // a night with no parseable duration still shows
   : mode === "vitals" ? (d.steps || 1)      // a HR- or pressure-only day still shows
+  : mode === "all" ? d.n
   : mode === "meals" ? d.meals.length
   : mode === "diary" ? (d.rated ? d.mood : 0.5)   // an unrated day still shows faintly
   // A run has no reps, so a cardio-only day would shade as an empty one.
   // It shows at the lowest level instead: present, without claiming a volume
   // it does not have.
   : (d.reps || (d.cardio && d.cardio.length ? 1 : 0));
+
+/* One calendar for everything (Bas, 2026-10-09): a day is shaded by how many
+ * kinds of thing were logged on it -- training, meals, diary, sleep, vitals,
+ * cycle, drinks, weight -- not split by category. Assessment days keep their
+ * outline from the training map. */
+export function anyLogDays(maps, wts, training) {
+  const out = new Map();
+  const bump = (key) => {
+    const d = out.get(key) || { n: 0 };
+    d.n++; out.set(key, d);
+  };
+  for (const m of maps) if (m) for (const key of m.keys()) bump(key);
+  for (const day of new Set((wts || []).map((w) => w && w.day).filter(Boolean))) bump(day);
+  for (const [key, d] of out) if (training?.get(key)?.assess) d.assess = true;
+  return out;
+}
 
 function calendarHTML(days, year, month, selected, todayKey, mode, planned = new Set()) {
   const weeks = monthMatrix(year, month);
@@ -302,12 +319,13 @@ function calendarHTML(days, year, month, selected, todayKey, mode, planned = new
     // assessment day is usually a training day too.
     if (hit?.assess) cls.push("assessDay");
     // A planned day: a dashed outline in training view, whatever else it has.
-    const plan = mode === "training" && planned.has(c.key);
+    const plan = (mode === "training" || mode === "all") && planned.has(c.key);
     if (plan) cls.push("planned");
     if (c.key === todayKey) cls.push("today");
     if (c.key === selected) cls.push("sel");
     const assessNote = hit?.assess ? " \u00b7 " + tr("assessTag") : "";
     const label = !hit ? c.key
+      : mode === "all" ? tr("dayCellLogs", { date: c.key, n: hit.n })
       : mode === "sleep"
         ? tr("dayCellSleep", { date: c.key,
             hours: hit.minutes != null ? fmtSleep(hit.minutes) : tr("logged") })
@@ -333,15 +351,6 @@ function calendarHTML(days, year, month, selected, todayKey, mode, planned = new
     .toLocaleDateString([], { month: "long", year: "numeric" });
 
   return `
-    <div class="calmode">
-      <select id="dashMode" aria-label="${esc(tr("calendarShows"))}">
-        <option value="training"${mode === "meals" ? "" : " selected"}>${esc(tr("modeTraining"))}</option>
-        <option value="meals"${mode === "meals" ? " selected" : ""}>${esc(tr("modeMeals"))}</option>
-        <option value="diary"${mode === "diary" ? " selected" : ""}>${esc(tr("modeDiary"))}</option>
-        <option value="sleep"${mode === "sleep" ? " selected" : ""}>${esc(tr("sleep"))}</option>
-        <option value="vitals"${mode === "vitals" ? " selected" : ""}>${esc(tr("vitals"))}</option>
-      </select>
-    </div>
     <div class="calnav">
       <button type="button" class="ghost calbtn" id="dashPrev" aria-label="${esc(tr("prevMonth"))}">‹</button>
       <div class="calmonth">${esc(title)}</div>
@@ -741,18 +750,12 @@ function intakeHTML(mealDays, weights, year, month) {
  * along, because a dial is exactly the sort of thing that gets believed.
  */
 function healthHTML(ctx) {
+  /* Just the dial, the number and the words under it (Bas, 2026-10-09). The
+   * metric breakdown and the "add BMI" line went; the space is the weight's. */
   const r = rate(ctx);
   const pct = r.score === null ? 0 : Math.round(r.score * 100);
   const colour = scoreColour(r.score);
   const C = 2 * Math.PI * 34;
-
-  const detail = r.contributions.map((c) =>
-    `<span>${esc(tr(c.label))} ${esc(c.text)}</span>`).join(" · ");
-  const want = r.missing.length
-    ? `<p class="sub" style="margin:2px 0 0">${esc(tr("healthNeeds", {
-        what: r.missing.map((m) => esc(tr(m.label))).join(", ") }))}</p>` : "";
-  const caveat = r.contributions.find((c) => c.caveat);
-
   return `<div class="health">
     <svg viewBox="0 0 80 80" class="dial" role="img"
       aria-label="${esc(tr("healthLabel", { pct }))}">
@@ -763,12 +766,7 @@ function healthHTML(ctx) {
       <text x="40" y="44" text-anchor="middle" class="dialText"
         fill="${colour}">${r.score === null ? "\u2014" : pct}</text>
     </svg>
-    <div class="healthText">
-      <div style="font-weight:600">${esc(tr("healthRating"))}</div>
-      ${detail ? `<p class="sub" style="margin:2px 0 0">${detail}</p>` : ""}
-      ${want}
-      ${caveat ? `<p class="note" style="margin:4px 0 0">${esc(tr(caveat.caveat))}</p>` : ""}
-    </div>
+    <div class="healthText">${esc(tr("healthRating"))}</div>
   </div>`;
 }
 
@@ -1518,14 +1516,13 @@ function weightDayHTML(wts, key, todayKey) {
     : near ? `${tr("noWeightThatDay")} · ${weightSourceText(near)}`
     : tr("noWeightYet");
   /* One compact line under the health rating: "Weight [- 83.4 +] Save". */
-  return `<div id="weightBox" style="margin:8px 0 10px">
-    <div class="row" style="align-items:center;gap:8px;margin:0">
+  return `<div id="weightBox" title="${esc(line)}">
+    <div class="row" style="align-items:center;gap:8px;margin:0;flex-wrap:wrap">
       <span style="font-weight:600;flex:0 0 auto">${esc(tr("weightTitle"))}</span>
       ${weightStepperHTML("weightDayKg", near ? near.kg : null)}
       <button type="button" class="ghost" id="weightDaySave" style="margin:0;padding:7px 10px;font-size:13px;flex:0 0 auto;width:auto">${
         esc(key === todayKey ? tr("saveToday") : tr("saveToDay", { date: shortDay(key) }))}</button>
     </div>
-    <p class="sub" style="margin:2px 0 0;font-size:12px">${esc(line)}</p>
   </div>`;
 }
 
@@ -1555,7 +1552,6 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
   // list. Sleep and vitals have no such section of their own tucked under
   // another one, so they stay normal peer modes -- the calendar can shade
   // nights or step counts the same way it shades meals or diary entries.
-  const mode = ["meals", "diary", "sleep", "vitals"].includes(view.mode) ? view.mode : "training";
 
   // An athlete with no training but a week of meals still has a dashboard.
   /* No special empty state. Every section already says when it has nothing --
@@ -1574,19 +1570,23 @@ export function renderDashboard(sessions, meals, diary, weights, cycle, sleep, v
     <div style="font-weight:600;margin:0 0 2px">${esc(tr("monthlySummary"))}</div>
     <p class="sub" style="margin:0 0 6px">${esc(tr("monthSessions", {
       n: monthSessions.size, days: o.days }))}</p>
+    <div class="healthWeight">
     ${healthHTML({ heightM: view.heightM, weightKg: nowW ? nowW.kg : null,
                    sex: view.sex, ageY: view.ageY })}
-    ${intakeHTML(mealDays, wts, view.year, view.month)}
+    <div class="hwRight">
     ${weightDayHTML(wts, view.selected, todayKey)}
+    <button type="button" class="ghost" id="athSummaryBtn">${esc(tr("asmButton"))}</button>
+    </div>
+    </div>
     <div class="dashCols"><div class="dashLeft">
     <div id="dayHead">
       <div style="font-weight:600">${esc(localeDay(view.selected)
         .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>
     </div>
-    ${calendarHTML({ meals: mealDays, diary: diaryDays, sleep: sleepDays, vitals: vitalsDays }[mode] || days,
-                   view.year, view.month, view.selected, todayKey, mode, plannedDays(view.plans || []))}
+    ${calendarHTML(anyLogDays([days, mealDays, diaryDays, sleepDays, vitalsDays,
+                                cycleDays, waterDays, coffeeDays], wts, days),
+                   view.year, view.month, view.selected, todayKey, "all", plannedDays(view.plans || []))}
     ${summaryHTML(days, wts, view)}
-    <button type="button" class="ghost" id="athSummaryBtn" style="margin:10px 0 0;width:100%">${esc(tr("asmButton"))}</button>
     </div><div class="dashRight">
     <div class="dayHead2">${esc(localeDay(view.selected)
       .toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }))}</div>
