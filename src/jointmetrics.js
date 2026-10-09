@@ -37,15 +37,24 @@ export const METRICS = ["angle", "vel", "moment", "power"];
  * at first is the elbow, so it opens there. */
 export const UPPER_BODY_TASKS = ["pullup", "dip", "pushup", "jumpshot"];
 export const isUpperBody = (activity) => UPPER_BODY_TASKS.includes(activity);
-/* The kick back is a hip exercise: the knee just rides along. */
-const HIP_TASKS = ["kickback"];
-export const defaultJoint = (activity) => (isUpperBody(activity) ? "elbow"
+/* The kick back is a hip exercise: the knee just rides along. So are the
+ * hinge and the bridge. The free-weight arm exercises open on their working
+ * joint; their angles come from the features, not the arm-dynamics tracks
+ * (no hand-force model for a dumbbell). */
+const HIP_TASKS = ["kickback", "deadlift", "bridge", "plank", "sideplank"];
+const ELBOW_TASKS = ["curl", "row", "ohpress"];
+const SHOULDER_TASKS = ["raise"];
+export const ARM_ANGLE_TASKS = [...ELBOW_TASKS, ...SHOULDER_TASKS];
+export const defaultJoint = (activity) => (isUpperBody(activity) || ELBOW_TASKS.includes(activity) ? "elbow"
+  : SHOULDER_TASKS.includes(activity) ? "shoulder"
   : HIP_TASKS.includes(activity) ? "hip" : "knee");
 
 /** Display order: the task's default joint first, then top to bottom. */
 export function jointOrder(activity) {
-  return isUpperBody(activity)
+  return isUpperBody(activity) || ELBOW_TASKS.includes(activity)
     ? ["elbow", "shoulder", "hip", "knee", "ankle"]
+    : SHOULDER_TASKS.includes(activity)
+    ? ["shoulder", "elbow", "hip", "knee", "ankle"]
     : HIP_TASKS.includes(activity)
     ? ["hip", "knee", "ankle", "shoulder", "elbow"]
     : ["knee", "hip", "ankle", "shoulder", "elbow"];
@@ -235,6 +244,10 @@ export function clipAngles(activity, spec, F, tracks, { ankleUsable = true } = {
       }
     }
     if (activity === "jumpshot") put("elbow", F.elbow_flex);
+    if (ARM_ANGLE_TASKS.includes(activity)) {
+      put("elbow", F.elbow_flex);
+      put("shoulder", F.shoulder_elev);
+    }
   }
   /* The shoulder, one arm at a time and then averaged -- never off the
    * midpoint of the two. Filmed face-on, the midpoint of two elbows sits on

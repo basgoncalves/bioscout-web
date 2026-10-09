@@ -8,22 +8,22 @@
  *
  * Only movements BioScout can actually measure are offered. A group with none
  * (the core, for now) says so rather than pointing at something the recorder
- * would then refuse. The figure is drawn here from plain shapes -- no image
+ * would then refuse. The figure is drawn here from angular plates -- no image
  * files, so it follows the page's light and dark colours.
  */
 
 /** Muscle group -> the movements that train it, main ones first. */
 export const REGION_EXERCISES = {
   neck: ["neck"],
-  shoulders: ["pushup", "dip", "pullup"],
+  shoulders: ["ohpress", "raise", "pushup", "dip", "pullup", "plank"],
   chest: ["pushup", "dip"],
-  back: ["pullup"],
-  biceps: ["pullup"],
-  triceps: ["pushup", "dip"],
-  core: [],
-  glutes: ["kickback", "squat", "slsquat"],
-  quads: ["squat", "slsquat", "cmj", "sj"],
-  hamstrings: ["kickback"],
+  back: ["pullup", "row", "deadlift"],
+  biceps: ["curl", "pullup", "row"],
+  triceps: ["pushup", "dip", "ohpress"],
+  core: ["plank", "sideplank", "deadlift", "bridge"],
+  glutes: ["bridge", "kickback", "squat", "lunge", "deadlift", "slsquat"],
+  quads: ["squat", "lunge", "wallsit", "slsquat", "cmj", "sj"],
+  hamstrings: ["deadlift", "bridge", "kickback"],
   calves: ["heelraise", "cmj", "sj"],
 };
 export const REGIONS = Object.keys(REGION_EXERCISES);
@@ -35,74 +35,72 @@ export function regionsFor(activity) {
 
 /* Shapes, in a 260 x 262 box: front figure centred on x = 60, back on
  * x = 200. Each entry is [region or null (not selectable), svg element]. */
-const E = (cx, cy, rx, ry) => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"/>`;
-const R = (x, y, w, h, r = 5) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}"/>`;
-const P = (d) => `<path d="${d}"/>`;
 
-/* Proportions. The female figure is not the male one with a different head:
- * narrower shoulders and arms, a waist, wider hips and thighs, a bust in place
- * of flat pecs, and hair -- the same shapes and the same tap targets, so the
- * two figures pick exactly the same groups. */
+/* Armor-plate style (chosen 2026-10-09, draft C in assets/charachters/):
+ * every group is a low-poly plate -- hex shoulder plates, chevron abs, diamond
+ * knees, an octagon head -- with a thin seam between plates (CSS stroke).
+ *
+ * Shapes are written for the left side as [dx, y] with dx measured from the
+ * centre line, then mirrored. The female figure is not the male one with a
+ * different head: narrower shoulders and arms (`up` scales the upper body's
+ * dx), wider hips and thighs (`lo`), a bust in place of flat pecs, and hair --
+ * the same tap targets, so the two figures pick exactly the same groups. */
 const BUILD = {
-  male:   { sh: 26, shW: 21, waist: 21, hip: 18, delt: 24, deltR: 10, arm: 30, armR: 7,
-            fore: 34, foreR: 6, hand: 36, core: 13, pelvis: 16, thigh: 11, thighR: 10,
-            knee: 11, shin: 12, shinR: 6, lat: 19, glute: 10, gluteR: 11, calfR: 8 },
-  female: { sh: 23, shW: 19, waist: 16, hip: 21, delt: 20, deltR: 8.5, arm: 26, armR: 6,
-            fore: 30, foreR: 5, hand: 32, core: 11, pelvis: 20, thigh: 12, thighR: 10.5,
-            knee: 10, shin: 11, shinR: 5.5, lat: 16, glute: 11, gluteR: 12.5, calfR: 7.5 },
+  male:   { up: 1.0,  lo: 1.0 },
+  female: { up: 0.88, lo: 1.1 },
 };
 
 function figure(cx, back, female = false) {
   const b = female ? BUILD.female : BUILD.male;
-  const L = (dx) => cx - dx, Rt = (dx) => cx + dx;
+  const pts = (list, k) => list.map(([dx, y]) => `${(cx + dx * k).toFixed(1)},${y}`).join(" ");
+  const poly = (list, k = 1) => `<polygon points="${pts(list, k)}"/>`;
+  // mirrored pair; list is the LEFT side, dx positive = away from centre
+  const M = (list, k = 1) => poly(list.map(([dx, y]) => [-dx, y]), k) + poly(list, k);
+  const U = (list) => M(list, b.up), Lo = (list) => M(list, b.lo);
   const parts = [];
-  // Hair, front view: shoulder length, behind the head (a fringe goes on top
-  // of the head below). The back view covers the head entirely, further down.
-  if (female && !back) {
-    parts.push(["hair", P(`M${L(13)},20 Q${L(14)},4 ${cx},5 Q${Rt(14)},4 ${Rt(13)},20 L${Rt(15)},41 Q${Rt(10)},43 ${Rt(7)},36 L${L(7)},36 Q${L(10)},43 ${L(15)},41 Z`)]);
+  if (female && !back) {   // hair behind the head, angular bob
+    parts.push(["hair", poly([[-14, 10], [-8, 3], [8, 3], [14, 10], [16, 38], [9, 34], [-9, 34], [-16, 38]])]);
   }
   parts.push(
-    // Torso underlay, so the groups read as one body rather than loose pieces.
-    [null, P(`M${L(b.sh)},44 Q${cx},34 ${Rt(b.sh)},44 Q${Rt(b.shW)},60 ${Rt(b.waist)},90 L${Rt(b.hip)},126 L${L(b.hip)},126 L${L(b.waist)},90 Q${L(b.shW)},60 ${L(b.sh)},44 Z`)],
-    [null, `<circle cx="${cx}" cy="20" r="${female ? 12 : 13}"/>`],      // head
+    // torso underlay so the plates read as one body
+    [null, poly([[-28 * b.up, 44], [28 * b.up, 44], [20 * b.up, 92], [18 * b.lo, 127], [-18 * b.lo, 127], [-20 * b.up, 92]])],
+    [null, poly([[-7, 6], [7, 6], [13, 12], [13, 24], [7, 32], [-7, 32], [-13, 24], [-13, 12]], female ? 0.93 : 1)],   // head
   );
   if (female) parts.push(["hair", back
-    ? P(`M${L(12.5)},20 Q${L(13.5)},6 ${cx},6 Q${Rt(13.5)},6 ${Rt(12.5)},20 L${Rt(14)},40 Q${cx},43 ${L(14)},40 Z`)
-    : P(`M${L(12)},21 Q${L(12.5)},6.5 ${cx},7 Q${Rt(12.5)},6.5 ${Rt(12)},21 Q${Rt(8)},12.5 ${cx},14 Q${L(8)},12.5 ${L(12)},21 Z`)]);
+    ? poly([[-14, 9], [-8, 3], [8, 3], [14, 9], [15, 38], [0, 41], [-15, 38]])
+    : poly([[-13, 13], [-7, 4], [7, 4], [13, 13], [6, 11], [0, 15], [-6, 11]])]);
   parts.push(
-    ["neck", R(cx - (female ? 5 : 6), 32, female ? 10 : 12, 10, 3)],
-    ["shoulders", E(L(b.delt), 51, b.deltR, b.deltR - 1) + E(Rt(b.delt), 51, b.deltR, b.deltR - 1)],
-    [back ? "triceps" : "biceps", E(L(b.arm), 78, b.armR, 16) + E(Rt(b.arm), 78, b.armR, 16)],
-    [null, E(L(b.fore), 111, b.foreR, 16) + E(Rt(b.fore), 111, b.foreR, 16)],   // forearms
-    [null, E(L(b.hand), 132, 5, 6) + E(Rt(b.hand), 132, 5, 6)],                 // hands
+    ["neck", poly([[-7, 32], [7, 32], [5, 42], [-5, 42]], female ? 0.85 : 1)],
+    ["shoulders", U([[15, 42], [27, 41], [37, 48], [35, 58], [25, 61], [17, 54]])],
+    [back ? "triceps" : "biceps", U([[25, 63], [35, 62], [37, 78], [33, 95], [27, 95], [24, 78]])],
+    [null, U([[27, 97], [34, 97], [38, 112], [37, 127], [32, 127], [29, 112]])],    // forearms
+    [null, U([[32, 129], [39, 129], [41, 135], [37, 141], [33, 141]])],              // hands
   );
   if (!back) {
     parts.push(
       ["chest", female
-        ? E(L(8.5), 61, 8, 7.5) + E(Rt(8.5), 61, 8, 7.5)
-        : P(`M${L(20)},45 Q${L(20)},44 ${cx - 1},45 L${cx - 1},66 Q${L(10)},72 ${L(20)},66 Z`)
-          + P(`M${Rt(20)},45 Q${Rt(20)},44 ${cx + 1},45 L${cx + 1},66 Q${Rt(10)},72 ${Rt(20)},66 Z`)],
-      ["core", female
-        ? P(`M${L(11)},71 L${Rt(11)},71 Q${Rt(8)},92 ${Rt(12)},113 L${L(12)},113 Q${L(8)},92 ${L(11)},71 Z`)
-        : R(cx - b.core, 71, 2 * b.core, 42, 7)],
-      ["hip", P(`M${L(b.pelvis)},113 L${Rt(b.pelvis)},113 L${Rt(b.pelvis + 2)},128 L${L(b.pelvis + 2)},128 Z`)],   // hips
-      ["quads", E(L(b.thigh), 160, b.thighR, 30) + E(Rt(b.thigh), 160, b.thighR, 30)],
-      ["knee", E(L(b.knee), 193, 6, 5) + E(Rt(b.knee), 193, 6, 5)],               // knees
-      ["shin", E(L(b.shin), 220, b.shinR, 22) + E(Rt(b.shin), 220, b.shinR, 22)], // shins
+        ? U([[2, 50], [10, 47], [18, 52], [18, 63], [10, 68], [2, 64]])
+        : M([[1.5, 45], [23, 45], [21, 60], [12, 68], [1.5, 66]])],
+      ["core", poly([[-12, 70], [0, 75], [12, 70], [12, 84], [0, 89], [-12, 84]])
+             + poly([[-12, 87], [0, 92], [12, 87], [11, 100], [0, 105], [-11, 100]])
+             + poly([[-11, 103], [0, 108], [11, 103], [10, 113], [0, 117], [-10, 113]])],
+      ["hip", poly([[-18, 116], [-8, 120], [0, 119], [8, 120], [18, 116], [19, 128], [0, 136], [-19, 128]], b.lo)],
+      ["quads", Lo([[4, 138], [14, 129], [22, 140], [18, 182], [11, 188], [6, 180]])],
+      ["knee", M([[11, 186], [17, 193], [11, 200], [5, 193]])],
+      ["shin", M([[6, 203], [11, 200], [16, 203], [15, 232], [11, 241], [8, 232]])],
     );
   } else {
     parts.push(
-      ["back", P(`M${L(14)},40 L${Rt(14)},40 L${cx},66 Z`)                // traps
-             + P(`M${L(b.lat)},58 Q${L(b.lat - 1)},90 ${cx - 2},104 L${cx - 2},66 Z`)   // lats
-             + P(`M${Rt(b.lat)},58 Q${Rt(b.lat - 1)},90 ${cx + 2},104 L${cx + 2},66 Z`)],
-      ["core", R(cx - (female ? 10 : 11), 100, female ? 20 : 22, 16, 5)],     // lower back
-      ["glutes", E(L(b.glute), 128, b.gluteR, 12) + E(Rt(b.glute), 128, b.gluteR, 12)],
-      ["hamstrings", E(L(b.thigh + 1), 166, b.thighR, 25) + E(Rt(b.thigh + 1), 166, b.thighR, 25)],
-      ["knee", E(L(b.knee), 195, 6, 5) + E(Rt(b.knee), 195, 6, 5)],               // knees
-      ["calves", E(L(b.shin), 218, b.calfR, 20) + E(Rt(b.shin), 218, b.calfR, 20)],
+      ["back", poly([[-16, 41], [16, 41], [0, 64]], b.up)                         // traps
+             + U([[21, 56], [3, 67], [2, 104], [9, 100], [16, 84]])],             // lats
+      ["core", poly([[-12, 102], [0, 106], [12, 102], [12, 114], [0, 118], [-12, 114]])],   // lower back
+      ["glutes", Lo([[2, 121], [12, 117], [22, 123], [22, 135], [13, 141], [3, 137]])],
+      ["hamstrings", Lo([[4, 143], [13, 141], [21, 146], [18, 182], [11, 188], [6, 182]])],
+      ["knee", M([[11, 187], [17, 194], [11, 201], [5, 194]])],
+      ["calves", M([[6, 206], [11, 200], [18, 207], [16, 224], [11, 241], [7, 224]])],
     );
   }
-  parts.push(["ankle", E(L(12), 246, female ? 6 : 7, 4) + E(Rt(12), 246, female ? 6 : 7, 4)]);   // feet
+  parts.push(["ankle", M([[6, 243], [17, 243], [20, 250], [12, 252], [5, 250]])]);   // feet
   return parts;
 }
 

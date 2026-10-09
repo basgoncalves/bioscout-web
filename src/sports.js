@@ -13,7 +13,8 @@
  * have none, and show every movement.
  */
 export const SPORTS = {
-  strength: ["squat", "slsquat", "pullup", "dip", "pushup", "kickback", "heelraise", "cmj", "sj", "neck"],
+  strength: ["squat", "slsquat", "pullup", "dip", "pushup", "kickback", "heelraise", "cmj", "sj", "neck",
+    "deadlift", "lunge", "bridge", "ohpress", "curl", "row", "raise", "plank", "sideplank", "wallsit"],
   basketball: ["jumpshot", "stroke", "cmj", "sj", "sidestep", "run", "walk"],
   /* The two scripted sessions (protocol.js). Their movement lists are what
    * the session may contain: the circuit's three for the first, anything the
@@ -22,8 +23,9 @@ export const SPORTS = {
   tomholland: ["pullup", "pushup", "squat"],
   /* Return to play (rtp.js): every movement an injury's tests or phase
    * exercises can name. The figure and the injury pick the movement. */
-  rtp: ["heelraise", "slsquat", "squat", "cmj", "sj", "sidestep", "run", "walk", "kickback", "pushup", "dip", "pullup", "neck"],
-  tabata: ["squat", "pushup", "pullup", "dip", "heelraise", "kickback", "slsquat", "cmj", "sj"],
+  rtp: ["heelraise", "slsquat", "squat", "cmj", "sj", "sidestep", "run", "walk", "kickback", "pushup", "dip", "pullup", "neck",
+    "plank", "sideplank", "wallsit", "deadlift", "lunge", "bridge", "ohpress", "row", "raise"],
+  tabata: ["squat", "pushup", "pullup", "dip", "heelraise", "kickback", "slsquat", "cmj", "sj", "lunge", "bridge"],
 };
 
 export const SPORT_IDS = Object.keys(SPORTS);

@@ -38,7 +38,9 @@ export const PLANES = {
   frontal: { cols: [2, 1], dirs: ["jlSup", "jlLat", "jlInf", "jlMed"] },
 };
 export const JOINTS = ["hip", "knee", "ankle"];
-const NO_LEGS = new Set(["pullup", "dip", "pushup", "neck", "kickback"]);
+const NO_LEGS = new Set(["pullup", "dip", "pushup", "neck", "kickback",
+  // 2026-10-09 movements: angles and timing only (openChain), see kinematics.js
+  "plank", "sideplank", "wallsit", "deadlift", "lunge", "bridge", "ohpress", "curl", "row", "raise"]);
 
 const isNum = (v) => typeof v === "number" && Number.isFinite(v);
 const f1 = (v) => (isNum(v) ? v.toFixed(1) : "0");

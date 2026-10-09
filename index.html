@@ -174,6 +174,7 @@ try {
   /* The body map (bodymap.js) */
   svg.bodymap { width:100%; max-width:340px; height:auto; display:block; margin:0 auto; }
   svg.bodymap g.bm-base { fill:var(--bmBase); }
+  svg.bodymap g.bm-base, svg.bodymap g.bm-part, svg.bodymap g.bm-hair { stroke:var(--card); stroke-width:1.1; stroke-linejoin:miter; }
   /* Diary: the day's overall mood as five faces */
   .faces { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin:6px 0 4px; }
   button.faceBtn { margin:0; padding:4px 0; background:transparent; border:1px solid transparent;
@@ -481,6 +482,8 @@ try {
      not be read on the accent fill and was dropped (Bas, 2026-10-08). */
   button.sportBtn.big { font-size:20px; font-weight:700; padding:20px; }
   /* Return to play (rtp.js) */
+  /* Return to play needs a video (camera or file): no counting by hand. */
+  body.rtpMode #manualBtn { display:none !important; }
   .rtpPhases { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; margin-top:6px; }
   button.rtpPhase { display:flex; flex-direction:column; align-items:center; gap:4px; margin:0; padding:8px 2px;
     font-size:11.5px; line-height:1.15; background:transparent; color:var(--ink); border:1px solid var(--line); }
@@ -1186,7 +1189,7 @@ try {
     <div id="rtpBox" class="trainOnly hidden" style="margin-bottom:12px"></div>
     <!-- Today's plan, if there is one: planned vs done, tap to pick. -->
     <div id="planNow" class="trainOnly hidden" style="margin-bottom:12px"></div>
-    <div class="row trainOnly" style="margin-bottom:11px">
+    <div class="row trainOnly" id="activityRow" style="margin-bottom:11px">
       <div>
         <label for="activity" data-i18n="movement">Movement</label>
         <select id="activity">
@@ -1202,6 +1205,16 @@ try {
           <option value="slsquat" data-i18n="slsquat">Single-leg squat</option>
           <option value="heelraise" data-i18n="heelraise">Heel raises (tip-toe)</option>
           <option value="kickback" data-i18n="kickback">Glute kick back</option>
+          <option value="deadlift" data-i18n="deadlift">Deadlift / RDL</option>
+          <option value="lunge" data-i18n="lunge">Lunge / split squat</option>
+          <option value="bridge" data-i18n="bridge">Glute bridge / hip thrust</option>
+          <option value="wallsit" data-i18n="wallsit">Wall sit</option>
+          <option value="plank" data-i18n="plank">Plank</option>
+          <option value="sideplank" data-i18n="sideplank">Side plank</option>
+          <option value="ohpress" data-i18n="ohpress">Overhead press</option>
+          <option value="curl" data-i18n="curl">Biceps curl</option>
+          <option value="row" data-i18n="row">Bent-over row</option>
+          <option value="raise" data-i18n="raise">Lateral / front raise</option>
           <option value="walk" data-i18n="walk">Walking</option>
           <option value="run" data-i18n="run">Running</option>
           <option value="sidestep" data-i18n="sidestep">Side step</option>
@@ -1462,7 +1475,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 133;
+window.BUILD = 134;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -5864,6 +5877,13 @@ function renderRtp() {
   const sess = getSession();
   const show = !!sess && sess.sport === "rtp" && !assessStep;
   box.classList.toggle("hidden", !show);
+  /* Return to play: the Movement list sits under "Analyse a video file", and
+   * there is no count-by-hand -- a return-to-play test needs a video. Moved
+   * back to its usual place for every other session. */
+  document.body.classList.toggle("rtpMode", show);
+  const row = $("activityRow"), file = $("fileBtn");
+  if (show && file.nextElementSibling !== row) file.after(row);
+  else if (!show && row.previousElementSibling !== $("planNow")) $("planNow").after(row);
   if (!show) { box.innerHTML = ""; return; }
   const s = rtpState();
   const inj = s.injury && INJURY[s.injury];
@@ -8729,6 +8749,7 @@ function viewNote(res) {
     bits.push(tr("bothFeetDown"));
   }
   if (spec.kickback) bits.push(tr("kickbackNoKinetics"));
+  if (spec.generic) bits.push(tr("moreNoKinetics"));
   return bits.length
     ? `<p class="note banner">${bits.join(" ")}</p>` : "";
 }

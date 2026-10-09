@@ -68,6 +68,10 @@ const WORK_COST = 5.4;
 export const MOVEMENT_MET = {
   squat: 6.0, slsquat: 6.0, pullup: 8.0, dip: 8.0, pushup: 8.0,
   kickback: 4.0, heelraise: 4.0, neck: 2.5,
+  // Added 2026-10-09: free-weight and bodyweight work at the compendium's
+  // moderate-vigorous resistance values; holds and small-muscle work lower.
+  deadlift: 6.0, lunge: 5.0, bridge: 3.5, ohpress: 5.0, curl: 3.5, row: 5.0, raise: 3.5,
+  plank: 3.8, sideplank: 3.8, wallsit: 3.8,
   cmj: 8.0, sj: 7.0, jumpshot: 7.0, sidestep: 8.0,
   // Tennis, singles (7.3) and padel sit close together in the compendium.
   stroke: 7.3,

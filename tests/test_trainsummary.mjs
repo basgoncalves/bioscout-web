@@ -92,7 +92,7 @@ ok(reps.chest === 30 && reps.triceps === 30, "push-ups and dips both reach chest
 ok(reps.shoulders === 44, "shoulders take from all three upper-body movements", String(reps.shoulders));
 ok(bal.max === 44, "the rim is the busiest group", String(bal.max));
 ok(reps.hamstrings === 0 && reps.neck === 0, "a group nothing trained is zero, not missing");
-ok(!BALANCE_REGIONS.includes("core"), "core has no trackable movement, so it gets no axis");
+ok(BALANCE_REGIONS.includes("core"), "core is trackable now (plank, side plank, bridge, deadlift), so it gets an axis");
 ok(bal.sets === 6, "every set with a group behind it is counted once", String(bal.sets));
 
 const none = muscleBalance([]);

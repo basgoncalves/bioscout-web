@@ -22,6 +22,21 @@ import { sessionReps } from "./achievements.js";
 import { stamp, IDENTITY, mergeTombs, mergeRecords, tombIndex, buried } from "./syncmeta.js";
 import { normalizePlan } from "./plans.js";
 
+/* Summary fields of the movements added 2026-10-09 (kinematics.js moreMetrics). */
+const MORE_HOLDS = ["plank", "sideplank", "wallsit"];
+const MORE_FIELDS = {
+  plank: ["hold_s", "body_line_mean_deg", "body_line_max_deg"],
+  sideplank: ["hold_s", "body_line_mean_deg", "body_line_max_deg"],
+  wallsit: ["hold_s", "knee_flex_mean_deg", "hip_flex_mean_deg"],
+  deadlift: ["hip_flex_max_deg", "hip_range_deg", "trunk_pitch_max_deg", "knee_flex_at_bottom_deg"],
+  lunge: ["stance_side", "front_knee_flex_max_deg", "trunk_lean_max_deg", "depth_m"],
+  bridge: ["hip_range_deg", "hip_flex_top_deg"],
+  ohpress: ["elbow_flex_top_deg", "shoulder_elev_max_deg", "trunk_motion_deg"],
+  curl: ["elbow_flex_max_deg", "elbow_flex_min_deg", "elbow_range_deg", "shoulder_swing_deg"],
+  row: ["elbow_flex_max_deg", "elbow_flex_min_deg", "elbow_range_deg", "trunk_pitch_mean_deg"],
+  raise: ["shoulder_elev_max_deg", "shoulder_range_deg", "elbow_flex_mean_deg"],
+};
+
 const PKEY = "bioscout.profiles.v1";
 const SKEY = "bioscout.session.v1";
 const AKEY = "bioscout.archive.v1";
@@ -1418,6 +1433,12 @@ function summariseRep(r, activity) {
     o.trunk_lean_at_plant_deg = r.trunk_lean_at_plant_deg ?? null;
     o.out_s = r.out_s ?? null;
     o.back_s = r.back_s ?? null;
+  } else if (MORE_FIELDS[activity]) {
+    // The 2026-10-09 movements: their own few numbers, plus `main_range`, the
+    // one each is graded and trended on (range of the working joint, or the
+    // hold time for a plank / wall sit).
+    for (const k of MORE_FIELDS[activity]) o[k] = r[k] ?? null;
+    o.main_range = r.main_range ?? null;
   } else if (activity === "neck") {
     o.flex_ext_deg = r.flexion_extension_range_deg;
     o.bend_deg = r.lateral_bend_range_deg;
@@ -1508,6 +1529,10 @@ export function summariseSession(session) {
     trends.push(trend("excursion_m", "Lateral excursion", "m", true),
                 trend("out_s", "Time out", "s", false),
                 trend("knee_flex_at_plant_deg", "Knee flexion at plant", "°", true));
+  } else if (MORE_FIELDS[activity]) {
+    trends.push(MORE_HOLDS.includes(activity)
+      ? trend("main_range", "Hold time", "s", true)
+      : trend("main_range", "Range", "", true));
   } else if (activity === "neck") {
     trends.push(trend("rotation_deg", "Rotation range", "°", true),
                 trend("flex_ext_deg", "Flexion/extension range", "°", true));

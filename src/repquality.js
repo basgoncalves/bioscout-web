@@ -183,6 +183,25 @@ const RULES = {
       vsMedian("load", r.load_s, ctx.median((q) => q.load_s), 0.15, 0.30),
     ];
   },
+  /* The 2026-10-09 movements. Rep tasks: range against your own best rep in
+   * the set (per leg for the lunge), plus the one compensation each is known
+   * for. Holds: the line kept -- a plank whose hips sag or pike by more than
+   * 10 deg on average is visibly off, 20 is a different exercise. */
+  deadlift: (r, ctx) => [vsBest("travel", r.main_range, ctx.best((q) => q.main_range))],
+  bridge: (r, ctx) => [vsBest("travel", r.main_range, ctx.best((q) => q.main_range)),
+                       bar("hipTop", r.hip_flex_top_deg, 10, 20, false)],
+  ohpress: (r, ctx) => [vsBest("travel", r.main_range, ctx.best((q) => q.main_range)),
+                        bar("lockout", r.elbow_flex_top_deg, 20, 35, false),
+                        bar("trunkArch", r.trunk_motion_deg, 10, 20, false)],
+  curl: (r, ctx) => [vsBest("travel", r.main_range, ctx.best((q) => q.main_range)),
+                     bar("armSwing", r.shoulder_swing_deg, 20, 35, false)],
+  row: (r, ctx) => [vsBest("travel", r.main_range, ctx.best((q) => q.main_range))],
+  raise: (r, ctx) => [vsBest("travel", r.main_range, ctx.best((q) => q.main_range))],
+  lunge: (r, ctx) => [vsBest("travel", r.main_range,
+                             ctx.best((q) => (q.stance_side === r.stance_side ? q.main_range : null)))],
+  plank: (r) => [bar("bodyLine", r.body_line_mean_deg, 10, 20, false)],
+  sideplank: (r) => [bar("bodyLine", r.body_line_mean_deg, 10, 20, false)],
+  wallsit: (r) => [bar("wallAngle", Math.abs(90 - (r.knee_flex_mean_deg ?? 90)), 15, 30, false)],
   neck(r, ctx) {
     const rng = (q) => Math.max(q.flexion_extension_range_deg || 0,
                                 q.lateral_bend_range_deg || 0, q.rotation_range_deg || 0);
@@ -230,4 +249,4 @@ export function gradeReps(res) {
 /** Every note code the rules can produce -- for the translation test. */
 export const NOTE_CODES = ["lockout", "top", "travel", "swing", "depthArm", "depthKnee",
   "standUp", "height", "wrongJump", "implausible", "kneeBent", "tempo", "release",
-  "releaseElbow", "load", "trunk", "bodyLine"];
+  "releaseElbow", "load", "trunk", "bodyLine", "hipTop", "armSwing", "wallAngle", "trunkArch"];

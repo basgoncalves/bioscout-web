@@ -44,9 +44,10 @@ ok(REGIONS.filter((r) => r !== "core").every((r) => svg.includes(`data-region="$
    "every group is drawn and tappable");
 ok(/bm-part sel" data-region="glutes"/.test(svg) && /bm-part done" data-region="back"/.test(svg),
    "the tapped group is selected, trained groups are tinted");
-ok((svg.match(/class="ghost bmEx/g) || []).length === 3 && /bmEx on" data-activity="squat"/.test(svg),
-   "the glutes list three exercises, the current one marked");
-ok(bodyMapHTML((k) => k, { selected: "core" }).includes("bmNone"), "a group with nothing trackable says so");
+ok((svg.match(/class="ghost bmEx/g) || []).length === REGION_EXERCISES.glutes.length && /bmEx on" data-activity="squat"/.test(svg),
+   "the glutes list their exercises, the current one marked");
+ok(bodyMapHTML((k) => k, { selected: "chest", regions: ["chest"] }).includes("bmEx")
+   && REGION_EXERCISES.core.includes("plank"), "core now lists the plank; a group's list renders");
 
 {
   const regionsOf = (h) => [...h.matchAll(/data-region="([a-z]+)"/g)].map((m) => m[1]).sort().join();

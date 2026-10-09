@@ -2803,6 +2803,211 @@ export function strokeMetrics(F, rep, fps, pxPerM, found, i) {
   };
 }
 
+/* ---- more strength and rehab exercises (2026-10-09) ---------------------
+ *
+ * Ten movements on one shared feature set: three isometric holds (plank, side
+ * plank, wall sit) and seven rep tasks (deadlift / RDL, lunge, glute bridge,
+ * overhead press, biceps curl, bent-over row, lateral / front raise).
+ *
+ * Each rep task is cut on ONE angle-like signal oriented so the rep's middle
+ * is its maximum, the same trough -> peak -> trough rule the kick back uses,
+ * with a minimum excursion so a fidget is not a rep. Holds are the longest
+ * stretch where the posture is held, reported as one rep with its duration
+ * and how well the line was kept.
+ *
+ * All ten are `openChain` here: angles and timing only. The ground-reaction,
+ * moment and muscle models were built and checked on squats, jumps and gait;
+ * running them on a hinge or a lying bridge would print numbers nobody has
+ * validated (see bioscout_msk_evidence). */
+export function buildMoreFeatures(poses) {
+  const F = buildSquatFeatures(poses);
+  const frames = Object.keys(poses).map(Number).sort((a, b) => a - b);
+  const lo = F._lo, n = F._n;
+  for (const k of ["elbow_flex", "elbow_flex_l", "elbow_flex_r", "shoulder_elev",
+                   "wrist_rise", "body_line", "body_tilt", "trunk_pitch",
+                   "ankle_ahead_l", "ankle_ahead_r"]) F[k] = new Array(n).fill(NaN);
+  const facing = facingSign(poses);
+  F._facing = facing;
+  for (const fi of frames) {
+    const i = fi - lo, lm = poses[fi];
+    const L = (s) => lm["left_" + s], R = (s) => lm["right_" + s];
+    const el = 180 - angle3(L("shoulder"), L("elbow"), L("wrist"));
+    const er = 180 - angle3(R("shoulder"), R("elbow"), R("wrist"));
+    F.elbow_flex_l[i] = el; F.elbow_flex_r[i] = er;
+    F.elbow_flex[i] = nanmean([el, er]);
+    // Arm elevation: 0 hanging by the side, 90 level, 180 straight overhead --
+    // front-on that is abduction, side-on flexion; either way "how high".
+    F.shoulder_elev[i] = nanmean([angle3(L("hip"), L("shoulder"), L("elbow")),
+                                  angle3(R("hip"), R("shoulder"), R("elbow"))]);
+    const sh = mid(L("shoulder"), R("shoulder")), hp = mid(L("hip"), R("hip"));
+    const an = mid(L("ankle"), R("ankle")), wr = mid(L("wrist"), R("wrist"));
+    const elb = mid(L("elbow"), R("elbow"));
+    // Wrist height above the shoulder in upper-arm lengths: scale-free, so the
+    // press reads the same at any camera distance.
+    if (sh && wr && elb) {
+      const ua = Math.hypot(elb[0] - sh[0], elb[1] - sh[1]);
+      if (ua > 1e-6) F.wrist_rise[i] = (sh[1] - wr[1]) / ua;
+    }
+    // Body line: how far shoulder-hip-ankle is from straight (0 = a plank),
+    // and the tilt of the shoulder-ankle line from horizontal.
+    if (sh && hp && an) {
+      F.body_line[i] = 180 - angle3(sh, hp, an);
+      F.body_tilt[i] = Math.abs(Math.atan2(Math.abs(an[1] - sh[1]), Math.abs(an[0] - sh[0]) || 1e-6) * 180 / Math.PI);
+    }
+    // How far each ankle is in front of the hip, in the facing direction:
+    // the front leg of a lunge is the one whose foot is ahead.
+    if (hp && L("ankle")) F.ankle_ahead_l[i] = facing * (L("ankle")[0] - hp[0]);
+    if (hp && R("ankle")) F.ankle_ahead_r[i] = facing * (R("ankle")[0] - hp[0]);
+    if (sh && hp) F.trunk_pitch[i] = Math.abs(Math.atan2(sh[0] - hp[0], hp[1] - sh[1]) * 180 / Math.PI);
+  }
+  return F;
+}
+
+export const DEFAULT_MORE_CFG = { minRepFrames: 8, smoothWin: 5, minHoldS: 2 };
+
+/** Trough -> peak -> trough reps of one signal, each moving at least `minExc`. */
+function cycleReps(sig, minExc, cfg) {
+  const y0 = smooth(interpNan(sig), cfg.smoothWin);
+  const base = nanpercentile(y0, 10);
+  const y = y0.map((v) => v - base);
+  const peaks = localMaxima(y, cfg.minRepFrames, 0.6 * minExc);
+  const reps = [];
+  for (let k = 0; k < peaks.length; k++) {
+    const pk = peaks[k];
+    const left = k > 0 ? peaks[k - 1] : 0;
+    const right = k < peaks.length - 1 ? peaks[k + 1] : y.length - 1;
+    const t0 = pk > left ? argmin(y, left, pk) : left;
+    const t1 = right > pk ? argmin(y, pk, right) : right;
+    if (t1 - t0 < cfg.minRepFrames || pk - t0 < 2 || t1 - pk < 2) continue;
+    if (y[pk] - Math.max(y[t0], y[t1]) < minExc) continue;
+    reps.push([t0, pk, t1]);
+  }
+  return { reps, sig: y, depth: y };
+}
+
+/** The longest stretch where `ok(i)` holds, gaps of up to 0.3 s bridged. */
+function holdRep(F, ok, cfg) {
+  const n = F._n, fps = F._fps || 30, gap = Math.round(0.3 * fps);
+  let best = null, s = -1, miss = 0;
+  for (let i = 0; i <= n; i++) {
+    const good = i < n && ok(i);
+    if (good) { if (s < 0) s = i; miss = 0; }
+    else if (s >= 0 && (++miss > gap || i === n)) {
+      const e = i - miss;
+      if (!best || e - s > best[1] - best[0]) best = [s, e];
+      s = -1; miss = 0;
+    }
+  }
+  if (!best || (best[1] - best[0]) / fps < cfg.minHoldS) return { reps: [], depth: [] };
+  return { reps: [[best[0], best[1], best[1]]], depth: [] };
+}
+
+const at = (a, i) => (a && isNum(a[i]) ? a[i] : NaN);
+const MORE_FIND = {
+  plank: (F, c) => holdRep(F, (i) => at(F.body_tilt, i) < 35 && at(F.body_line, i) < 35, c),
+  sideplank: (F, c) => holdRep(F, (i) => at(F.body_tilt, i) < 50 && at(F.body_line, i) < 35, c),
+  wallsit: (F, c) => holdRep(F, (i) => at(F.knee_flex, i) > 55 && at(F.knee_flex, i) < 125
+                                    && at(F.trunk_pitch, i) < 35, c),
+  deadlift: (F, c) => cycleReps(F.hip_flex, 35, c),
+  bridge: (F, c) => {
+    const rest = nanpercentile(F.hip_flex, 80);
+    return cycleReps(F.hip_flex.map((v) => rest - v), 20, c);
+  },
+  ohpress: (F, c) => cycleReps(F.wrist_rise, 0.8, c),
+  curl: (F, c) => cycleReps(F.elbow_flex, 50, c),
+  row: (F, c) => cycleReps(F.elbow_flex, 40, c),
+  raise: (F, c) => cycleReps(F.shoulder_elev, 40, c),
+  // Lunge: the hip drops and comes back; the front leg is the one whose foot
+  // is ahead of the hip at the bottom, and each rep is tagged with it.
+  lunge: (F, c) => {
+    const f = cycleReps(F.depth, 0.08, c);
+    const knee = interpNan(F.knee_flex);
+    f.reps = f.reps.filter(([a, p, b]) => knee[p] - Math.min(knee[a], knee[b]) >= 30);
+    f.repSides = f.reps.map(([, p]) => (at(F.ankle_ahead_l, p) >= at(F.ankle_ahead_r, p) ? "l" : "r"));
+    f.sideReps = { l: f.reps.filter((_, i) => f.repSides[i] === "l"), r: f.reps.filter((_, i) => f.repSides[i] === "r") };
+    return f;
+  },
+};
+const moreFinder = (id) => (F, cfg = DEFAULT_MORE_CFG) => MORE_FIND[id](F, cfg);
+
+/** Per-rep numbers for the ten, from the measured angles in the rep window. */
+export function moreMetrics(activity, F, rep, fps, found, i) {
+  const [t0, pk, t1] = rep;
+  const seg = (k) => interpNan(F[k] || []).slice(t0, t1 + 1).filter(isNum);
+  const mx = (k) => { const v = seg(k); return v.length ? +Math.max(...v).toFixed(1) : null; };
+  const mn = (k) => { const v = seg(k); return v.length ? +Math.min(...v).toFixed(1) : null; };
+  const mean = (k) => { const v = seg(k); return v.length ? +(v.reduce((a, b) => a + b, 0) / v.length).toFixed(1) : null; };
+  const rng = (k) => { const a = mx(k), b = mn(k); return a != null && b != null ? +(a - b).toFixed(1) : null; };
+  const o = {};
+  switch (activity) {
+    case "plank": case "sideplank":
+      o.hold_s = +((t1 - t0) / fps).toFixed(1);
+      o.body_line_mean_deg = mean("body_line");
+      o.body_line_max_deg = mx("body_line");
+      o.main_range = o.hold_s; break;
+    case "wallsit":
+      o.hold_s = +((t1 - t0) / fps).toFixed(1);
+      o.knee_flex_mean_deg = mean("knee_flex");
+      o.hip_flex_mean_deg = mean("hip_flex");
+      o.main_range = o.hold_s; break;
+    case "deadlift":
+      o.hip_flex_max_deg = mx("hip_flex");
+      o.hip_range_deg = rng("hip_flex");
+      o.trunk_pitch_max_deg = mx("trunk_pitch");
+      o.knee_flex_at_bottom_deg = isNum(F.knee_flex[pk]) ? +F.knee_flex[pk].toFixed(1) : null;
+      o.main_range = o.hip_range_deg; break;
+    case "bridge":
+      o.hip_range_deg = rng("hip_flex");
+      o.hip_flex_top_deg = mn("hip_flex");      // 0 = shoulders, hips and knees in a line
+      o.main_range = o.hip_range_deg; break;
+    case "ohpress":
+      o.elbow_flex_top_deg = isNum(F.elbow_flex[pk]) ? +F.elbow_flex[pk].toFixed(1) : null;   // lockout
+      o.shoulder_elev_max_deg = mx("shoulder_elev");
+      o.trunk_motion_deg = rng("trunk_pitch");
+      o.main_range = rng("wrist_rise"); break;
+    case "curl": case "row":
+      o.elbow_flex_max_deg = mx("elbow_flex");
+      o.elbow_flex_min_deg = mn("elbow_flex");
+      o.elbow_range_deg = rng("elbow_flex");
+      if (activity === "curl") o.shoulder_swing_deg = rng("shoulder_elev");
+      else o.trunk_pitch_mean_deg = mean("trunk_pitch");
+      o.main_range = o.elbow_range_deg; break;
+    case "raise":
+      o.shoulder_elev_max_deg = mx("shoulder_elev");
+      o.shoulder_range_deg = rng("shoulder_elev");
+      o.elbow_flex_mean_deg = mean("elbow_flex");
+      o.main_range = o.shoulder_range_deg; break;
+    case "lunge": {
+      const sd = found.repSides ? found.repSides[i] : "l";
+      o.stance_side = sd;
+      o.front_knee_flex_max_deg = mx("knee_flex_" + sd);
+      o.trunk_lean_max_deg = mx("trunk_pitch");
+      o.main_range = o.front_knee_flex_max_deg; break;
+    }
+  }
+  return o;
+}
+
+const MORE = (label, findId, extra = {}) => ({
+  label, generic: true, openChain: true,
+  columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_MORE_CFG,
+  features: buildMoreFeatures, findReps: moreFinder(findId),
+  coords: squatRepCoordinates, reference: squatReferencePositions,
+  phases: ["eccentric_s", "concentric_s"], ...extra,
+});
+export const MORE_ACTIVITIES = {
+  plank: MORE("plank", "plank", { isometric: true, phases: ["hold_s", "end_s"] }),
+  sideplank: MORE("side plank", "sideplank", { isometric: true, phases: ["hold_s", "end_s"] }),
+  wallsit: MORE("wall sit", "wallsit", { isometric: true, phases: ["hold_s", "end_s"] }),
+  deadlift: MORE("deadlift", "deadlift"),
+  lunge: MORE("lunge", "lunge", { perLeg: true, coords: perLegRepCoordinates }),
+  bridge: MORE("glute bridge", "bridge", { lying: true, phases: ["concentric_s", "eccentric_s"] }),
+  ohpress: MORE("overhead press", "ohpress", { armTask: true, phases: ["concentric_s", "eccentric_s"] }),
+  curl: MORE("biceps curl", "curl", { armTask: true, phases: ["concentric_s", "eccentric_s"] }),
+  row: MORE("bent-over row", "row", { armTask: true, phases: ["concentric_s", "eccentric_s"] }),
+  raise: MORE("lateral / front raise", "raise", { armTask: true, phases: ["concentric_s", "eccentric_s"] }),
+};
+
 export const ACTIVITIES = {
   pullup: {
     label: "pull-up", columns: DRIVEN_COORDS, defaultCfg: DEFAULT_PULLUP_CFG,
@@ -2935,6 +3140,7 @@ export const ACTIVITIES = {
     coords: perLegRepCoordinates, reference: squatReferencePositions,
     phases: ["out_s", "back_s"],
   },
+  ...MORE_ACTIVITIES,
 };
 
 /* ---- cropping a rep to the movement ----------------------------------------
@@ -3030,7 +3236,7 @@ function trimSignal(activity, F, found, i) {
       const sd = found.repSides ? found.repSides[i] : "l";
       return found.kick ? found.kick[sd] : null;
     }
-    default: return null;
+    default: return (ACTIVITIES[activity]?.generic && found.sig) || null;
   }
 }
 
@@ -3055,7 +3261,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   const F = spec.features(poses);
   let pxPerM = 1, detail = {};
   try { ({ pxPerM, detail } = computePxPerM(poses, heightM)); }
-  catch (err) { if (activity !== "neck") throw err; }
+  catch (err) { if (activity !== "neck" && !spec.generic) throw err; }
   const [refA, refB] = spec.reference(F);
   F._fps = fps;          // the jump detector sizes its floor window in seconds
   let found = spec.findReps(F, conf);
@@ -3085,7 +3291,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
 
   const reps = bounds.map((b, i) => {
     const { times, coords } = (activity === "squat" || spec.jump || spec.perLeg
-                               || spec.shot || spec.stroke)
+                               || spec.shot || spec.stroke || spec.generic)
       ? spec.coords(F, b, fps, pxPerM, refA, refB,
                     { model: osimModel, ankleValid: view.ankle_usable })
       : activity === "neck"
@@ -3146,7 +3352,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
         [s.flex_hold_deg, s.flex_sd_deg, s.flex_drift_deg] = stat("pitch1", "pitch2");
         [s.rot_hold_deg, s.rot_sd_deg, s.rot_drift_deg] = stat("yaw1", "yaw2");
       }
-    } else if (activity === "squat" || spec.jump || spec.perLeg || spec.shot || spec.stroke) {
+    } else if (activity === "squat" || spec.jump || spec.perLeg || spec.shot || spec.stroke || spec.generic) {
       // knee_angle is SIGNED per model family, so report peak flexion as a
       // magnitude; otherwise a GPK export summarises as "-2 deg".
       s.knee_flex_max_deg = Math.max(...coords.knee_angle_r.map(Math.abs));
@@ -3211,6 +3417,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       if (spec.kickback) {
         Object.assign(s, kickbackMetrics(F, b, fps, found.repSides ? found.repSides[i] : "l"));
       }
+      if (spec.generic) Object.assign(s, moreMetrics(activity, F, b, fps, found, i));
     } else {
       /* The peak is taken from the MEASUREMENT, not from the exported column.
        *
