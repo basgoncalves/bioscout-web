@@ -157,9 +157,11 @@ export function readOpenSim(text, fileName) {
   if (h < 0) throw new Error("not an OpenSim file (no endheader)");
   const meta = {};
   for (const l of lines.slice(0, h)) { const m = l.match(/^\s*(\w+)\s*=\s*(.*)$/); if (m) meta[m[1]] = m[2].trim(); }
-  const header = lines[h + 1].trim().split(/\s+/);
+  // the column-name line is the first non-blank line after endheader (OpenSim writes a blank one sometimes)
+  let hr = h + 1; while (hr < lines.length && !lines[hr].trim()) hr++;
+  const header = lines[hr].trim().split(/\s+/);
   const rows = [];
-  for (let i = h + 2; i < lines.length; i++) { const l = lines[i].trim(); if (l) rows.push(l.split(/\s+/)); }
+  for (let i = hr + 1; i < lines.length; i++) { const l = lines[i].trim(); if (l) rows.push(l.split(/\s+/)); }
   const ds = fromTable(fileName, header, rows, { kind: "opensim", meta });
   ds.meta = { ...meta, inDegrees: !/^no$/i.test(meta.inDegrees || "yes"), title: lines[0].trim() };
   return [ds];

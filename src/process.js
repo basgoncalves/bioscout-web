@@ -69,6 +69,7 @@ export const HELP = [
 export function makeProcessor() {
   const S = { ds: [], cur: -1, results: [], plot: { cols: [], xy: null, curves: null, marks: [] }, win: null, bw: {}, contacts: {}, log: [] };
 
+  const rootOf = (ds, k) => (ds.src && ds.src[k]) || k;
   const cur = () => { if (S.cur < 0 || !S.ds[S.cur]) throw new Error("load a file first"); return S.ds[S.cur]; };
   const addResult = (ds, analysis, measure, value, unit = "") => {
     const p = D.parseName(ds.name);
@@ -114,7 +115,7 @@ export function makeProcessor() {
     // the raw channel this column was made from (for the raw-vs-processed view)
     const parent = from ?? (S._src && !/^\d+:/.test(S._src) ? S._src : null);
     if (parent && parent !== key) { ds.src = ds.src || {}; ds.src[key] = (ds.src[parent] || parent); }
-    if (!S.plot.cols.includes(key)) S.plot.cols.push(key);
+    const r = rootOf(ds, key); if (!S.plot.cols.includes(r)) S.plot.cols.push(r);
     S.plot.xy = null; S.plot.curves = null;
     return key;
   };
@@ -127,8 +128,8 @@ export function makeProcessor() {
 
   const C = {
     use([n]) { const i = +n - 1; if (!S.ds[i]) throw new Error(`no file ${n}`); S.cur = i; S.plot = { cols: [], xy: null, curves: null, marks: [] }; return `using ${S.ds[i].name}`; },
-    plot(args) { const ds = cur(); S.plot = { cols: args.map((a) => col(ds, a).key).filter((k) => ds.cols[k]), xy: null, curves: null, marks: [] }; return args.length ? `plotting ${S.plot.cols.length} column(s)` : "plot cleared"; },
-    xy([a, b]) { const ds = cur(); S.plot = { cols: [], xy: [col(ds, a).key, col(ds, b).key], curves: null, marks: [] }; return "xy plot"; },
+    plot(args) { const ds = cur(); S.plot = { cols: [...new Set(args.map((a) => rootOf(ds, col(ds, a).key)))].filter((k) => ds.cols[k]), xy: null, curves: null, marks: [] }; return args.length ? `plotting ${S.plot.cols.length} column(s)` : "plot cleared"; },
+    xy([a, b]) { const ds = cur(); S.plot = { cols: S.plot.cols, xy: [col(ds, a).key, col(ds, b).key], curves: null, marks: [] }; return "xy plot"; },
     window([a, b]) {
       if (!a || /^(all|off)$/i.test(a)) { S.win = null; return "whole trial"; }
       const t0 = numArg(a), t1 = numArg(b); if (!(t1 > t0)) throw new Error("window needs t0 < t1"); S.win = [t0, t1]; return `window ${t0}-${t1} s`;
@@ -187,7 +188,7 @@ export function makeProcessor() {
       const y = Array.from(k.y).slice(a, b);
       const pk = D.simplePeaks(y, th, numArg(half, 50)).map((i) => i + a);
       const vals = pk.map((i) => k.y[i]);
-      S.plot = { cols: [k.key], xy: null, curves: null, marks: pk.map((i) => [ds.time[i], k.y[i]]) };
+      S.plot = { cols: [rootOf(ds, k.key)], markCol: k.key, xy: null, curves: null, marks: pk.map((i) => [ds.time[i], k.y[i]]) };
       const [m, s] = D.meanSd(vals); const u = ds.units[k.key] || "";
       addResult(ds, "peaks", `${k.key} n peaks`, pk.length); if (pk.length) { addResult(ds, "peaks", `${k.key} mean peak`, m, u); addResult(ds, "peaks", `${k.key} SD peak`, s, u); }
       return `${pk.length} peaks, mean ${r3(m)} ± ${r3(s)}`;
@@ -203,7 +204,7 @@ export function makeProcessor() {
         addResult(ds, "contacts", `contact ${i + 1} duration`, (e - s) / ds.fs, "s");
         addResult(ds, "contacts", `contact ${i + 1} peak 1`, p1, u); addResult(ds, "contacts", `contact ${i + 1} peak 2`, p2, u);
       });
-      S.plot = { cols: [k.key], xy: null, curves: null, marks: cs.flatMap(([s, e]) => [[ds.time[s], k.y[s]], [ds.time[e - 1], k.y[e - 1]]]) };
+      S.plot = { cols: [rootOf(ds, k.key)], markCol: k.key, xy: null, curves: null, marks: cs.flatMap(([s, e]) => [[ds.time[s], k.y[s]], [ds.time[e - 1], k.y[e - 1]]]) };
       return `${cs.length} contact(s)`;
     },
     jump([c, thr, quiet]) {
@@ -212,7 +213,7 @@ export function makeProcessor() {
       const f = D.jumpHeightFlight(y, ds.fs, numArg(thr, 20)), im = D.jumpHeightImpulse(y, ds.fs, numArg(quiet, 1), numArg(thr, 20));
       addResult(ds, "jump", "height (flight time)", f.height * 100, "cm"); addResult(ds, "jump", "flight time", f.flight, "s");
       addResult(ds, "jump", "height (impulse)", im.height * 100, "cm"); addResult(ds, "jump", "take-off velocity", im.vTakeoff, "m/s");
-      S.plot = { cols: [k.key], xy: null, curves: null, marks: [[ds.time[a + f.window[0]], 0], [ds.time[Math.min(a + f.window[1], ds.time.length - 1)], 0]] };
+      S.plot = { cols: [rootOf(ds, k.key)], markCol: k.key, xy: null, curves: null, marks: [[ds.time[a + f.window[0]], 0], [ds.time[Math.min(a + f.window[1], ds.time.length - 1)], 0]] };
       return `flight ${r3(f.height * 100)} cm, impulse ${r3(im.height * 100)} cm`;
     },
     cop(args) {
@@ -230,7 +231,7 @@ export function makeProcessor() {
       const [a, b] = win(ds);
       const m = D.copMetrics(x.y.slice(a, b), y.y.slice(a, b), ds.fs);
       for (const [k, v] of Object.entries(m)) addResult(ds, "CoP", k.replace(/_(mm.*)$/, ""), v, k.match(/_(mm.*)$/)?.[1].replace("mm2", "mm²").replace("mm_s", "mm/s") || "");
-      S.plot = { cols: [], xy: [x.key, y.key], curves: null, marks: [] };
+      S.plot = { ...S.plot, xy: [x.key, y.key], curves: null, marks: [] };
       return `path ${r3(m.path_length_mm)} mm, ellipse ${r3(m.ellipse95_area_mm2)} mm²`;
     },
     power([mo, an]) {
@@ -264,7 +265,7 @@ export function makeProcessor() {
       }
       if (!curves.length) throw new Error(`no file has "${c}"`);
       const ms = D.meanSdCurves(curves);
-      S.plot = { cols: [], xy: null, curves: { name: c, all: curves, labels, mean: ms.mean, sd: ms.sd }, marks: [] };
+      S.plot = { ...S.plot, xy: null, curves: { name: c, all: curves, labels, mean: ms.mean, sd: ms.sd }, marks: [] };
       return `${curves.length} curve(s), mean ± SD`;
     },
     compare([measure, A, B]) {
@@ -436,19 +437,19 @@ function decimate(x, y, buckets) {
  * series: [{ x, y, color, label, dash, band:[lo,hi] }]. Returns { svg, map }
  * where map converts a pointer x (0..1 of width) to a data x for the readout.
  */
-export function chartSVG({ series, xLabel = "s", yLabel = "", marks = [], equal = false, W = 720, H = 300 }) {
+export function chartSVG({ series, xLabel = "s", yLabel = "", marks = [], equal = false, W = 720, H = 300, cursors = null, xRange = null }) {
   const L = 64, R = 12, T = 14, B = 38;
   const xs = series.flatMap((s) => Array.from(s.x)).filter(fin);
   const ys = series.flatMap((s) => [...Array.from(s.y), ...(s.band ? [...s.band[0], ...s.band[1]] : [])]).filter(fin);
   if (!xs.length || !ys.length) return { svg: "", x0: 0, x1: 1 };
-  let x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  let x0 = xRange ? xRange[0] : Math.min(...xs), x1 = xRange ? xRange[1] : Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
   if (x1 - x0 < 1e-12) { x0 -= 1; x1 += 1; } if (y1 - y0 < 1e-12) { y0 -= 1; y1 += 1; }
   if (equal) { const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, ax = (W - L - R) / (H - T - B); const sx = Math.max(x1 - x0, (y1 - y0) * ax), sy = sx / ax; x0 = cx - sx / 2; x1 = cx + sx / 2; y0 = cy - sy / 2; y1 = cy + sy / 2; }
   const ys0 = niceStep(y1 - y0); y0 = Math.floor(y0 / ys0) * ys0; y1 = Math.ceil(y1 / ys0) * ys0;
   const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
   const dp = (st) => (st < 1 ? Math.min(4, Math.ceil(-Math.log10(st))) : 0);
   let g = "";
-  for (let v = y0; v <= y1 + ys0 / 2; v += ys0) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)"${Math.abs(v) < ys0 / 1e6 ? "" : ' stroke-dasharray="2 3"'}/><text x="${L - 5}" y="${(Y(v) + 3).toFixed(1)}" font-size="13" text-anchor="end" fill="var(--muted)">${v.toFixed(dp(ys0))}</text>`;
+  for (let v = y0; v <= y1 + ys0 / 2; v += ys0) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)"${Math.abs(v) < ys0 / 1e6 ? "" : ' stroke-dasharray="2 3"'}/><text x="${L - 5}" y="${(Y(v) + 4).toFixed(1)}" font-size="13" text-anchor="end" fill="var(--muted)">${v.toFixed(dp(ys0))}</text>`;
   const xs0 = niceStep(x1 - x0, 6);
   for (let v = Math.ceil(x0 / xs0) * xs0; v <= x1 + 1e-9; v += xs0) g += `<line x1="${X(v).toFixed(1)}" x2="${X(v).toFixed(1)}" y1="${T}" y2="${H - B}" stroke="var(--line)" stroke-dasharray="2 3"/><text x="${X(v).toFixed(1)}" y="${H - B + 17}" font-size="13" text-anchor="middle" fill="var(--muted)">${v.toFixed(dp(xs0))}</text>`;
   const buckets = W - L - R;
@@ -464,11 +465,12 @@ export function chartSVG({ series, xLabel = "s", yLabel = "", marks = [], equal 
     for (let i = 0; i < px.length; i++) { if (!fin(py[i]) || !fin(px[i])) { pen = false; continue; } d += `${pen ? "L" : "M"}${X(px[i]).toFixed(1)} ${Y(py[i]).toFixed(1)}`; pen = true; }
     return `${band}<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.thin ? 1 : 1.6}"${s.dash ? ' stroke-dasharray="5 3"' : ""}${s.thin ? ' stroke-opacity=".45"' : ""}><title>${escX(s.label || "")}</title></path>`;
   }).join("");
-  const mk = marks.filter(([x, y]) => fin(x) && fin(y)).map(([x, y]) => `<circle cx="${X(x).toFixed(1)}" cy="${Y(y).toFixed(1)}" r="3.5" fill="none" stroke="var(--warn)" stroke-width="1.6"/>`).join("");
-  const svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;touch-action:pan-y" role="img" data-l="${L}" data-r="${R}" data-w="${W}">`
-    + `<rect x="0" y="0" width="${W}" height="${H}" fill="var(--card)"/>${g}${paths}${mk}`
-    + `<text x="${W - R}" y="${H - 6}" font-size="13" text-anchor="end" fill="var(--muted)">${escX(xLabel)}</text>`
-    + (yLabel ? `<text x="${L + 4}" y="${T + 10}" font-size="13" fill="var(--muted)">${escX(yLabel)}</text>` : "")
+  const mk = marks.filter(([x, y]) => fin(x) && fin(y)).map(([x, y]) => `<circle cx="${X(x).toFixed(1)}" cy="${Y(y).toFixed(1)}" r="4" fill="none" stroke="var(--warn)" stroke-width="1.8"/>`).join("");
+  const cur = (cursors || []).map((c, i) => fin(c) ? `<g class="prCur" data-cur="${i}" transform="translate(${X(c).toFixed(1)},0)"><line x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--accent)" stroke-width="1.5"/><rect x="-9" y="${T - 2}" width="18" height="16" rx="3" fill="var(--accent)"/><text x="0" y="${T + 10}" font-size="11" fill="#fff" text-anchor="middle">${"AB"[i]}</text></g>` : "").join("");
+  const svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;touch-action:pan-y" role="img" data-l="${L}" data-r="${R}" data-w="${W}" data-x0="${x0}" data-x1="${x1}">`
+    + `<rect x="0" y="0" width="${W}" height="${H}" fill="var(--card)"/>${g}${paths}${mk}${cur}`
+    + `<text x="${W - R}" y="${H - 4}" font-size="12" text-anchor="end" fill="var(--muted)">${escX(xLabel)}</text>`
+    + (yLabel ? `<text x="${L + 4}" y="${T + 12}" font-size="12" fill="var(--muted)">${escX(yLabel)}</text>` : "")
     + `<line class="prCursor" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-width="1" visibility="hidden"/></svg>`;
   return { svg, x0, x1, L, R, W };
 }
@@ -521,97 +523,325 @@ export const TOOLS = [
   ] },
 ];
 
-/** Mount the page into `root`. `t` translates, `esc` escapes, `download(name, text|blob)` saves a file. */
+/** Mount the page into `root`. `t` translates, `download(name, text|blob)` saves a file. */
 export function mountProcess(root, { t, download }) {
   const P = makeProcessor();
   const S = P.S;
   let colFilter = "", out = [];
-  const vis = { tab: "pp", chans: new Set(), view: { yaw: 0.6, pitch: 0.35, zoom: 1, up: null, labels: false, frame: 0 }, playing: false, speed: 1, box: null, boxFor: null };
+  const vis = { show3d: false, view: { yaw: 0.6, pitch: 0.35, zoom: 1, up: null, labels: false, frame: 0 }, playing: false, speed: 1, box: null, boxFor: null };
+  const cursors = {};          // dataset name -> [tA, tB]
 
   const say = (r, line) => { out.unshift({ ok: r.ok, line, msg: r.msg }); out = out.slice(0, 30); };
   const exec = (line) => { const r = P.run(line); say(r, line); render(); return r; };
 
-  function plotHTML() {
-    const ds = P.current(); if (!ds) return "";
-    const pl = S.plot; let ch, legend = [];
-    if (pl.curves) {
-      const x = Float64Array.from({ length: pl.curves.mean.length }, (_, i) => (100 * i) / (pl.curves.mean.length - 1));
-      const lo = pl.curves.mean.map((m, i) => m - pl.curves.sd[i]), hi = pl.curves.mean.map((m, i) => m + pl.curves.sd[i]);
-      const series = pl.curves.all.map((y, i) => ({ x, y, color: COLORS[(i + 1) % COLORS.length], thin: true, label: pl.curves.labels[i] }));
-      series.push({ x, y: pl.curves.mean, band: [lo, hi], color: COLORS[0], label: t("pr_meanSd") });
-      ch = chartSVG({ series, xLabel: "%", yLabel: pl.curves.name });
-      legend = [{ color: COLORS[0], label: `${t("pr_meanSd")} (n = ${pl.curves.all.length})` }];
-    } else if (pl.xy) {
-      const [a, b] = pl.xy; let i0 = 0, i1 = ds.time.length;
-      if (S.win) { i0 = ds.time.findIndex((v) => v >= S.win[0]); i1 = ds.time.findIndex((v) => v > S.win[1]); if (i1 < 0) i1 = ds.time.length; }
-      const x = ds.cols[a].slice(i0, i1), y = ds.cols[b].slice(i0, i1);
-      ch = chartSVG({ series: [{ x, y, color: COLORS[0], label: `${b} vs ${a}` }], xLabel: a, yLabel: b, equal: true });
-      legend = [{ color: COLORS[0], label: `${b} vs ${a}` }];
-    } else if (pl.cols.length) {
-      let i0 = 0, i1 = ds.time.length;
-      if (S.win) { i0 = Math.max(0, ds.time.findIndex((v) => v >= S.win[0])); i1 = ds.time.findIndex((v) => v > S.win[1]); if (i1 < 0) i1 = ds.time.length; }
-      const x = ds.time.slice(i0, i1);
-      const series = pl.cols.filter((k) => ds.cols[k]).map((k, i) => ({ x, y: ds.cols[k].slice(i0, i1), color: COLORS[i % COLORS.length], label: k }));
-      const units = [...new Set(pl.cols.map((k) => ds.units[k]).filter(Boolean))];
-      ch = chartSVG({ series, xLabel: t("pr_timeS"), yLabel: units.join(", "), marks: pl.marks.filter(([tm]) => !S.win || (tm >= S.win[0] && tm <= S.win[1])) });
-      legend = series;
-    } else return `<p class="note" style="margin:8px 0">${t("pr_tickToPlot")}</p>`;
-    return `<div class="prPlot">${ch.svg}<div class="prReadout sub" style="font-size:12px;min-height:16px;margin:2px 0 0"></div></div>
-      <div class="sub" style="font-size:12px;display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 0">${legend.map((s) => `<span><i class="dot" style="display:inline-block;width:10px;height:3px;background:${s.color};vertical-align:middle"></i> ${escX(s.label)}</span>`).join("")}</div>
-      <div class="row" style="margin-top:8px;gap:8px"><button type="button" class="ghost" id="prSvg" style="margin:0">${t("pr_saveSvg")}</button><button type="button" class="ghost" id="prCsv" style="margin:0">${t("pr_saveCsv")}</button></div>`;
+  // ---- what is plotted ---------------------------------------------------------
+  const rootOf = (ds, k) => (ds.src && ds.src[k]) || k;
+  function span(ds) {
+    let i0 = 0, i1 = ds.time.length;
+    if (S.win) { i0 = Math.max(0, ds.time.findIndex((v) => v >= S.win[0])); i1 = ds.time.findIndex((v) => v > S.win[1]); if (i1 < 0) i1 = ds.time.length; }
+    return [i0, Math.max(i0 + 2, i1)];
   }
-
-  function visHTML(ds) {
-    const mk = markerTriplets(ds), tree = channelTree(ds);
-    const has3d = mk.length > 0;
-    if (vis.tab === "3d" && !has3d) vis.tab = "pp";
-    const tabs = `<div class="row" style="gap:6px;margin:8px 0">
-      <button type="button" class="${vis.tab === "pp" ? "" : "ghost"}" data-vtab="pp" style="margin:0">${t("pr_vRawProc")}</button>
-      ${has3d ? `<button type="button" class="${vis.tab === "3d" ? "" : "ghost"}" data-vtab="3d" style="margin:0">${t("pr_v3d")} (${mk.length})</button>` : ""}</div>`;
-    let body = "";
-    if (vis.tab === "pp") {
-      const raws = tree.raw.filter((k) => !colFilter || k.toLowerCase().includes(colFilter.toLowerCase()));
-      const sorted = [...raws.filter((k) => tree.derived[k]), ...raws.filter((k) => !tree.derived[k])];
-      for (const k of [...vis.chans]) if (!ds.cols[k]) vis.chans.delete(k);
-      if (!vis.chans.size) for (const k of Object.keys(tree.derived).slice(0, 2)) vis.chans.add(k);
-      let i0 = 0, i1 = ds.time.length;
-      if (S.win) { i0 = Math.max(0, ds.time.findIndex((v) => v >= S.win[0])); i1 = ds.time.findIndex((v) => v > S.win[1]); if (i1 < 0) i1 = ds.time.length; }
-      const x = ds.time.slice(i0, i1);
-      const panels = [...vis.chans].map((k) => {
-        const kids = tree.derived[k] || [];
-        const series = [{ x, y: ds.cols[k].slice(i0, i1), color: "#9aa1ae", label: `${k} (${t("pr_raw")})` },
-          ...kids.map((d, i) => ({ x, y: ds.cols[d].slice(i0, i1), color: COLORS[i % COLORS.length], label: d }))];
-        const ch = chartSVG({ series, xLabel: t("pr_timeS"), yLabel: ds.units[k] || "", H: 220 });
-        return `<div style="margin-top:10px"><b style="font-size:13px">${escX(k)}</b>${ch.svg}
-          <div class="sub" style="font-size:12px;display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 0">${series.map((q) => `<span><i style="display:inline-block;width:10px;height:3px;background:${q.color};vertical-align:middle"></i> ${escX(q.label)}</span>`).join("")}</div></div>`;
-      }).join("");
-      body = `<p class="note" style="margin:0 0 6px">${t("pr_vRawNote")}</p>
-        <div class="prCols" style="max-height:160px">${sorted.map((k) => `<label class="prCol"><input type="checkbox" data-vchan="${escX(k)}"${vis.chans.has(k) ? " checked" : ""}> ${escX(k)}${tree.derived[k] ? ` <span class="sub" style="font-size:11px">→ ${tree.derived[k].length}</span>` : ""}</label>`).join("")}</div>
-        ${panels || `<p class="note" style="margin:8px 0 0">${t("pr_vNone")}</p>`}`;
-    } else {
-      const n = ds.time.length;
-      if (vis.view.up == null) vis.view.up = ds.kind === "trc" ? "y" : "z";
-      vis.view.frame = Math.min(vis.view.frame, n - 1);
-      body = `<canvas id="prCanvas" style="width:100%;aspect-ratio:4/3;display:block;border:1px solid var(--line);border-radius:10px;touch-action:none;cursor:grab"></canvas>
-        <p class="note" style="margin:4px 0 6px">${t("pr_vDrag")}</p>
-        <div class="row" style="gap:8px;align-items:center">
-          <button type="button" id="prPlay" style="margin:0;width:auto;padding:6px 14px">${vis.playing ? t("pr_pause") : t("pr_play")}</button>
-          <input id="prFrame" type="range" min="0" max="${n - 1}" value="${vis.view.frame}" style="flex:1">
-          <span id="prFrameT" class="sub" style="font-size:12px;min-width:64px;text-align:right">${(+ds.time[vis.view.frame]).toFixed(2)} s</span></div>
-        <div class="row" style="gap:12px;align-items:center;margin-top:6px;font-size:13px">
-          <label>${t("pr_up")} <select id="prUp" style="width:auto;display:inline-block">${["z", "y"].map((a) => `<option${vis.view.up === a ? " selected" : ""}>${a}</option>`).join("")}</select></label>
-          <label>${t("pr_speed")} <select id="prSpeed" style="width:auto;display:inline-block">${[0.25, 0.5, 1, 2].map((v) => `<option value="${v}"${vis.speed === v ? " selected" : ""}>${v}×</option>`).join("")}</select></label>
-          <label><input type="checkbox" id="prLabels"${vis.view.labels ? " checked" : ""} style="width:auto;display:inline-block;min-height:0"> ${t("pr_labels")}</label></div>`;
+  function curOf(ds) {
+    const [i0, i1] = span(ds), a = ds.time[i0], b = ds.time[i1 - 1];
+    let c = cursors[ds.name];
+    if (!c || !(c[0] >= a && c[0] <= b) || !(c[1] >= a && c[1] <= b)) c = cursors[ds.name] = [a + 0.1 * (b - a), a + 0.9 * (b - a)];
+    return c;
+  }
+  function plotted(ds) {
+    const tree = channelTree(ds);
+    const ticked = [...new Set(S.plot.cols.map((k) => rootOf(ds, k)))].filter((k) => ds.cols[k]);
+    const raw = ticked.map((k, i) => ({ key: k, color: COLORS[i % COLORS.length] }));
+    const proc = [];
+    ticked.forEach((k, i) => (tree.derived[k] || []).forEach((d, j) => proc.push({ key: d, parent: k, color: COLORS[(i + j + 1) % COLORS.length], dash: j > 0 })));
+    return { tree, raw, proc };
+  }
+  /** Min/max/mean between the cursors, and the processed-vs-raw differences. */
+  function compareRows(ds, pl) {
+    const [ta, tb] = curOf(ds).slice().sort((x, y) => x - y);
+    let a = ds.time.findIndex((v) => v >= ta), b = ds.time.findIndex((v) => v > tb); if (b < 0) b = ds.time.length;
+    const iA = Math.max(0, a), iB = Math.max(iA + 1, b);
+    const st = (k) => {
+      const y = ds.cols[k]; let mn = Infinity, mx = -Infinity, imn = iA, imx = iA, s = 0, n = 0;
+      for (let i = iA; i < iB; i++) { const v = y[i]; if (!fin(v)) continue; if (v < mn) { mn = v; imn = i; } if (v > mx) { mx = v; imx = i; } s += v; n++; }
+      return { min: mn, tmin: ds.time[imn], max: mx, tmax: ds.time[imx], mean: n ? s / n : NaN, range: mx - mn, atA: y[iA], atB: y[iB - 1] };
+    };
+    const rows = [];
+    for (const r of pl.raw) {
+      const s0 = st(r.key); rows.push({ name: r.key, kind: "raw", color: r.color, ...s0 });
+      for (const p of pl.proc.filter((q) => q.parent === r.key)) {
+        const s1 = st(p.key);
+        rows.push({ name: p.key, kind: "proc", color: p.color, ...s1,
+          dPeak: s0.max ? (100 * (s1.max - s0.max)) / Math.abs(s0.max) : NaN, dT: s1.tmax - s0.tmax });
+      }
     }
-    return `<div class="card"><b>${t("pr_visualise")}</b>${tabs}${body}</div>`;
+    return { rows, ta, tb };
   }
 
-  function wireVis(ds) {
-    root.querySelectorAll("[data-vtab]").forEach((b) => { b.onclick = () => { vis.tab = b.dataset.vtab; vis.playing = false; render(); }; });
-    root.querySelectorAll("[data-vchan]").forEach((c) => { c.onchange = () => { c.checked ? vis.chans.add(c.dataset.vchan) : vis.chans.delete(c.dataset.vchan); render(); }; });
-    const cv = root.querySelector("#prCanvas"); if (!cv) { vis.playing = false; return; }
+  // ---- the plot card -------------------------------------------------------------
+  function plotCardHTML(ds) {
+    if (!S.plot.cols.length && !S.plot.curves && !S.plot.xy) { const k = Object.keys(ds.cols)[0]; if (k) S.plot.cols = [k]; }
+    const pl = plotted(ds), [i0, i1] = span(ds);
+    const x = ds.time.slice(i0, i1), xr = [ds.time[i0], ds.time[i1 - 1]];
+    const cur = curOf(ds);
+    const marksFor = (keys) => (keys.includes(S.plot.markCol) ? S.plot.marks.filter(([tm]) => tm >= xr[0] && tm <= xr[1]) : []);
+    const legend = (series) => `<div class="sub" style="font-size:12px;display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 0">${series.map((s) => `<span><i style="display:inline-block;width:12px;height:0;border-top:2px ${s.dash ? "dashed" : "solid"} ${s.color};vertical-align:middle"></i> ${escX(s.label)}</span>`).join("")}</div>`;
+    const plotBox = (id, title, series, unit, marks, extra = "") => `<div class="prPlotTitle">${title}${extra}</div>${series.length
+      ? `<div class="prPlot" id="${id}">${chartSVG({ series, xLabel: t("pr_timeS"), yLabel: unit, marks, cursors: cur, xRange: xr, H: 250 }).svg}<div class="prReadout sub" style="font-size:12px;min-height:16px;margin:2px 0 0"></div></div>${legend(series)}`
+      : `<p class="note prEmpty">${id === "prRaw" ? t("pr_tickToPlot") : t("pr_vNone")}</p>`}`;
+    const rawSeries = pl.raw.map((r) => ({ x, y: ds.cols[r.key].slice(i0, i1), color: r.color, label: r.key }));
+    const units = (list) => [...new Set(list.map((s) => ds.units[s.key]).filter(Boolean))].join(", ");
+    let bottom;
+    if (S.plot.curves || S.plot.xy) {
+      const clear = ` <button type="button" class="ghost" id="prResultClose" style="margin:0 0 0 6px;width:auto;padding:2px 8px;font-size:12px">${t("pr_backProc")}</button>`;
+      let ch;
+      if (S.plot.curves) {
+        const c = S.plot.curves, xx = Float64Array.from({ length: c.mean.length }, (_, i) => (100 * i) / (c.mean.length - 1));
+        const series = c.all.map((y, i) => ({ x: xx, y, color: COLORS[(i + 1) % COLORS.length], thin: true, label: c.labels[i] }));
+        series.push({ x: xx, y: c.mean, band: [c.mean.map((m, i) => m - c.sd[i]), c.mean.map((m, i) => m + c.sd[i])], color: COLORS[0], label: `${t("pr_meanSd")} (n = ${c.all.length})` });
+        ch = chartSVG({ series, xLabel: "%", yLabel: c.name, H: 250 }).svg + legend([series[series.length - 1]]);
+      } else {
+        const [a, b] = S.plot.xy;
+        ch = chartSVG({ series: [{ x: ds.cols[a].slice(i0, i1), y: ds.cols[b].slice(i0, i1), color: COLORS[0], label: `${b} vs ${a}` }], xLabel: a, yLabel: b, equal: true, H: 300 }).svg;
+      }
+      bottom = `<div class="prPlotTitle">${t("pr_result")}${clear}</div><div class="prPlot">${ch}</div>`;
+    } else {
+      const procSeries = pl.proc.map((p) => ({ x, y: ds.cols[p.key].slice(i0, i1), color: p.color, dash: p.dash, label: p.key }));
+      bottom = plotBox("prProc", t("pr_processed"), procSeries, units(pl.proc), marksFor(pl.proc.map((p) => p.key)));
+    }
+    const cmp = pl.raw.length ? compareRows(ds, pl) : null;
+    const f = (v) => (fin(v) ? r3(v) : "–");
+    const cmpHTML = cmp ? `<div class="prCmp"><div class="prPlotTitle" style="margin-top:0">${t("pr_cmpTitle", { a: f(cmp.ta), b: f(cmp.tb) })}</div>
+      <div style="overflow-x:auto"><table><thead><tr><th></th><th>${t("pr_min")}</th><th>${t("pr_atT")}</th><th>${t("pr_max")}</th><th>${t("pr_atT")}</th><th>${t("pr_mean")}</th><th>${t("pr_range")}</th><th>A</th><th>B</th><th>${t("pr_peakChange")}</th><th>${t("pr_peakShift")}</th></tr></thead><tbody>${
+      cmp.rows.map((r) => `<tr${r.kind === "raw" ? ' class="prCmpRaw"' : ""}><td><i style="display:inline-block;width:10px;height:0;border-top:2px solid ${r.color};vertical-align:middle"></i> ${escX(r.name)}</td><td>${f(r.min)}</td><td>${f(r.tmin)}</td><td>${f(r.max)}</td><td>${f(r.tmax)}</td><td>${f(r.mean)}</td><td>${f(r.range)}</td><td>${f(r.atA)}</td><td>${f(r.atB)}</td><td>${r.kind === "proc" ? `${f(r.dPeak)} %` : ""}</td><td>${r.kind === "proc" ? `${f(r.dT)} s` : ""}</td></tr>`).join("")}</tbody></table></div>
+      <button type="button" class="ghost" id="prZoomCur" style="margin:6px 0 0;width:auto;padding:4px 10px;font-size:12.5px">${t("pr_zoomCur")}</button></div>` : "";
     const mk = markerTriplets(ds);
-    const key = ds.name + vis.view.up;
+    const chans = pl.tree.raw.filter((k) => !colFilter || k.toLowerCase().includes(colFilter.toLowerCase()));
+    return `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><b>${escX(ds.name)}</b>
+        ${mk.length ? `<button type="button" class="${vis.show3d ? "" : "ghost"}" id="prShow3d" style="margin:0;width:auto;padding:4px 10px;font-size:12.5px">${t("pr_v3d")} (${mk.length})</button>` : ""}</div>
+      <div class="row" style="margin-top:8px;align-items:flex-end;gap:8px">
+        <div><label for="prT0">${t("pr_from")}</label><input id="prT0" type="number" step="any" value="${S.win ? S.win[0] : ""}" placeholder="${(+ds.time[0]).toFixed(2)}"></div>
+        <div><label for="prT1">${t("pr_to")}</label><input id="prT1" type="number" step="any" value="${S.win ? S.win[1] : ""}" placeholder="${(+ds.time[ds.time.length - 1]).toFixed(2)}"></div>
+        <div><button type="button" class="ghost" id="prWinAll" style="margin:0">${t("pr_whole")}</button></div>
+      </div>
+      <div class="prVis">
+        <div class="prChanCol">
+          <input id="prColFilter" type="search" placeholder="${t("pr_filterCols")}" value="${escX(colFilter)}">
+          <div class="prChanList">${chans.map((k) => `<label class="prCol"><input type="checkbox" data-col="${escX(k)}"${S.plot.cols.some((c) => rootOf(ds, c) === k) ? " checked" : ""}> ${escX(k)}${pl.tree.derived[k] ? ` <span class="sub" style="font-size:11px">→ ${pl.tree.derived[k].length}</span>` : ""}${ds.units[k] ? ` <span class="sub" style="font-size:11px">(${escX(ds.units[k])})</span>` : ""}</label>`).join("") || `<p class="note">${t("pr_noCols")}</p>`}</div>
+          ${ds.meta?.text ? `<p class="note" style="margin:6px 0 0">${t("pr_textCols")}: ${Object.keys(ds.meta.text).map(escX).join(", ")}</p>` : ""}
+        </div>
+        <div class="prPlots">
+          ${plotBox("prRaw", t("pr_raw"), rawSeries, units(pl.raw), marksFor(pl.raw.map((r) => r.key)))}
+          ${bottom}
+          <div class="row" style="margin-top:8px;gap:8px"><button type="button" class="ghost" id="prCsv" style="margin:0">${t("pr_saveCsv")}</button><button type="button" class="ghost" id="prPng" style="margin:0">${t("pr_savePng")}</button></div>
+          ${cmpHTML}
+        </div>
+      </div>
+    </div>
+    ${vis.show3d && mk.length ? markers3dHTML(ds, mk) : ""}`;
+  }
+
+  function markers3dHTML(ds, mk) {
+    const n = ds.time.length;
+    if (vis.view.up == null) vis.view.up = ds.kind === "trc" ? "y" : "z";
+    vis.view.frame = Math.min(vis.view.frame, n - 1);
+    return `<div class="card"><b>${t("pr_v3d")} (${mk.length})</b>
+      <canvas id="prCanvas" style="width:100%;aspect-ratio:4/3;display:block;border:1px solid var(--line);border-radius:10px;touch-action:none;cursor:grab;margin-top:8px"></canvas>
+      <p class="note" style="margin:4px 0 6px">${t("pr_vDrag")}</p>
+      <div class="row" style="gap:8px;align-items:center">
+        <button type="button" id="prPlay" style="margin:0;width:auto;padding:6px 14px">${vis.playing ? t("pr_pause") : t("pr_play")}</button>
+        <input id="prFrame" type="range" min="0" max="${n - 1}" value="${vis.view.frame}" style="flex:1">
+        <span id="prFrameT" class="sub" style="font-size:12px;min-width:64px;text-align:right">${(+ds.time[vis.view.frame]).toFixed(2)} s</span></div>
+      <div class="row" style="gap:12px;align-items:center;margin-top:6px;font-size:13px">
+        <label>${t("pr_up")} <select id="prUp" style="width:auto;display:inline-block">${["z", "y"].map((a) => `<option${vis.view.up === a ? " selected" : ""}>${a}</option>`).join("")}</select></label>
+        <label>${t("pr_speed")} <select id="prSpeed" style="width:auto;display:inline-block">${[0.25, 0.5, 1, 2].map((v) => `<option value="${v}"${vis.speed === v ? " selected" : ""}>${v}×</option>`).join("")}</select></label>
+        <label><input type="checkbox" id="prLabels"${vis.view.labels ? " checked" : ""} style="width:auto;display:inline-block;min-height:0"> ${t("pr_labels")}</label></div></div>`;
+  }
+
+  // ---- tools: one row each, the button first --------------------------------------
+  function toolsHTML(ds) {
+    const keys = ds ? Object.keys(ds.cols) : [];
+    const pl = ds ? plotted(ds) : { raw: [], proc: [] };
+    const pre = [...pl.proc.map((p) => p.key), ...pl.raw.map((r) => r.key)];
+    const colSel = (id, pick) => `<select id="${id}">${["@fz", ...keys].map((k) => `<option value="${escX(k)}"${k === pick ? " selected" : ""}>${escX(k === "@fz" ? t("pr_autoFz") : k)}</option>`).join("")}</select>`;
+    return TOOLS.map((g, gi) => `<details class="prGroup"${gi === 0 ? " open" : ""}><summary><b>${t(g.group)}</b></summary>${g.items.map((it, ii) => {
+      const id = `prT${gi}_${ii}`; let ci = 0;
+      const fields = it.f.map(([type, lbl, def], fi) => `<label>${t(lbl)} ${type === "c"
+        ? colSel(`${id}_${fi}`, pl.raw[ci] ? (ci++ === 0 ? pl.raw[0].key : pre[ci - 1]) : "")
+        : `<input id="${id}_${fi}" type="${type === "n" ? "number" : "text"}" step="any" value="${escX(def ?? "")}"${type === "n" ? ' class="prNum"' : ""}>`}</label>`).join("");
+      return `<div class="prToolRow"><button type="button" data-tool="${gi}_${ii}">${t(it.k)}</button>${fields}</div>`;
+    }).join("")}</details>`).join("");
+  }
+
+  function render() {
+    const open = [...root.querySelectorAll(".prGroup")].map((d) => d.open);
+    const ds = P.current();
+    root.innerHTML = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <b style="font-size:16px">${t("pr_title")}</b>
+        <button type="button" class="ghost labHomeBtn" style="margin:0;width:auto;padding:6px 12px">${t("labHome")}</button>
+      </div>
+      <p class="note" style="margin:4px 0 10px">${t("pr_intro")}</p>
+      <label class="prDrop" for="prFiles"><input id="prFiles" type="file" multiple style="display:none"
+        accept=".csv,.txt,.tsv,.mot,.sto,.trc,.c3d,.xlsx,.xlsm">${t("pr_drop")}</label>
+      ${S.ds.length ? `<div class="prFiles">${S.ds.map((d, i) => `<div class="prFile${i === S.cur ? " sel" : ""}">
+        <button type="button" class="ghost" data-use="${i + 1}" style="margin:0;text-align:left">${i + 1} · ${escX(d.name)}
+          <span class="sub" style="font-size:11.5px;display:block;margin:0">${d.fs ? `${+d.fs.toFixed(2)} Hz · ` : ""}${d.time.length} ${t("pr_samples")} · ${Object.keys(d.cols).length} ${t("pr_columns")}${d.meta?.noTime ? " · " + t("pr_noTime") : ""}</span></button>
+        <button type="button" class="ghost" data-del="${i}" aria-label="${t("pr_remove")}" style="margin:0;width:auto;padding:6px 10px">×</button></div>`).join("")}</div>` : ""}
+    </div>
+    ${ds ? plotCardHTML(ds) : ""}
+    ${ds ? `<div class="card"><b>${t("pr_tools")}</b><p class="note" style="margin:4px 0 6px">${t("pr_toolsNote")}</p>${toolsHTML(ds)}</div>` : ""}
+    <div class="card">
+      <b>${t("pr_commands")}</b>
+      <form id="prCmdForm" style="display:flex;gap:6px;margin-top:8px" autocomplete="off">
+        <input id="prCmd" type="text" spellcheck="false" autocapitalize="off" placeholder="lowpass Fz 10" style="flex:1;font-family:ui-monospace,Consolas,monospace">
+        <button type="submit" style="margin:0;width:auto;padding:0 16px">${t("pr_run")}</button>
+      </form>
+      ${out.length ? `<div class="osimLog" style="max-height:150px">${out.map((o) => `<div style="${o.ok ? "" : "color:var(--warn)"}">&gt; ${escX(o.line)}${o.msg ? `\n  ${escX(o.msg)}` : ""}</div>`).join("")}</div>` : ""}
+      ${S.log.length ? `<details style="margin-top:8px"><summary>${t("pr_recipe")} (${S.log.length})</summary>
+        <textarea id="prRecipe" rows="5" style="width:100%;font:12px ui-monospace,Consolas,monospace;margin-top:6px">${escX(S.log.join("\n"))}</textarea>
+        <div class="row" style="gap:8px;margin-top:6px"><button type="button" class="ghost" id="prRunAll" style="margin:0">${t("pr_runAll")}</button>
+        <button type="button" class="ghost" id="prRecipeSave" style="margin:0">${t("pr_saveRecipe")}</button></div></details>` : ""}
+      <details style="margin-top:8px"><summary>${t("pr_cmdList")}</summary><table style="font-size:12px;margin-top:6px"><tbody>${HELP.map(([c, d], i) => `<tr><td style="font-family:ui-monospace,Consolas,monospace;white-space:nowrap;padding-right:8px">${escX(c)}</td><td>${escX(t(`pr_h${i}`) === `pr_h${i}` ? d : t(`pr_h${i}`))}</td></tr>`).join("")}</tbody></table>
+        <p class="note">${t("pr_cmdNote")}</p></details>
+    </div>
+    ${S.results.length ? `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>${t("pr_results")}</b>
+      <span><button type="button" class="ghost" id="prResCsv" style="margin:0;width:auto;padding:6px 10px">${t("pr_saveCsv")}</button>
+      <button type="button" class="ghost" id="prResClear" style="margin:0;width:auto;padding:6px 10px">${t("pr_clear")}</button></span></div>
+      <div style="overflow-x:auto;max-height:340px;margin-top:8px"><table style="font-size:12px"><thead><tr><th>${t("pr_file")}</th><th>${t("pr_measure")}</th><th>${t("pr_value")}</th><th></th></tr></thead><tbody>${
+        S.results.slice().reverse().map((r) => `<tr><td>${escX(r.file.replace(/ · .*/, ""))}</td><td>${escX(r.measure)}</td><td style="text-align:right">${escX(r.value)}</td><td>${escX(r.unit)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
+    <p class="note" style="margin:6px 4px 0">${t("pr_honest")}</p>`;
+    root.querySelectorAll(".prGroup").forEach((d, i) => { if (open[i] !== undefined) d.open = open[i]; });
+    wire(ds);
+  }
+
+  async function load(files) {
+    for (const f of files) {
+      try {
+        const list = await readAny(f); P.add(list);
+        // open on something: the first few channels of the new file
+        const ds = P.current(); if (ds && !S.plot.cols.length) S.plot.cols = Object.keys(ds.cols).slice(0, 1);
+        say({ ok: true, msg: list.map((d) => `${d.name}: ${Object.keys(d.cols).length} ${t("pr_columns")}`).join("\n") }, `load ${f.name}`);
+      } catch (e) { say({ ok: false, msg: e.message }, `load ${f.name}`); }
+    }
+    render();
+  }
+
+  function svgForExport(svgs, titles) {
+    const W = 720; let y = 0, body = "";
+    svgs.forEach((s, i) => {
+      const vb = s.getAttribute("viewBox").split(" ").map(Number), h = vb[3];
+      body += `<text x="8" y="${y + 18}" font-size="15" font-weight="600" fill="#222">${escX(titles[i])}</text>`;
+      body += s.outerHTML.replace("<svg ", `<svg x="0" y="${y + 24}" width="${W}" height="${h}" `);
+      y += h + 30;
+    });
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${y}" viewBox="0 0 ${W} ${y}"><rect width="${W}" height="${y}" fill="#fff"/>${body}</svg>`
+      .replace(/var\(--card\)/g, "#fff").replace(/var\(--line\)/g, "#ddd").replace(/var\(--muted\)/g, "#666").replace(/var\(--warn\)/g, "#b4540f").replace(/var\(--accent\)/g, "#2d706c")
+      .replace(/<line class="prCursor"[^>]*\/>/g, "");
+  }
+
+  function wire(ds) {
+    const q = (s) => root.querySelector(s);
+    q("#prFiles").onchange = (e) => load([...e.target.files]);
+    const drop = q(".prDrop");
+    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+    drop.ondragleave = () => drop.classList.remove("over");
+    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); load([...e.dataTransfer.files]); };
+    root.querySelectorAll("[data-use]").forEach((b) => { b.onclick = () => { exec(`use ${b.dataset.use}`); const d = P.current(); if (d && !S.plot.cols.length) { S.plot.cols = Object.keys(d.cols).slice(0, 1); render(); } }; });
+    root.querySelectorAll("[data-del]").forEach((b) => { b.onclick = () => { P.remove(+b.dataset.del); render(); }; });
+    q("#prCmdForm").onsubmit = (e) => { e.preventDefault(); const v = q("#prCmd").value; if (v.trim()) { exec(v); root.querySelector("#prCmd")?.focus(); } };
+    if (q("#prRunAll")) q("#prRunAll").onclick = () => {
+      const lines = q("#prRecipe").value.split("\n").map((l) => l.trim()).filter((l) => l && !/^(use|all)\b/i.test(l));
+      const keep = S.cur;
+      for (let i = 0; i < S.ds.length; i++) { S.cur = i; for (const l of lines) { const r = P.run(l); if (!r.ok) say(r, `${S.ds[i].name}: ${l}`); } }
+      S.cur = keep; say({ ok: true, msg: `${lines.length} × ${S.ds.length}` }, t("pr_runAll")); render();
+    };
+    if (q("#prRecipeSave")) q("#prRecipeSave").onclick = () => download("process_recipe.txt", q("#prRecipe").value);
+    if (q("#prResCsv")) q("#prResCsv").onclick = () => download("process_results.csv", P.resultsCsv());
+    if (q("#prResClear")) q("#prResClear").onclick = () => { S.results.length = 0; render(); };
+    if (!ds) return;
+    const setWin = () => { const a = q("#prT0").value, b = q("#prT1").value; if (a !== "" && b !== "") exec(`window ${a} ${b}`); };
+    q("#prT0").onchange = setWin; q("#prT1").onchange = setWin;
+    q("#prWinAll").onclick = () => exec("window all");
+    if (q("#prZoomCur")) q("#prZoomCur").onclick = () => { const c = curOf(ds).slice().sort((x, y) => x - y); exec(`window ${r3(c[0])} ${r3(c[1])}`); };
+    if (q("#prResultClose")) q("#prResultClose").onclick = () => { S.plot.curves = null; S.plot.xy = null; render(); };
+    if (q("#prShow3d")) q("#prShow3d").onclick = () => { vis.show3d = !vis.show3d; vis.playing = false; render(); };
+    const f = q("#prColFilter");
+    f.oninput = () => { colFilter = f.value; const pos = f.selectionStart; render(); const g = root.querySelector("#prColFilter"); g.focus(); g.setSelectionRange(pos, pos); };
+    root.querySelectorAll("[data-col]").forEach((c) => {
+      c.onchange = () => {
+        const k = c.dataset.col, now = [...new Set(S.plot.cols.map((x) => rootOf(ds, x)))];
+        const next = c.checked ? [...now.filter((x) => x !== k), k] : now.filter((x) => x !== k);
+        const keepRes = { curves: S.plot.curves, xy: S.plot.xy };
+        exec(`plot ${next.map(quote).join(" ")}`.trim());
+        Object.assign(S.plot, keepRes); render();
+      };
+    });
+    root.querySelectorAll("[data-tool]").forEach((b) => {
+      b.onclick = () => {
+        const [gi, ii] = b.dataset.tool.split("_").map(Number), it = TOOLS[gi].items[ii];
+        const v = it.f.map((_, fi) => root.querySelector(`#prT${gi}_${ii}_${fi}`).value);
+        const line = it.cmd(v); q("#prCmd").value = line; exec(line);
+      };
+    });
+    if (q("#prCsv")) q("#prCsv").onclick = () => {
+      const pl = plotted(ds), [i0, i1] = span(ds);
+      const keys = [...pl.raw.map((r) => r.key), ...pl.proc.map((p) => p.key)];
+      const cut = { time: ds.time.slice(i0, i1), cols: Object.fromEntries(keys.map((k) => [k, ds.cols[k].slice(i0, i1)])) };
+      download(`${ds.name.replace(/[^\w.-]+/g, "_")}_raw_processed.csv`, toCsv(cut, keys));
+    };
+    if (q("#prPng")) q("#prPng").onclick = () => {
+      const svgs = [...root.querySelectorAll(".prPlots .prPlot svg")];
+      const titles = [...root.querySelectorAll(".prPlots .prPlotTitle")].map((e) => e.firstChild.textContent);
+      if (!svgs.length) return;
+      const text = svgForExport(svgs, titles);
+      const img = new Image(), url = URL.createObjectURL(new Blob([text], { type: "image/svg+xml" }));
+      img.onload = () => {
+        const c = document.createElement("canvas"); c.width = img.width * 2; c.height = img.height * 2;
+        const g = c.getContext("2d"); g.scale(2, 2); g.drawImage(img, 0, 0); URL.revokeObjectURL(url);
+        c.toBlob((b) => download(`${ds.name.replace(/[^\w.-]+/g, "_")}_plot.png`, b), "image/png");
+      };
+      img.src = url;
+    };
+    // hover readout + draggable cursors, on both plots
+    for (const svg of root.querySelectorAll(".prPlots .prPlot svg")) {
+      const box = svg.closest(".prPlot"), ro = box.querySelector(".prReadout"), line = svg.querySelector(".prCursor");
+      const W = +svg.dataset.w, L = +svg.dataset.l, R = +svg.dataset.r, x0 = +svg.dataset.x0, x1 = +svg.dataset.x1;
+      const toT = (e) => { const rc = svg.getBoundingClientRect(); const px = ((e.clientX - rc.left) / rc.width) * W; return [px, x0 + ((px - L) / (W - L - R)) * (x1 - x0)]; };
+      const isTime = !!svg.querySelector(".prCur");
+      let drag = null;
+      svg.onpointerdown = (e) => {
+        if (!isTime) return;
+        // press anywhere: the nearer cursor jumps there and follows the pointer
+        const [px, tm] = toT(e), c = curOf(ds);
+        if (px < L || px > W - R) return;
+        const k = Math.abs(c[0] - tm) <= Math.abs(c[1] - tm) ? 0 : 1;
+        drag = k; e.preventDefault();
+        try { svg.setPointerCapture(e.pointerId); } catch { /* synthetic event */ }
+        svg.onpointermove(e);
+      };
+      svg.onpointermove = (e) => {
+        const [px, tm] = toT(e); if (px < L || px > W - R) return;
+        if (drag != null) {
+          const c = curOf(ds); c[drag] = Math.max(x0, Math.min(x1, tm));
+          const tx = L + ((c[drag] - x0) / (x1 - x0)) * (W - L - R);
+          root.querySelectorAll(`.prPlots .prCur[data-cur="${drag}"]`).forEach((g) => g.setAttribute("transform", `translate(${tx.toFixed(1)},0)`));
+        }
+        if (!ro || !isTime) return;
+        const i = Math.max(0, Math.min(ds.time.length - 1, ds.time.findIndex((v) => v >= tm)));
+        const keys = box.id === "prRaw" ? plotted(ds).raw.map((r) => r.key) : plotted(ds).proc.map((p) => p.key);
+        ro.textContent = `${r3(ds.time[i])} s — ${keys.map((k) => `${k}: ${r3(ds.cols[k][i])}`).join(" · ")}`;
+        line.setAttribute("x1", px); line.setAttribute("x2", px); line.setAttribute("visibility", "visible");
+      };
+      svg.onpointerup = () => { if (drag != null) { drag = null; render(); } };
+    }
+    wire3d(ds);
+  }
+
+  function wire3d(ds) {
+    const cv = root.querySelector("#prCanvas"); if (!cv) { vis.playing = false; return; }
+    const mk = markerTriplets(ds), key = ds.name + vis.view.up;
     if (vis.boxFor !== key) { vis.box = markerBox(ds, mk, vis.view.up); vis.boxFor = key; }
     const draw = () => {
       const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
@@ -644,153 +874,6 @@ export function mountProcess(root, { t, download }) {
       };
       requestAnimationFrame(tick);
     };
-  }
-
-  function toolsHTML(ds) {
-    const keys = ds ? Object.keys(ds.cols) : [];
-    const firstTicked = S.plot.cols[0] || "";
-    const colSel = (id, pre) => `<select id="${id}" class="prColSel">${["@fz", ...keys].map((k) => `<option value="${escX(k)}"${k === pre ? " selected" : ""}>${escX(k === "@fz" ? t("pr_autoFz") : k)}</option>`).join("")}</select>`;
-    return TOOLS.map((g, gi) => `<details class="prGroup"><summary><b>${t(g.group)}</b></summary>${g.items.map((it, ii) => {
-      const id = `prT${gi}_${ii}`;
-      const fields = it.f.map(([type, lbl, def], fi) => `<label style="font-size:12px;margin:6px 0 2px;display:block">${t(lbl)}</label>${
-        type === "c" ? colSel(`${id}_${fi}`, fi === 0 ? firstTicked : S.plot.cols[fi] || "") : `<input id="${id}_${fi}" type="${type === "n" ? "number" : "text"}" step="any" value="${escX(def ?? "")}">`}`).join("");
-      return `<div class="prTool"><div style="font-size:13.5px;font-weight:600">${t(it.k)}</div>${fields}<button type="button" data-tool="${gi}_${ii}" style="margin:8px 0 0">${t("pr_run")}</button></div>`;
-    }).join("")}</details>`).join("");
-  }
-
-  function render() {
-    const ds = P.current();
-    const keys = ds ? Object.keys(ds.cols) : [];
-    const shown = keys.filter((k) => !colFilter || k.toLowerCase().includes(colFilter.toLowerCase()));
-    root.innerHTML = `
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <b style="font-size:16px">${t("pr_title")}</b>
-        <button type="button" class="ghost labHomeBtn" style="margin:0;width:auto;padding:6px 12px">${t("labHome")}</button>
-      </div>
-      <p class="note" style="margin:4px 0 10px">${t("pr_intro")}</p>
-      <label class="prDrop" for="prFiles"><input id="prFiles" type="file" multiple style="display:none"
-        accept=".csv,.txt,.tsv,.mot,.sto,.trc,.c3d,.xlsx,.xlsm">${t("pr_drop")}</label>
-      ${S.ds.length ? `<div class="prFiles">${S.ds.map((d, i) => `<div class="prFile${i === S.cur ? " sel" : ""}">
-        <button type="button" class="ghost" data-use="${i + 1}" style="margin:0;text-align:left">${i + 1} · ${escX(d.name)}
-          <span class="sub" style="font-size:11.5px;display:block;margin:0">${d.fs ? `${+d.fs.toFixed(2)} Hz · ` : ""}${d.time.length} ${t("pr_samples")} · ${Object.keys(d.cols).length} ${t("pr_columns")}${d.meta?.noTime ? " · " + t("pr_noTime") : ""}</span></button>
-        <button type="button" class="ghost" data-del="${i}" aria-label="${t("pr_remove")}" style="margin:0;width:auto;padding:6px 10px">×</button></div>`).join("")}</div>` : ""}
-    </div>
-    ${ds ? `<div class="card">
-      <b>${escX(ds.name)}</b>
-      <div class="row" style="margin-top:8px;align-items:flex-end;gap:8px">
-        <div><label for="prT0">${t("pr_from")}</label><input id="prT0" type="number" step="any" value="${S.win ? S.win[0] : ""}" placeholder="${(+ds.time[0]).toFixed(2)}"></div>
-        <div><label for="prT1">${t("pr_to")}</label><input id="prT1" type="number" step="any" value="${S.win ? S.win[1] : ""}" placeholder="${(+ds.time[ds.time.length - 1]).toFixed(2)}"></div>
-        <div><button type="button" class="ghost" id="prWinAll" style="margin:0">${t("pr_whole")}</button></div>
-      </div>
-      ${plotHTML()}
-      <input id="prColFilter" type="search" placeholder="${t("pr_filterCols")}" value="${escX(colFilter)}" style="margin-top:10px">
-      <div class="prCols">${shown.map((k) => `<label class="prCol"><input type="checkbox" data-col="${escX(k)}"${S.plot.cols.includes(k) ? " checked" : ""}> ${escX(k)}${ds.units[k] ? ` <span class="sub" style="font-size:11px">(${escX(ds.units[k])})</span>` : ""}</label>`).join("") || `<p class="note">${t("pr_noCols")}</p>`}</div>
-      ${ds.meta?.text ? `<p class="note" style="margin:6px 0 0">${t("pr_textCols")}: ${Object.keys(ds.meta.text).map(escX).join(", ")}</p>` : ""}
-    </div>
-    ${visHTML(ds)}
-    <div class="card"><b>${t("pr_tools")}</b><p class="note" style="margin:4px 0 6px">${t("pr_toolsNote")}</p>${toolsHTML(ds)}</div>` : ""}
-    <div class="card">
-      <b>${t("pr_commands")}</b>
-      <form id="prCmdForm" style="display:flex;gap:6px;margin-top:8px" autocomplete="off">
-        <input id="prCmd" type="text" spellcheck="false" autocapitalize="off" placeholder="lowpass Fz 10" style="flex:1;font-family:ui-monospace,Consolas,monospace">
-        <button type="submit" style="margin:0;width:auto;padding:0 16px">${t("pr_run")}</button>
-      </form>
-      ${out.length ? `<div class="osimLog" style="max-height:150px">${out.map((o) => `<div style="${o.ok ? "" : "color:var(--warn)"}">&gt; ${escX(o.line)}${o.msg ? `\n  ${escX(o.msg)}` : ""}</div>`).join("")}</div>` : ""}
-      ${S.log.length ? `<details style="margin-top:8px"><summary>${t("pr_recipe")} (${S.log.length})</summary>
-        <textarea id="prRecipe" rows="5" style="width:100%;font:12px ui-monospace,Consolas,monospace;margin-top:6px">${escX(S.log.join("\n"))}</textarea>
-        <div class="row" style="gap:8px;margin-top:6px"><button type="button" class="ghost" id="prRunAll" style="margin:0">${t("pr_runAll")}</button>
-        <button type="button" class="ghost" id="prRecipeSave" style="margin:0">${t("pr_saveRecipe")}</button></div></details>` : ""}
-      <details style="margin-top:8px"><summary>${t("pr_cmdList")}</summary><table style="font-size:12px;margin-top:6px"><tbody>${HELP.map(([c, d], i) => `<tr><td style="font-family:ui-monospace,Consolas,monospace;white-space:nowrap;padding-right:8px">${escX(c)}</td><td>${escX(t(`pr_h${i}`) === `pr_h${i}` ? d : t(`pr_h${i}`))}</td></tr>`).join("")}</tbody></table>
-        <p class="note">${t("pr_cmdNote")}</p></details>
-    </div>
-    ${S.results.length ? `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>${t("pr_results")}</b>
-      <span><button type="button" class="ghost" id="prResCsv" style="margin:0;width:auto;padding:6px 10px">${t("pr_saveCsv")}</button>
-      <button type="button" class="ghost" id="prResClear" style="margin:0;width:auto;padding:6px 10px">${t("pr_clear")}</button></span></div>
-      <div style="overflow-x:auto;max-height:340px;margin-top:8px"><table style="font-size:12px"><thead><tr><th>${t("pr_file")}</th><th>${t("pr_measure")}</th><th>${t("pr_value")}</th><th></th></tr></thead><tbody>${
-        S.results.slice().reverse().map((r) => `<tr><td>${escX(r.file.replace(/ · .*/, ""))}</td><td>${escX(r.measure)}</td><td style="text-align:right">${escX(r.value)}</td><td>${escX(r.unit)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
-    <p class="note" style="margin:6px 4px 0">${t("pr_honest")}</p>`;
-    wire(ds);
-  }
-
-  async function load(files) {
-    for (const f of files) {
-      try { const list = await readAny(f); P.add(list); say({ ok: true, msg: list.map((d) => `${d.name}: ${Object.keys(d.cols).length} ${t("pr_columns")}`).join("\n") }, `load ${f.name}`); }
-      catch (e) { say({ ok: false, msg: e.message }, `load ${f.name}`); }
-    }
-    render();
-  }
-
-  function wire(ds) {
-    const q = (s) => root.querySelector(s);
-    q("#prFiles").onchange = (e) => load([...e.target.files]);
-    const drop = q(".prDrop");
-    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
-    drop.ondragleave = () => drop.classList.remove("over");
-    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); load([...e.dataTransfer.files]); };
-    root.querySelectorAll("[data-use]").forEach((b) => { b.onclick = () => exec(`use ${b.dataset.use}`); });
-    root.querySelectorAll("[data-del]").forEach((b) => { b.onclick = () => { P.remove(+b.dataset.del); render(); }; });
-    q("#prCmdForm").onsubmit = (e) => { e.preventDefault(); const v = q("#prCmd").value; if (v.trim()) { exec(v); root.querySelector("#prCmd")?.focus(); } };
-    if (q("#prRunAll")) q("#prRunAll").onclick = () => {
-      const lines = q("#prRecipe").value.split("\n").map((l) => l.trim()).filter((l) => l && !/^(use|all)\b/i.test(l));
-      const keep = S.cur;
-      for (let i = 0; i < S.ds.length; i++) { S.cur = i; for (const l of lines) { const r = P.run(l); if (!r.ok) say(r, `${S.ds[i].name}: ${l}`); } }
-      S.cur = keep; say({ ok: true, msg: `${lines.length} × ${S.ds.length}` }, t("pr_runAll")); render();
-    };
-    if (q("#prRecipeSave")) q("#prRecipeSave").onclick = () => download("process_recipe.txt", q("#prRecipe").value);
-    if (q("#prResCsv")) q("#prResCsv").onclick = () => download("process_results.csv", P.resultsCsv());
-    if (q("#prResClear")) q("#prResClear").onclick = () => { S.results.length = 0; render(); };
-    if (!ds) return;
-    wireVis(ds);
-    const setWin = () => { const a = q("#prT0").value, b = q("#prT1").value; if (a !== "" && b !== "") exec(`window ${a} ${b}`); };
-    q("#prT0").onchange = setWin; q("#prT1").onchange = setWin;
-    q("#prWinAll").onclick = () => exec("window all");
-    const f = q("#prColFilter");
-    f.oninput = () => { colFilter = f.value; const pos = f.selectionStart; render(); const g = root.querySelector("#prColFilter"); g.focus(); g.setSelectionRange(pos, pos); };
-    root.querySelectorAll("[data-col]").forEach((c) => {
-      c.onchange = () => {
-        const k = c.dataset.col, cols = S.plot.curves || S.plot.xy ? [] : S.plot.cols.slice();
-        const next = c.checked ? [...cols.filter((x) => x !== k), k] : cols.filter((x) => x !== k);
-        exec(`plot ${next.map(quote).join(" ")}`.trim());
-      };
-    });
-    root.querySelectorAll("[data-tool]").forEach((b) => {
-      b.onclick = () => {
-        const [gi, ii] = b.dataset.tool.split("_").map(Number), it = TOOLS[gi].items[ii];
-        const v = it.f.map((_, fi) => root.querySelector(`#prT${gi}_${ii}_${fi}`).value);
-        const line = it.cmd(v); q("#prCmd").value = line; exec(line);
-        const d = root.querySelectorAll(".prGroup")[gi]; if (d) d.open = true;
-      };
-    });
-    const svg = q(".prPlot svg");
-    if (svg) {
-      const ro = q(".prReadout"), cursor = svg.querySelector(".prCursor");
-      svg.onpointermove = (e) => {
-        const rc = svg.getBoundingClientRect(), W = +svg.dataset.w, L = +svg.dataset.l, R = +svg.dataset.r;
-        const px = ((e.clientX - rc.left) / rc.width) * W; if (px < L || px > W - R) return;
-        const pl = S.plot;
-        if (pl.xy) return;
-        let xs, val;
-        if (pl.curves) { const n = pl.curves.mean.length, i = Math.round(((px - L) / (W - L - R)) * (n - 1)); xs = `${Math.round((100 * i) / (n - 1))} %`; val = `${r3(pl.curves.mean[i])} ± ${r3(pl.curves.sd[i])}`; }
-        else {
-          let i0 = 0, i1 = ds.time.length;
-          if (S.win) { i0 = Math.max(0, ds.time.findIndex((v) => v >= S.win[0])); i1 = ds.time.findIndex((v) => v > S.win[1]); if (i1 < 0) i1 = ds.time.length; }
-          const i = Math.min(i1 - 1, i0 + Math.round(((px - L) / (W - L - R)) * (i1 - 1 - i0)));
-          xs = `${r3(ds.time[i])} s`; val = pl.cols.map((k) => `${k}: ${r3(ds.cols[k][i])}`).join(" · ");
-        }
-        ro.textContent = `${xs} — ${val}`;
-        cursor.setAttribute("x1", px); cursor.setAttribute("x2", px); cursor.setAttribute("visibility", "visible");
-      };
-      q("#prSvg").onclick = () => download("process_plot.svg", new Blob([svg.outerHTML.replace(/var\(--card\)/g, "#fff").replace(/var\(--line\)/g, "#ddd").replace(/var\(--muted\)/g, "#666").replace(/var\(--warn\)/g, "#b4540f").replace("<svg ", '<svg xmlns="http://www.w3.org/2000/svg" ')], { type: "image/svg+xml" }));
-      q("#prCsv").onclick = () => {
-        const keys = S.plot.cols.length ? S.plot.cols : S.plot.xy || Object.keys(ds.cols);
-        if (S.plot.curves) {
-          const c = S.plot.curves, lines = [["percent", "mean", "sd", ...c.labels.map((l) => `"${l}"`)].join(",")];
-          c.mean.forEach((m, i) => lines.push([(100 * i) / (c.mean.length - 1), m, c.sd[i], ...c.all.map((y) => y[i])].join(",")));
-          download("process_curves.csv", lines.join("\n"));
-        } else download(`${ds.name.replace(/[^\w.-]+/g, "_")}.csv`, toCsv(ds, keys));
-      };
-    }
   }
 
   render();
