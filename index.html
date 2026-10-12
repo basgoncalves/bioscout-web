@@ -2,6 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- No screen is shown until the app has chosen one: without this the login
+     screen (the only view not hidden in the markup) flashes for a frame before
+     the module routes to the lab home. showView() lifts it; the timeout is a
+     safety net if the module fails to load. The rule is in the main <style>. -->
+<script>document.documentElement.classList.add("booting");
+setTimeout(function () { document.documentElement.classList.remove("booting"); }, 6000);</script>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1c4a48">
 <title>BioScout Web — a physics-informed, AI-powered bio tracker</title>
@@ -61,6 +67,7 @@ try {
   :root[data-theme="dark"][data-palette="violet"] { --accent:#a48be6; }
   :root[data-theme="dark"][data-palette="rose"] { --accent:#e57b9f; }
   :root[data-theme="dark"][data-palette="amber"] { --accent:#c68f2a; }
+  html.booting section[id^="view"] { display:none !important; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   body { margin:0; background:var(--bg); color:var(--ink);
          font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
@@ -1537,7 +1544,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 137;
+window.BUILD = 138;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -4939,6 +4946,7 @@ function leaveRecorder() {
 
 function showView(id, push = true) {
   if (LAB && !LAB_VIEWS.includes(id)) id = "viewHome";   // the lab demo: home + its three doors
+  document.documentElement.classList.remove("booting");
   if (id !== "viewRecord") leaveRecorder();
   if (id !== "viewRecord" && assessStep) exitAssessMode();
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
