@@ -22,6 +22,8 @@ export const OSIM_STEPS = [
   { id: "scale", run: "scale" },
   { id: "ikid", run: "ikid" },
   { id: "so", run: "so" },
+  { id: "mew", run: "mew" },          // engines from 2026-10-12 on (health.steps lists them)
+  { id: "ceinms", run: "ceinms" },
 ];
 
 /**

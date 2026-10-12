@@ -538,6 +538,31 @@ try {
   .osimLog { font:11px/1.35 ui-monospace,Consolas,monospace; white-space:pre-wrap; word-break:break-word;
              max-height:160px; overflow:auto; margin:6px 0 0; padding:6px 8px; border-radius:8px;
              background:var(--bg); border:1px solid var(--line); }
+  /* Lab demo home: three doors -- Record, Process, Simulate. */
+  .labDoors { display:grid; gap:12px; }
+  .labDoor { display:flex; gap:14px; align-items:center; text-align:left; margin:0; padding:18px 16px;
+             border-radius:14px; border:1px solid var(--line); background:var(--card); color:var(--ink);
+             box-shadow:var(--shadow); cursor:pointer; font:inherit; }
+  .labDoor:hover, .labDoor:focus-visible { border-color:var(--accent); }
+  .labDoor svg { flex:none; width:40px; height:40px; color:var(--accent); }
+  .labDoor b { display:block; font-size:17px; margin-bottom:2px; }
+  .labDoor span { color:var(--muted); font-size:13px; line-height:1.4; }
+  .labHead { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .labHead .labHomeBtn { margin:0; width:auto; padding:6px 12px; }
+  /* Process page (src/process.js) */
+  .prDrop { display:block; border:1.5px dashed var(--line); border-radius:12px; padding:18px 12px; text-align:center;
+            color:var(--muted); cursor:pointer; font-size:13.5px; }
+  .prDrop.over, .prDrop:hover { border-color:var(--accent); color:var(--ink); }
+  .prFiles { display:grid; gap:6px; margin-top:10px; }
+  .prFile { display:flex; gap:6px; align-items:stretch; }
+  .prFile > button:first-child { flex:1; }
+  .prFile.sel > button:first-child { border-color:var(--accent); outline:1px solid var(--accent); }
+  .prCols { max-height:220px; overflow:auto; margin-top:6px; border:1px solid var(--line); border-radius:10px; padding:4px 8px; }
+  .prCol { display:block; font-size:12.5px; padding:3px 0; word-break:break-all; }
+  .prCol input { width:auto; display:inline-block; margin:0 6px 0 0; vertical-align:middle; min-height:0; }
+  .prGroup { border-top:1px solid var(--line); padding:8px 0; }
+  .prGroup summary { cursor:pointer; }
+  .prTool { border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-top:8px; }
   .daybox { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
   .accountBox { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin:0 0 11px; }
   .sharePreview { min-height:120px; display:flex; align-items:center; justify-content:center;
@@ -1159,9 +1184,34 @@ try {
     </div>
   </section>
 
+  <!-- Lab demo home: Record (the recorder), Process (files, src/process.js),
+       Simulate (OpenSim + CEINMS through the lab engine, src/osimlab.js). -->
+  <section id="viewHome" class="hidden">
+    <p class="note" style="margin:0 4px 12px" data-i18n="labHomeNote">Pick what you want to do. Nothing is uploaded unless you connect to the lab engine in Simulate.</p>
+    <div class="labDoors">
+      <button type="button" class="labDoor" id="doorRecord"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/><circle cx="9.5" cy="12" r="2.5"/></svg><div><b data-i18n="doorRecord">Record</b><span data-i18n="doorRecordNote">Film a movement with this device and read its joint angles, moments and estimated loads.</span></div></button>
+      <button type="button" class="labDoor" id="doorProcess"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 20h18"/><path d="M4 16l4-6 4 3 4-8 4 5"/><circle cx="8" cy="10" r="1"/><circle cx="16" cy="5" r="1"/></svg><div><b data-i18n="doorProcess">Process</b><span data-i18n="doorProcessNote">Open lab files (force plates, EMG, motion capture, OpenSim results), filter, plot and analyse them.</span></div></button>
+      <button type="button" class="labDoor" id="doorSimulate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="4" r="2"/><path d="M12 6v7M8 9h8M12 13l-3 8M12 13l3 8"/><path d="M5 12c-1 2-1 4 0 6M19 12c1 2 1 4 0 6"/></svg><div><b data-i18n="doorSimulate">Simulate</b><span data-i18n="doorSimulateNote">Run OpenSim and CEINMS on a marker and force-plate trial: scaling, IK, ID, static optimisation, muscle and joint contact forces.</span></div></button>
+    </div>
+  </section>
+
+  <section id="viewProcess" class="hidden">
+    <div id="processRoot"><p class="note" data-i18n="loading">Loading…</p></div>
+  </section>
+
+  <section id="viewSimulate" class="hidden">
+    <div class="card" id="osimCard">
+      <div class="labHead"><b style="font-size:16px" data-i18n="doorSimulate">Simulate</b>
+        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+      <button type="button" class="ghost hidden" id="osimToggle" style="margin:0" data-i18n="osimOpen">OpenSim trial (markers and force plates)</button>
+      <div id="osimBody" class="hidden" style="margin-top:12px"></div>
+    </div>
+  </section>
+
   <section id="viewRecord" class="hidden">
     <div class="card hidden" id="labCard">
-      <b data-i18n="labTitle">Lab demo</b>
+      <div class="labHead"><b data-i18n="labTitle">Lab demo</b>
+        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
       <p class="note" style="margin:4px 0 10px" data-i18n="labNote">Record a movement and read its joint angles, moments and estimated loads. No account, nothing uploaded: it all stays on this device. The numbers are estimates from video, not measurements, and this is not a medical device.</p>
       <div class="row" style="margin-bottom:11px">
         <div>
@@ -1174,12 +1224,6 @@ try {
         </div>
       </div>
       <button type="button" class="ghost" id="labNewBtn" data-i18n="labNew">Next person (clear results)</button>
-    </div>
-    <!-- Marker and force-plate trials through OpenSim, run by the lab engine on
-         a PC (src/osimlab.js). Lab demo only; folded away until asked for. -->
-    <div class="card hidden" id="osimCard">
-      <button type="button" class="ghost" id="osimToggle" style="margin:0" data-i18n="osimOpen">OpenSim trial (markers and force plates)</button>
-      <div id="osimBody" class="hidden" style="margin-top:12px"></div>
     </div>
     <div class="card hidden" id="assessBanner"></div>
     <div class="card trainOnly" id="setup">
@@ -1475,7 +1519,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 134;
+window.BUILD = 135;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1856,6 +1900,9 @@ const DEMO = new URLSearchParams(location.search).get("demo");
  * it is a front door, not a lock: the page source is public, so the thing
  * that actually stops new accounts is the server refusing sign-ups. */
 const FULL_KEY = "bioscout.full.v1";
+// The screen the page was opened on, read before the recorder's start-up
+// rewrites the hash: a reload of Process must come back to Process.
+const ENTRY_VIEW = location.hash.slice(1);
 const LAB_NAME = "Lab demo";
 const LAB = !DEMO && (() => {
   try {
@@ -4845,7 +4892,10 @@ $("mealShotFile").onchange = (e) => {
  * gets stored. The login screen writes to it rather than replacing it, so
  * there is still exactly one source of truth for the athlete.
  */
-const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat", "viewSummary"];
+const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat", "viewSummary",
+               "viewHome", "viewProcess", "viewSimulate"];
+/* The lab demo's screens: a home with three doors, and what they open. */
+const LAB_VIEWS = ["viewHome", "viewRecord", "viewProcess", "viewSimulate"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -4870,7 +4920,7 @@ function leaveRecorder() {
 }
 
 function showView(id, push = true) {
-  if (LAB) id = "viewRecord";          // the lab demo has one screen
+  if (LAB && !LAB_VIEWS.includes(id)) id = "viewHome";   // the lab demo: home + its three doors
   if (id !== "viewRecord") leaveRecorder();
   if (id !== "viewRecord" && assessStep) exitAssessMode();
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
@@ -4891,6 +4941,8 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewSummary") renderAthSummary();
   if (id === "viewFeed") renderFeed();
   if (id === "viewChat") chat.open();
+  if (id === "viewProcess") openProcess();
+  if (id === "viewSimulate") openSimulate();
 });
 
 $("navBack").onclick = () => history.back();
@@ -6959,7 +7011,7 @@ async function osimDo(fn) {
   }
   await osimSync();
 }
-const OSIM_RESULTS = { scale: ["scale"], ikid: ["ik", "id", "ik_errors"], so: ["so", "jra"] };
+const OSIM_RESULTS = { scale: ["scale"], ikid: ["ik", "id", "ik_errors"], so: ["so", "jra"], mew: ["mew_jra"], ceinms: ["ceinms_jra"] };
 async function osimSync() {
   clearTimeout(osim.timer);
   if (!osim.client || !osim.job) { renderOsim(); return; }
@@ -7102,11 +7154,35 @@ function renderOsim() {
   const so = `<div class="osimStep"><h3>4 \u00b7 ${tr("osimStepSo")}</h3>
     <p class="note" style="margin:0 0 8px">${tr("osimSoIntro")}</p>
     ${osimRunBtn("so", tr("osimRunSo"), done("ikid"))}${osimStateLine("so")}${soOut}</div>`;
-  const any = ["scale", "ikid", "so"].some(done);
+  // 5-6. mew and CEINMS (engines that offer them): joint reactions, and the
+  // peak beside SO's for the same joint so the three solvers can be compared.
+  const hasStep = (id) => (h.steps || []).includes(id);
+  const jrlOf = (res) => {
+    if (!res) return null;
+    const joints = reactionJoints(res);
+    const key = joints.some((j) => j.key === osim.joint) ? osim.joint : defaultReactionJoint(joints);
+    return key ? { key, f: reactionForce(res, key, res.mass) } : null;
+  };
+  const jrlChart = (res, color) => {
+    const j = jrlOf(res); if (!j || !j.f) return "";
+    return `${lineChartSVG({ time: res.time, series: [{ label: tr("osimResultant"), y: j.f.resultant, color }], yUnit: "BW" })}
+      <p class="note" style="margin:4px 0 0">${esc(j.key.split("_on_")[0])}: ${tr("osimPeakBw", { peak: j.f.peak.toFixed(2) })}</p>`;
+  };
+  const extra = (id, n, titleKey, introKey, runKey, res, color) => hasStep(id) ? `<div class="osimStep"><h3>${n} \u00b7 ${tr(titleKey)}</h3>
+    <p class="note" style="margin:0 0 8px">${tr(introKey)}</p>
+    ${osimRunBtn(id, tr(runKey), done("so"))}${osimStateLine(id)}${jrlChart(res, color)}</div>` : "";
+  const mew = extra("mew", 5, "osimStepMew", "osimMewIntro", "osimRunMew", r.mew_jra, "#e8871a");
+  const ceinms = extra("ceinms", 6, "osimStepCeinms", "osimCeinmsIntro", "osimRunCeinms", r.ceinms_jra, "#7d5bbe");
+  const peaks = [["SO", r.jra], ["mew", r.mew_jra], ["CEINMS", r.ceinms_jra]].map(([nm, res]) => [nm, jrlOf(res)]).filter(([, j]) => j && j.f);
+  const compare = peaks.length > 1 ? `<div class="osimStep"><h3>${tr("osimCompareTitle")}</h3>
+    <table><thead><tr><th>${tr("osimSolver")}</th><th>${tr("osimJoint")}</th><th>${tr("osimPeak")}</th></tr></thead><tbody>${
+      peaks.map(([nm, j]) => `<tr><td>${nm}</td><td>${esc(j.key.split("_on_")[0])}</td><td>${j.f.peak.toFixed(2)} BW</td></tr>`).join("")}</tbody></table>
+    <p class="note" style="margin:6px 0 0">${tr("osimCompareNote")}</p></div>` : "";
+  const any = ["scale", "ikid", "so", "mew", "ceinms"].some(done);
   box.innerHTML = `<p class="sub" style="font-size:12.5px;margin:0">${tr("osimConnected", { model: esc(h.model) })}
       <a href="#" id="osimDisconnect">${tr("osimDisconnect")}</a></p>
     ${h.fake ? `<p class="note banner" style="margin:8px 0 0">${tr("osimFake")}</p>` : ""}${err}
-    ${data}${scale}${ikid}${so}
+    ${data}${scale}${ikid}${so}${mew}${ceinms}${compare}
     ${any ? `<a class="ghost" href="${esc(osim.client.bundleUrl(st.id))}" style="display:block;text-align:center;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:10px;text-decoration:none;color:var(--ink)">${tr("osimDownload")}</a>` : ""}
     <p class="note" style="margin:10px 0 0">${tr("osimHonest")}</p>`;
   const id = st.id, c = osim.client;
@@ -7138,18 +7214,34 @@ function osimInit() {
   /* Only reachable through the lab engine's own link: without an engine
    * running on a PC the card cannot do anything, so the plain lab demo does
    * not show it (Bas, 2026-10-08). */
-  if (!engineFromSearch(location.search)) return;
-  $("osimCard").classList.remove("hidden");
   const open = () => {
     $("osimBody").classList.remove("hidden");
     $("osimToggle").classList.add("hidden");
     renderOsim();
   };
   $("osimToggle").onclick = open;
+  open();
   // Arriving by the engine's own link opens the card already connected.
   const linked = engineFromSearch(location.search);
-  if (linked) { open(); osimConnect(linked.url, linked.code); }
+  if (linked) osimConnect(linked.url, linked.code);
+  return !!linked;
 }
+/* Process: the module (and its file readers) loads the first time the door is
+ * opened, so the recorder's start-up does not pay for it. */
+let processMounted = null;
+function openProcess() {
+  if (processMounted) return;
+  processMounted = import("./src/process.js").then((m) => m.mountProcess($("processRoot"), {
+    t: tr,
+    download(name, data) {
+      const blob = data instanceof Blob ? data : new Blob([data], { type: "text/plain" });
+      const url = URL.createObjectURL(blob), a = document.createElement("a");
+      a.href = url; a.download = name; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 10000);
+    },
+  })).catch((e) => { processMounted = null; $("processRoot").innerHTML = `<p class="note banner">${esc(e.message)}</p>`; });
+}
+function openSimulate() { renderOsim(); }
 
 /* The lab demo: one local athlete, straight into the recorder. A reload keeps
  * the sets already on the page; "Next person" wipes that athlete and starts
@@ -7179,7 +7271,19 @@ function enterLab() {
     eraseAthlete(LAB_NAME);
     location.reload();
   };
-  osimInit();
+  const linked = osimInit();
+  document.addEventListener("click", (e) => {
+    if (e.target.closest(".labHomeBtn")) showView("viewHome");
+  });
+  $("doorRecord").onclick = () => showView("viewRecord");
+  $("doorProcess").onclick = () => { showView("viewProcess"); openProcess(); };
+  $("doorSimulate").onclick = () => { showView("viewSimulate"); openSimulate(); };
+  // Where to land: the engine's link -> Simulate; a reload keeps the screen it was on.
+  const want = linked ? "viewSimulate" : ENTRY_VIEW;
+  const land = LAB_VIEWS.includes(want) ? want : "viewHome";
+  history.replaceState({ view: land }, "", "#" + land);
+  showView(land, false);
+  if (land === "viewProcess") openProcess();
 }
 
 if (LAB) {
