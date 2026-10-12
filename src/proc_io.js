@@ -420,7 +420,9 @@ export async function readAny(file) {
   if (ext === "xlsx" || ext === "xlsm") return readXlsx(buf, name);
   const text = new TextDecoder().decode(buf);
   if (ext === "trc" || /^PathFileType/i.test(text.slice(0, 40))) return readTrc(text, name);
-  if (ext === "mot" || ext === "sto" || /^\s*endheader\s*$/im.test(text.slice(0, 6000))) return readOpenSim(text, name);
+  if (/^\s*endheader\s*$/im.test(text)) return readOpenSim(text, name);
+  // .sto/.mot without an endheader (some CEINMS / MATLAB writers): a whitespace table
+  if (ext === "mot" || ext === "sto") return readDelimited(text.replace(/[ \t]+/g, "\t"), name);
   return readDelimited(text, name);
 }
 

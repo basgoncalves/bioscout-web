@@ -7,7 +7,7 @@
  *
  *   node tests/test_process.mjs
  */
-import { makeProcessor, tokenize, chartSVG } from "../src/process.js";
+import { makeProcessor, tokenize, chartSVG, channelTree, markerTriplets } from "../src/process.js";
 import { readDelimited, readOpenSim, readTrc, fromTable } from "../src/proc_io.js";
 import * as D from "../src/proc_dsp.js";
 
@@ -81,6 +81,15 @@ const trc = readTrc("PathFileType\t4\t(X/Y/Z)\tx.trc\nDataRate\tCameraRate\tNumF
 ok(trc[0].cols["LASI Y"][1] === 5, ".trc markers");
 const nexus = readDelimited("Trial,x\nTime,EMG Channels.TA\ns,V\n0,0.1\n0.0005,0.2\n", "n.csv");
 ok(nexus[0].cols.TA && Math.round(nexus[0].fs) === 2000, "Nexus ASCII export");
+
+// raw vs processed: every processed column knows its raw channel, through chains
+const V = makeProcessor();
+V.add([fromTable("v.csv", ["time", "EMG1", "LASI X", "LASI Y", "LASI Z", "RASI - X", "RASI - Y", "RASI - Z"], Array.from({ length: 400 }, (_, i) => [i / 1000, Math.sin(i), 1, 2, 3, 4, 5, 6]))]);
+V.run("envelope EMG1 50"); V.run("lowpass EMG1·env50 20"); V.run("all rectify EMG1");
+const tree = channelTree(V.current());
+ok(JSON.stringify(tree.derived.EMG1) === JSON.stringify(["EMG1·env50", "EMG1·env50·lp20", "EMG1·abs"]), "processed columns trace back to the raw channel");
+ok(!tree.raw.includes("EMG1·env50"), "processed columns are not listed as raw");
+ok(markerTriplets(V.current()).map((m) => m.name).join() === "LASI,RASI", "marker triplets from C3D and Vicon naming");
 
 ok(chartSVG({ series: [{ x: [0, 1, 2], y: [1, 3, 2], color: "#000" }] }).svg.startsWith("<svg"), "chart draws");
 

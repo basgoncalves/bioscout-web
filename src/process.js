@@ -109,8 +109,11 @@ export function makeProcessor() {
     if (b - a < 2) throw new Error("the window holds no samples of this file");
     return [a, b];
   };
-  const put = (ds, key, y, unit = "") => {
+  const put = (ds, key, y, unit = "", from = null) => {
     ds.cols[key] = Float64Array.from(y); if (unit) ds.units[key] = unit;
+    // the raw channel this column was made from (for the raw-vs-processed view)
+    const parent = from ?? (S._src && !/^\d+:/.test(S._src) ? S._src : null);
+    if (parent && parent !== key) { ds.src = ds.src || {}; ds.src[key] = (ds.src[parent] || parent); }
     if (!S.plot.cols.includes(key)) S.plot.cols.push(key);
     S.plot.xy = null; S.plot.curves = null;
     return key;
@@ -165,7 +168,7 @@ export function makeProcessor() {
       const d = /^bw$/i.test(f) ? bwOf(ds) : numArg(f);
       return put(ds, /^bw$/i.test(f) ? `${k.key} (xBW)` : `${k.key}/${f}`, k.y.map((v) => v / d), /^bw$/i.test(f) ? "xBW" : "");
     },
-    fz([plate]) { const ds = cur(), v = D.verticalForce(ds, plate || null); put(ds, "Fz", v.y, "N"); return `Fz from ${v.col}`; },
+    fz([plate]) { const ds = cur(), v = D.verticalForce(ds, plate || null); put(ds, "Fz", v.y, "N", v.col); return `Fz from ${v.col}`; },
     bw([a, b]) {
       const ds = cur(), v = col(ds, "@fz"); const t0 = numArg(a, 0), t1 = numArg(b, 1);
       const y = []; ds.time.forEach((t, i) => { if (t >= t0 && t < t1) y.push(v.y[i]); });
@@ -304,12 +307,17 @@ export function makeProcessor() {
         const keep = S.cur, msgs = [];
         for (let i = 0; i < S.ds.length; i++) {
           S.cur = i;
+          S._src = null;
+          try { if (args[1]) S._src = col(S.ds[i], args[1]).key; } catch { /* not a column */ }
           try { msgs.push(`${S.ds[i].name}: ${C[args[0].toLowerCase()](args.slice(1))}`); }
           catch (e) { msgs.push(`${S.ds[i].name}: ${e.message}`); }
         }
         S.cur = keep; msg = msgs.join("\n");
       } else {
         if (!C[c]) throw new Error(`unknown command "${cmd}" -- see the command list`);
+        S._src = null;
+        try { if (args[0] && S.ds[S.cur]) S._src = col(S.ds[S.cur], args[0]).key; } catch { /* not a column */ }
+        if (c === "power") S._src = null;
         msg = C[c](args);
       }
       S.log.push(String(line).trim());
@@ -329,6 +337,81 @@ export function makeProcessor() {
       return [h.join(","), ...S.results.map((r) => h.map((k) => { const v = r[k] ?? ""; return /[\x22,\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v; }).join(","))].join("\n");
     },
   };
+}
+
+/** Raw channels and what was made from each: { raw: [...], derived: { raw: [keys] } }. */
+export function channelTree(ds) {
+  const src = ds.src || {}, derived = {};
+  for (const [k, r] of Object.entries(src)) if (ds.cols[k] && ds.cols[r]) (derived[r] = derived[r] || []).push(k);
+  const raw = Object.keys(ds.cols).filter((k) => !src[k]);
+  return { raw, derived };
+}
+
+/** Marker triplets: "LASI X/Y/Z" (C3D, .trc) or "LASI - X" (Vicon CSV) -> [{ name, x, y, z }]. */
+export function markerTriplets(ds) {
+  const out = [];
+  for (const k of Object.keys(ds.cols)) {
+    const m = k.match(/^(.*?)(?: - | )X$/); if (!m) continue;
+    const sep = k.slice(m[1].length, k.length - 1);
+    const y = m[1] + sep + "Y", z = m[1] + sep + "Z";
+    if (ds.cols[y] && ds.cols[z] && !(ds.src && ds.src[k])) out.push({ name: m[1], x: k, y, z });
+  }
+  return out;
+}
+
+/**
+ * Draw one frame of markers on a 2-D canvas: orthographic view, rotated by
+ * yaw about the vertical axis and pitched toward the viewer.
+ * view: { yaw, pitch, zoom, up: "z"|"y", labels, frame }
+ */
+export function drawMarkers(ctx, W, H, ds, mk, view, box) {
+  const up = view.up === "y" ? 1 : 2, h1 = up === 2 ? 1 : 2;     // horizontal axes: x and (y or z)
+  const P = (p) => {
+    const a = p[0] - box.c[0], b = p[h1] - box.c[h1], v = p[up] - box.c[up];
+    const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw), cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+    const x1 = a * cy - b * sy, d1 = a * sy + b * cy;           // depth before pitch
+    const yv = v * cp - d1 * sp, depth = v * sp + d1 * cp;
+    const s = (Math.min(W, H) / box.r) * 0.45 * view.zoom;
+    return [W / 2 + x1 * s, H / 2 - yv * s, depth];
+  };
+  ctx.clearRect(0, 0, W, H);
+  // floor grid at the lowest marker height
+  ctx.strokeStyle = "rgba(128,128,128,.25)"; ctx.lineWidth = 1;
+  const g = box.r, step = niceStep(2 * g, 8);
+  for (let i = -Math.ceil(g / step); i <= Math.ceil(g / step); i++) {
+    for (const [p0, p1] of [[[i * step, -g], [i * step, g]], [[-g, i * step], [g, i * step]]]) {
+      const A = [0, 0, 0], B = [0, 0, 0];
+      A[0] = box.c[0] + p0[0]; A[h1] = box.c[h1] + p0[1]; A[up] = box.lo;
+      B[0] = box.c[0] + p1[0]; B[h1] = box.c[h1] + p1[1]; B[up] = box.lo;
+      const a = P(A), b = P(B); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    }
+  }
+  const f = view.frame, pts = [];
+  for (const m of mk) {
+    const p = [ds.cols[m.x][f], ds.cols[m.y][f], ds.cols[m.z][f]];
+    if (!p.every(Number.isFinite)) continue;
+    const q = P(p); pts.push([q, m.name]);
+  }
+  pts.sort((a, b) => a[0][2] - b[0][2]);
+  ctx.font = "11px system-ui, sans-serif";
+  for (const [q, name] of pts) {
+    const side = /^(L|l_|left)/.test(name) ? "#2f6fe4" : /^(R|r_|right)/.test(name) ? "#e8871a" : "#1d7a45";
+    ctx.fillStyle = side; ctx.beginPath(); ctx.arc(q[0], q[1], 4, 0, 2 * Math.PI); ctx.fill();
+    if (view.labels) { ctx.fillStyle = "rgba(128,128,128,.95)"; ctx.fillText(name, q[0] + 6, q[1] - 4); }
+  }
+  return pts.length;
+}
+export function markerBox(ds, mk, up) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const n = ds.time.length, step = Math.max(1, Math.floor(n / 200));
+  for (const m of mk) for (let i = 0; i < n; i += step) {
+    const p = [ds.cols[m.x][i], ds.cols[m.y][i], ds.cols[m.z][i]];
+    if (!p.every(Number.isFinite)) continue;
+    for (let k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k]; }
+  }
+  if (!Number.isFinite(lo[0])) return null;
+  const c = lo.map((v, k) => (v + hi[k]) / 2), r = Math.max(...hi.map((v, k) => v - lo[k])) || 1;
+  return { c, r, lo: lo[up === "y" ? 1 : 2] };
 }
 
 // ============================================================== drawing
@@ -443,6 +526,7 @@ export function mountProcess(root, { t, download }) {
   const P = makeProcessor();
   const S = P.S;
   let colFilter = "", out = [];
+  const vis = { tab: "pp", chans: new Set(), view: { yaw: 0.6, pitch: 0.35, zoom: 1, up: null, labels: false, frame: 0 }, playing: false, speed: 1, box: null, boxFor: null };
 
   const say = (r, line) => { out.unshift({ ok: r.ok, line, msg: r.msg }); out = out.slice(0, 30); };
   const exec = (line) => { const r = P.run(line); say(r, line); render(); return r; };
@@ -475,6 +559,91 @@ export function mountProcess(root, { t, download }) {
     return `<div class="prPlot">${ch.svg}<div class="prReadout sub" style="font-size:12px;min-height:16px;margin:2px 0 0"></div></div>
       <div class="sub" style="font-size:12px;display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 0">${legend.map((s) => `<span><i class="dot" style="display:inline-block;width:10px;height:3px;background:${s.color};vertical-align:middle"></i> ${escX(s.label)}</span>`).join("")}</div>
       <div class="row" style="margin-top:8px;gap:8px"><button type="button" class="ghost" id="prSvg" style="margin:0">${t("pr_saveSvg")}</button><button type="button" class="ghost" id="prCsv" style="margin:0">${t("pr_saveCsv")}</button></div>`;
+  }
+
+  function visHTML(ds) {
+    const mk = markerTriplets(ds), tree = channelTree(ds);
+    const has3d = mk.length > 0;
+    if (vis.tab === "3d" && !has3d) vis.tab = "pp";
+    const tabs = `<div class="row" style="gap:6px;margin:8px 0">
+      <button type="button" class="${vis.tab === "pp" ? "" : "ghost"}" data-vtab="pp" style="margin:0">${t("pr_vRawProc")}</button>
+      ${has3d ? `<button type="button" class="${vis.tab === "3d" ? "" : "ghost"}" data-vtab="3d" style="margin:0">${t("pr_v3d")} (${mk.length})</button>` : ""}</div>`;
+    let body = "";
+    if (vis.tab === "pp") {
+      const raws = tree.raw.filter((k) => !colFilter || k.toLowerCase().includes(colFilter.toLowerCase()));
+      const sorted = [...raws.filter((k) => tree.derived[k]), ...raws.filter((k) => !tree.derived[k])];
+      for (const k of [...vis.chans]) if (!ds.cols[k]) vis.chans.delete(k);
+      if (!vis.chans.size) for (const k of Object.keys(tree.derived).slice(0, 2)) vis.chans.add(k);
+      let i0 = 0, i1 = ds.time.length;
+      if (S.win) { i0 = Math.max(0, ds.time.findIndex((v) => v >= S.win[0])); i1 = ds.time.findIndex((v) => v > S.win[1]); if (i1 < 0) i1 = ds.time.length; }
+      const x = ds.time.slice(i0, i1);
+      const panels = [...vis.chans].map((k) => {
+        const kids = tree.derived[k] || [];
+        const series = [{ x, y: ds.cols[k].slice(i0, i1), color: "#9aa1ae", label: `${k} (${t("pr_raw")})` },
+          ...kids.map((d, i) => ({ x, y: ds.cols[d].slice(i0, i1), color: COLORS[i % COLORS.length], label: d }))];
+        const ch = chartSVG({ series, xLabel: t("pr_timeS"), yLabel: ds.units[k] || "", H: 220 });
+        return `<div style="margin-top:10px"><b style="font-size:13px">${escX(k)}</b>${ch.svg}
+          <div class="sub" style="font-size:12px;display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 0">${series.map((q) => `<span><i style="display:inline-block;width:10px;height:3px;background:${q.color};vertical-align:middle"></i> ${escX(q.label)}</span>`).join("")}</div></div>`;
+      }).join("");
+      body = `<p class="note" style="margin:0 0 6px">${t("pr_vRawNote")}</p>
+        <div class="prCols" style="max-height:160px">${sorted.map((k) => `<label class="prCol"><input type="checkbox" data-vchan="${escX(k)}"${vis.chans.has(k) ? " checked" : ""}> ${escX(k)}${tree.derived[k] ? ` <span class="sub" style="font-size:11px">→ ${tree.derived[k].length}</span>` : ""}</label>`).join("")}</div>
+        ${panels || `<p class="note" style="margin:8px 0 0">${t("pr_vNone")}</p>`}`;
+    } else {
+      const n = ds.time.length;
+      if (vis.view.up == null) vis.view.up = ds.kind === "trc" ? "y" : "z";
+      vis.view.frame = Math.min(vis.view.frame, n - 1);
+      body = `<canvas id="prCanvas" style="width:100%;aspect-ratio:4/3;display:block;border:1px solid var(--line);border-radius:10px;touch-action:none;cursor:grab"></canvas>
+        <p class="note" style="margin:4px 0 6px">${t("pr_vDrag")}</p>
+        <div class="row" style="gap:8px;align-items:center">
+          <button type="button" id="prPlay" style="margin:0;width:auto;padding:6px 14px">${vis.playing ? t("pr_pause") : t("pr_play")}</button>
+          <input id="prFrame" type="range" min="0" max="${n - 1}" value="${vis.view.frame}" style="flex:1">
+          <span id="prFrameT" class="sub" style="font-size:12px;min-width:64px;text-align:right">${(+ds.time[vis.view.frame]).toFixed(2)} s</span></div>
+        <div class="row" style="gap:12px;align-items:center;margin-top:6px;font-size:13px">
+          <label>${t("pr_up")} <select id="prUp" style="width:auto;display:inline-block">${["z", "y"].map((a) => `<option${vis.view.up === a ? " selected" : ""}>${a}</option>`).join("")}</select></label>
+          <label>${t("pr_speed")} <select id="prSpeed" style="width:auto;display:inline-block">${[0.25, 0.5, 1, 2].map((v) => `<option value="${v}"${vis.speed === v ? " selected" : ""}>${v}×</option>`).join("")}</select></label>
+          <label><input type="checkbox" id="prLabels"${vis.view.labels ? " checked" : ""} style="width:auto;display:inline-block;min-height:0"> ${t("pr_labels")}</label></div>`;
+    }
+    return `<div class="card"><b>${t("pr_visualise")}</b>${tabs}${body}</div>`;
+  }
+
+  function wireVis(ds) {
+    root.querySelectorAll("[data-vtab]").forEach((b) => { b.onclick = () => { vis.tab = b.dataset.vtab; vis.playing = false; render(); }; });
+    root.querySelectorAll("[data-vchan]").forEach((c) => { c.onchange = () => { c.checked ? vis.chans.add(c.dataset.vchan) : vis.chans.delete(c.dataset.vchan); render(); }; });
+    const cv = root.querySelector("#prCanvas"); if (!cv) { vis.playing = false; return; }
+    const mk = markerTriplets(ds);
+    const key = ds.name + vis.view.up;
+    if (vis.boxFor !== key) { vis.box = markerBox(ds, mk, vis.view.up); vis.boxFor = key; }
+    const draw = () => {
+      const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+      const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (vis.box) drawMarkers(ctx, r.width, r.height, ds, mk, vis.view, vis.box);
+      const fr = root.querySelector("#prFrame"), ft = root.querySelector("#prFrameT");
+      if (fr) fr.value = vis.view.frame; if (ft) ft.textContent = `${(+ds.time[vis.view.frame]).toFixed(2)} s`;
+    };
+    draw();
+    let drag = null;
+    cv.onpointerdown = (e) => { drag = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId); };
+    cv.onpointermove = (e) => { if (!drag) return; vis.view.yaw += (e.clientX - drag[0]) * 0.01; vis.view.pitch = Math.max(-1.5, Math.min(1.5, vis.view.pitch + (e.clientY - drag[1]) * 0.01)); drag = [e.clientX, e.clientY]; draw(); };
+    cv.onpointerup = () => { drag = null; };
+    cv.onwheel = (e) => { e.preventDefault(); vis.view.zoom = Math.max(0.2, Math.min(8, vis.view.zoom * (e.deltaY < 0 ? 1.1 : 0.9))); draw(); };
+    root.querySelector("#prFrame").oninput = (e) => { vis.view.frame = +e.target.value; draw(); };
+    root.querySelector("#prUp").onchange = (e) => { vis.view.up = e.target.value; render(); };
+    root.querySelector("#prSpeed").onchange = (e) => { vis.speed = +e.target.value; };
+    root.querySelector("#prLabels").onchange = (e) => { vis.view.labels = e.target.checked; draw(); };
+    root.querySelector("#prPlay").onclick = (e) => {
+      vis.playing = !vis.playing; e.target.textContent = vis.playing ? t("pr_pause") : t("pr_play");
+      if (!vis.playing) return;
+      let last = performance.now(), acc = 0;
+      const tick = (now) => {
+        if (!vis.playing || !cv.isConnected) { vis.playing = false; return; }
+        acc += ((now - last) / 1000) * vis.speed * (ds.fs || 100); last = now;
+        const step = Math.floor(acc); acc -= step;
+        if (step) { vis.view.frame = (vis.view.frame + step) % ds.time.length; draw(); }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    };
   }
 
   function toolsHTML(ds) {
@@ -519,6 +688,7 @@ export function mountProcess(root, { t, download }) {
       <div class="prCols">${shown.map((k) => `<label class="prCol"><input type="checkbox" data-col="${escX(k)}"${S.plot.cols.includes(k) ? " checked" : ""}> ${escX(k)}${ds.units[k] ? ` <span class="sub" style="font-size:11px">(${escX(ds.units[k])})</span>` : ""}</label>`).join("") || `<p class="note">${t("pr_noCols")}</p>`}</div>
       ${ds.meta?.text ? `<p class="note" style="margin:6px 0 0">${t("pr_textCols")}: ${Object.keys(ds.meta.text).map(escX).join(", ")}</p>` : ""}
     </div>
+    ${visHTML(ds)}
     <div class="card"><b>${t("pr_tools")}</b><p class="note" style="margin:4px 0 6px">${t("pr_toolsNote")}</p>${toolsHTML(ds)}</div>` : ""}
     <div class="card">
       <b>${t("pr_commands")}</b>
@@ -571,6 +741,7 @@ export function mountProcess(root, { t, download }) {
     if (q("#prResCsv")) q("#prResCsv").onclick = () => download("process_results.csv", P.resultsCsv());
     if (q("#prResClear")) q("#prResClear").onclick = () => { S.results.length = 0; render(); };
     if (!ds) return;
+    wireVis(ds);
     const setWin = () => { const a = q("#prT0").value, b = q("#prT1").value; if (a !== "" && b !== "") exec(`window ${a} ${b}`); };
     q("#prT0").onchange = setWin; q("#prT1").onchange = setWin;
     q("#prWinAll").onclick = () => exec("window all");

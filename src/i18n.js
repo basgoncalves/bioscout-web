@@ -1906,6 +1906,18 @@ const EN = {
   "pr_h26": "typed values (ultrasound, raters): mean, SD, range, CV",
   "pr_h27": "% change between two typed values",
   "pr_h28": "run a command on every loaded file",
+  "pr_visualise": "Visualise",
+  "pr_vRawProc": "Raw vs processed",
+  "pr_v3d": "3D markers",
+  "pr_vRawNote": "Tick channels: each gets a panel with the raw signal in grey and everything made from it in colour.",
+  "pr_vNone": "Tick a channel to see it. Process one (e.g. a low-pass filter) to compare raw and processed.",
+  "pr_vDrag": "Drag to rotate, scroll to zoom. Blue = left, orange = right.",
+  "pr_play": "Play",
+  "pr_pause": "Pause",
+  "pr_up": "Up axis",
+  "pr_speed": "Speed",
+  "pr_labels": "Labels",
+  "pr_raw": "raw",
 };
 
 const PT = {
@@ -3787,6 +3799,18 @@ const PT = {
   "pr_h26": "valores escritos (ecografia, avaliadores): média, DP, amplitude, CV",
   "pr_h27": "% de variação entre dois valores escritos",
   "pr_h28": "correr um comando em todos os ficheiros carregados",
+  "pr_visualise": "Visualizar",
+  "pr_vRawProc": "Bruto vs processado",
+  "pr_v3d": "Marcadores 3D",
+  "pr_vRawNote": "Marque canais: cada um tem um painel com o sinal bruto a cinzento e tudo o que dele derivou a cores.",
+  "pr_vNone": "Marque um canal para o ver. Processe-o (p. ex. um filtro passa-baixo) para comparar bruto e processado.",
+  "pr_vDrag": "Arraste para rodar, role para ampliar. Azul = esquerda, laranja = direita.",
+  "pr_play": "Reproduzir",
+  "pr_pause": "Pausa",
+  "pr_up": "Eixo vertical",
+  "pr_speed": "Velocidade",
+  "pr_labels": "Rótulos",
+  "pr_raw": "bruto",
 };
 
 const DE = {
@@ -5667,6 +5691,18 @@ const DE = {
   "pr_h26": "eingetippte Werte (Ultraschall, Rater): Mittelwert, SD, Spannweite, VK",
   "pr_h27": "% Änderung zwischen zwei eingetippten Werten",
   "pr_h28": "einen Befehl auf allen geladenen Dateien ausführen",
+  "pr_visualise": "Visualisieren",
+  "pr_vRawProc": "Roh vs. verarbeitet",
+  "pr_v3d": "3D-Marker",
+  "pr_vRawNote": "Kanäle anhaken: jeder bekommt ein Feld mit dem Rohsignal in Grau und allem daraus Berechneten in Farbe.",
+  "pr_vNone": "Hake einen Kanal an. Verarbeite ihn (z. B. Tiefpass), um roh und verarbeitet zu vergleichen.",
+  "pr_vDrag": "Ziehen zum Drehen, scrollen zum Zoomen. Blau = links, orange = rechts.",
+  "pr_play": "Abspielen",
+  "pr_pause": "Pause",
+  "pr_up": "Hochachse",
+  "pr_speed": "Tempo",
+  "pr_labels": "Beschriftungen",
+  "pr_raw": "roh",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };
