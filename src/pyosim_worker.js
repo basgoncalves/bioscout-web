@@ -41,9 +41,12 @@ from pyosim import ik
 a = dict(args)
 tr = (float(a["t0"]), float(a["t1"])) if a.get("t0") not in (None, "") and a.get("t1") not in (None, "") else None
 ik.run("/job/" + a["model"], "/job/" + a["trc"], ("/job/" + a["tasks"]) if a.get("tasks") else None,
-       "/job/ik.mot", tr, log=js_log, markerset=("/job/" + a["markerset"]) if a.get("markerset") else None)
+       "/job/ik.mot", tr, log=js_log, markerset=("/job/" + a["markerset"]) if a.get("markerset") else None,
+       errors_path="/job/ik_marker_errors.sto", setup_path="/job/setup_ik.xml")
 `);
-      self.postMessage({ id, done: true, outputs: { "ik.mot": py.FS.readFile("/job/ik.mot", { encoding: "utf8" }) } });
+      const outputs = {};
+      for (const f of ["setup_ik.xml", "ik.mot", "ik_marker_errors.sto"]) outputs[f] = py.FS.readFile("/job/" + f, { encoding: "utf8" });
+      self.postMessage({ id, done: true, outputs });
     } else throw new Error("unknown command " + cmd);
   } catch (err) {
     const msg = String(err && err.message || err).split("\n").filter(Boolean);

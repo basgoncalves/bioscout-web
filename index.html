@@ -601,15 +601,19 @@ try {
   .twRow.miss span { opacity:.5; text-decoration:line-through; }
   .tvHead { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
   .tvBody { display:flex; gap:12px; margin-top:8px; }
-  .tvPlots { flex:1; min-width:0; display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-  .tvPlots > div:last-child { grid-column:1 / -1; }
+  .tvPlots { flex:1; min-width:0; }
   .tvPlots canvas { width:100%; display:block; }
   .tvSide { width:170px; flex:none; }
   .tvList { max-height:380px; overflow:auto; font-size:13px; }
-  .tvList label { display:block; }
+  .tvList label { display:flex; align-items:center; gap:6px; white-space:nowrap; }
+  .tvList input { width:auto; margin:0; }
   .tvSl { display:flex; align-items:center; gap:10px; margin-top:6px; }
   .tvSl span { width:70px; } .tvSl input { flex:1; } .tvSl b { width:80px; text-align:right; font-variant-numeric:tabular-nums; }
-  @media (max-width:700px) { .tvBody { flex-direction:column; } .tvSide { width:auto; } .tvPlots { grid-template-columns:1fr; } }
+  @media (max-width:700px) { .tvBody { flex-direction:column; } .tvSide { width:auto; } .tvList { max-height:160px; } }
+  .simOutDir { display:flex; align-items:center; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .simOutDir input, .simPick input { flex:1; min-width:140px; width:auto; }
+  .simOutDir button, .simPick button { width:auto; padding:6px 10px; margin:0; }
+  .simPick { display:flex; gap:6px; align-items:center; }
   .simFname { word-break:break-all; font-weight:600; }
   fieldset.simPreview { border:0; padding:0; margin:0; min-width:0; }
   fieldset.simPreview .simDrop { cursor:default; opacity:.75; }
@@ -1624,7 +1628,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 159;
+window.BUILD = 161;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

@@ -44,7 +44,7 @@ export function simHTML(ctx) {
   const badge = (sp) => (!sp || !sp.state || sp.state === "idle" ? "" : `<span class="simBadge ${sp.state}">${esc(t("sim_st_" + sp.state))}</span>`);
   const sections = spec.tools.map((tl, i) => {
     const sp = (job.tools || {})[tl.id] || { state: "idle" }, have = sp.inputs || {};
-    const slots = tl.slots.map((sl) => {
+    const slots = tl.slots.filter((sl) => sl.id !== "model").map((sl) => {
       const got = have[sl.id], fname = dropNames[`${tl.id}:${sl.id}`];
       return `<label class="simDrop${got ? " has" : ""}" data-drop="${tl.id}:${sl.id}">
         <input type="file" accept="${sl.ext.join(",")}" data-file="${tl.id}:${sl.id}" hidden>
@@ -67,17 +67,34 @@ export function simHTML(ctx) {
       <p class="note" style="margin:4px 0 8px">${t("sim_note_" + tl.id)}</p>
       ${slots}${opts ? `<div class="simOpts">${opts}${tl.id === "ik" ? `<button type="button" class="ghost" data-view${trcIK ? "" : " disabled"}>${esc(t("sim_v_btn"))}</button>` : ""}</div>` : ""}
       ${tl.id === "ik" ? `<button type="button" class="ghost" data-tw style="margin-top:8px">${esc(t("sim_tw_btn"))}</button>` : ""}
-      <button type="button" data-run="${tl.id}" style="margin-top:10px"${!job.model || busy ? " disabled" : ""}>${esc(t("sim_run", { tool: t("sim_tool_" + tl.id) }))}</button>
+      <button type="button" data-run="${tl.id}" style="margin-top:10px"${(!job.model && !(scaledName && tl.id !== "scale")) || busy ? " disabled" : ""}>${esc(t("sim_run", { tool: t("sim_tool_" + tl.id) }))}</button>
       ${stateLine(sp)}${outHTML}
+      <div class="simOutDir"><span class="sub">${esc(t("sim_outdir"))}:</span>
+        <input type="text" readonly value="${esc(dirName(tl.id) || t("sim_outdir_none"))}">
+        <button type="button" class="ghost" data-dir="${tl.id}" title="${esc(t("sim_outdir_pick"))}">📁</button>
+        ${sp.state === "done" && outs && outs.length && dirFor(tl.id) ? `<button type="button" class="ghost" data-save="${tl.id}">${esc(t("sim_outdir_save"))}</button>` : ""}
+        ${saved[tl.id] ? `<span class="sub">✓ ${esc(saved[tl.id])}</span>` : ""}</div>
     </details>`;
-  }).join("");
+  });
+  const si = spec.tools.findIndex((tl) => tl.id === "scale");
+  const scaledHTML = `<div class="simModel"><label for="simScaled">${t("sim_scaled")}</label>
+      <div class="simPick"><input id="simScaled" type="text" readonly placeholder="${esc(t("sim_scaled_none"))}" value="${esc(scaledName || "")}">
+        <button type="button" class="ghost" data-scaledpick title="${esc(t("sim_scaled_pick"))}">🔍</button>
+        ${scaledName ? `<button type="button" class="ghost" data-scaledclear>${t("pr_remove")}</button>` : ""}
+        <input type="file" accept=".osim" data-scaledfile hidden></div>
+      <p class="note" style="margin:6px 0 0">${t("sim_scaled_note")}</p></div>`;
+  sections.splice(si + 1, 0, scaledHTML);
+  const sectionsHTML = sections.join("");
   return `<div class="simModel">
-      <label for="simModel">${t("sim_model")}</label>
+      <div class="simOutDir" style="margin:0 0 8px"><span class="sub">${esc(t("sim_outdir_all"))}:</span>
+        <input type="text" readonly value="${esc(dirName("*") || t("sim_outdir_none"))}">
+        <button type="button" class="ghost" data-dir="*" title="${esc(t("sim_outdir_pick"))}">📁</button></div>
+      <label for="simModel">${t("sim_generic")}</label>
       <select id="simModel"><option value="">${t("sim_chooseModel")}</option>${models.map((m) => `<option value="${esc(m)}"${m === job.model ? " selected" : ""}>${esc(m)}</option>`).join("")}</select>
       <p class="note" style="margin:6px 0 0">${t("sim_modelNote")}</p>
     </div>
     ${ctx.err ? `<p class="note banner" style="margin:8px 0 0">${esc(ctx.err)}</p>` : ""}
-    <div class="simTools">${sections}</div>
+    <div class="simTools">${sectionsHTML}</div>
     <p class="note" style="margin:10px 0 0">${t("sim_templatesNote")}</p>`;
 }
 
@@ -92,6 +109,26 @@ let T = (k) => k;
 const dropNames = {};
 const dropFiles = {};
 let trcIK = null;            // the parsed motion .trc of the IK section
+let scaledName = "", scaledFile = null;
+const dirs = {};             // tool or "*" -> FileSystemDirectoryHandle (Chrome / Edge)
+const saved = {};            // tool -> "n files -> folder"
+const autoSaved = {};        // tool -> run start time already written
+const dirFor = (tool) => dirs[tool] || dirs["*"] || null;
+const dirName = (tool) => (dirs[tool] ? dirs[tool].name : tool !== "*" && dirs["*"] ? dirs["*"].name + " (all)" : "");
+async function saveOutputs(ctx, tool) {
+  const dir = dirFor(tool), files = ctx.outputs[tool] || [];
+  if (!dir || !files.length) return;
+  let n = 0;
+  for (const f of files) {
+    let blob = ctx.client.toolBlob ? ctx.client.toolBlob(ctx.job.id, tool, f.path) : null;
+    if (!blob) blob = await (await fetch(ctx.client.toolFileUrl(ctx.job.id, tool, f.path))).blob();
+    const parts = f.path.split("/"); let d = dir;
+    for (const sub of parts.slice(0, -1)) d = await d.getDirectoryHandle(sub, { create: true });
+    const fh = await d.getFileHandle(parts[parts.length - 1], { create: true });
+    const w = await fh.createWritable(); await w.write(blob); await w.close(); n++;
+  }
+  saved[tool] = `${n} → ${dir.name}`;
+}
 
 /** Wire the drawn page. */
 export function simWire(box, ctx) {
@@ -118,6 +155,48 @@ export function simWire(box, ctx) {
     }
     ctx.act(() => client.toolUpload(id, tool, slot, file));
   };
+  box.querySelectorAll("[data-dir]").forEach((b) => {
+    b.onclick = async () => {
+      if (!window.showDirectoryPicker) { alert(ctx.t("sim_outdir_unsupported")); return; }
+      try { dirs[b.dataset.dir] = await window.showDirectoryPicker({ mode: "readwrite" }); } catch { return; }
+      ctx.act(() => client.status(id));
+    };
+  });
+  box.querySelectorAll("[data-save]").forEach((b) => {
+    b.onclick = async () => { try { await saveOutputs(ctx, b.dataset.save); } catch (e) { saved[b.dataset.save] = "✗ " + e.message; } ctx.act(() => client.status(id)); };
+  });
+  // finished runs go to their output folder by themselves, once per run
+  for (const [tool, sp] of Object.entries(job.tools || {})) {
+    if (sp.state === "done" && dirFor(tool) && (ctx.outputs[tool] || []).length && autoSaved[tool] !== sp.started) {
+      autoSaved[tool] = sp.started;
+      saveOutputs(ctx, tool).catch((e) => { saved[tool] = "✗ " + e.message; }).then(() => ctx.act(() => client.status(id)));
+    }
+  }
+  const sf = box.querySelector("[data-scaledfile]");
+  if (sf) {
+    box.querySelector("[data-scaledpick]").onclick = () => sf.click();
+    sf.onchange = () => {
+      const f = sf.files[0]; if (!f) return;
+      scaledName = f.name; scaledFile = f;
+      if (client.setScaled) { client.setScaled(f); ctx.act(() => client.status(id)); return; }
+      // the lab engine: the same model goes to every section after Scale
+      ctx.act(async () => {
+        let st = null;
+        for (const tl of spec.tools) if (tl.id !== "scale" && tl.slots.some((x) => x.id === "model")) st = await client.toolUpload(id, tl.id, "model", f);
+        return st || client.status(id);
+      });
+    };
+    const sc = box.querySelector("[data-scaledclear]");
+    if (sc) sc.onclick = () => {
+      scaledName = ""; scaledFile = null;
+      if (client.setScaled) { client.setScaled(null); ctx.act(() => client.status(id)); return; }
+      ctx.act(async () => {
+        let st = null;
+        for (const tl of spec.tools) if (tl.id !== "scale" && tl.slots.some((x) => x.id === "model")) st = await client.toolClear(id, tl.id, "model");
+        return st || client.status(id);
+      });
+    };
+  }
   const vb = box.querySelector("[data-view]");
   if (vb) vb.onclick = async () => {
     const o = ikOpts();
