@@ -97,7 +97,7 @@ def solve(model, times, markers, marker_w, coord_tasks=None, t_range=None, log=p
             return cache["J"]
 
         sol = least_squares(fun, x, jac=jac, bounds=(lo, hi), method="trf", x_scale="jac",
-                            xtol=1e-10, ftol=1e-10, gtol=1e-10, max_nfev=500 if first else 100)
+                            xtol=1e-6, ftol=1e-6, gtol=1e-6, max_nfev=200 if first else 20)
         x = sol.x; first = False
         P = kin.markers(x[None])[0]
         d = np.linalg.norm(P - obs, axis=1)

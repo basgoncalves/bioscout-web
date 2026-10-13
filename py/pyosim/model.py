@@ -331,31 +331,70 @@ class Kinematics:
             Q[:, d] = _feval(f, Q[:, i])
         return Q
 
+    def _plan(self):
+        """Per joint, once: parent/child frames and the transform axes, with unit axes and
+        cross-product matrices precomputed and constant axes folded into fixed matrices."""
+        if getattr(self, "_p", None) is not None:
+            return self._p
+        m, plan = self.m, []
+        for j in m.joints:
+            steps = []                               # ("R", K, KK, coord_idx|None, func) / ("Rc", R) / ("t", unit, idx, func) / ("tc", vec)
+            if j.type == "CustomJoint":
+                for kind, ax, names, f in j.axes:
+                    a = np.asarray(ax, float); a = a / np.linalg.norm(a)
+                    if not names:                    # constant along this axis
+                        v = 0.0 if f.kind == "const0" else float(_feval(f, np.zeros(1))[0])
+                        if abs(v) < 1e-15:
+                            continue
+                        if kind == "r":
+                            steps.append(("Rc", rot_axis(a, v)))
+                        else:
+                            steps.append(("tc", a * v))
+                        continue
+                    if kind == "r":
+                        K = np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
+                        steps.append(("R", K, K @ K, self.idx[names[0]], f))
+                    else:
+                        steps.append(("t", a, self.idx[names[0]], f))
+            elif j.type == "PinJoint":
+                K = np.array([[0., -1, 0], [1, 0, 0], [0, 0, 0]])
+                steps.append(("R", K, K @ K, self.idx[j.coords[0].name], None))
+            elif j.type != "WeldJoint":
+                steps = None                         # rare joint types: per-pose fallback
+            plan.append((j, m._body_of(j.parent), m._body_of(j.child), steps))
+        self._p = plan
+        return plan
+
     def markers(self, X):
         """X: (B, n_free) -> (B, n_markers, 3)."""
         Q = self.full(np.atleast_2d(X)); B = len(Q); m = self.m
-        I = np.broadcast_to(np.eye(3), (B, 3, 3))
-        T = {"ground": (I, np.zeros((B, 3)))}
-        for j in m.joints:
-            Rb, pb = T[m._body_of(j.parent)]
+        I3 = np.eye(3)
+        T = {"ground": (np.broadcast_to(I3, (B, 3, 3)), np.zeros((B, 3)))}
+        for j, pbody, cbody, steps in self._plan():
+            Rb, pb = T[pbody]
             Rf = Rb @ j.parent.R; pf = pb + Rb @ j.parent.p
-            R = I; p = np.zeros((B, 3))
-            if j.type == "CustomJoint":
-                for kind, ax, names, f in j.axes:
-                    v = Q[:, self.idx[names[0]]] if names else np.zeros(B)
-                    val = _feval(f, v) if (names or f.kind != "const0") else np.zeros(B)
-                    if kind == "r":
-                        R = R @ _rot_batch(ax, val)
-                    else:
-                        a = np.asarray(ax, float); p = p + val[:, None] * (a / np.linalg.norm(a))
-            elif j.type == "PinJoint":
-                R = _rot_batch([0, 0, 1], Q[:, self.idx[j.coords[0].name]])
-            elif j.type == "WeldJoint":
-                pass
-            else:                                   # rare types: per-pose fallback
+            R = None; p = None
+            if steps is None:
                 Rs, ps = zip(*[j.local({n: Q[b, i] for n, i in self.idx.items()}) for b in range(B)])
                 R, p = np.array(Rs), np.array(ps)
-            Rm = Rf @ R; pm = pf + np.einsum("bij,bj->bi", Rf, p)
+            else:
+                for st in steps:
+                    if st[0] == "R":
+                        _, K, KK, ci, f = st
+                        v = Q[:, ci] if f is None or f.kind == "const0" else _feval(f, Q[:, ci])
+                        Ri = I3 + np.sin(v)[:, None, None] * K + (1 - np.cos(v))[:, None, None] * KK
+                        R = Ri if R is None else R @ Ri
+                    elif st[0] == "Rc":
+                        R = st[1] if R is None else R @ st[1]
+                    elif st[0] == "t":
+                        _, a, ci, f = st
+                        v = Q[:, ci] if f.kind == "const0" else _feval(f, Q[:, ci])
+                        d = v[:, None] * a
+                        p = d if p is None else p + d
+                    else:
+                        p = st[1] if p is None else p + st[1]
+            Rm = Rf if R is None else Rf @ R
+            pm = pf if p is None else (pf + (np.einsum("bij,bj->bi", Rf, p) if np.ndim(p) == 2 else Rf @ p))
             Rbody = Rm @ j.child.R.T
-            T[m._body_of(j.child)] = (Rbody, pm - Rbody @ j.child.p)
+            T[cbody] = (np.broadcast_to(Rbody, (B, 3, 3)) if Rbody.ndim == 2 else Rbody, pm - Rbody @ j.child.p)
         return np.stack([T[b][1] + T[b][0] @ loc for b, loc in self.mk], axis=1)
