@@ -86,6 +86,17 @@ export const STEPS = {
   envelope: { n: 0, label: ([ms = 100]) => `EMG envelope ${ms} ms`, f: (y, ds, [ms = 100]) => D.emgEnvelope(y, ds.fs, ms).envelope },
 };
 export const stepLabel = (st) => STEPS[st.op].label(st.args);
+/** The unit a channel ends in after the chain, and whether body weight was divided out. */
+export function chainUnit(pipe, unit) {
+  let u = unit || "", bw = false;
+  for (const st of pipe) {
+    if (st.op === "divbw") { u = "×BW"; bw = true; }
+    else if (st.op === "normmax") { u = "%"; bw = false; }
+    else if (st.op === "deriv") u = u ? `${u}/s` : "/s";
+    else if (st.op === "integrate") u = u ? `${u}·s` : "·s";
+  }
+  return { unit: u, bw };
+}
 
 /**
  * The engine. `t` translates the few words it puts in the results table
@@ -589,17 +600,30 @@ function decimate(x, y, buckets) {
  * series: [{ x, y, color, label, dash, band:[lo,hi] }]. Returns { svg, map }
  * where map converts a pointer x (0..1 of width) to a data x for the readout.
  */
-export function chartSVG({ series, xLabel = "s", yLabel = "", marks = [], equal = false, W = 640, H = 300, cursors = null, xRange = null }) {
-  const L = 78, R = 12, T = 18, B = 46;
+export function chartSVG({ series, xLabel = "s", yLabel = "", yLabelR = "", marks = [], equal = false, W = 640, H = 300, cursors = null, xRange = null }) {
+  const hasR = series.some((s) => s.axis === "r");
+  const L = 78, R = hasR ? 78 : 12, T = 18, B = 46;
   const xs = series.flatMap((s) => Array.from(s.x)).filter(fin);
-  const ys = series.flatMap((s) => [...Array.from(s.y), ...(s.band ? [...s.band[0], ...s.band[1]] : [])]).filter(fin);
+  const ys = series.filter((s) => s.axis !== "r").flatMap((s) => [...Array.from(s.y), ...(s.band ? [...s.band[0], ...s.band[1]] : [])]).filter(fin);
+  const ysR = series.filter((s) => s.axis === "r").flatMap((s) => Array.from(s.y)).filter(fin);
   if (!xs.length || !ys.length) return { svg: "", x0: 0, x1: 1 };
   let x0 = xRange ? xRange[0] : Math.min(...xs), x1 = xRange ? xRange[1] : Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
   if (x1 - x0 < 1e-12) { x0 -= 1; x1 += 1; } if (y1 - y0 < 1e-12) { y0 -= 1; y1 += 1; }
   if (equal) { const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, ax = (W - L - R) / (H - T - B); const sx = Math.max(x1 - x0, (y1 - y0) * ax), sy = sx / ax; x0 = cx - sx / 2; x1 = cx + sx / 2; y0 = cy - sy / 2; y1 = cy + sy / 2; }
   const ys0 = niceStep(y1 - y0); y0 = Math.floor(y0 / ys0) * ys0; y1 = Math.ceil(y1 / ys0) * ys0;
   const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
-  const dp = (st) => (st < 1 ? Math.min(4, Math.ceil(-Math.log10(st))) : 0);
+  // right axis: its own range, ticks drawn at the same heights as the left grid
+  // as many decimals as the step has (0.25 -> 2), so -0.25 is not printed as -0.3
+  const dp = (st) => (st < 1 ? Math.min(4, (String(+st.toPrecision(6)).split(".")[1] || "").length) : 0);
+  let YR = Y, rTicks = "";
+  if (hasR && ysR.length) {
+    let r0 = Math.min(...ysR), r1 = Math.max(...ysR); if (r1 - r0 < 1e-12) { r0 -= 1; r1 += 1; }
+    const n = Math.round((y1 - y0) / ys0), st = niceStep(r1 - r0, n);
+    r0 = Math.floor(r0 / st) * st; r1 = r0 + st * n; while (r1 < Math.max(...ysR)) r1 += st;
+    YR = (v) => T + (1 - (v - r0) / (r1 - r0)) * (H - T - B);
+    const dpr = dp(st);
+    for (let v = r0; v <= r1 + st / 2; v += st) rTicks += `<text x="${W - R + 6}" y="${(YR(v) + 5).toFixed(1)}" font-size="18" fill="var(--muted)">${v.toFixed(dpr)}</text>`;
+  }
   let g = "";
   for (let v = y0; v <= y1 + ys0 / 2; v += ys0) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)"${Math.abs(v) < ys0 / 1e6 ? "" : ' stroke-dasharray="2 3"'}/><text x="${L - 5}" y="${(Y(v) + 4).toFixed(1)}" font-size="18" text-anchor="end" fill="var(--muted)">${v.toFixed(dp(ys0))}</text>`;
   const xs0 = niceStep(x1 - x0, 6);
@@ -612,15 +636,16 @@ export function chartSVG({ series, xLabel = "s", yLabel = "", marks = [], equal 
       const dn = Array.from(s.x, (x, i) => `${X(x).toFixed(1)},${Y(s.band[0][i]).toFixed(1)}`).reverse();
       band = `<polygon points="${up.concat(dn).join(" ")}" fill="${s.color}" fill-opacity=".2" stroke="none"/>`;
     }
-    const [px, py] = decimate(s.x, s.y, buckets);
+    const [px, py] = decimate(s.x, s.y, buckets), Yf = s.axis === "r" ? YR : Y;
     let d = "", pen = false;
-    for (let i = 0; i < px.length; i++) { if (!fin(py[i]) || !fin(px[i])) { pen = false; continue; } d += `${pen ? "L" : "M"}${X(px[i]).toFixed(1)} ${Y(py[i]).toFixed(1)}`; pen = true; }
+    for (let i = 0; i < px.length; i++) { if (!fin(py[i]) || !fin(px[i])) { pen = false; continue; } d += `${pen ? "L" : "M"}${X(px[i]).toFixed(1)} ${Yf(py[i]).toFixed(1)}`; pen = true; }
     return `${band}<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.thin ? 1 : 1.6}"${s.dash ? ` stroke-dasharray="${typeof s.dash === "string" ? s.dash : "5 3"}"` : ""}${s.thin ? ' stroke-opacity=".45"' : ""}><title>${escX(s.label || "")}</title></path>`;
   }).join("");
   const mk = marks.filter(([x, y]) => fin(x) && fin(y)).map(([x, y]) => `<circle cx="${X(x).toFixed(1)}" cy="${Y(y).toFixed(1)}" r="4" fill="none" stroke="var(--warn)" stroke-width="1.8"/>`).join("");
   const cur = (cursors || []).map((c, i) => fin(c) ? `<g class="prCur" data-cur="${i}" transform="translate(${X(c).toFixed(1)},0)"><line x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--accent)" stroke-width="1.5"/><rect x="-9" y="${T - 2}" width="18" height="16" rx="3" fill="var(--accent)"/><text x="0" y="${T + 10}" font-size="13" fill="#fff" text-anchor="middle">${"AB"[i]}</text></g>` : "").join("");
   const svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;touch-action:pan-y" role="img" data-l="${L}" data-r="${R}" data-w="${W}" data-x0="${x0}" data-x1="${x1}">`
-    + `<rect x="0" y="0" width="${W}" height="${H}" fill="var(--card)"/>${g}${paths}${mk}${cur}`
+    + `<rect x="0" y="0" width="${W}" height="${H}" fill="var(--card)"/>${g}${rTicks}${paths}${mk}${cur}`
+    + (hasR && yLabelR ? `<text x="${W - R - 4}" y="${T + 12}" font-size="17" text-anchor="end" fill="var(--muted)">${escX(yLabelR)}</text>` : "")
     + `<text x="${W - R}" y="${H - 4}" font-size="17" text-anchor="end" fill="var(--muted)">${escX(xLabel)}</text>`
     + (yLabel ? `<text x="${L + 4}" y="${T + 12}" font-size="17" fill="var(--muted)">${escX(yLabel)}</text>` : "")
     + `<line class="prCursor" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-width="1" visibility="hidden"/></svg>`;
@@ -644,11 +669,11 @@ export const TOOLS = [
     { k: "pr_tIntegrate", f: [], cmd: () => "step integrate" },
   ] },
   { group: "pr_gFilter", items: [
-    { k: "pr_tLowpass", f: [["n", "pr_fCutoff", 10], ["n", "pr_fOrder", 4]], cmd: (v) => `step lowpass ${v[0]} ${v[1]}` },
-    { k: "pr_tHighpass", f: [["n", "pr_fCutoff", 20], ["n", "pr_fOrder", 4]], cmd: (v) => `step highpass ${v[0]} ${v[1]}` },
-    { k: "pr_tBandpass", f: [["n", "pr_fLow", 20], ["n", "pr_fHigh", 450], ["n", "pr_fOrder", 4]], cmd: (v) => `step bandpass ${v[0]} ${v[1]} ${v[2]}` },
     { k: "pr_tOffset", f: [], cmd: () => "step offset" },
     { k: "pr_tRectify", f: [], cmd: () => "step rectify" },
+    { k: "pr_tHighpass", f: [["n", "pr_fCutoff", 20], ["n", "pr_fOrder", 4]], cmd: (v) => `step highpass ${v[0]} ${v[1]}` },
+    { k: "pr_tBandpass", f: [["n", "pr_fLow", 20], ["n", "pr_fHigh", 450], ["n", "pr_fOrder", 4]], cmd: (v) => `step bandpass ${v[0]} ${v[1]} ${v[2]}` },
+    { k: "pr_tLowpass", f: [["n", "pr_fCutoff", 10], ["n", "pr_fOrder", 4]], cmd: (v) => `step lowpass ${v[0]} ${v[1]}` },
   ] },
 ];
 
@@ -729,8 +754,8 @@ export function mountProcess(root, { t, download }) {
     const cur = curOf(ds);
     const marksFor = (keys) => (keys.includes(S.plot.markCol) ? S.plot.marks.filter(([tm]) => tm >= xr[0] && tm <= xr[1]) : []);
     const legend = (series) => `<div class="sub" style="font-size:16px;display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 0">${series.map((s) => `<span><i style="display:inline-block;width:12px;height:0;border-top:2px ${s.dash ? (s.dash === "2 3" ? "dotted" : "dashed") : "solid"} ${s.color};vertical-align:middle"></i> ${escX(s.label)}</span>`).join("")}</div>`;
-    const plotBox = (id, title, series, unit, marks, extra = "") => `<div class="prPlotTitle">${title}${extra}</div>${series.length
-      ? `<div class="prPlot" id="${id}">${chartSVG({ series, xLabel: t("pr_timeS"), yLabel: unit, marks, cursors: cur, xRange: xr, H: 250 }).svg}<div class="prReadout sub" style="font-size:16px;min-height:16px;margin:2px 0 0"></div></div>${legend(series)}`
+    const plotBox = (id, title, series, unit, marks, extra = "", unitR = "") => `<div class="prPlotTitle">${title}${extra}</div>${series.length
+      ? `<div class="prPlot" id="${id}">${chartSVG({ series, xLabel: t("pr_timeS"), yLabel: unit, yLabelR: unitR, marks, cursors: cur, xRange: xr, H: 250 }).svg}<div class="prReadout sub" style="font-size:16px;min-height:16px;margin:2px 0 0"></div></div>${legend(series)}`
       : `<p class="note prEmpty">${id === "prRaw" ? t("pr_tickToPlot") : t("pr_vNone")}</p>`}`;
     const rawSeries = pl.raw.map((r) => ({ x, y: r.y.slice(i0, i1), color: r.color, label: r.key }));
     // min / max of every curve between the cursors, marked on the plot (Basic tab)
@@ -766,11 +791,16 @@ export function mountProcess(root, { t, download }) {
       }
       bottom = `<div class="prPlotTitle">${t("pr_result")}${clear}</div><div class="prPlot">${ch}</div>`;
     } else {
+      // ÷ body weight: one axis in ×BW, the raw curve divided too. Any other change of unit
+      // (% of max, d/dt, ∫dt): the processed curves on a second axis on the right.
+      const rawUnit = units(pl.raw), cu = chainUnit(S.pipe, rawUnit);
+      const bwN = S.massKg ? S.massKg * D.G : S.bw[ds.name];
+      const asBw = cu.bw && cu.unit === "×BW" && bwN > 0, twoAxes = !asBw && cu.unit !== rawUnit && S.pipe.length > 0;
       const procSeries = pl.proc.length ? [
-        ...pl.raw.map((r) => ({ x, y: r.y.slice(i0, i1), color: r.color, label: `${r.key} (${t("pr_raw").toLowerCase()})`, thin: true })),
-        ...pl.proc.map((p) => ({ x, y: p.y.slice(i0, i1), color: p.color, dash: p.dash, label: p.key }))] : [];
-      bottom = plotBox("prProc", t("pr_processed"), procSeries, units(pl.raw), [...marksFor(pl.proc.map((p) => p.key)), ...mmMarks(pl.proc)],
-        pipeErr ? ` <span style="color:var(--warn);font-weight:400">${escX(pipeErr)}</span>` : "");
+        ...pl.raw.map((r) => ({ x, y: asBw ? r.y.slice(i0, i1).map((v) => v / bwN) : r.y.slice(i0, i1), color: r.color, label: `${r.key} (${t("pr_raw").toLowerCase()})`, thin: true })),
+        ...pl.proc.map((p) => ({ x, y: p.y.slice(i0, i1), color: p.color, dash: p.dash, label: p.key, axis: twoAxes && !p.base && p.dash === "6 4" ? "r" : undefined }))] : [];
+      bottom = plotBox("prProc", t("pr_processed"), procSeries, asBw ? "×BW" : rawUnit, [...marksFor(pl.proc.map((p) => p.key)), ...(twoAxes || asBw ? [] : mmMarks(pl.proc))],
+        pipeErr ? ` <span style="color:var(--warn);font-weight:400">${escX(pipeErr)}</span>` : "", twoAxes ? `${cu.unit} →` : "");
     }
     const cmp = pl.raw.length ? compareRows(ds, pl) : null;
     const f = (v) => (fin(v) ? r3(v) : "–");

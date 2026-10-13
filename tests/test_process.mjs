@@ -7,7 +7,7 @@
  *
  *   node tests/test_process.mjs
  */
-import { makeProcessor, tokenize, chartSVG, channelTree, markerTriplets } from "../src/process.js";
+import { makeProcessor, tokenize, chartSVG, channelTree, markerTriplets, chainUnit } from "../src/process.js";
 import { readDelimited, readOpenSim, readTrc, fromTable } from "../src/proc_io.js";
 import * as D from "../src/proc_dsp.js";
 
@@ -114,6 +114,9 @@ near(pa[500], Math.abs(D.lowpass(Ch.current().cols.a, 1000, 10)[500]), 1e-9, "ch
 ok(!Ch.run("step lowpass 900").ok, "a cut-off above fs/2 is refused when added");
 ok(Ch.run("step undo").ok && Ch.S.pipe.length === 1 && Ch.run("step clear").ok && !Ch.S.pipe.length, "undo and clear");
 
+ok(chainUnit([{ op: "lowpass" }, { op: "normmax" }], "N").unit === "%", "% of max ends in %");
+ok(chainUnit([{ op: "divbw" }], "N").bw && chainUnit([{ op: "divbw" }], "N").unit === "×BW", "÷ body weight ends in ×BW");
+ok(/text-anchor="end"[^>]*>%<\/text>/.test(chartSVG({ series: [{ x: [0, 1], y: [0, 800], color: "#000" }, { x: [0, 1], y: [0, 100], color: "#000", axis: "r" }], yLabelR: "%" }).svg), "second y axis labelled on the right");
 ok(chartSVG({ series: [{ x: [0, 1, 2], y: [1, 3, 2], color: "#000" }] }).svg.startsWith("<svg"), "chart draws");
 
 if (fails) { console.error(`${fails} failure(s)`); process.exit(1); }
