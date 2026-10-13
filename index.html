@@ -1628,7 +1628,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 161;
+window.BUILD = 162;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -7199,6 +7199,23 @@ function renderOsim() {
   const box = $("osimBody");
   if (box.classList.contains("hidden")) return;
   const err = osim.err ? `<p class="note banner" style="margin:8px 0 0">${esc(osim.err)}</p>` : "";
+  // No server needed: Simulate opens straight in this browser. A lab-engine
+  // link (?engine=&code=) still connects to the engine instead.
+  if ((!osim.client || !osim.job) && !engineFromSearch(location.search)) {
+    box.innerHTML = `<p class="note">${tr("loading")}</p>`;
+    if (osim.localStarting) return;
+    osim.localStarting = true;
+    (async () => {
+      if (!osim.spec) osim.spec = await loadSimSpec();
+      const c = makeLocalClient(osim.spec);
+      osim.client = c; osim.health = await c.health(); osim.job = await c.newJob();
+      osim.res = {}; osim.toolOut = {}; osim.err = null;
+      osim.localStarting = false;
+      osimSync();
+    })();
+    box.innerHTML = `<p class="note">${tr("loading")}</p>`;
+    return;
+  }
   if (!osim.client || !osim.job) {
     let saved = {};
     try { saved = JSON.parse(sessionStorage.getItem("bioscout.osim") || "{}"); } catch { /* none */ }
@@ -7250,11 +7267,11 @@ function renderOsim() {
     },
   };
   box.innerHTML = `<p class="sub" style="font-size:15px;margin:0">${tr(h.local ? "sim_localOn" : "simConnected")}
-      <a href="#" id="osimDisconnect">${tr("osimDisconnect")}</a></p>
+      ${h.local ? "" : `<a href="#" id="osimDisconnect">${tr("osimDisconnect")}</a>`}</p>
     ${h.fake ? `<p class="note banner" style="margin:8px 0 0">${tr("osimFake")}</p>` : ""}
     ${simHTML(ctx)}
     <p class="note" style="margin:10px 0 0">${tr(h.local ? "sim_localNote" : "osimHonest")}</p>`;
-  $("osimDisconnect").onclick = (e) => {
+  if ($("osimDisconnect")) $("osimDisconnect").onclick = (e) => {
     e.preventDefault();
     clearTimeout(osim.timer);
     try { sessionStorage.removeItem("bioscout.osim"); } catch { /* nothing kept */ }
