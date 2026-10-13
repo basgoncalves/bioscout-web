@@ -636,8 +636,6 @@ export const TOOLS = [
   { group: "pr_gBasic", items: [
     { k: "pr_tMinMax", f: [], ui: "minmax" },
     { k: "pr_tMassSet", f: [["n", "pr_fMass", "", "mass"]], cmd: (v) => `mass ${v[0]}` },
-    { k: "pr_tOffset", f: [], cmd: () => "step offset" },
-    { k: "pr_tRectify", f: [], cmd: () => "step rectify" },
     { k: "pr_tScale", f: [["n", "pr_fFactor", 1]], cmd: (v) => `step scale ${v[0]}` },
     { k: "pr_tXbw", f: [], cmd: () => "step divbw" },
     { k: "pr_tNormMax", f: [], cmd: () => "step normmax" },
@@ -649,6 +647,8 @@ export const TOOLS = [
     { k: "pr_tLowpass", f: [["n", "pr_fCutoff", 10], ["n", "pr_fOrder", 4]], cmd: (v) => `step lowpass ${v[0]} ${v[1]}` },
     { k: "pr_tHighpass", f: [["n", "pr_fCutoff", 20], ["n", "pr_fOrder", 4]], cmd: (v) => `step highpass ${v[0]} ${v[1]}` },
     { k: "pr_tBandpass", f: [["n", "pr_fLow", 20], ["n", "pr_fHigh", 450], ["n", "pr_fOrder", 4]], cmd: (v) => `step bandpass ${v[0]} ${v[1]} ${v[2]}` },
+    { k: "pr_tOffset", f: [], cmd: () => "step offset" },
+    { k: "pr_tRectify", f: [], cmd: () => "step rectify" },
   ] },
 ];
 

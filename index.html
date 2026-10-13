@@ -20,6 +20,9 @@ try {
   var th = JSON.parse(localStorage.getItem("bioscout.theme.v1") || "{}");
   if (th.mode === "light" || th.mode === "dark") document.documentElement.dataset.theme = th.mode;
   if (th.palette) document.documentElement.dataset.palette = th.palette;
+  /* Text size (A- / A+ in the header), before the first paint too. */
+  var z = parseFloat(localStorage.getItem("bioscout.zoom.v1"));
+  if (z >= 0.7 && z <= 1.8) document.documentElement.style.setProperty("--uiZoom", z);
   /* Phone or desktop layout: the saved choice, else by the window's width. */
   var lay = localStorage.getItem("bioscout.layout.v1");
   if (lay !== "phone" && lay !== "desktop") lay = window.innerWidth >= 1100 ? "desktop" : "phone";
@@ -72,7 +75,8 @@ try {
   body { margin:0; background:var(--bg); color:var(--ink);
          font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
          padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
-  .wrap { max-width:640px; margin:0 auto; padding:16px 14px 40px; }
+  .wrap { max-width:640px; margin:0 auto; padding:16px 14px 40px; zoom:var(--uiZoom, 1); }
+  button.zoomBtn { width:auto; height:30px; padding:0 9px; margin:0; font-size:14px; font-weight:700; line-height:1; }
   h1 { font-size:21px; margin:4px 0 2px; letter-spacing:-.01em; }
   .brand { display:flex; align-items:center; gap:10px; margin:4px 0 2px; }
   .brand img { width:34px; height:34px; flex:none; }
@@ -565,19 +569,21 @@ try {
   .prFile > button:first-child { flex:1; }
   .prFile.sel > button:first-child { border-color:var(--accent); outline:1px solid var(--accent); }
   .prCols { max-height:220px; overflow:auto; margin-top:6px; border:1px solid var(--line); border-radius:10px; padding:4px 8px; }
-  .prCol { display:block; font-size:16.5px; padding:3px 0; word-break:break-all; }
+  .prCol { display:block; font-size:18px; padding:3px 0; word-break:break-all; }
   .prCol input { width:auto; display:inline-block; margin:0 6px 0 0; vertical-align:middle; min-height:0; }
   .prGroup { border-top:1px solid var(--line); padding:8px 0; }
   .prGroup summary { cursor:pointer; }
   /* Process: large type and the full width of the screen. */
-  #viewProcess { font-size:17.5px; }
-  #viewProcess .note { font-size:16.5px; }
-  #viewProcess label { font-size:16.5px; }
-  #viewProcess .sub { font-size:16px; }
-  #viewProcess .card b { font-size:19px; }
-  #viewProcess .osimLog { font-size:15px; }
-  #viewProcess button { font-size:17px; }
-  #viewProcess input, #viewProcess select { font-size:17px; }
+  #viewProcess { font-size:19px; }
+  #viewProcess .note { font-size:18px; }
+  #viewProcess label { font-size:18px; }
+  #viewProcess .sub { font-size:17.5px; }
+  #viewProcess .card b { font-size:20.5px; }
+  #viewProcess .osimLog { font-size:16.5px; }
+  #viewProcess button { font-size:18.5px; }
+  #viewProcess input, #viewProcess select { font-size:18.5px; }
+  /* Filled (accent) buttons in the tools: black text, easier to read than white on the light accents. */
+  .prToolRow > button:not(.ghost), .prTabs button:not(.ghost), .prChip, .prChip button { color:#111 !important; }
   .prTabs { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 4px; }
   .prTabs button { width:auto; margin:0; padding:9px 16px; }
   .prChain { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 12px; margin-top:8px;
@@ -589,20 +595,20 @@ try {
   :root[data-layout="desktop"] section#viewProcess { max-width:none; }
   .prToolRow { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; padding:7px 0; border-top:1px solid var(--line); }
   .prToolRow:first-of-type { border-top:0; }
-  .prToolRow > button { width:auto; margin:0; padding:10px 14px; font-size:17px; min-width:230px; text-align:left; }
-  .prToolRow label { font-size:16.5px; color:var(--muted); display:inline-flex; align-items:center; gap:4px; margin:0; }
-  .prToolRow input, .prToolRow select { width:auto; max-width:260px; margin:0; padding:8px 10px; min-height:0; font-size:17px; }
+  .prToolRow > button { width:auto; margin:0; padding:10px 14px; font-size:18.5px; min-width:230px; text-align:left; }
+  .prToolRow label { font-size:18px; color:var(--muted); display:inline-flex; align-items:center; gap:4px; margin:0; }
+  .prToolRow input, .prToolRow select { width:auto; max-width:260px; margin:0; padding:8px 10px; min-height:0; font-size:18.5px; }
   .prToolRow input.prNum { width:96px; }
   .prVis { display:grid; grid-template-columns:minmax(200px, 320px) 1fr; gap:12px; align-items:start; margin-top:10px; }
   @media (max-width: 680px) { .prVis { grid-template-columns:1fr; } .prChanList { max-height:150px !important; } }
   .prChanList { max-height:560px; overflow:auto; border:1px solid var(--line); border-radius:10px; padding:4px 8px; margin-top:6px; }
   .prPlots { min-width:0; }
   .prPlots .prPlot svg { user-select:none; -webkit-user-select:none; cursor:ew-resize; }
-  .prPlotTitle { font-size:19px; font-weight:600; margin:8px 0 2px; }
+  .prPlotTitle { font-size:20.5px; font-weight:600; margin:8px 0 2px; }
   .prPlotTitle:first-child { margin-top:0; }
   .prEmpty { border:1px dashed var(--line); border-radius:10px; padding:28px 12px; text-align:center; margin:2px 0 6px; }
   .prCmp { border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-top:10px; }
-  .prCmp table { font-size:16px; white-space:nowrap; }
+  .prCmp table { font-size:17.5px; white-space:nowrap; }
   .prCmp td, .prCmp th { padding:2px 6px; text-align:right; }
   .prCmp td:first-child, .prCmp th:first-child { text-align:left; }
   .prCmpRaw td { color:var(--muted); }
@@ -824,6 +830,8 @@ try {
     <button type="button" class="ghost layoutToggle" id="layoutToggle"></button>
     <button type="button" class="ghost themeToggle" id="themeToggle"></button>
     <div class="swatches" id="swatches" role="radiogroup"></div>
+    <button type="button" class="ghost zoomBtn" id="textSmaller" aria-label="Smaller text">A−</button>
+    <button type="button" class="ghost zoomBtn" id="textLarger" aria-label="Larger text">A+</button>
     <select id="lang" style="width:auto;padding:5px 8px;font-size:12.5px;margin:0"></select>
   </div>
   <p class="sub"><span data-i18n="tagline">A physics-informed, AI-powered bio tracker.</span>
@@ -1562,7 +1570,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 141;
+window.BUILD = 142;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -3217,6 +3225,20 @@ function applyLayout() {
   b.title = tr(lay === "desktop" ? "layoutDesktop" : "layoutPhone");
   b.setAttribute("aria-label", tr(lay === "desktop" ? "toPhone" : "toDesktop"));
   $("brandReload").title = tr("reloadTitle");      // here: runs at boot and on a language change
+}
+/* A- / A+: the whole page's text size, kept per device. */
+{
+  const ZK = "bioscout.zoom.v1";
+  const cur = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--uiZoom")) || 1;
+  const setZ = (z) => {
+    z = Math.round(Math.min(1.8, Math.max(0.7, z)) * 10) / 10;
+    document.documentElement.style.setProperty("--uiZoom", z);
+    try { localStorage.setItem(ZK, String(z)); } catch { /* private window */ }
+  };
+  $("textLarger").onclick = () => setZ(cur() + 0.1);
+  $("textSmaller").onclick = () => setZ(cur() - 0.1);
+  $("textLarger").title = tr("zoomIn"); $("textSmaller").title = tr("zoomOut");
+  $("textLarger").setAttribute("aria-label", tr("zoomIn")); $("textSmaller").setAttribute("aria-label", tr("zoomOut"));
 }
 $("layoutToggle").onclick = () => {
   try { localStorage.setItem(LKEY_LAYOUT, readLayout() === "desktop" ? "phone" : "desktop"); } catch { /* per visit */ }

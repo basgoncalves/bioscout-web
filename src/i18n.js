@@ -1958,6 +1958,8 @@ const EN = {
   "pr_h33": "body mass typed by you; body weight = mass x g for every file",
   "pr_tMassSet": "Set body mass",
   "pr_h34": "add to the processing applied to every channel: lowpass fc [order], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
+  "zoomIn": "Larger text",
+  "zoomOut": "Smaller text",
 };
 
 const PT = {
@@ -3891,6 +3893,8 @@ const PT = {
   "pr_h33": "massa corporal escrita por si; peso corporal = massa x g em todos os ficheiros",
   "pr_tMassSet": "Definir massa corporal",
   "pr_h34": "acrescentar ao processamento aplicado a todos os canais: lowpass fc [ordem], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
+  "zoomIn": "Texto maior",
+  "zoomOut": "Texto menor",
 };
 
 const DE = {
@@ -5823,6 +5827,8 @@ const DE = {
   "pr_h33": "von dir eingetippte Körpermasse; Körpergewicht = Masse x g für alle Dateien",
   "pr_tMassSet": "Körpermasse setzen",
   "pr_h34": "zur Verarbeitung aller Kanäle hinzufügen: lowpass fc [Ordnung], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
+  "zoomIn": "Größere Schrift",
+  "zoomOut": "Kleinere Schrift",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };
