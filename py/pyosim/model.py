@@ -228,6 +228,19 @@ class Model:
         self.free = [n for n in self.coord_order
                      if not self.coords[n].locked and self.coords[n].coupled is None]
 
+    def load_markerset(self, path):
+        """Replace the model's markers by a MarkerSet .xml (as Scale / the GUI 'Load markers' do)."""
+        root = ET.parse(path).getroot()
+        objs = root.find(".//MarkerSet/objects")
+        if objs is None:
+            raise ValueError(f"no MarkerSet in {path}")
+        self.markers = {mk.get("name"): (_path_name(mk.findtext("socket_parent_frame") or mk.findtext("body")),
+                                         _vec(mk.findtext("location")))
+                        for mk in objs if mk.tag == "Marker"}
+        missing = {b for b, _ in self.markers.values()} - set(self.bodies) - {"ground"}
+        if missing:
+            raise ValueError(f"marker set uses bodies not in the model: {', '.join(sorted(missing))}")
+
     @staticmethod
     def _body_of(frame):
         return frame.parent if frame.parent != frame.name else frame.name

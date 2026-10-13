@@ -89,10 +89,13 @@ def solve(model, times, markers, marker_w, coord_tasks=None, t_range=None, log=p
     return t, out, np.array(errs), names
 
 
-def run(model_path, trc_path, task_path, out_mot, t_range=None, log=print):
-    model = Model(model_path)
+def run(model_path, trc_path, task_path, out_mot, t_range=None, log=print, markerset=None):
+    model = model_path if isinstance(model_path, Model) else Model(model_path)
+    if markerset:
+        model.load_markerset(markerset)
+        log(f"[ik] markers from {os.path.basename(markerset)} ({len(model.markers)})")
     times, markers, rate = read_trc(trc_path)
-    mw, ct = read_tasks(task_path)
+    mw, ct = read_tasks(task_path) if task_path else ({}, {})
     t, qs, errs, used = solve(model, times, markers, mw, ct, t_range, log)
     cols = ["time"] + model.coord_order
     # as OpenSim: degrees for rotational coordinates, but coupled (dependent) ones stay in radians
