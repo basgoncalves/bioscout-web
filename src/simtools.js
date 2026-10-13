@@ -321,6 +321,7 @@ export function simWire(box, ctx) {
   if (ctx.batch) sessionWire(box, ctx, {
     send,
     setDir: (tool, h) => { dirs[tool] = h; },
+    setOption: (tool, key, val) => ctx.act(() => client.toolOptions(id, tool, { ...((job.options || {})[tool] || {}), [key]: val })),
     setGeneric: (f) => { genericName = f ? f.name : ""; genericFile = f; if (client.setGeneric) client.setGeneric(f); },
     setScaled: (f) => { scaledName = f ? f.name : ""; scaledFile = f; if (client.setScaled) client.setScaled(f); },
     genericName: () => genericName || job.model || "",
