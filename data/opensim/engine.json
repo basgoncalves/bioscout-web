@@ -1,0 +1,5 @@
+{
+  "_note": "The hosted OpenSim engine Simulate connects to by itself. Set url to the Space's https address and code to its BIOSCOUT_CODE. Empty url = no hosted engine.",
+  "url": "",
+  "code": ""
+}

@@ -25,6 +25,8 @@ const TKEY = "bioscout.terms.v3";
 export const LANGUAGES = { en: "English", pt: "Português", de: "Deutsch" };
 
 const EN = {
+  sim_connecting: "Connecting to the simulation server…",
+  sim_waking: "The simulation server is waking up (this can take a minute or two)…",
   "bfStart": "Start",
   "bfCueFront": "Face the camera",
   "bfCueTurn": "Turn sideways",
@@ -2040,6 +2042,8 @@ const EN = {
 };
 
 const PT = {
+  sim_connecting: "A ligar ao servidor de simulação…",
+  sim_waking: "O servidor de simulação está a acordar (pode demorar um ou dois minutos)…",
   "bfStart": "Começar",
   "bfCueFront": "De frente para a câmara",
   "bfCueTurn": "Vire-se de lado",
@@ -4052,6 +4056,8 @@ const PT = {
 };
 
 const DE = {
+  sim_connecting: "Verbindung zum Simulationsserver…",
+  sim_waking: "Der Simulationsserver startet (das kann ein bis zwei Minuten dauern)…",
   "bfStart": "Start",
   "bfCueFront": "Zur Kamera schauen",
   "bfCueTurn": "Zur Seite drehen",

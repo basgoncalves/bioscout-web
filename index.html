@@ -1593,7 +1593,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 152;
+window.BUILD = 153;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -7239,7 +7239,28 @@ function openProcess() {
     },
   })).catch((e) => { processMounted = null; $("processRoot").innerHTML = `<p class="note banner">${esc(e.message)}</p>`; });
 }
-function openSimulate() { renderOsim(); }
+/* The hosted engine (data/opensim/engine.json): Simulate connects to it by
+ * itself, so a visitor needs nothing but the app link. A free host sleeps
+ * when idle, so the first health check is retried while it wakes up. A lab
+ * engine link (?engine=&code=) still wins. */
+let osimAuto = null;
+function openSimulate() {
+  renderOsim();
+  if (osim.client || osimAuto || engineFromSearch(location.search)) return;
+  osimAuto = (async () => {
+    let cfg = null;
+    try { cfg = await (await fetch("./data/opensim/engine.json", { cache: "no-store" })).json(); } catch { /* none */ }
+    const url = cfg && cleanEngineUrl(cfg.url), code = cfg && String(cfg.code || "");
+    if (!url || !code) return;
+    for (let i = 0; i < 20 && !osim.client; i++) {
+      osim.err = tr(i ? "sim_waking" : "sim_connecting"); renderOsim();
+      try { const h = await makeEngineClient({ url, code }).health(); if (h && h.name === "bioscout-lab-engine") break; }
+      catch { /* still asleep */ }
+      await new Promise((r) => setTimeout(r, 6000));
+    }
+    if (!osim.client) await osimConnect(url, code);
+  })().finally(() => { osimAuto = null; });
+}
 
 /* The lab demo: one local athlete, straight into the recorder. A reload keeps
  * the sets already on the page; "Next person" wipes that athlete and starts
