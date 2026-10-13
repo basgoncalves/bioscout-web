@@ -86,9 +86,7 @@ export function simHTML(ctx) {
   sections.splice(si + 1, 0, scaledHTML);
   const sectionsHTML = sections.join("");
   return `<div class="simModel">
-      <div class="simOutDir" style="margin:0 0 8px"><span class="sub">${esc(t("sim_outdir_all"))}:</span>
-        <input type="text" readonly value="${esc(dirName("*") || t("sim_outdir_none"))}">
-        <button type="button" class="ghost" data-dir="*" title="${esc(t("sim_outdir_pick"))}">📁</button></div>
+
       <label for="simModel">${t("sim_generic")}</label>
       <select id="simModel"><option value="">${t("sim_chooseModel")}</option>${models.map((m) => `<option value="${esc(m)}"${m === job.model ? " selected" : ""}>${esc(m)}</option>`).join("")}</select>
       <p class="note" style="margin:6px 0 0">${t("sim_modelNote")}</p>
