@@ -21,6 +21,8 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms", "rra"]) };
 Object.defineProperty(Q, "trial", { get: () => (Q.file && Q.file.file ? Q.file.file.name : "") });
 
+async function writeText(dir, name, data) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); }
+
 /** A .c3d through an ordinary file input: showOpenFilePicker hangs without a dialog in embedded
  *  browsers (the Claude pane, automation), so it is not used. -> { handle: null, file } or null. */
 function pickC3d() {
