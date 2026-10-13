@@ -370,7 +370,7 @@ export function readC3d(buf, fileName) {
     labels.slice(0, nPts).forEach((lb, p) => ["X", "Y", "Z"].forEach((ax, k) => {
       const key = `${lb || "P" + (p + 1)} ${ax}`; cols[key] = pts[3 * p + k]; units[key] = ptUnits;
     }));
-    out.push({ name: `${fileName} · markers`, kind: "c3d", fs: ptRate, units, meta: { markers: labels.slice(0, nPts) },
+    out.push({ name: `${fileName} · markers`, kind: "c3d", fs: ptRate, units, meta: { markers: labels.slice(0, nPts), first },
       time: Float64Array.from({ length: nFrames }, (_, i) => i / ptRate), cols });
   }
   if (nAn) {
@@ -406,7 +406,20 @@ export function readC3d(buf, fileName) {
       cols[`${name} CoPx`] = cx; cols[`${name} CoPy`] = cy; units[`${name} CoPx`] = units[`${name} CoPy`] = "mm";
       void mz;
     }
-    out.push({ name: `${fileName} · analog`, kind: "c3d", fs: fsA, units, meta: { plates: used || 0 },
+    // raw plate geometry + the six channels, for the OpenSim export (c3dexport.js)
+    const corners = numv("FORCE_PLATFORM", "CORNERS", []), platesRaw = [];
+    for (let k = 0; k < used && ch; k++) {
+      const per = ch.dims[0] || 6, idx = ch.v.slice(k * per, k * per + 6).map((i) => i - 1);
+      if (idx.some((i) => i < 0 || i >= nAn)) continue;
+      let F = idx.map((i) => an[i]);
+      if (types[k] === 4 && cal) {
+        const m = cal.v.slice(k * 36, k * 36 + 36);
+        F = [0, 1, 2, 3, 4, 5].map((r) => { const a = new Float64Array(F[0].length);
+          for (let i = 0; i < a.length; i++) { let s = 0; for (let c = 0; c < 6; c++) s += m[c * 6 + r] * F[c][i]; a[i] = s; } return a; });
+      }
+      platesRaw.push({ type: types[k], corners: corners.slice(k * 12, k * 12 + 12), origin: origin.slice(k * 3, k * 3 + 3), channels: F });
+    }
+    out.push({ name: `${fileName} · analog`, kind: "c3d", fs: fsA, units, meta: { plates: used || 0, platesRaw, first },
       time: Float64Array.from({ length: nFrames * anPerFrame }, (_, i) => i / fsA), cols });
   }
   if (!out.length) throw new Error("the C3D file holds no data");

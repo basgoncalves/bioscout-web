@@ -15,6 +15,8 @@
  */
 import { parseTrc, editTaskWeights, viewTrc } from "./trcview.js";
 import { buildSetup, downloadText } from "./simsetup.js";
+import { sessionHTML, sessionWire, S as session } from "./simsession.js";
+import { c3dToOpenSim } from "./c3dexport.js";
 const SETUP_TOOLS = new Set(["scale", "ik", "id", "ma", "so"]);   // steps whose OpenSim setup .xml can be written before running
 const TPL = "./data/opensim/setup_files/";
 let spec = null;
@@ -94,8 +96,7 @@ export function simHTML(ctx) {
       <p class="note" style="margin:6px 0 0">${t("sim_scaled_note")}</p></div>`;
   sections.splice(si + 1, 0, scaledHTML);
   const sectionsHTML = sections.join("");
-  return `<div class="simModel">
-
+  return `${ctx.batch ? sessionHTML(ctx) : ""}<div class="simModel">
       <label for="simModel">${t("sim_generic")}</label>
       ${genericName
         ? `<div class="simPick"><input type="text" readonly value="${esc(genericName)}"><button type="button" class="ghost" data-genericclear>${t("pr_remove")}</button></div>`
@@ -106,7 +107,10 @@ export function simHTML(ctx) {
     </div>
     ${ctx.err ? `<p class="note banner" style="margin:8px 0 0">${esc(ctx.err)}</p>` : ""}
     <div class="simTools">${sectionsHTML}</div>
-    <p class="note" style="margin:10px 0 0">${t("sim_templatesNote")}</p>`;
+    <p class="note" style="margin:10px 0 0">${t("sim_templatesNote")}</p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+      <button type="button" class="ghost" data-c3d>${t("sim_c3d_btn")}</button><input type="file" accept=".c3d" multiple data-c3dfile hidden>
+      <span class="sub">${t("sim_c3d_note")}</span>${c3dMsg ? `<span class="sub">${esc(c3dMsg)}</span>` : ""}</div>`;
 }
 
 /** A slot's label: a tool-specific key first (sim_slot_id_grf_mot), then the slot's, then the engine's English. */
@@ -122,7 +126,8 @@ const dropFiles = {};
 let trcIK = null;            // the parsed motion .trc of the IK section
 let scaledName = "", scaledFile = null;
 let genericName = "", genericFile = null;
-const setupMsg = {};         // per tool: what the last "Setup .xml" click did        // a generic .osim the user dropped (instead of the dropdown)
+const setupMsg = {};         // per tool: what the last "Setup .xml" click did
+let c3dMsg = "";             // what the last "Convert C3D" did        // a generic .osim the user dropped (instead of the dropdown)
 const dirs = {};             // tool or "*" -> FileSystemDirectoryHandle (Chrome / Edge)
 const saved = {};            // tool -> "n files -> folder"
 const autoSaved = {};        // tool -> run start time already written
@@ -146,6 +151,7 @@ async function saveOutputs(ctx, tool) {
 /** Wire the drawn page. */
 export function simWire(box, ctx) {
   const { client, job } = ctx, id = job.id;
+  const osimOutputsRefresh = ctx.refreshOutputs || null;
   const sel = box.querySelector("#simModel");
   if (sel) sel.onchange = () => sel.value && ctx.act(() => client.setModel(id, sel.value));
   box.querySelectorAll("details.simTool").forEach((d) => { d.ontoggle = () => { d.open ? ctx.open.add(d.dataset.tool) : ctx.open.delete(d.dataset.tool); }; });
@@ -296,6 +302,33 @@ export function simWire(box, ctx) {
     };
   });
   box.querySelectorAll("[data-run]").forEach((b) => { b.onclick = () => { ctx.open.add(b.dataset.run); ctx.act(() => client.toolRun(id, b.dataset.run)); }; });
+  // plain mode: a C3D becomes the trc / grf.mot / emg.mot files, downloaded
+  const cf = box.querySelector("[data-c3dfile]");
+  if (cf) {
+    box.querySelector("[data-c3d]").onclick = () => cf.click();
+    cf.onchange = async () => {
+      for (const f of cf.files) {
+        try {
+          const out = c3dToOpenSim(await f.arrayBuffer(), f.name), stem = f.name.replace(/\.c3d$/i, "");
+          for (const [name, text] of Object.entries(out)) downloadText(`${stem}_${name}`, text);
+          c3dMsg = `✓ ${stem}: ${Object.keys(out).join(", ")}`;
+        } catch (e) { c3dMsg = "✗ " + e.message; }
+      }
+      ctx.act(() => client.status(id));
+    };
+  }
+  // batch mode: the session folder feeds the sections and takes their outputs
+  if (ctx.batch) sessionWire(box, ctx, {
+    send,
+    setDir: (tool, h) => { dirs[tool] = h; },
+    setGeneric: (f) => { genericName = f ? f.name : ""; genericFile = f; if (client.setGeneric) client.setGeneric(f); },
+    setScaled: (f) => { scaledName = f ? f.name : ""; scaledFile = f; if (client.setScaled) client.setScaled(f); },
+    genericName: () => genericName || job.model || "",
+    genericFile: () => genericFile,
+    markersetFile: () => dropFiles["scale:markerset"] || null,
+    save: (tool) => ctx.act(async () => { osimOutputsRefresh && await osimOutputsRefresh(); await saveOutputs(ctx, tool); return client.status(id); }),
+    repaint: () => ctx.act(() => client.status(id)),
+  });
   box.querySelectorAll("[data-openproc]").forEach((b) => {
     b.onclick = async () => {
       const [tool, ...rest] = b.dataset.openproc.split(":"), path = rest.join(":");

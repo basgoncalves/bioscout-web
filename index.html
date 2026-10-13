@@ -197,6 +197,7 @@ try {
   button.faceBtn .mouth.open { fill:var(--fc); }
   button.faceBtn.on { border-color:var(--fc); background:color-mix(in srgb, var(--fc) 12%, transparent); }
   button.faceBtn.on .fc { fill-opacity:1; }
+  #osimBatch.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent); }
   button.faceBtn.on .eye { fill:#fff; }
   button.faceBtn.on .mouth { stroke:#fff; }
   button.faceBtn.on .mouth.open { fill:#fff; }
@@ -1314,7 +1315,8 @@ try {
   <section id="viewSimulate" class="hidden">
     <div class="card" id="osimCard">
       <div class="labHead"><b style="font-size:16px" data-i18n="doorSimulate">Simulate</b>
-        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+        <span style="display:flex;gap:6px"><button type="button" class="ghost" id="osimBatch" data-i18n="ss_batch">Batch mode</button>
+        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></span></div>
       <button type="button" class="ghost hidden" id="osimToggle" style="margin:0" data-i18n="osimOpen">OpenSim trial (markers and force plates)</button>
       <div id="osimBody" class="hidden" style="margin-top:12px"></div>
     </div>
@@ -1631,8 +1633,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 170;
-window.BUILD_AT = "2026-10-13 18:05";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 171;
+window.BUILD_AT = "2026-10-13 18:40";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -7120,7 +7122,7 @@ function boot() {
  * engine on a PC (see src/osimlab.js). `osim.job` is the engine's own record
  * of this trial and is the only state that matters: every button sends one
  * request and repaints from what comes back. */
-const osim = { client: null, health: null, job: null, res: {}, err: null, joint: null, timer: null, spec: null, toolOut: {}, open: new Set() };
+const osim = { client: null, health: null, job: null, res: {}, err: null, joint: null, timer: null, spec: null, toolOut: {}, open: new Set(), batch: false };
 function osimErrText(e) {
   const map = { offline: "osimErrOffline", bad_code: "osimErrCode", no_job: "osimErrNoJob" };
   return map[e && e.code] ? tr(map[e.code]) : tr("osimErr", { err: (e && e.message) || String(e) });
@@ -7263,8 +7265,9 @@ function renderOsim() {
     return;
   }
   const ctx = {
-    t: tr, esc, client: osim.client, health: h, job: st, outputs: osim.toolOut, open: osim.open, err: osim.err,
+    t: tr, esc, client: osim.client, health: h, job: st, outputs: osim.toolOut, open: osim.open, err: osim.err, batch: osim.batch,
     act: (fn) => osimDo(fn),
+    refreshOutputs: async () => { for (const [tool, sp] of Object.entries(osim.job.tools || {})) if (sp.state === "done" && osim.toolOut[tool] === undefined) { try { osim.toolOut[tool] = (await osim.client.toolOutputs(osim.job.id, tool)).files; } catch { osim.toolOut[tool] = []; } } },
     openInProcess: (file) => {
       // Process gets a "back to Simulate" button; the Simulate job stays as it is
       document.documentElement.dataset.fromSim = "1";
@@ -7296,6 +7299,7 @@ function osimInit() {
     renderOsim();
   };
   $("osimToggle").onclick = open;
+  $("osimBatch").onclick = () => { osim.batch = !osim.batch; $("osimBatch").classList.toggle("on", osim.batch); renderOsim(); };
   open();
   // Arriving by the engine's own link opens the card already connected.
   const linked = engineFromSearch(location.search);
