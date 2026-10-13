@@ -440,5 +440,5 @@ export function jumpByImpulse(F0, fs, bwGiven = null, threshold = 20) {
   let land = -1; for (let i = to; i < F.length; i++) if (F[i] >= threshold) { land = i; break; }
   const tf = land > 0 ? (land - to) / fs : null;
   return { bw, mass: m, iOnset: onset, iLow: low, iTakeoff: to, tOnset: onset / fs, tLow: low / fs, tTakeoff: to / fs,
-    eccImpulse: ecc, conImpulse: con, vTakeoff: vto, height: (vto * vto) / (2 * G), flightHeight: tf != null ? (G * tf * tf) / 8 : null };
+    eccImpulse: ecc, conImpulse: con, vTakeoff: vto, F, v, height: (vto * vto) / (2 * G), flightHeight: tf != null ? (G * tf * tf) / 8 : null };
 }

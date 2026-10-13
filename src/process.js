@@ -229,8 +229,9 @@ export function makeProcessor() {
             ["take-off velocity", r.vTakeoff, "m/s"], ["jump height (impulse)", 100 * r.height, "cm"],
             ...(r.flightHeight != null ? [["jump height (flight time)", 100 * r.flightHeight, "cm"]] : [])])
             addResult(ds, "calculate", `${k} ${n}`, val, un);
-          // show the concentric phase with the cursors
+          // show the concentric phase with the cursors, and keep the curves for the jump plots
           S.cursors[ds.name] = [r.tLow, r.tTakeoff];
+          S.jump = { file: ds.name, channel: k, fs: ds.fs, ...r };
           msgs.push(`${k}: BW ${r3(r.bw)} N; concentric ${r3(r.tLow)}-${r3(r.tTakeoff)} s, impulse ${r3(r.conImpulse)} N·s, v ${r3(r.vTakeoff)} m/s, h ${r3(100 * r.height)} cm${r.flightHeight != null ? ` (flight ${r3(100 * r.flightHeight)} cm)` : ""}`);
           break;
         } else throw new Error("calc stats | area | impulse | flight | time");
@@ -920,6 +921,28 @@ export function mountProcess(root, { t, download }) {
     }).join("")}</div>`; }).join("");
   }
 
+  /* Jump height from impulse: the force with the impulse shaded, and the centre-of-mass velocity. */
+  function jumpCardHTML(j) {
+    const fs = j.fs, a = Math.max(0, j.iOnset - Math.round(0.3 * fs)), b = Math.min(j.F.length, j.iTakeoff + Math.round(0.15 * fs));
+    const x = Float64Array.from({ length: b - a }, (_, i) => (a + i) / fs), F = j.F.slice(a, b), bwL = x.map(() => j.bw);
+    const inPhase = (lo, hi) => (arr, fill) => Array.from(arr, (vv, i) => (a + i >= lo && a + i < hi ? vv : fill));
+    const ecc = inPhase(j.iOnset, j.iLow), con = inPhase(j.iLow, j.iTakeoff);
+    const forceSeries = [
+      { label: `${t("pr_jEcc")} (${r3(j.eccImpulse)} N·s)`, x, y: bwL, color: "#e8871a", thin: true, band: [ecc(F.map((vv) => Math.min(vv, j.bw)), j.bw), ecc(F.map((vv) => Math.max(vv, j.bw)), j.bw)] },
+      { label: `${t("pr_jCon")} (${r3(j.conImpulse)} N·s)`, x, y: bwL, color: "#2f6fe4", thin: true, band: [con(F.map((vv) => Math.min(vv, j.bw)), j.bw), con(F.map((vv) => Math.max(vv, j.bw)), j.bw)] },
+      { label: `${j.channel} (N)`, x, y: F, color: "#888" },
+    ];
+    const vx = Float64Array.from({ length: Math.min(b, j.v.length) - a }, (_, i) => (a + i) / fs);
+    const vSeries = [{ label: t("pr_jVel"), x: vx, y: j.v.slice(a, Math.min(b, j.v.length)), color: "#1d7a45" }];
+    const marks = [[j.tLow, 0], [j.tTakeoff, j.vTakeoff]];
+    const leg = (series) => `<div class="sub" style="display:flex;flex-wrap:wrap;gap:4px 14px;margin:2px 0 0">${series.map((q) => `<span><i style="display:inline-block;width:12px;height:${q.band ? 10 : 0}px;${q.band ? `background:${q.color};opacity:.4` : `border-top:2px solid ${q.color}`};vertical-align:middle"></i> ${escX(q.label)}</span>`).join("")}</div>`;
+    return `<div class="card"><b>${t("pr_jTitle")}</b>
+      <p class="note" style="margin:4px 0 8px">${t("pr_jNote", { bw: r3(j.bw), low: r3(j.tLow), to: r3(j.tTakeoff), v: r3(j.vTakeoff), h: r3(100 * j.height) })}</p>
+      <div class="prPlotTitle">${t("pr_jForce")}</div>${chartSVG({ series: forceSeries, xLabel: t("pr_timeS"), yLabel: "N", H: 250, xRange: [x[0], x[x.length - 1]] }).svg}${leg(forceSeries)}
+      <div class="prPlotTitle">${t("pr_jVel")}</div>${chartSVG({ series: vSeries, xLabel: t("pr_timeS"), yLabel: "m/s", marks, H: 230, xRange: [x[0], x[x.length - 1]] }).svg}${leg(vSeries)}
+    </div>`;
+  }
+
   function render() {
     const open = [];
     const ds = P.current();
@@ -939,6 +962,7 @@ export function mountProcess(root, { t, download }) {
     </div>
     ${ds ? plotCardHTML(ds) : ""}
     ${ds ? `<div class="card"><b>${t("pr_tools")}</b><p class="note" style="margin:4px 0 6px">${t("pr_toolsNote")}</p>${toolsHTML(ds)}</div>` : ""}
+    ${ds && S.jump && S.jump.file === ds.name ? jumpCardHTML(S.jump) : ""}
     <div class="card">
       <b>${t("pr_commands")}</b>
       <form id="prCmdForm" style="display:flex;gap:6px;margin-top:8px" autocomplete="off">

@@ -1969,6 +1969,12 @@ const EN = {
   "pr_cTime": "Time between A and B",
   "pr_h35": "between cursors A and B, on the ticked channels after the processing",
   "pr_tBwSet": "Set body weight (mean between A and B)",
+  "pr_jTitle": "Jump: impulse and centre-of-mass velocity",
+  "pr_jNote": "Body weight {bw} N. The velocity comes from (F − BW)/m integrated over time; it goes negative while the body moves down and returns to zero at the lowest point ({low} s). The concentric impulse from there to take-off ({to} s) gives the take-off velocity {v} m/s, so h = v²/2g = {h} cm.",
+  "pr_jForce": "Vertical force with the impulse above / below body weight",
+  "pr_jEcc": "eccentric (onset to lowest point)",
+  "pr_jCon": "concentric (lowest point to take-off)",
+  "pr_jVel": "Centre-of-mass velocity (m/s)",
 };
 
 const PT = {
@@ -3913,6 +3919,12 @@ const PT = {
   "pr_cTime": "Tempo entre A e B",
   "pr_h35": "entre os cursores A e B, nos canais marcados depois do processamento",
   "pr_tBwSet": "Definir peso corporal (média entre A e B)",
+  "pr_jTitle": "Salto: impulso e velocidade do centro de massa",
+  "pr_jNote": "Peso corporal {bw} N. A velocidade vem de (F − PC)/m integrada no tempo; é negativa enquanto o corpo desce e volta a zero no ponto mais baixo ({low} s). O impulso concêntrico daí até à saída ({to} s) dá a velocidade de saída {v} m/s, logo h = v²/2g = {h} cm.",
+  "pr_jForce": "Força vertical com o impulso acima / abaixo do peso corporal",
+  "pr_jEcc": "excêntrico (início ao ponto mais baixo)",
+  "pr_jCon": "concêntrico (ponto mais baixo à saída)",
+  "pr_jVel": "Velocidade do centro de massa (m/s)",
 };
 
 const DE = {
@@ -5856,6 +5868,12 @@ const DE = {
   "pr_cTime": "Zeit zwischen A und B",
   "pr_h35": "zwischen den Cursorn A und B, für die angehakten Kanäle nach der Verarbeitung",
   "pr_tBwSet": "Körpergewicht setzen (Mittelwert zwischen A und B)",
+  "pr_jTitle": "Sprung: Impuls und Schwerpunktgeschwindigkeit",
+  "pr_jNote": "Körpergewicht {bw} N. Die Geschwindigkeit ist (F − KG)/m über die Zeit integriert; sie ist negativ, solange der Körper sinkt, und wird am tiefsten Punkt ({low} s) wieder null. Der konzentrische Impuls von dort bis zum Absprung ({to} s) ergibt die Absprunggeschwindigkeit {v} m/s, also h = v²/2g = {h} cm.",
+  "pr_jForce": "Vertikalkraft mit dem Impuls über / unter dem Körpergewicht",
+  "pr_jEcc": "exzentrisch (Beginn bis tiefster Punkt)",
+  "pr_jCon": "konzentrisch (tiefster Punkt bis Absprung)",
+  "pr_jVel": "Schwerpunktgeschwindigkeit (m/s)",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };
