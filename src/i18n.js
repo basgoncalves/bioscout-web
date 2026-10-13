@@ -1838,7 +1838,7 @@ const EN = {
   "pr_tNormalise": "Normalise to MVC or peak (%)",
   "pr_tFz": "Vertical force from the most loaded plate",
   "pr_tBw": "Body weight from a quiet window",
-  "pr_tXbw": "Express in body weights (xBW)",
+  "pr_tXbw": "Divide by body weight (xBW)",
   "pr_tContacts": "Contacts / stance phases + two peaks",
   "pr_tJump": "Jump height (flight time and impulse)",
   "pr_tCop": "Sway metrics from the plate's CoP",
@@ -1947,6 +1947,15 @@ const EN = {
   "pr_h30": "L02 B: positive, negative and net impulse, take-off velocity, heights",
   "pr_h31": "L02 C: several filters at once; peak, time of peak and quiet-window mean each",
   "pr_h32": "the same column from every file on one plot (norm: 0-100 %)",
+  "pr_gBasic": "Basic",
+  "pr_gFilter": "Filtering",
+  "pr_tMinMax": "Show min and max (between A and B)",
+  "pr_tNormMax": "% of maximum",
+  "pr_steps": "Processing, applied to every channel:",
+  "pr_noSteps": "none yet: pick a step below (e.g. Filtering → Low-pass).",
+  "pr_clearSteps": "Clear all",
+  "pr_procShort": "processed",
+  "pr_h33": "add to the processing applied to every channel: lowpass fc [order], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
 };
 
 const PT = {
@@ -3869,6 +3878,15 @@ const PT = {
   "pr_h30": "L02 B: impulso positivo, negativo e líquido, velocidade de saída, alturas",
   "pr_h31": "L02 C: vários filtros de uma vez; pico, tempo do pico e média da janela parada",
   "pr_h32": "a mesma coluna de todos os ficheiros num gráfico (norm: 0-100 %)",
+  "pr_gBasic": "Básico",
+  "pr_gFilter": "Filtragem",
+  "pr_tMinMax": "Mostrar mín e máx (entre A e B)",
+  "pr_tNormMax": "% do máximo",
+  "pr_steps": "Processamento, aplicado a todos os canais:",
+  "pr_noSteps": "nenhum ainda: escolha um passo abaixo (p. ex. Filtragem → Passa-baixo).",
+  "pr_clearSteps": "Limpar tudo",
+  "pr_procShort": "processado",
+  "pr_h33": "acrescentar ao processamento aplicado a todos os canais: lowpass fc [ordem], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
 };
 
 const DE = {
@@ -5790,6 +5808,15 @@ const DE = {
   "pr_h30": "L02 B: positiver, negativer und Netto-Impuls, Absprunggeschwindigkeit, Höhen",
   "pr_h31": "L02 C: mehrere Filter auf einmal; Spitze, Zeitpunkt und Mittelwert im Ruhefenster",
   "pr_h32": "dieselbe Spalte aller Dateien in einem Plot (norm: 0-100 %)",
+  "pr_gBasic": "Basis",
+  "pr_gFilter": "Filtern",
+  "pr_tMinMax": "Min und Max zeigen (zwischen A und B)",
+  "pr_tNormMax": "% des Maximums",
+  "pr_steps": "Verarbeitung, auf alle Kanäle angewendet:",
+  "pr_noSteps": "noch keine: wähle unten einen Schritt (z. B. Filtern → Tiefpass).",
+  "pr_clearSteps": "Alle löschen",
+  "pr_procShort": "verarbeitet",
+  "pr_h33": "zur Verarbeitung aller Kanäle hinzufügen: lowpass fc [Ordnung], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };

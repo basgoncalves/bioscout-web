@@ -104,6 +104,16 @@ const wk = fromTable("walk.csv", ["time", "Fz", "Fy"], Array.from({ length: 300 
 L2.add([wk]);
 ok(L2.run("gait Fz Fy 60").ok && L2.S.results.some((q) => q.measure === "braking" && q.value < 0), "gait: braking reported negative whatever the walking direction");
 
+// the processing chain runs on every channel
+const Ch = makeProcessor();
+Ch.add([fromTable("c.csv", ["time", "a", "b"], Array.from({ length: 1000 }, (_, i) => [i / 1000, Math.sin(i / 20) + 0.3 * Math.sin(i), 2 * Math.sin(i / 20)]))]);
+ok(Ch.run("step lowpass 10 4").ok && Ch.run("step rectify").ok && Ch.S.pipe.length === 2, "steps add to the chain");
+const pa = Ch.processed(Ch.current(), "a"), pb = Ch.processed(Ch.current(), "b");
+ok(pa.length === 1000 && pb.length === 1000 && pa.every((v) => v >= 0) && pb.every((v) => v >= 0), "the chain is applied to every channel");
+near(pa[500], Math.abs(D.lowpass(Ch.current().cols.a, 1000, 10)[500]), 1e-9, "chain = the same filter run by hand");
+ok(!Ch.run("step lowpass 900").ok, "a cut-off above fs/2 is refused when added");
+ok(Ch.run("step undo").ok && Ch.S.pipe.length === 1 && Ch.run("step clear").ok && !Ch.S.pipe.length, "undo and clear");
+
 ok(chartSVG({ series: [{ x: [0, 1, 2], y: [1, 3, 2], color: "#000" }] }).svg.startsWith("<svg"), "chart draws");
 
 if (fails) { console.error(`${fails} failure(s)`); process.exit(1); }

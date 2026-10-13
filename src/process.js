@@ -63,15 +63,35 @@ export const HELP = [
   ["gait <Fz> <Fy> [mass_kg] [threshold]", "L02 A: stance time, peak 1, valley, peak 2, braking and propulsion (xBW); curves of all files"],
   ["impulse <Fz> [quiet_s] [threshold]", "L02 B: positive, negative and net impulse, take-off velocity, heights"],
   ["filters <col> 5 10 20 50 ma25 [quiet ab | quiet t0 t1]", "L02 C: several filters at once; peak, time of peak and quiet-window mean each"],
-  ["overlay <col> [norm]", "the same column from every file on one plot (norm: 0-100 %)"],
+  ["overlay <col> [norm]", "the same column from every file on one plot (norm: 0-100 %)"],  ["step <op> [numbers] | step undo | step clear", "add to the processing applied to every channel: lowpass fc [order], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate"],
 ];
+
+/**
+ * The processing chain: steps applied, in order, to EVERY channel of a file.
+ * f(y, ds, args) -> new array. Filters refuse a cut-off at or above fs/2.
+ */
+export const STEPS = {
+  offset: { n: 0, label: () => "offset removed", f: (y) => { const m = D.mean(y); return y.map((v) => v - m); } },
+  rectify: { n: 0, label: () => "rectified", f: (y) => y.map(Math.abs) },
+  scale: { n: 1, label: ([k]) => `× ${k}`, f: (y, ds, [k]) => y.map((v) => v * k) },
+  divbw: { n: 0, label: () => "÷ body weight", f: (y, ds, a, S) => { const b = S.bw[ds.name]; if (!b) throw new Error("no body weight yet (bw)"); return y.map((v) => v / b); } },
+  normmax: { n: 0, label: () => "% of max", f: (y) => { const m = D.max(Array.from(y, Math.abs)); return y.map((v) => (100 * v) / m); } },
+  smooth: { n: 1, label: ([n]) => `moving average ${n}`, f: (y, ds, [n]) => D.movingAverage(y, n) },
+  deriv: { n: 0, label: () => "d/dt", f: (y, ds) => D.numGradient(y, ds.time) },
+  integrate: { n: 0, label: () => "∫ dt", f: (y, ds) => D.cumtrapz(D.nanToNum(y), ds.time) },
+  lowpass: { n: 1, label: ([fc, o = 4]) => `low-pass ${fc} Hz (${o})`, f: (y, ds, [fc, o = 4]) => { if (!(fc < ds.fs / 2)) throw new Error(`${fc} Hz is above fs/2 (${ds.fs / 2} Hz)`); return D.lowpass(D.nanToNum(y), ds.fs, fc, o); } },
+  highpass: { n: 1, label: ([fc, o = 4]) => `high-pass ${fc} Hz (${o})`, f: (y, ds, [fc, o = 4]) => { if (!(fc < ds.fs / 2)) throw new Error(`${fc} Hz is above fs/2 (${ds.fs / 2} Hz)`); return D.highpass(D.nanToNum(y), ds.fs, fc, o); } },
+  bandpass: { n: 2, label: ([lo, hi, o = 4]) => `band-pass ${lo}-${hi} Hz (${o})`, f: (y, ds, [lo, hi, o = 4]) => { if (!(lo < ds.fs / 2)) throw new Error(`${lo} Hz is above fs/2`); return D.bandpass(D.nanToNum(y), ds.fs, lo, hi, o); } },
+  envelope: { n: 0, label: ([ms = 100]) => `EMG envelope ${ms} ms`, f: (y, ds, [ms = 100]) => D.emgEnvelope(y, ds.fs, ms).envelope },
+};
+export const stepLabel = (st) => STEPS[st.op].label(st.args);
 
 /**
  * The engine. `t` translates the few words it puts in the results table
  * (it is optional: tests run it without).
  */
 export function makeProcessor() {
-  const S = { gait: {}, cursors: {}, ds: [], cur: -1, results: [], plot: { cols: [], xy: null, curves: null, marks: [] }, win: null, bw: {}, contacts: {}, log: [] };
+  const S = { pipe: [], gait: {}, cursors: {}, ds: [], cur: -1, results: [], plot: { cols: [], xy: null, curves: null, marks: [] }, win: null, bw: {}, contacts: {}, log: [] };
 
   const rootOf = (ds, k) => (ds.src && ds.src[k]) || k;
   const cur = () => { if (S.cur < 0 || !S.ds[S.cur]) throw new Error("load a file first"); return S.ds[S.cur]; };
@@ -134,7 +154,31 @@ export function makeProcessor() {
     const w = D.mean(Array.from(v.y).slice(0, n)); S.bw[ds.name] = w; return w;
   };
 
+  /** A channel after the processing chain (cached per file, channel and chain). */
+  function processed(ds, key) {
+    const sig = JSON.stringify(S.pipe) + "|" + (S.bw[ds.name] || "");
+    if (!ds._pc || ds._pc.sig !== sig) ds._pc = { sig, map: {} };
+    if (ds._pc.map[key]) return ds._pc.map[key];
+    let y = Float64Array.from(ds.cols[key]);
+    for (const st of S.pipe) y = Float64Array.from(STEPS[st.op].f(y, ds, st.args, S));
+    return (ds._pc.map[key] = y);
+  }
   const C = {
+    /* the chain: "step lowpass 10 4", "step undo", "step clear", "step remove 2" */
+    step([op, ...args]) {
+      if (!op) throw new Error("step <operation> [numbers]");
+      const o = op.toLowerCase();
+      if (o === "clear") { S.pipe.length = 0; return "no processing"; }
+      if (o === "undo") { S.pipe.pop(); return `${S.pipe.length} step(s)`; }
+      if (o === "remove") { S.pipe.splice(numArg(args[0]) - 1, 1); return `${S.pipe.length} step(s)`; }
+      if (!STEPS[o]) throw new Error(`unknown step "${op}" -- ${Object.keys(STEPS).join(", ")}`);
+      const a = args.map((x) => numArg(x));
+      if (a.length < STEPS[o].n) throw new Error(`${o} needs ${STEPS[o].n} number(s)`);
+      const st = { op: o, args: a };
+      if (S.cur >= 0 && S.ds[S.cur]) { const ds = S.ds[S.cur], k = Object.keys(ds.cols)[0]; if (k) STEPS[o].f(Float64Array.from(ds.cols[k]).slice(0, 400), ds, a, S); }
+      S.pipe.push(st);
+      return `${S.pipe.length}. ${stepLabel(st)} -- applied to every channel`;
+    },
     use([n]) { const i = +n - 1; if (!S.ds[i]) throw new Error(`no file ${n}`); S.cur = i; S.plot = { cols: [], xy: null, curves: null, marks: [] }; return `using ${S.ds[i].name}`; },
     plot(args) { const ds = cur(); S.plot = { cols: [...new Set(args.map((a) => rootOf(ds, col(ds, a).key)))].filter((k) => ds.cols[k]), xy: null, curves: null, marks: [] }; return args.length ? `plotting ${S.plot.cols.length} column(s)` : "plot cleared"; },
     xy([a, b]) { const ds = cur(); S.plot = { cols: S.plot.cols, xy: [col(ds, a).key, col(ds, b).key], curves: null, marks: [] }; return "xy plot"; },
@@ -430,7 +474,7 @@ export function makeProcessor() {
   }
 
   return {
-    S, run, col: (n) => col(cur(), n),
+    S, run, col: (n) => col(cur(), n), processed,
     add(list) { const first = S.ds.length; S.ds.push(...list); if (S.cur < 0 || list.length) S.cur = first; S.plot = { cols: [], xy: null, curves: null, marks: [] }; return list.length; },
     remove(i) { const d = S.ds.splice(i, 1)[0]; if (d) delete S.bw[d.name]; S.cur = Math.min(S.cur, S.ds.length - 1); if (S.cur >= 0 && S.cur === i) S.plot = { cols: [], xy: null, curves: null, marks: [] }; },
     current: () => S.ds[S.cur] || null,
@@ -539,7 +583,7 @@ function decimate(x, y, buckets) {
  * where map converts a pointer x (0..1 of width) to a data x for the readout.
  */
 export function chartSVG({ series, xLabel = "s", yLabel = "", marks = [], equal = false, W = 640, H = 300, cursors = null, xRange = null }) {
-  const L = 70, R = 12, T = 16, B = 42;
+  const L = 78, R = 12, T = 18, B = 46;
   const xs = series.flatMap((s) => Array.from(s.x)).filter(fin);
   const ys = series.flatMap((s) => [...Array.from(s.y), ...(s.band ? [...s.band[0], ...s.band[1]] : [])]).filter(fin);
   if (!xs.length || !ys.length) return { svg: "", x0: 0, x1: 1 };
@@ -550,9 +594,9 @@ export function chartSVG({ series, xLabel = "s", yLabel = "", marks = [], equal 
   const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
   const dp = (st) => (st < 1 ? Math.min(4, Math.ceil(-Math.log10(st))) : 0);
   let g = "";
-  for (let v = y0; v <= y1 + ys0 / 2; v += ys0) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)"${Math.abs(v) < ys0 / 1e6 ? "" : ' stroke-dasharray="2 3"'}/><text x="${L - 5}" y="${(Y(v) + 4).toFixed(1)}" font-size="16" text-anchor="end" fill="var(--muted)">${v.toFixed(dp(ys0))}</text>`;
+  for (let v = y0; v <= y1 + ys0 / 2; v += ys0) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)"${Math.abs(v) < ys0 / 1e6 ? "" : ' stroke-dasharray="2 3"'}/><text x="${L - 5}" y="${(Y(v) + 4).toFixed(1)}" font-size="18" text-anchor="end" fill="var(--muted)">${v.toFixed(dp(ys0))}</text>`;
   const xs0 = niceStep(x1 - x0, 6);
-  for (let v = Math.ceil(x0 / xs0) * xs0; v <= x1 + 1e-9; v += xs0) g += `<line x1="${X(v).toFixed(1)}" x2="${X(v).toFixed(1)}" y1="${T}" y2="${H - B}" stroke="var(--line)" stroke-dasharray="2 3"/><text x="${X(v).toFixed(1)}" y="${H - B + 20}" font-size="16" text-anchor="middle" fill="var(--muted)">${v.toFixed(dp(xs0))}</text>`;
+  for (let v = Math.ceil(x0 / xs0) * xs0; v <= x1 + 1e-9; v += xs0) g += `<line x1="${X(v).toFixed(1)}" x2="${X(v).toFixed(1)}" y1="${T}" y2="${H - B}" stroke="var(--line)" stroke-dasharray="2 3"/><text x="${X(v).toFixed(1)}" y="${H - B + 22}" font-size="18" text-anchor="middle" fill="var(--muted)">${v.toFixed(dp(xs0))}</text>`;
   const buckets = W - L - R;
   const paths = series.map((s) => {
     let band = "";
@@ -564,14 +608,14 @@ export function chartSVG({ series, xLabel = "s", yLabel = "", marks = [], equal 
     const [px, py] = decimate(s.x, s.y, buckets);
     let d = "", pen = false;
     for (let i = 0; i < px.length; i++) { if (!fin(py[i]) || !fin(px[i])) { pen = false; continue; } d += `${pen ? "L" : "M"}${X(px[i]).toFixed(1)} ${Y(py[i]).toFixed(1)}`; pen = true; }
-    return `${band}<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.thin ? 1 : 1.6}"${s.dash ? ' stroke-dasharray="5 3"' : ""}${s.thin ? ' stroke-opacity=".45"' : ""}><title>${escX(s.label || "")}</title></path>`;
+    return `${band}<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.thin ? 1 : 1.6}"${s.dash ? ` stroke-dasharray="${typeof s.dash === "string" ? s.dash : "5 3"}"` : ""}${s.thin ? ' stroke-opacity=".45"' : ""}><title>${escX(s.label || "")}</title></path>`;
   }).join("");
   const mk = marks.filter(([x, y]) => fin(x) && fin(y)).map(([x, y]) => `<circle cx="${X(x).toFixed(1)}" cy="${Y(y).toFixed(1)}" r="4" fill="none" stroke="var(--warn)" stroke-width="1.8"/>`).join("");
   const cur = (cursors || []).map((c, i) => fin(c) ? `<g class="prCur" data-cur="${i}" transform="translate(${X(c).toFixed(1)},0)"><line x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--accent)" stroke-width="1.5"/><rect x="-9" y="${T - 2}" width="18" height="16" rx="3" fill="var(--accent)"/><text x="0" y="${T + 10}" font-size="13" fill="#fff" text-anchor="middle">${"AB"[i]}</text></g>` : "").join("");
   const svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block;touch-action:pan-y" role="img" data-l="${L}" data-r="${R}" data-w="${W}" data-x0="${x0}" data-x1="${x1}">`
     + `<rect x="0" y="0" width="${W}" height="${H}" fill="var(--card)"/>${g}${paths}${mk}${cur}`
-    + `<text x="${W - R}" y="${H - 4}" font-size="15" text-anchor="end" fill="var(--muted)">${escX(xLabel)}</text>`
-    + (yLabel ? `<text x="${L + 4}" y="${T + 12}" font-size="15" fill="var(--muted)">${escX(yLabel)}</text>` : "")
+    + `<text x="${W - R}" y="${H - 4}" font-size="17" text-anchor="end" fill="var(--muted)">${escX(xLabel)}</text>`
+    + (yLabel ? `<text x="${L + 4}" y="${T + 12}" font-size="17" fill="var(--muted)">${escX(yLabel)}</text>` : "")
     + `<line class="prCursor" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-width="1" visibility="hidden"/></svg>`;
   return { svg, x0, x1, L, R, W };
 }
@@ -582,39 +626,39 @@ export function chartSVG({ series, xLabel = "s", yLabel = "", marks = [], equal 
  * Labels are i18n keys; the command words stay English (they are the language).
  */
 export const TOOLS = [
-  { group: "pr_gCourse", items: [
+  { group: "pr_gBasic", items: [
+    { k: "pr_tMinMax", f: [], ui: "minmax" },
     { k: "pr_tBwAB", f: [["c", "pr_fCol", null, "fz"]], cmd: (v) => `bw ab ${quote(v[0])}` },
+    { k: "pr_tOffset", f: [], cmd: () => "step offset" },
+    { k: "pr_tRectify", f: [], cmd: () => "step rectify" },
+    { k: "pr_tScale", f: [["n", "pr_fFactor", 1]], cmd: (v) => `step scale ${v[0]}` },
+    { k: "pr_tXbw", f: [], cmd: () => "step divbw" },
+    { k: "pr_tNormMax", f: [], cmd: () => "step normmax" },
+    { k: "pr_tSmooth", f: [["n", "pr_fSamples", 25]], cmd: (v) => `step smooth ${v[0]}` },
+    { k: "pr_tDeriv", f: [], cmd: () => "step deriv" },
+    { k: "pr_tIntegrate", f: [], cmd: () => "step integrate" },
+  ] },
+  { group: "pr_gFilter", items: [
+    { k: "pr_tLowpass", f: [["n", "pr_fCutoff", 10], ["n", "pr_fOrder", 4]], cmd: (v) => `step lowpass ${v[0]} ${v[1]}` },
+    { k: "pr_tHighpass", f: [["n", "pr_fCutoff", 20], ["n", "pr_fOrder", 4]], cmd: (v) => `step highpass ${v[0]} ${v[1]}` },
+    { k: "pr_tBandpass", f: [["n", "pr_fLow", 20], ["n", "pr_fHigh", 450], ["n", "pr_fOrder", 4]], cmd: (v) => `step bandpass ${v[0]} ${v[1]} ${v[2]}` },
     { k: "pr_tFilters", f: [["c", "pr_fCol", null, "fz"], ["s", "pr_fCutoffs", "5 10 20 50"], ["n", "pr_fSamples", 25], ["s", "pr_fQuietWin", "ab"]],
       cmd: (v) => `filters ${quote(v[0])} ${v[1]} ma${v[2]} quiet ${v[3]}` },
-    { k: "pr_tGait", f: [["c", "pr_fVert", null, "fz"], ["c", "pr_fAp", null, "fy"], ["n", "pr_fMass", ""], ["n", "pr_fThresholdN", 20]],
-      cmd: (v) => `gait ${quote(v[0])} ${quote(v[1])} ${v[2] || ""} ${v[3]}`.replace(/\s+/g, " ").trim() },
-    { k: "pr_tImpulse", f: [["c", "pr_fCol", null, "fz"], ["n", "pr_fQuiet", 0.5], ["n", "pr_fThresholdN", 20]], cmd: (v) => `impulse ${quote(v[0])} ${v[1]} ${v[2]}` },
-    { k: "pr_tOverlay", f: [["c", "pr_fCol"], ["s", "pr_fMode", "time"]], cmd: (v) => `overlay ${quote(v[0])} ${v[1]}` },
-  ] },
-  { group: "pr_gSignal", items: [
-    { k: "pr_tLowpass", f: [["c", "pr_fCol"], ["n", "pr_fCutoff", 10], ["n", "pr_fOrder", 4]], cmd: (v) => `lowpass ${quote(v[0])} ${v[1]} ${v[2]}` },
-    { k: "pr_tHighpass", f: [["c", "pr_fCol"], ["n", "pr_fCutoff", 20], ["n", "pr_fOrder", 4]], cmd: (v) => `highpass ${quote(v[0])} ${v[1]} ${v[2]}` },
-    { k: "pr_tBandpass", f: [["c", "pr_fCol"], ["n", "pr_fLow", 20], ["n", "pr_fHigh", 450]], cmd: (v) => `bandpass ${quote(v[0])} ${v[1]} ${v[2]}` },
-    { k: "pr_tSmooth", f: [["c", "pr_fCol"], ["n", "pr_fSamples", 25]], cmd: (v) => `smooth ${quote(v[0])} ${v[1]}` },
-    { k: "pr_tOffset", f: [["c", "pr_fCol"]], cmd: (v) => `offset ${quote(v[0])}` },
-    { k: "pr_tRectify", f: [["c", "pr_fCol"]], cmd: (v) => `rectify ${quote(v[0])}` },
-    { k: "pr_tDeriv", f: [["c", "pr_fCol"]], cmd: (v) => `deriv ${quote(v[0])}` },
-    { k: "pr_tIntegrate", f: [["c", "pr_fCol"]], cmd: (v) => `integrate ${quote(v[0])}` },
-    { k: "pr_tScale", f: [["c", "pr_fCol"], ["n", "pr_fFactor", 1]], cmd: (v) => `scale ${quote(v[0])} ${v[1]}` },
-    { k: "pr_tStats", f: [["c", "pr_fCol"]], cmd: (v) => `stats ${quote(v[0])}` },
-    { k: "pr_tPeaks", f: [["c", "pr_fCol"], ["s", "pr_fThreshold", "1.3bw"], ["n", "pr_fHalf", 50]], cmd: (v) => `peaks ${quote(v[0])} ${v[1]} ${v[2]}` },
   ] },
   { group: "pr_gEmg", items: [
-    { k: "pr_tEnvelope", f: [["c", "pr_fCol"], ["n", "pr_fWindowMs", 100]], cmd: (v) => `envelope ${quote(v[0])} ${v[1]}` },
-    { k: "pr_tEnvelopeBand", f: [["c", "pr_fCol"], ["n", "pr_fWindowMs", 100]], cmd: (v) => `envelope ${quote(v[0])} ${v[1]} band` },
-    { k: "pr_tNormalise", f: [["c", "pr_fCol"], ["s", "pr_fRef", "max"]], cmd: (v) => `normalise ${quote(v[0])} ${v[1]}` },
+    { k: "pr_tEnvelope", f: [["n", "pr_fWindowMs", 100]], cmd: (v) => `step envelope ${v[0]}` },
+    { k: "pr_tEnvelopeBand", f: [["n", "pr_fWindowMs", 100]], cmd: (v) => [`step bandpass 20 450 4`, `step envelope ${v[0]}`] },
+    { k: "pr_tNormalise", f: [], cmd: () => "step normmax" },
   ] },
   { group: "pr_gForce", items: [
     { k: "pr_tFz", f: [], cmd: () => "fz" },
     { k: "pr_tBw", f: [["n", "pr_fFrom", 0], ["n", "pr_fTo", 1]], cmd: (v) => `bw ${v[0]} ${v[1]}` },
-    { k: "pr_tXbw", f: [["c", "pr_fCol"]], cmd: (v) => `divide ${quote(v[0])} bw` },
-    { k: "pr_tContacts", f: [["c", "pr_fCol"], ["n", "pr_fThresholdN", 20], ["n", "pr_fMinSamples", 20]], cmd: (v) => `contacts ${quote(v[0])} ${v[1]} ${v[2]}` },
-    { k: "pr_tJump", f: [["c", "pr_fCol"], ["n", "pr_fThresholdN", 20], ["n", "pr_fQuiet", 1]], cmd: (v) => `jump ${quote(v[0])} ${v[1]} ${v[2]}` },
+    { k: "pr_tPeaks", f: [["c", "pr_fCol", null, "fz"], ["s", "pr_fThreshold", "1.3bw"], ["n", "pr_fHalf", 50]], cmd: (v) => `peaks ${quote(v[0])} ${v[1]} ${v[2]}` },
+    { k: "pr_tContacts", f: [["c", "pr_fCol", null, "fz"], ["n", "pr_fThresholdN", 20], ["n", "pr_fMinSamples", 20]], cmd: (v) => `contacts ${quote(v[0])} ${v[1]} ${v[2]}` },
+    { k: "pr_tJump", f: [["c", "pr_fCol", null, "fz"], ["n", "pr_fThresholdN", 20], ["n", "pr_fQuiet", 1]], cmd: (v) => `jump ${quote(v[0])} ${v[1]} ${v[2]}` },
+    { k: "pr_tImpulse", f: [["c", "pr_fCol", null, "fz"], ["n", "pr_fQuiet", 0.5], ["n", "pr_fThresholdN", 20]], cmd: (v) => `impulse ${quote(v[0])} ${v[1]} ${v[2]}` },
+    { k: "pr_tGait", f: [["c", "pr_fVert", null, "fz"], ["c", "pr_fAp", null, "fy"], ["n", "pr_fMass", ""], ["n", "pr_fThresholdN", 20]],
+      cmd: (v) => `gait ${quote(v[0])} ${quote(v[1])} ${v[2] || ""} ${v[3]}`.replace(/\s+/g, " ").trim() },
   ] },
   { group: "pr_gBalance", items: [
     { k: "pr_tCop", f: [], cmd: () => "cop" },
@@ -625,6 +669,7 @@ export const TOOLS = [
     { k: "pr_tMarkerErr", f: [], cmd: () => "markererr" },
   ] },
   { group: "pr_gCompare", items: [
+    { k: "pr_tOverlay", f: [["c", "pr_fCol"], ["s", "pr_fMode", "time"]], cmd: (v) => `overlay ${quote(v[0])} ${v[1]}` },
     { k: "pr_tMeanSd", f: [["c", "pr_fCol"]], cmd: (v) => `meansd ${quote(v[0])}` },
     { k: "pr_tMeanSdContacts", f: [["c", "pr_fCol"]], cmd: (v) => `meansd ${quote(v[0])} contacts` },
     { k: "pr_tCompare", f: [["s", "pr_fMeasure", "height (flight"], ["s", "pr_fCondA", "A"], ["s", "pr_fCondB", "B"]], cmd: (v) => `compare ${quote(v[0])} ${v[1]} ${v[2]}` },
@@ -638,7 +683,7 @@ export function mountProcess(root, { t, download }) {
   const P = makeProcessor();
   const S = P.S;
   let colFilter = "", out = [];
-  const vis = { show3d: false, view: { yaw: 0.6, pitch: 0.35, zoom: 1, up: null, labels: false, frame: 0 }, playing: false, speed: 1, box: null, boxFor: null };
+  const vis = { toolTab: 0, minmax: false, show3d: false, view: { yaw: 0.6, pitch: 0.35, zoom: 1, up: null, labels: false, frame: 0 }, playing: false, speed: 1, box: null, boxFor: null };
   const cursors = S.cursors;   // dataset name -> [tA, tB]; the engine reads them for "bw ab" / "quiet ab"
 
   const say = (r, line) => { out.unshift({ ok: r.ok, line, msg: r.msg }); out = out.slice(0, 30); };
@@ -657,12 +702,21 @@ export function mountProcess(root, { t, download }) {
     if (!c || !(c[0] >= a && c[0] <= b) || !(c[1] >= a && c[1] <= b)) c = cursors[ds.name] = [a + 0.1 * (b - a), a + 0.9 * (b - a)];
     return c;
   }
+  /* raw = ticked channels (solid); proc = each one through the chain, dashed in the
+     same colour, plus any column a command made from it. y arrays are full length. */
+  let pipeErr = null;
   function plotted(ds) {
     const tree = channelTree(ds);
     const ticked = [...new Set(S.plot.cols.map((k) => rootOf(ds, k)))].filter((k) => ds.cols[k]);
-    const raw = ticked.map((k, i) => ({ key: k, color: COLORS[i % COLORS.length] }));
-    const proc = [];
-    ticked.forEach((k, i) => (tree.derived[k] || []).forEach((d, j) => proc.push({ key: d, parent: k, color: COLORS[(i + j + 1) % COLORS.length], dash: j > 0 })));
+    const raw = ticked.map((k, i) => ({ key: k, color: COLORS[i % COLORS.length], y: ds.cols[k] }));
+    const proc = []; pipeErr = null;
+    raw.forEach((r) => {
+      if (S.pipe.length) {
+        try { proc.push({ key: `${r.key} · ${t("pr_procShort")}`, parent: r.key, color: r.color, dash: "6 4", y: P.processed(ds, r.key) }); }
+        catch (e) { pipeErr = e.message; }
+      }
+      (tree.derived[r.key] || []).forEach((d) => proc.push({ key: d, parent: r.key, base: ds.par && ds.par[d], color: r.color, dash: "2 3", y: ds.cols[d] }));
+    });
     return { tree, raw, proc };
   }
   /** Min/max/mean between the cursors, and the processed-vs-raw differences. */
@@ -671,17 +725,17 @@ export function mountProcess(root, { t, download }) {
     let a = ds.time.findIndex((v) => v >= ta), b = ds.time.findIndex((v) => v > tb); if (b < 0) b = ds.time.length;
     const iA = Math.max(0, a), iB = Math.max(iA + 1, b);
     const st = (k) => {
-      const y = ds.cols[k]; let mn = Infinity, mx = -Infinity, imn = iA, imx = iA, s = 0, n = 0;
+      const y = typeof k === "string" ? ds.cols[k] : k; let mn = Infinity, mx = -Infinity, imn = iA, imx = iA, s = 0, n = 0;
       for (let i = iA; i < iB; i++) { const v = y[i]; if (!fin(v)) continue; if (v < mn) { mn = v; imn = i; } if (v > mx) { mx = v; imx = i; } s += v; n++; }
       return { min: mn, tmin: ds.time[imn], max: mx, tmax: ds.time[imx], mean: n ? s / n : NaN, range: mx - mn, atA: y[iA], atB: y[iB - 1] };
     };
     const rows = [];
     for (const r of pl.raw) {
-      const s0r = st(r.key); rows.push({ name: r.key, kind: "raw", color: r.color, ...s0r });
+      const s0r = st(r.y); rows.push({ name: r.key, kind: "raw", color: r.color, ...s0r });
       for (const p of pl.proc.filter((q) => q.parent === r.key)) {
-        const s1 = st(p.key);
-        // compared with the column it was made from (e.g. Fz·lp10 with Fz, not with the downward plate signal)
-        const baseKey = (ds.par && ds.par[p.key] && ds.cols[ds.par[p.key]]) ? ds.par[p.key] : r.key, s0 = baseKey === r.key ? s0r : st(baseKey);
+        const s1 = st(p.y);
+        // compared with what it was made from (e.g. Fz·lp10 with Fz, not with the downward plate signal)
+        const s0 = p.base && ds.cols[p.base] && p.base !== r.key ? st(p.base) : s0r;
         rows.push({ name: p.key, kind: "proc", color: p.color, ...s1,
           dPeak: s0.max ? (100 * (s1.max - s0.max)) / Math.abs(s0.max) : NaN, dT: s1.tmax - s0.tmax });
       }
@@ -700,21 +754,32 @@ export function mountProcess(root, { t, download }) {
     const x = ds.time.slice(i0, i1), xr = [ds.time[i0], ds.time[i1 - 1]];
     const cur = curOf(ds);
     const marksFor = (keys) => (keys.includes(S.plot.markCol) ? S.plot.marks.filter(([tm]) => tm >= xr[0] && tm <= xr[1]) : []);
-    const legend = (series) => `<div class="sub" style="font-size:14px;display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 0">${series.map((s) => `<span><i style="display:inline-block;width:12px;height:0;border-top:2px ${s.dash ? "dashed" : "solid"} ${s.color};vertical-align:middle"></i> ${escX(s.label)}</span>`).join("")}</div>`;
+    const legend = (series) => `<div class="sub" style="font-size:16px;display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 0">${series.map((s) => `<span><i style="display:inline-block;width:12px;height:0;border-top:2px ${s.dash ? (s.dash === "2 3" ? "dotted" : "dashed") : "solid"} ${s.color};vertical-align:middle"></i> ${escX(s.label)}</span>`).join("")}</div>`;
     const plotBox = (id, title, series, unit, marks, extra = "") => `<div class="prPlotTitle">${title}${extra}</div>${series.length
-      ? `<div class="prPlot" id="${id}">${chartSVG({ series, xLabel: t("pr_timeS"), yLabel: unit, marks, cursors: cur, xRange: xr, H: 250 }).svg}<div class="prReadout sub" style="font-size:14px;min-height:16px;margin:2px 0 0"></div></div>${legend(series)}`
+      ? `<div class="prPlot" id="${id}">${chartSVG({ series, xLabel: t("pr_timeS"), yLabel: unit, marks, cursors: cur, xRange: xr, H: 250 }).svg}<div class="prReadout sub" style="font-size:16px;min-height:16px;margin:2px 0 0"></div></div>${legend(series)}`
       : `<p class="note prEmpty">${id === "prRaw" ? t("pr_tickToPlot") : t("pr_vNone")}</p>`}`;
-    const rawSeries = pl.raw.map((r) => ({ x, y: ds.cols[r.key].slice(i0, i1), color: r.color, label: r.key }));
+    const rawSeries = pl.raw.map((r) => ({ x, y: r.y.slice(i0, i1), color: r.color, label: r.key }));
+    // min / max of every curve between the cursors, marked on the plot (Basic tab)
+    const mmMarks = (list) => {
+      if (!vis.minmax) return [];
+      const [ta, tb] = cur.slice().sort((p1, p2) => p1 - p2), out2 = [];
+      for (const q2 of list) {
+        let lo = -1, hi = -1;
+        for (let i = 0; i < ds.time.length; i++) { const tt = ds.time[i]; if (tt < ta || tt > tb || !fin(q2.y[i])) continue; if (lo < 0 || q2.y[i] < q2.y[lo]) lo = i; if (hi < 0 || q2.y[i] > q2.y[hi]) hi = i; }
+        if (lo >= 0) out2.push([ds.time[lo], q2.y[lo]], [ds.time[hi], q2.y[hi]]);
+      }
+      return out2;
+    };
     const units = (list) => [...new Set(list.map((s) => ds.units[s.key]).filter(Boolean))].join(", ");
     let bottom;
     if (S.plot.panels && S.plot.panels.length) {
-      const clear = ` <button type="button" class="ghost" id="prResultClose" style="margin:0 0 0 6px;width:auto;padding:2px 10px;font-size:14px">${t("pr_backProc")}</button>`;
+      const clear = ` <button type="button" class="ghost" id="prResultClose" style="margin:0 0 0 6px;width:auto;padding:2px 10px;font-size:16px">${t("pr_backProc")}</button>`;
       bottom = S.plot.panels.map((pn, pi) => {
         const series = pn.series.map((q, i) => ({ ...q, color: q.color || COLORS[i % COLORS.length] }));
         return `<div class="prPlotTitle">${escX(pn.title)}${pi === 0 ? clear : ""}</div><div class="prPlot">${chartSVG({ series, xLabel: pn.xLabel || "", H: 260 }).svg}</div>${legend(series.filter((q) => !q.band || q.label))}`;
       }).join("");
     } else if (S.plot.curves || S.plot.xy) {
-      const clear = ` <button type="button" class="ghost" id="prResultClose" style="margin:0 0 0 6px;width:auto;padding:2px 8px;font-size:14px">${t("pr_backProc")}</button>`;
+      const clear = ` <button type="button" class="ghost" id="prResultClose" style="margin:0 0 0 6px;width:auto;padding:2px 8px;font-size:16px">${t("pr_backProc")}</button>`;
       let ch;
       if (S.plot.curves) {
         const c = S.plot.curves, xx = Float64Array.from({ length: c.mean.length }, (_, i) => (100 * i) / (c.mean.length - 1));
@@ -727,20 +792,23 @@ export function mountProcess(root, { t, download }) {
       }
       bottom = `<div class="prPlotTitle">${t("pr_result")}${clear}</div><div class="prPlot">${ch}</div>`;
     } else {
-      const procSeries = pl.proc.map((p) => ({ x, y: ds.cols[p.key].slice(i0, i1), color: p.color, dash: p.dash, label: p.key }));
-      bottom = plotBox("prProc", t("pr_processed"), procSeries, units(pl.proc), marksFor(pl.proc.map((p) => p.key)));
+      const procSeries = pl.proc.length ? [
+        ...pl.raw.map((r) => ({ x, y: r.y.slice(i0, i1), color: r.color, label: `${r.key} (${t("pr_raw").toLowerCase()})`, thin: true })),
+        ...pl.proc.map((p) => ({ x, y: p.y.slice(i0, i1), color: p.color, dash: p.dash, label: p.key }))] : [];
+      bottom = plotBox("prProc", t("pr_processed"), procSeries, units(pl.raw), [...marksFor(pl.proc.map((p) => p.key)), ...mmMarks(pl.proc)],
+        pipeErr ? ` <span style="color:var(--warn);font-weight:400">${escX(pipeErr)}</span>` : "");
     }
     const cmp = pl.raw.length ? compareRows(ds, pl) : null;
     const f = (v) => (fin(v) ? r3(v) : "–");
     const cmpHTML = cmp ? `<div class="prCmp"><div class="prPlotTitle" style="margin-top:0">${t("pr_cmpTitle", { a: f(cmp.ta), b: f(cmp.tb) })}</div>
       <div style="overflow-x:auto"><table><thead><tr><th></th><th>${t("pr_min")}</th><th>${t("pr_atT")}</th><th>${t("pr_max")}</th><th>${t("pr_atT")}</th><th>${t("pr_mean")}</th><th>${t("pr_range")}</th><th>A</th><th>B</th><th>${t("pr_peakChange")}</th><th>${t("pr_peakShift")}</th></tr></thead><tbody>${
       cmp.rows.map((r) => `<tr${r.kind === "raw" ? ' class="prCmpRaw"' : ""}><td><i style="display:inline-block;width:10px;height:0;border-top:2px solid ${r.color};vertical-align:middle"></i> ${escX(r.name)}</td><td>${f(r.min)}</td><td>${f(r.tmin)}</td><td>${f(r.max)}</td><td>${f(r.tmax)}</td><td>${f(r.mean)}</td><td>${f(r.range)}</td><td>${f(r.atA)}</td><td>${f(r.atB)}</td><td>${r.kind === "proc" ? `${f(r.dPeak)} %` : ""}</td><td>${r.kind === "proc" ? `${f(r.dT)} s` : ""}</td></tr>`).join("")}</tbody></table></div>
-      <button type="button" class="ghost" id="prZoomCur" style="margin:6px 0 0;width:auto;padding:4px 10px;font-size:14px">${t("pr_zoomCur")}</button></div>` : "";
+      <button type="button" class="ghost" id="prZoomCur" style="margin:6px 0 0;width:auto;padding:4px 10px;font-size:16px">${t("pr_zoomCur")}</button></div>` : "";
     const mk = markerTriplets(ds);
     const chans = pl.tree.raw.filter((k) => !colFilter || k.toLowerCase().includes(colFilter.toLowerCase()));
     return `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><b>${escX(ds.name)}</b>
-        ${mk.length ? `<button type="button" class="${vis.show3d ? "" : "ghost"}" id="prShow3d" style="margin:0;width:auto;padding:4px 10px;font-size:14px">${t("pr_v3d")} (${mk.length})</button>` : ""}</div>
+        ${mk.length ? `<button type="button" class="${vis.show3d ? "" : "ghost"}" id="prShow3d" style="margin:0;width:auto;padding:4px 10px;font-size:16px">${t("pr_v3d")} (${mk.length})</button>` : ""}</div>
       <div class="row" style="margin-top:8px;align-items:flex-end;gap:8px">
         <div><label for="prT0">${t("pr_from")}</label><input id="prT0" type="number" step="any" value="${S.win ? S.win[0] : ""}" placeholder="${(+ds.time[0]).toFixed(2)}"></div>
         <div><label for="prT1">${t("pr_to")}</label><input id="prT1" type="number" step="any" value="${S.win ? S.win[1] : ""}" placeholder="${(+ds.time[ds.time.length - 1]).toFixed(2)}"></div>
@@ -749,11 +817,11 @@ export function mountProcess(root, { t, download }) {
       <div class="prVis">
         <div class="prChanCol">
           <input id="prColFilter" type="search" placeholder="${t("pr_filterCols")}" value="${escX(colFilter)}">
-          <div class="prChanList">${chans.map((k) => `<label class="prCol"><input type="checkbox" data-col="${escX(k)}"${S.plot.cols.some((c) => rootOf(ds, c) === k) ? " checked" : ""}> ${escX(k)}${pl.tree.derived[k] ? ` <span class="sub" style="font-size:13px">→ ${pl.tree.derived[k].length}</span>` : ""}${ds.units[k] ? ` <span class="sub" style="font-size:13px">(${escX(ds.units[k])})</span>` : ""}</label>`).join("") || `<p class="note">${t("pr_noCols")}</p>`}</div>
+          <div class="prChanList">${chans.map((k) => `<label class="prCol"><input type="checkbox" data-col="${escX(k)}"${S.plot.cols.some((c) => rootOf(ds, c) === k) ? " checked" : ""}> ${escX(k)}${pl.tree.derived[k] ? ` <span class="sub" style="font-size:15px">→ ${pl.tree.derived[k].length}</span>` : ""}${ds.units[k] ? ` <span class="sub" style="font-size:15px">(${escX(ds.units[k])})</span>` : ""}</label>`).join("") || `<p class="note">${t("pr_noCols")}</p>`}</div>
           ${ds.meta?.text ? `<p class="note" style="margin:6px 0 0">${t("pr_textCols")}: ${Object.keys(ds.meta.text).map(escX).join(", ")}</p>` : ""}
         </div>
         <div class="prPlots">
-          ${plotBox("prRaw", t("pr_raw"), rawSeries, units(pl.raw), marksFor(pl.raw.map((r) => r.key)))}
+          ${plotBox("prRaw", t("pr_raw"), rawSeries, units(pl.raw), [...marksFor(pl.raw.map((r) => r.key)), ...mmMarks(pl.raw)])}
           ${bottom}
           <div class="row" style="margin-top:8px;gap:8px"><button type="button" class="ghost" id="prCsv" style="margin:0">${t("pr_saveCsv")}</button><button type="button" class="ghost" id="prPng" style="margin:0">${t("pr_savePng")}</button></div>
           ${cmpHTML}
@@ -773,8 +841,8 @@ export function mountProcess(root, { t, download }) {
       <div class="row" style="gap:8px;align-items:center">
         <button type="button" id="prPlay" style="margin:0;width:auto;padding:6px 14px">${vis.playing ? t("pr_pause") : t("pr_play")}</button>
         <input id="prFrame" type="range" min="0" max="${n - 1}" value="${vis.view.frame}" style="flex:1">
-        <span id="prFrameT" class="sub" style="font-size:14px;min-width:64px;text-align:right">${(+ds.time[vis.view.frame]).toFixed(2)} s</span></div>
-      <div class="row" style="gap:12px;align-items:center;margin-top:6px;font-size:13px">
+        <span id="prFrameT" class="sub" style="font-size:16px;min-width:64px;text-align:right">${(+ds.time[vis.view.frame]).toFixed(2)} s</span></div>
+      <div class="row" style="gap:12px;align-items:center;margin-top:6px;font-size:15px">
         <label>${t("pr_up")} <select id="prUp" style="width:auto;display:inline-block">${["z", "y"].map((a) => `<option${vis.view.up === a ? " selected" : ""}>${a}</option>`).join("")}</select></label>
         <label>${t("pr_speed")} <select id="prSpeed" style="width:auto;display:inline-block">${[0.25, 0.5, 1, 2].map((v) => `<option value="${v}"${vis.speed === v ? " selected" : ""}>${v}×</option>`).join("")}</select></label>
         <label><input type="checkbox" id="prLabels"${vis.view.labels ? " checked" : ""} style="width:auto;display:inline-block;min-height:0"> ${t("pr_labels")}</label></div></div>`;
@@ -786,19 +854,23 @@ export function mountProcess(root, { t, download }) {
     const pl = ds ? plotted(ds) : { raw: [], proc: [] };
     const pre = [...pl.proc.map((p) => p.key), ...pl.raw.map((r) => r.key)];
     const colSel = (id, pick) => `<select id="${id}">${["@fz", ...keys].map((k) => `<option value="${escX(k)}"${k === pick ? " selected" : ""}>${escX(k === "@fz" ? t("pr_autoFz") : k)}</option>`).join("")}</select>`;
-    return TOOLS.map((g, gi) => `<details class="prGroup"${gi === 0 ? " open" : ""}><summary><b>${t(g.group)}</b></summary>${g.items.map((it, ii) => {
+    const tabs = `<div class="prTabs">${TOOLS.map((g, gi) => `<button type="button" class="${gi === vis.toolTab ? "" : "ghost"}" data-ttab="${gi}">${t(g.group)}</button>`).join("")}</div>`;
+    const chain = `<div class="prChain"><b>${t("pr_steps")}</b> ${S.pipe.length ? S.pipe.map((st, i) => `<span class="prChip">${i + 1}. ${escX(stepLabel(st))} <button type="button" data-unstep="${i + 1}" aria-label="${t("pr_remove")}">×</button></span>`).join("")
+      + ` <button type="button" class="ghost" id="prStepsClear" style="margin:0;width:auto;padding:4px 12px">${t("pr_clearSteps")}</button>` : `<span class="sub">${t("pr_noSteps")}</span>`}</div>`;
+    return chain + tabs + [TOOLS[vis.toolTab]].map((g) => { const gi = vis.toolTab; return `<div class="prGroup">${g.items.map((it, ii) => {
       const id = `prT${gi}_${ii}`; let ci = 0;
       const fields = it.f.map(([type, lbl, def, pick], fi) => `<label>${t(lbl)} ${type === "c"
         ? colSel(`${id}_${fi}`, pick === "fz" ? (keys.find((k) => /^(Fz|Fz_N|Fz \(N\))$/i.test(k)) || "@fz")
           : pick === "fy" ? (keys.find((k) => /(^|[ ._-])Fy(_N)?$/.test(k) && !/·/.test(k)) || "")
           : pl.raw[ci] ? (ci++ === 0 ? pl.raw[0].key : pre[ci - 1]) : "")
         : `<input id="${id}_${fi}" type="${type === "n" ? "number" : "text"}" step="any" value="${escX(def ?? "")}"${type === "n" ? ' class="prNum"' : ""}>`}</label>`).join("");
-      return `<div class="prToolRow"><button type="button" data-tool="${gi}_${ii}">${t(it.k)}</button>${fields}</div>`;
-    }).join("")}</details>`).join("");
+      const on = it.ui === "minmax" && vis.minmax;
+      return `<div class="prToolRow"><button type="button" data-tool="${gi}_${ii}"${it.ui && !on ? ' class="ghost"' : ""}>${t(it.k)}${it.ui ? (on ? " ✓" : "") : ""}</button>${fields}</div>`;
+    }).join("")}</div>`; }).join("");
   }
 
   function render() {
-    const open = [...root.querySelectorAll(".prGroup")].map((d) => d.open);
+    const open = [];
     const ds = P.current();
     root.innerHTML = `
     <div class="card">
@@ -811,7 +883,7 @@ export function mountProcess(root, { t, download }) {
         accept=".csv,.txt,.tsv,.mot,.sto,.trc,.c3d,.xlsx,.xlsm">${t("pr_drop")}</label>
       ${S.ds.length ? `<div class="prFiles">${S.ds.map((d, i) => `<div class="prFile${i === S.cur ? " sel" : ""}">
         <button type="button" class="ghost" data-use="${i + 1}" style="margin:0;text-align:left">${i + 1} · ${escX(d.name)}
-          <span class="sub" style="font-size:13.5px;display:block;margin:0">${d.fs ? `${+d.fs.toFixed(2)} Hz · ` : ""}${d.time.length} ${t("pr_samples")} · ${Object.keys(d.cols).length} ${t("pr_columns")}${d.meta?.noTime ? " · " + t("pr_noTime") : ""}</span></button>
+          <span class="sub" style="font-size:15.5px;display:block;margin:0">${d.fs ? `${+d.fs.toFixed(2)} Hz · ` : ""}${d.time.length} ${t("pr_samples")} · ${Object.keys(d.cols).length} ${t("pr_columns")}${d.meta?.noTime ? " · " + t("pr_noTime") : ""}</span></button>
         <button type="button" class="ghost" data-del="${i}" aria-label="${t("pr_remove")}" style="margin:0;width:auto;padding:6px 10px">×</button></div>`).join("")}</div>` : ""}
     </div>
     ${ds ? plotCardHTML(ds) : ""}
@@ -827,13 +899,13 @@ export function mountProcess(root, { t, download }) {
         <textarea id="prRecipe" rows="5" style="width:100%;font:12px ui-monospace,Consolas,monospace;margin-top:6px">${escX(S.log.join("\n"))}</textarea>
         <div class="row" style="gap:8px;margin-top:6px"><button type="button" class="ghost" id="prRunAll" style="margin:0">${t("pr_runAll")}</button>
         <button type="button" class="ghost" id="prRecipeSave" style="margin:0">${t("pr_saveRecipe")}</button></div></details>` : ""}
-      <details style="margin-top:8px"><summary>${t("pr_cmdList")}</summary><table style="font-size:14px;margin-top:6px"><tbody>${HELP.map(([c, d], i) => `<tr><td style="font-family:ui-monospace,Consolas,monospace;white-space:nowrap;padding-right:8px">${escX(c)}</td><td>${escX(t(`pr_h${i}`) === `pr_h${i}` ? d : t(`pr_h${i}`))}</td></tr>`).join("")}</tbody></table>
+      <details style="margin-top:8px"><summary>${t("pr_cmdList")}</summary><table style="font-size:16px;margin-top:6px"><tbody>${HELP.map(([c, d], i) => `<tr><td style="font-family:ui-monospace,Consolas,monospace;white-space:nowrap;padding-right:8px">${escX(c)}</td><td>${escX(t(`pr_h${i}`) === `pr_h${i}` ? d : t(`pr_h${i}`))}</td></tr>`).join("")}</tbody></table>
         <p class="note">${t("pr_cmdNote")}</p></details>
     </div>
     ${S.results.length ? `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>${t("pr_results")}</b>
       <span><button type="button" class="ghost" id="prResCsv" style="margin:0;width:auto;padding:6px 10px">${t("pr_saveCsv")}</button>
       <button type="button" class="ghost" id="prResClear" style="margin:0;width:auto;padding:6px 10px">${t("pr_clear")}</button></span></div>
-      <div style="overflow-x:auto;max-height:340px;margin-top:8px"><table style="font-size:14px"><thead><tr><th>${t("pr_file")}</th><th>${t("pr_measure")}</th><th>${t("pr_value")}</th><th></th></tr></thead><tbody>${
+      <div style="overflow-x:auto;max-height:340px;margin-top:8px"><table style="font-size:16px"><thead><tr><th>${t("pr_file")}</th><th>${t("pr_measure")}</th><th>${t("pr_value")}</th><th></th></tr></thead><tbody>${
         S.results.slice().reverse().map((r) => `<tr><td>${escX(r.file.replace(/ · .*/, ""))}</td><td>${escX(r.measure)}</td><td style="text-align:right">${escX(r.value)}</td><td>${escX(r.unit)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
     <p class="note" style="margin:6px 4px 0">${t("pr_honest")}</p>`;
     root.querySelectorAll(".prGroup").forEach((d, i) => { if (open[i] !== undefined) d.open = open[i]; });
@@ -856,7 +928,7 @@ export function mountProcess(root, { t, download }) {
     const W = 720; let y = 0, body = "";
     svgs.forEach((s, i) => {
       const vb = s.getAttribute("viewBox").split(" ").map(Number), h = vb[3];
-      body += `<text x="8" y="${y + 18}" font-size="15" font-weight="600" fill="#222">${escX(titles[i])}</text>`;
+      body += `<text x="8" y="${y + 18}" font-size="17" font-weight="600" fill="#222">${escX(titles[i])}</text>`;
       body += s.outerHTML.replace("<svg ", `<svg x="0" y="${y + 24}" width="${W}" height="${h}" `);
       y += h + 30;
     });
@@ -902,18 +974,25 @@ export function mountProcess(root, { t, download }) {
         Object.assign(S.plot, keepRes); render();
       };
     });
+    root.querySelectorAll("[data-ttab]").forEach((b) => { b.onclick = () => { vis.toolTab = +b.dataset.ttab; render(); }; });
+    root.querySelectorAll("[data-unstep]").forEach((b) => { b.onclick = () => exec(`step remove ${b.dataset.unstep}`); });
+    if (q("#prStepsClear")) q("#prStepsClear").onclick = () => exec("step clear");
     root.querySelectorAll("[data-tool]").forEach((b) => {
       b.onclick = () => {
         const [gi, ii] = b.dataset.tool.split("_").map(Number), it = TOOLS[gi].items[ii];
+        if (it.ui === "minmax") { vis.minmax = !vis.minmax; render(); return; }
         const v = it.f.map((_, fi) => root.querySelector(`#prT${gi}_${ii}_${fi}`).value);
-        const line = it.cmd(v); q("#prCmd").value = line; exec(line);
+        const lines = [].concat(it.cmd(v));
+        for (const line of lines.slice(0, -1)) say(P.run(line), line);
+        q("#prCmd").value = lines[lines.length - 1]; exec(lines[lines.length - 1]);
       };
     });
     if (q("#prCsv")) q("#prCsv").onclick = () => {
-      const pl = plotted(ds), [i0, i1] = span(ds);
-      const keys = [...pl.raw.map((r) => r.key), ...pl.proc.map((p) => p.key)];
-      const cut = { time: ds.time.slice(i0, i1), cols: Object.fromEntries(keys.map((k) => [k, ds.cols[k].slice(i0, i1)])) };
-      download(`${ds.name.replace(/[^\w.-]+/g, "_")}_raw_processed.csv`, toCsv(cut, keys));
+      // every channel of the file, through the processing chain, over the current window
+      const [i0, i1] = span(ds), keys = channelTree(ds).raw, cols = {};
+      try { for (const k of keys) cols[k] = (S.pipe.length ? P.processed(ds, k) : ds.cols[k]).slice(i0, i1); }
+      catch (e) { say({ ok: false, msg: e.message }, t("pr_saveCsv")); render(); return; }
+      download(`${ds.name.replace(/[^\w.-]+/g, "_")}_${S.pipe.length ? "processed" : "raw"}.csv`, toCsv({ time: ds.time.slice(i0, i1), cols }, keys));
     };
     if (q("#prPng")) q("#prPng").onclick = () => {
       const svgs = [...root.querySelectorAll(".prPlots .prPlot svg")];
