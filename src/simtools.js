@@ -76,7 +76,7 @@ export function simHTML(ctx) {
     </div>
     ${ctx.err ? `<p class="note banner" style="margin:8px 0 0">${esc(ctx.err)}</p>` : ""}
     <div class="simTools">${sections}</div>
-    <p class="note" style="margin:10px 0 0">${t("sim_templatesNote")} <a href="${TPL}" target="_blank" rel="noopener">data/opensim/setup_files</a></p>`;
+    <p class="note" style="margin:10px 0 0">${t("sim_templatesNote")}</p>`;
 }
 
 /** A slot's label: a tool-specific key first (sim_slot_id_grf_mot), then the slot's, then the engine's English. */
