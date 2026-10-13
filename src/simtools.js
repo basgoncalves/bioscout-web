@@ -16,6 +16,7 @@
 import { parseTrc, editTaskWeights, viewTrc } from "./trcview.js";
 import { buildSetup, downloadText } from "./simsetup.js";
 import { sessionHTML, sessionWire, S as session } from "./simsession.js";
+import { quickHTML, quickWire } from "./simquick.js";
 import { c3dToOpenSim } from "./c3dexport.js";
 const SETUP_TOOLS = new Set(["scale", "ik", "id", "ma", "so"]);   // steps whose OpenSim setup .xml can be written before running
 const TPL = "./data/opensim/setup_files/";
@@ -96,7 +97,7 @@ export function simHTML(ctx) {
       <p class="note" style="margin:6px 0 0">${t("sim_scaled_note")}</p></div>`;
   sections.splice(si + 1, 0, scaledHTML);
   const sectionsHTML = sections.join("");
-  return `${ctx.batch ? sessionHTML(ctx) : ""}<div class="simModel">
+  return `${ctx.batch ? sessionHTML(ctx) : ctx.quick ? quickHTML(ctx) : ""}<div class="simModel">
       <label for="simModel">${t("sim_generic")}</label>
       ${genericName
         ? `<div class="simPick"><input type="text" readonly value="${esc(genericName)}"><button type="button" class="ghost" data-genericclear>${t("pr_remove")}</button></div>`
@@ -318,8 +319,8 @@ export function simWire(box, ctx) {
       ctx.act(() => client.status(id));
     };
   }
-  // batch mode: the session folder feeds the sections and takes their outputs
-  if (ctx.batch) sessionWire(box, ctx, {
+  // batch mode: the project folder feeds the sections and takes their outputs; quick run: one c3d does
+  const modeHooks = {
     send,
     setDir: (tool, h) => { dirs[tool] = h; },
     setRenames: (tool, map) => { renames[tool] = map || {}; },
@@ -331,7 +332,9 @@ export function simWire(box, ctx) {
     markersetFile: () => dropFiles["scale:markerset"] || null,
     save: (tool) => ctx.act(async () => { osimOutputsRefresh && await osimOutputsRefresh(); await saveOutputs(ctx, tool); return client.status(id); }),
     repaint: () => ctx.act(() => client.status(id)),
-  });
+  };
+  if (ctx.batch) sessionWire(box, ctx, modeHooks);
+  if (ctx.quick) quickWire(box, ctx, modeHooks);
   box.querySelectorAll("[data-openproc]").forEach((b) => {
     b.onclick = async () => {
       const [tool, ...rest] = b.dataset.openproc.split(":"), path = rest.join(":");
