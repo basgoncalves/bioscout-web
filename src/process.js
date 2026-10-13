@@ -936,7 +936,10 @@ export function mountProcess(root, { t, download }) {
     const vSeries = [{ label: t("pr_jVel"), x: vx, y: j.v.slice(a, Math.min(b, j.v.length)), color: "#1d7a45" }];
     const marks = [[j.tLow, 0], [j.tTakeoff, j.vTakeoff]];
     const leg = (series) => `<div class="sub" style="display:flex;flex-wrap:wrap;gap:4px 14px;margin:2px 0 0">${series.map((q) => `<span><i style="display:inline-block;width:12px;height:${q.band ? 10 : 0}px;${q.band ? `background:${q.color};opacity:.4` : `border-top:2px solid ${q.color}`};vertical-align:middle"></i> ${escX(q.label)}</span>`).join("")}</div>`;
+    const big = (label, val, unit, main) => `<div class="prJumpStat${main ? " main" : ""}"><span>${label}</span><b>${val}<small> ${unit}</small></b></div>`;
     return `<div class="card"><b>${t("pr_jTitle")}</b>
+      <div class="prJumpStats">${big(t("pr_jHeight"), r3(100 * j.height), "cm", true)}${big(t("pr_jTakeoffV"), r3(j.vTakeoff), "m/s")}${
+        j.flightHeight != null ? big(t("pr_jFlightH"), r3(100 * j.flightHeight), "cm") : ""}${big(t("pr_jConImp"), r3(j.conImpulse), "N·s")}</div>
       <p class="note" style="margin:4px 0 8px">${t("pr_jNote", { bw: r3(j.bw), low: r3(j.tLow), to: r3(j.tTakeoff), v: r3(j.vTakeoff), h: r3(100 * j.height) })}</p>
       <div class="prPlotTitle">${t("pr_jForce")}</div>${chartSVG({ series: forceSeries, xLabel: t("pr_timeS"), yLabel: "N", H: 250, xRange: [x[0], x[x.length - 1]] }).svg}${leg(forceSeries)}
       <div class="prPlotTitle">${t("pr_jVel")}</div>${chartSVG({ series: vSeries, xLabel: t("pr_timeS"), yLabel: "m/s", marks, H: 230, xRange: [x[0], x[x.length - 1]] }).svg}${leg(vSeries)}

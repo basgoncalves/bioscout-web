@@ -584,6 +584,11 @@ try {
   #viewProcess input, #viewProcess select { font-size:18.5px; }
   /* Filled (accent) buttons in the tools: black text, easier to read than white on the light accents. */
   .prToolRow > button:not(.ghost), .prTabs button:not(.ghost), .prChip, .prChip button { color:#111 !important; }
+  .prJumpStats { display:flex; flex-wrap:wrap; gap:10px 28px; align-items:flex-end; margin:10px 0 6px; }
+  .prJumpStat span { display:block; color:var(--muted); font-size:16px; }
+  .prJumpStat b { font-size:30px !important; font-weight:700; }
+  .prJumpStat.main b { font-size:48px !important; color:var(--accent); line-height:1.05; }
+  .prJumpStat small { font-size:.5em; font-weight:600; color:var(--muted); }
   .prTabs { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 4px; }
   .prTabs button { width:auto; margin:0; padding:9px 16px; }
   .prChain { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 12px; margin-top:8px;
@@ -1570,7 +1575,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 146;
+window.BUILD = 147;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

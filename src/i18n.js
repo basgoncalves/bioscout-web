@@ -1975,6 +1975,10 @@ const EN = {
   "pr_jEcc": "eccentric (onset to lowest point)",
   "pr_jCon": "concentric (lowest point to take-off)",
   "pr_jVel": "Centre-of-mass velocity (m/s)",
+  "pr_jHeight": "Jump height (impulse)",
+  "pr_jTakeoffV": "Take-off velocity",
+  "pr_jFlightH": "Height from flight time",
+  "pr_jConImp": "Concentric impulse",
 };
 
 const PT = {
@@ -3925,6 +3929,10 @@ const PT = {
   "pr_jEcc": "excêntrico (início ao ponto mais baixo)",
   "pr_jCon": "concêntrico (ponto mais baixo à saída)",
   "pr_jVel": "Velocidade do centro de massa (m/s)",
+  "pr_jHeight": "Altura do salto (impulso)",
+  "pr_jTakeoffV": "Velocidade de saída",
+  "pr_jFlightH": "Altura pelo tempo de voo",
+  "pr_jConImp": "Impulso concêntrico",
 };
 
 const DE = {
@@ -5874,6 +5882,10 @@ const DE = {
   "pr_jEcc": "exzentrisch (Beginn bis tiefster Punkt)",
   "pr_jCon": "konzentrisch (tiefster Punkt bis Absprung)",
   "pr_jVel": "Schwerpunktgeschwindigkeit (m/s)",
+  "pr_jHeight": "Sprunghöhe (Impuls)",
+  "pr_jTakeoffV": "Absprunggeschwindigkeit",
+  "pr_jFlightH": "Höhe aus Flugzeit",
+  "pr_jConImp": "Konzentrischer Impuls",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };
