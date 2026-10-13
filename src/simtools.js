@@ -16,7 +16,7 @@
 import { parseTrc, editTaskWeights, viewTrc } from "./trcview.js";
 import { buildSetup, downloadText } from "./simsetup.js";
 import { sessionHTML, sessionWire, S as session } from "./simsession.js";
-import { quickHTML, quickWire } from "./simquick.js";
+import { quickHTML, quickWire, quickFooterHTML, Q as quick } from "./simquick.js";
 import { c3dToOpenSim } from "./c3dexport.js";
 const SETUP_TOOLS = new Set(["scale", "ik", "id", "ma", "so"]);   // steps whose OpenSim setup .xml can be written before running
 const TPL = "./data/opensim/setup_files/";
@@ -67,21 +67,23 @@ export function simHTML(ctx) {
     const outHTML = sp.state === "done" && outs ? `<div class="simOuts"><b>${t("sim_outputs")}</b>${outs.length ? outs.map((f) => `<div class="simOut">
         <a href="${esc(ctx.client.toolFileUrl(job.id, tl.id, f.path))}" download>${esc(f.path)}</a> <span class="sub">${sizeText(f.size)}</span>
         ${/\.(mot|sto|trc)$/i.test(f.path) ? `<button type="button" class="ghost" data-openproc="${tl.id}:${esc(f.path)}">${t("sim_openProcess")}</button>` : ""}</div>`).join("") : `<p class="note">${t("sim_noOutputs")}</p>`}</div>` : "";
-    return `<details class="simTool"${ctx.open.has(tl.id) ? " open" : ""} data-tool="${tl.id}">
-      <summary><b>${i + 1} · ${esc(t("sim_tool_" + tl.id))}</b> ${badge(sp)}</summary>
+    const skipped = ctx.quick && quick.skip.has(tl.id);
+    const skipBox = ctx.quick ? `<label class="simSkip" onclick="event.stopPropagation()"><input type="checkbox" data-skip="${tl.id}"${skipped ? " checked" : ""}> ${esc(t("sq_skip"))}</label>` : "";
+    return `<details class="simTool${skipped ? " skipped" : ""}"${ctx.open.has(tl.id) && !skipped ? " open" : ""} data-tool="${tl.id}">
+      <summary><b>${i + 1} · ${esc(t("sim_tool_" + tl.id))}</b> ${badge(sp)}${skipBox}</summary>
       <p class="note" style="margin:4px 0 8px">${t("sim_note_" + tl.id)}</p>
       ${slots}${opts ? `<div class="simOpts">${opts}${tl.id === "ik" ? `<button type="button" class="ghost" data-view${trcIK ? "" : " disabled"}>${esc(t("sim_v_btn"))}</button>` : ""}</div>` : ""}
       ${tl.id === "ik" ? `<button type="button" class="ghost" data-tw style="margin-top:8px">${esc(t("sim_tw_btn"))}</button>` : ""}
-      <div class="simRunRow" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+      ${ctx.quick ? "" : `<div class="simRunRow" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
       <button type="button" data-run="${tl.id}"${(!job.model && !genericName && !(scaledName && tl.id !== "scale")) || busy ? " disabled" : ""}>${esc(t("sim_run", { tool: t("sim_tool_" + tl.id) }))}</button>
       ${SETUP_TOOLS.has(tl.id) ? `<button type="button" class="ghost" data-setup="${tl.id}" title="${esc(t("sim_setup_title"))}">${esc(t("sim_setup_btn"))}</button>` : ""}
-      ${setupMsg[tl.id] ? `<span class="sub">${esc(setupMsg[tl.id])}</span>` : ""}</div>
+      ${setupMsg[tl.id] ? `<span class="sub">${esc(setupMsg[tl.id])}</span>` : ""}</div>`}
       ${stateLine(sp)}${outHTML}
-      <div class="simOutDir"><span class="sub">${esc(t("sim_outdir"))}:</span>
+      ${ctx.quick ? "" : `<div class="simOutDir"><span class="sub">${esc(t("sim_outdir"))}:</span>
         <input type="text" readonly value="${esc(dirName(tl.id) || t("sim_outdir_none"))}">
         <button type="button" class="ghost" data-dir="${tl.id}" title="${esc(t("sim_outdir_pick"))}">📁</button>
         ${sp.state === "done" && outs && outs.length && dirFor(tl.id) ? `<button type="button" class="ghost" data-save="${tl.id}">${esc(t("sim_outdir_save"))}</button>` : ""}
-        ${saved[tl.id] ? `<span class="sub">✓ ${esc(saved[tl.id])}</span>` : ""}</div>
+        ${saved[tl.id] ? `<span class="sub">✓ ${esc(saved[tl.id])}</span>` : ""}</div>`}
     </details>`;
   });
   // a model made by Scale in this browser becomes the scaled model by itself
@@ -95,9 +97,9 @@ export function simHTML(ctx) {
         ${scaledName ? `<button type="button" class="ghost" data-scaledclear>${t("pr_remove")}</button>` : ""}
         <input type="file" accept=".osim" data-scaledfile hidden></div>
       <p class="note" style="margin:6px 0 0">${t("sim_scaled_note")}</p></div>`;
-  sections.splice(si + 1, 0, scaledHTML);
+  if (!ctx.quick) sections.splice(si + 1, 0, scaledHTML);
   const sectionsHTML = sections.join("");
-  return `${ctx.batch ? sessionHTML(ctx) : ctx.quick ? quickHTML(ctx) : ""}<div class="simModel">
+  return `${ctx.batch ? sessionHTML(ctx) : ""}<div class="simModel">
       <label for="simModel">${t("sim_generic")}</label>
       ${genericName
         ? `<div class="simPick"><input type="text" readonly value="${esc(genericName)}"><button type="button" class="ghost" data-genericclear>${t("pr_remove")}</button></div>`
@@ -106,12 +108,14 @@ export function simHTML(ctx) {
       <input type="file" accept=".osim" data-genericfile hidden>
       <p class="note" style="margin:6px 0 0">${t("sim_modelNote")} ${t("sim_generic_own")}</p>
     </div>
+    ${ctx.quick ? quickHTML(ctx) : ""}
     ${ctx.err ? `<p class="note banner" style="margin:8px 0 0">${esc(ctx.err)}</p>` : ""}
     <div class="simTools">${sectionsHTML}</div>
+    ${ctx.quick ? quickFooterHTML(ctx) : ""}
     <p class="note" style="margin:10px 0 0">${t("sim_templatesNote")}</p>
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
+    ${ctx.quick ? "" : `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
       <button type="button" class="ghost" data-c3d>${t("sim_c3d_btn")}</button><input type="file" accept=".c3d" multiple data-c3dfile hidden>
-      <span class="sub">${t("sim_c3d_note")}</span>${c3dMsg ? `<span class="sub">${esc(c3dMsg)}</span>` : ""}</div>`;
+      <span class="sub">${t("sim_c3d_note")}</span>${c3dMsg ? `<span class="sub">${esc(c3dMsg)}</span>` : ""}</div>`}`;
 }
 
 /** A slot's label: a tool-specific key first (sim_slot_id_grf_mot), then the slot's, then the engine's English. */
@@ -333,6 +337,7 @@ export function simWire(box, ctx) {
     save: (tool) => ctx.act(async () => { osimOutputsRefresh && await osimOutputsRefresh(); await saveOutputs(ctx, tool); return client.status(id); }),
     repaint: () => ctx.act(() => client.status(id)),
   };
+  box.querySelectorAll("[data-skip]").forEach((cb) => { cb.onchange = () => { cb.checked ? quick.skip.add(cb.dataset.skip) : quick.skip.delete(cb.dataset.skip); ctx.act(() => client.status(id)); }; });
   if (ctx.batch) sessionWire(box, ctx, modeHooks);
   if (ctx.quick) quickWire(box, ctx, modeHooks);
   box.querySelectorAll("[data-openproc]").forEach((b) => {

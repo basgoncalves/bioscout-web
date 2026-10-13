@@ -198,6 +198,12 @@ try {
   button.faceBtn.on { border-color:var(--fc); background:color-mix(in srgb, var(--fc) 12%, transparent); }
   button.faceBtn.on .fc { fill-opacity:1; }
   #osimBatch.on, #osimQuick.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent); }
+  .simSkip { float:right; font-size:13px; font-weight:400; color:var(--muted); display:inline-flex; gap:4px; align-items:center; cursor:pointer; }
+  details.simTool.skipped { opacity:.45; }
+  details.simTool.skipped > summary { pointer-events:none; }
+  details.simTool.skipped > summary .simSkip { pointer-events:auto; }
+  button.simGo { width:100%; padding:14px; font-size:18px; font-weight:700; background:var(--accent); color:#111; border:none; border-radius:12px; }
+  button.simGo:disabled { opacity:.5; }
   button.faceBtn.on .eye { fill:#fff; }
   button.faceBtn.on .mouth { stroke:#fff; }
   button.faceBtn.on .mouth.open { fill:#fff; }
@@ -1644,8 +1650,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 175;
-window.BUILD_AT = "2026-10-13 21:00";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 176;
+window.BUILD_AT = "2026-10-13 21:20";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

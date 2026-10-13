@@ -17,7 +17,7 @@ import { c3dToOpenSim } from "./c3dexport.js";
 let T = (k) => k;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-export const Q = { root: null, name: "", c3ds: [], trial: "", static: "", staticSeconds: 1.0, busy: false, log: [], done: null };
+export const Q = { root: null, name: "", c3ds: [], trial: "", static: "", staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms", "rra"]) };
 
 async function listC3d(root) { const out = []; for await (const [n, h] of root.entries()) if (h.kind === "file" && /\.c3d$/i.test(n)) out.push(n); return out.sort(); }
 async function writeText(dir, name, data) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); }
@@ -62,8 +62,9 @@ export async function runQuick(ctx, hooks) {
     if (ex["grf.mot"]) hooks.send("id:grf_mot", new File([ex["grf.mot"]], "grf.mot"));
     await new Promise((r) => setTimeout(r, 400));
     // 3. the steps, in order, each waiting for the last
-    const order = ["scale", "ik", ...(ex["grf.mot"] ? ["id", "ma", "so", "jra"] : [])];
+    const order = ["scale", "ik", ...(ex["grf.mot"] ? ["id", "ma", "rra", "so", "ceinms"] : [])];
     for (const tool of order) {
+      if (Q.skip.has(tool)) { log(`${tool}: ${T("sq_skipped")}`); continue; }
       if (!have.has(tool)) { log(`${tool}: ${T("sq_needsEngine")}`); continue; }
       log(`${tool} …`);
       await client.toolRun(id, tool);
@@ -81,21 +82,24 @@ export async function runQuick(ctx, hooks) {
 export function quickHTML(ctx) {
   T = ctx.t; const t = ctx.t;
   const opt = (list, cur, none) => `<option value="">${esc(none)}</option>` + list.map((x) => `<option value="${esc(x)}"${x === cur ? " selected" : ""}>${esc(x)}</option>`).join("");
-  return `<div class="card" id="simQuick" style="margin-bottom:12px">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>${t("sq_title")}</b>
+  return `<div class="simModel" id="simQuick">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><label style="margin:0">${t("sq_title")}</label>
       <button type="button" class="ghost" data-sq-pick style="margin:0;width:auto;padding:6px 12px">${Q.root ? esc(Q.name) : t("sq_pick")}</button></div>
-    <p class="note" style="margin:4px 0 8px">${t("sq_intro")}</p>
     ${Q.root ? `
-    <div class="simOpts">
+    <div class="simOpts" style="margin-top:6px">
       <label class="simOpt">${t("sq_trial")} <select data-sq-trial>${opt(Q.c3ds, Q.trial, t("ss_none"))}</select></label>
       <label class="simOpt">${t("sq_static")} <select data-sq-static>${opt(Q.c3ds, Q.static, t("sq_staticNone"))}</select></label>
-      <label class="simOpt">${t("sq_staticSeconds")} <input type="text" data-sq-sec value="${Q.staticSeconds}" style="width:70px"></label>
+      ${Q.static ? "" : `<label class="simOpt">${t("sq_staticSeconds")} <input type="text" data-sq-sec value="${Q.staticSeconds}" style="width:70px"></label>`}
     </div>
-    <p class="note" style="margin:6px 0 0">${t("sq_massNote")}</p>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center">
-      <button type="button" data-sq-run${Q.busy || !Q.trial ? " disabled" : ""}>${t("sq_run")}</button>
-    </div>
-    ${Q.log.length ? `<div class="osimLog" style="margin-top:8px">${Q.log.map(esc).join("\n")}</div>` : ""}` : ""}
+    <p class="note" style="margin:6px 0 0">${t("sq_where", { dir: (Q.trial || "<trial>").replace(/\.c3d$/i, "") + "_simulations" })}</p>` : `<p class="note" style="margin:6px 0 0">${t("sq_intro")}</p>`}
+  </div>`;
+}
+
+export function quickFooterHTML(ctx) {
+  const t = ctx.t;
+  return `<div style="margin-top:12px">
+    <button type="button" data-sq-run class="simGo"${Q.busy || !Q.trial ? " disabled" : ""}>${Q.busy ? t("sq_running") : t("sq_simulate")}</button>
+    ${Q.log.length ? `<div class="osimLog" style="margin-top:8px">${Q.log.map(esc).join("\n")}</div>` : ""}
   </div>`;
 }
 
@@ -110,7 +114,7 @@ export function quickWire(box, ctx, hooks) {
     hooks.repaint();
   });
   on("[data-sq-trial]", "onchange", (e) => { Q.trial = e.target.value; hooks.repaint(); });
-  on("[data-sq-static]", "onchange", (e) => { Q.static = e.target.value; });
+  on("[data-sq-static]", "onchange", (e) => { Q.static = e.target.value; hooks.repaint(); });
   on("[data-sq-sec]", "onchange", (e) => { const v = parseFloat(e.target.value); if (v > 0) Q.staticSeconds = v; });
   on("[data-sq-run]", "onclick", () => runQuick(ctx, hooks));
 }
