@@ -7,7 +7,7 @@
  * number. Tests, tools, docs and the Supabase folder ship nothing.
  */
 export const SHIPPED = [/^index\.html$/, /^sw\.js$/, /^src\//, /^data\//,
-  /^assets\//, /^manifest\.webmanifest$/, /^privacy\.html$/, /^formats\.html$/];
+  /^assets\//, /^manifest\.webmanifest$/, /^privacy\.html$/, /^formats\.html$/, /^glossary\//];
 export const isShipped = (f) => SHIPPED.some((re) => re.test(f));
 export const BUILD_RE = /window\.BUILD = (\d+);/;
 export const buildOf = (html) => { const m = (html || "").match(BUILD_RE); return m ? +m[1] : null; };

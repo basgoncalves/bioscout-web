@@ -33,6 +33,13 @@ npm test                     # every tests/test_*.mjs, nothing to install
   on a secure context, and `localhost` counts as one.
 - **On a phone**, use HTTPS through a tunnel (`npx localtunnel --port 8000` or
   `cloudflared tunnel --url http://localhost:8000`).
+- **Versions.** The plain link opens the **lab demo** (`?lab=1`): Record,
+  Process, Simulate and the [glossary](glossary/). The full app (athletes,
+  training log, accounts) is **developer mode**. It opens from the lab home's
+  *Developer mode* button (password `DEV_PASSWORD` in `index.html`) or by
+  loading `#viewLogin` directly, and lasts for that tab only.
+- **Glossary**: [`glossary/`](https://basgoncalves.github.io/bioscout-web/glossary/)
+  lists every variable, metric and term, searchable, A–Z or by topic.
 - **Without a camera**, `?demo=1` (or `?demo=squat`) renders a stored result.
 - **Deploying**: push to `main` and GitHub Pages serves the repository root.
   The first load is about 45 MB (pose engine plus model). After that the

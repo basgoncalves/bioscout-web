@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BioScout Glossary</title>
+<link rel="icon" href="../assets/icons/favicon.ico">
+<style>
+:root { --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --sub:#5b6573; --line:#dfe3e8; --accent:#0b7a75; --chip:#e8f3f2; }
+@media (prefers-color-scheme: dark) { :root { --bg:#111417; --card:#1a1e23; --ink:#e7eaee; --sub:#9aa4b1; --line:#2b3138; --accent:#4fc1b9; --chip:#1d2f2e; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+header { position:sticky; top:0; z-index:2; background:var(--bg); border-bottom:1px solid var(--line); padding:14px 16px 10px; }
+.wrap { max-width:880px; margin:0 auto; }
+h1 { font-size:20px; margin:0 0 2px; }
+h1 a { color:inherit; text-decoration:none; }
+.sub { color:var(--sub); font-size:13px; margin:0 0 10px; }
+.bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+input[type=search] { flex:1 1 220px; min-width:0; padding:9px 12px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink); font:inherit; }
+.seg { display:inline-flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+.seg button { border:0; background:var(--card); color:var(--ink); padding:8px 12px; font:inherit; cursor:pointer; }
+.seg button[aria-pressed=true] { background:var(--accent); color:#fff; }
+.jump { display:flex; flex-wrap:wrap; gap:4px; margin-top:8px; }
+.jump a { font-size:12px; padding:2px 7px; border-radius:6px; background:var(--chip); color:var(--accent); text-decoration:none; }
+main { padding:8px 16px 60px; }
+h2 { font-size:15px; text-transform:uppercase; letter-spacing:.06em; color:var(--accent); margin:26px 0 8px; scroll-margin-top:150px; }
+.term { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin:8px 0; scroll-margin-top:150px; }
+.term:target { outline:2px solid var(--accent); }
+.term h3 { font-size:16px; margin:0; display:flex; flex-wrap:wrap; gap:6px 10px; align-items:baseline; }
+.term h3 a.self { color:inherit; text-decoration:none; }
+code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace; background:var(--chip); padding:1px 5px; border-radius:5px; }
+.unit { font-weight:400; color:var(--sub); font-size:13px; }
+.cat { font-weight:500; font-size:11px; padding:1px 7px; border-radius:20px; border:1px solid var(--line); color:var(--sub); }
+.term p { margin:6px 0 0; }
+.meta { font-size:13px; color:var(--sub); margin-top:6px; }
+.meta a { color:var(--accent); }
+.empty { color:var(--sub); padding:30px 0; text-align:center; }
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <h1><a href="../?lab=1">BioScout</a> · Glossary</h1>
+  <p class="sub">Every variable, metric and term the app shows or exports. Search it, or browse A–Z or by topic. Each entry links to the related terms.</p>
+  <div class="bar">
+    <input type="search" id="q" placeholder="Search terms, symbols, units…" autocomplete="off">
+    <div class="seg" role="group" aria-label="Sort">
+      <button type="button" id="byAZ" aria-pressed="true">A–Z</button>
+      <button type="button" id="byCat" aria-pressed="false">By topic</button>
+    </div>
+  </div>
+  <nav class="jump" id="jump"></nav>
+</div></header>
+<main><div class="wrap" id="list"></div></main>
+
+<script>
+/* One entry per term. `see` lists ids of related terms; they become links.
+ * Add a term by adding an object here -- nothing else needs to change. */
+const CATS = ["Physics", "Kinematics", "Kinetics", "Muscles & joint loads", "Reps & detection",
+              "Training", "Daily log", "Files & OpenSim", "App & data"];
+const T = [
+  // Physics
+  { id:"newton2", n:"Newton's second law", c:"Physics", u:"F = m·a", d:"The net force on a body equals its mass times its acceleration. BioScout applies it to the whole body to get the ground reaction force from the centre-of-mass acceleration, with no force plate.", see:["grf","com"] },
+  { id:"g", n:"Gravitational acceleration", sym:"g", c:"Physics", u:"9.81 m/s²", d:"Added to the vertical centre-of-mass acceleration when computing the ground reaction, since standing still still needs a force equal to body weight.", see:["grf"] },
+  { id:"com", n:"Centre of mass", sym:"COM", c:"Physics", u:"m", d:"Mass-weighted average position of all body segments. It is computed every frame from the segment centres of mass and the segment mass fractions in Winter's tables.", see:["segment","winter","grf"] },
+  { id:"segment", n:"Body segment", c:"Physics", d:"A rigid link of the model, such as the thigh, shank or foot, defined between two landmarks. Each one has a mass, centre-of-mass location and moment of inertia taken from anthropometric tables.", see:["winter","inertia"] },
+  { id:"inertia", n:"Moment of inertia", sym:"I", c:"Physics", u:"kg·m²", d:"How strongly a segment resists angular acceleration about its centre of mass. It is used in the inverse dynamics equations.", see:["winter","id"] },
+  { id:"winter", n:"Winter anthropometric tables", c:"Physics", d:"Segment mass fractions, centre-of-mass positions and radii of gyration from Winter, Biomechanics and Motor Control of Human Movement, Table 4.1.", see:["segment","inertia"] },
+  { id:"bodymass", n:"Body mass", c:"Physics", u:"kg", d:"Scales every force and moment the app reports. It is stored on the profile and flagged when it is old.", see:["norm","weight"] },
+  { id:"height", n:"Height", c:"Physics", u:"m", d:"Sets the pixel-to-metre scale. Every output in metres (depth, travel, pelvis height) is only as good as this entry.", see:["pxscale"] },
+  { id:"pxscale", n:"Pixel-to-metre scale", c:"Physics", u:"m/px", d:"Conversion from image coordinates to metres, derived from the person's entered height and their measured body height in the picture.", see:["height","pelvisty"] },
+  { id:"norm", n:"Body-weight normalisation", c:"Physics", u:"BW, N·m/kg", d:"Forces divided by body weight (BW) and moments divided by body mass, so people of different sizes can be compared.", see:["bodymass","moment"] },
+  { id:"sagittal", n:"Sagittal plane", c:"Physics", d:"The side-on plane in which flexion and extension happen. A single side-on camera measures this plane only, and motion toward or away from the camera is invisible.", see:["frontal","planar"] },
+  { id:"frontal", n:"Frontal plane", c:"Physics", d:"The front-on plane of abduction, adduction and valgus. It is shown in the joint-load figure's frontal view, which comes from the force model and not from camera measurement.", see:["sagittal","jointload"] },
+  { id:"planar", n:"Planar assumption", c:"Physics", d:"The assumption that all motion happens in one plane. Twisting or leaning toward the camera breaks it and adds error.", see:["sagittal","symmetry"] },
+  { id:"symmetry", n:"Left-right symmetry", c:"Physics", d:"One camera cannot separate the two legs, so _r and _l columns carry identical values and the load is split evenly between them.", see:["planar"] },
+  // Kinematics
+  { id:"landmark", n:"Pose landmark", c:"Kinematics", u:"33 per frame", d:"Body keypoints (shoulders, hips, knees, ankles, heels, toes…) from MediaPipe Pose Landmarker, which runs on the device. They are the only data kept from the video.", see:["mediapipe","angle"] },
+  { id:"mediapipe", n:"MediaPipe Pose Landmarker", c:"Kinematics", d:"Google's pose-estimation model. BioScout runs the WASM build in the browser, so no frame leaves the device.", see:["landmark"] },
+  { id:"angle", n:"Joint angle", sym:"θ", c:"Kinematics", u:"deg", d:"Angle between two adjacent segments, such as hip flexion, knee flexion or ankle dorsiflexion. Sign conventions follow the chosen OpenSim model family.", see:["modelfam","omega","rom"] },
+  { id:"omega", n:"Joint angular velocity", sym:"ω", c:"Kinematics", u:"deg/s", d:"Rate of change of the joint angle. It is one of the four per-joint plots.", see:["angle","power"] },
+  { id:"rom", n:"Range of motion", sym:"ROM", c:"Kinematics", u:"deg", d:"Largest minus smallest joint angle within a rep.", see:["angle","rep"] },
+  { id:"depth", n:"Squat depth", c:"Kinematics", u:"m", d:"How far the hips drop from the standing reference at the start of the set. Stand still for a moment before the first rep so the reference is clean.", see:["pxscale","rep"] },
+  { id:"travel", n:"Pull-up travel", c:"Kinematics", u:"m", d:"Vertical distance moved from the dead hang to the top. A set that never returns to a full hang reads as less travel.", see:["depth"] },
+  { id:"pelvisty", n:"pelvis_ty", c:"Kinematics", u:"m", d:"Pelvis height above the floor in the .mot export: hip-above-ankle plus ankle joint height. A standing subject should be near 0.93 m. If not, check the height entry.", see:["mot","pxscale"] },
+  { id:"fps", n:"Achieved frame rate", c:"Kinematics", u:"Hz", d:"Frames the browser actually delivered per second. It varies with light, heat and load, and limits how precise tempo and velocity can be.", see:["tempo"] },
+  { id:"filter", n:"Low-pass filter", c:"Kinematics", u:"Hz cutoff", d:"Smooths landmark trajectories before they are differentiated, since differentiation amplifies jitter.", see:["omega"] },
+  // Kinetics
+  { id:"grf", n:"Ground reaction force", sym:"GRF", c:"Kinetics", u:"N or BW", d:"Force from the floor on the body. It is derived as m·(a_com + g) rather than assumed, then split between feet (and hands for push-ups).", see:["newton2","com","cop"] },
+  { id:"cop", n:"Centre of pressure", sym:"COP", c:"Kinetics", u:"m", d:"Point where the ground reaction acts. It is assumed to be at the midfoot, which is the largest single source of error in the moments.", see:["grf","moment"] },
+  { id:"id", n:"Inverse dynamics", sym:"ID", c:"Kinetics", d:"Working backwards from measured motion and external forces to the net joint moments that must have produced it, segment by segment from the foot up.", see:["moment","grf","inertia"] },
+  { id:"moment", n:"Net joint moment", sym:"M", c:"Kinetics", u:"N·m, N·m/kg", d:"Net turning effect of all muscles and ligaments at a joint. Extension is positive. In a shallow squat the knee can show a small flexor moment, which is real and not a bug.", see:["id","power","norm"] },
+  { id:"power", n:"Joint power", sym:"P", c:"Kinetics", u:"W, W/kg", d:"Moment times angular velocity. Positive values mean concentric work (generating energy) and negative values mean eccentric work (absorbing it).", see:["moment","omega"] },
+  { id:"loaddir", n:"Load direction", c:"Kinetics", d:"Which way an added external load (bar, vest, cable) acts. Set on the load dial so the moments include it.", see:["addedkg","moment"] },
+  { id:"addedkg", n:"Added / assisted load", c:"Kinetics", u:"kg", d:"External mass added (vest, bar) or assistance removed (band). It changes the forces in the dynamics but not the force model, which cannot see load.", see:["loaddir","surrogate"] },
+  // Muscles & joint loads
+  { id:"surrogate", n:"Force-model surrogate", c:"Muscles & joint loads", d:"A trained model that predicts the result of OpenSim static optimisation from kinematics, so muscle forces appear instantly in the browser. Treat the outputs as estimates: median R² on unseen subjects is 0.46 for muscles and 0.66 for contact force.", see:["so","jcf","muscleforce"] },
+  { id:"so", n:"Static optimisation", sym:"SO", c:"Muscles & joint loads", d:"Shares the net joint moments among muscles by minimising summed activation squared. It is run fully in the lab's Simulate page and approximated in the recorder by the surrogate.", see:["surrogate","ceinms"] },
+  { id:"ceinms", n:"CEINMS", c:"Muscles & joint loads", d:"Calibrated EMG-informed neuromusculoskeletal modelling toolbox. It is an alternative to SO in Simulate that uses measured EMG to drive the muscles.", see:["so"] },
+  { id:"muscleforce", n:"Muscle force", c:"Muscles & joint loads", u:"N or BW", d:"Estimated force in each of the model's 80 lower-limb muscles, also grouped functionally (quadriceps, hamstrings, glutes, plantarflexors…). Shapes and rankings are more reliable than the newtons.", see:["surrogate","musclegroup"] },
+  { id:"musclegroup", n:"Muscle group", c:"Muscles & joint loads", d:"Functional sum of model muscles, such as quadriceps = vasti + rectus femoris. Used to keep the plots readable.", see:["muscleforce"] },
+  { id:"jcf", n:"Joint contact force", sym:"JCF", c:"Muscles & joint loads", u:"N or BW", d:"Compressive force between the joint surfaces (hip, knee, ankle). It is muscle force plus external load, so it is usually several times body weight.", see:["jointload","surrogate"] },
+  { id:"jointload", n:"Joint-load figure", c:"Muscles & joint loads", d:"One picture per task showing where the joint contact forces point at the key instants, in a sagittal or frontal view.", see:["jcf","frontal"] },
+  { id:"momentarm", n:"Moment arm", c:"Muscles & joint loads", u:"m", d:"Perpendicular distance from a muscle's line of action to the joint centre. Muscle force times moment arm gives that muscle's contribution to the joint moment.", see:["moment","muscleforce"] },
+  { id:"neckload", n:"Neck load (g)", c:"Muscles & joint loads", u:"g", d:"Head acceleration expressed in multiples of gravity, compared with the 1–6 g reference panel for neck training.", see:["g"] },
+  // Reps & detection
+  { id:"rep", n:"Rep", c:"Reps & detection", d:"One cycle of a movement, found automatically from the kinematic signal. For running, each foot contact is a rep.", see:["detect","repquality","meanrep"] },
+  { id:"detect", n:"Movement detection", c:"Reps & detection", d:"Works out which movement was done from kinematics alone: squat, pull-up, push-up, dip, jumps, jump shot, kickback, heel raise, running, walking or strokes.", see:["rep"] },
+  { id:"repquality", n:"Rep quality", c:"Reps & detection", d:"Each rep is graded clean, acceptable or poor from its depth, smoothness and tracking confidence. Reps can be removed and restored by hand.", see:["rep"] },
+  { id:"meanrep", n:"Mean rep (ensemble)", c:"Reps & detection", u:"0–100 % of rep", d:"All reps of a set time-normalised to 0–100 % and averaged, with a spread band. This is the curve most plots show.", see:["rep"] },
+  { id:"tempo", n:"Tempo", c:"Reps & detection", u:"s", d:"Duration of the down and up phases. It is approximate because browser frame rate varies.", see:["fps"] },
+  { id:"flight", n:"Flight time / jump height", c:"Reps & detection", u:"s, m", d:"Time in the air, found by fitting a parabola to the jump, and the height that implies (h = g·t²/8).", see:["g","rsi"] },
+  { id:"rsi", n:"Reactive strength index", sym:"RSI", c:"Reps & detection", d:"Jump height divided by ground contact time, used to rate fast stretch-shortening ability in rebound jumps.", see:["flight"] },
+  { id:"framing", n:"Framing check", c:"Reps & detection", d:"Warns when part of the body leaves the picture, because a missing ankle silently corrupts every angle below the hip.", see:["landmark"] },
+  // Training
+  { id:"session", n:"Session", c:"Training", d:"A training occasion containing one or more sets, filed under a day in the calendar.", see:["set"] },
+  { id:"set", n:"Set", c:"Training", d:"One continuous recording of a movement, made up of reps.", see:["rep","session"] },
+  { id:"rpe", n:"RPE", c:"Training", u:"0–10", d:"Rating of perceived exertion, asked after a session and used for the energy estimate when there is no heart rate.", see:["kcal"] },
+  { id:"kcal", n:"Energy expenditure", c:"Training", u:"kcal", d:"Estimated cost of a session from RPE or heart rate, duration and body mass. It feeds the day's macronutrient targets.", see:["rpe","macros"] },
+  { id:"protocol", n:"Protocol", c:"Training", d:"A scripted session with fixed work and rest times, such as Tabata or the Tom Holland circuit.", see:["session"] },
+  { id:"plan", n:"Training plan", c:"Training", d:"Training planned for a future day, with how much of it was done.", see:["session"] },
+  { id:"badge", n:"Achievement badge", c:"Training", d:"Awarded at 10, 100, 500 and 1000 lifetime reps of each movement.", see:["rep"] },
+  { id:"rtp", n:"Return to play", sym:"RTP", c:"Training", d:"Guidance by body part, injury and recovery phase on which test to repeat and what to aim for.", see:["assess"] },
+  { id:"assess", n:"Physical assessment", c:"Training", d:"Three guided camera tests combined into one report.", see:["rtp"] },
+  // Daily log
+  { id:"weight", n:"Weight log", c:"Daily log", u:"kg", d:"Body mass over time, shown as a step function (last value holds until the next entry).", see:["bodymass"] },
+  { id:"bodyfat", n:"Body-fat estimate", c:"Daily log", u:"%", d:"Body-fat percentage estimated from two camera pictures. It is an estimate, not a DXA measurement.", see:["weight"] },
+  { id:"macros", n:"Macronutrients", c:"Daily log", u:"g", d:"Protein, carbohydrate and fat targets for the day, scaled by body mass and training energy.", see:["kcal"] },
+  { id:"vitals", n:"Vitals", c:"Daily log", d:"Steps, resting heart rate and blood pressure, one reading per day.", see:["rpe"] },
+  { id:"sleep", n:"Time in bed", c:"Daily log", u:"h", d:"Hours from going to bed to getting up, which is the sleep number people can actually report.", see:["vitals"] },
+  { id:"diary", n:"Mood diary", c:"Daily log", d:"How the day went, on a Daylio-style five-point scale with tags.", see:["sleep"] },
+  // Files & OpenSim
+  { id:"mot", n:".mot file", c:"Files & OpenSim", d:"OpenSim motion file with joint coordinates per frame. BioScout writes one per rep: <activity>_rep<N>_<model>_joint_angles.mot.", see:["modelfam","pelvisty"] },
+  { id:"sto", n:".sto file", c:"Files & OpenSim", d:"OpenSim storage file. BioScout writes joint moments and the ground reaction per rep.", see:["moment","grf"] },
+  { id:"modelfam", n:"Model family", c:"Files & OpenSim", d:"Which OpenSim model the export is signed for. Rajagopal uses knee flexion positive (0..+145) and GPK/gait2392 uses negative (−145..+10). The wrong choice loads with no error but gives a collapsed figure.", see:["mot"] },
+  { id:"scale", n:"Scaling", c:"Files & OpenSim", d:"Fitting a generic OpenSim model to one person's marker positions. It is the first step of the Simulate pipeline.", see:["ik"] },
+  { id:"ik", n:"Inverse kinematics", sym:"IK", c:"Files & OpenSim", d:"Finds the joint angles that best match the measured markers each frame. The camera version replaces markers with pose landmarks.", see:["scale","id","landmark"] },
+  { id:"jr", n:"Joint reaction analysis", c:"Files & OpenSim", d:"OpenSim tool that turns muscle forces into joint contact forces. It is the last step in Simulate.", see:["jcf","so"] },
+  { id:"c3d", n:"C3D / marker file", c:"Files & OpenSim", d:"Motion-capture file with marker trajectories and analog channels (force plates, EMG). It is read on the Process page.", see:["emg","forceplate"] },
+  { id:"forceplate", n:"Force plate", c:"Files & OpenSim", u:"N, N·m", d:"Measured ground reaction and centre of pressure. In the lab it replaces the GRF that the camera has to derive.", see:["grf","cop"] },
+  { id:"emg", n:"EMG", c:"Files & OpenSim", u:"mV, % MVC", d:"Electromyography: electrical muscle activity. On the Process page it is filtered, rectified and enveloped, then can drive CEINMS.", see:["ceinms"] },
+  // App & data
+  { id:"lab", n:"Lab demo", c:"App & data", d:"The default version of the app (?lab=1), with Record, Process, Simulate and this glossary. It needs no account and nothing is uploaded.", see:["devmode"] },
+  { id:"devmode", n:"Developer mode", c:"App & data", d:"The full app: athletes, dashboard, training log, accounts and feed. It is opened from the lab home with a password, or by opening #viewLogin directly.", see:["lab","sync"] },
+  { id:"sync", n:"Cloud sync", c:"App & data", d:"Optional private sync of records to Supabase in the EU, merged per record by last-change time, with tombstones for deletions.", see:["devmode"] },
+  { id:"offline", n:"Offline mode", c:"App & data", d:"After the first visit the service worker caches the app and pose engine, so it runs with the network off.", see:["lab"] },
+];
+
+const byId = Object.fromEntries(T.map((t) => [t.id, t]));
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+let mode = "az";
+try { mode = localStorage.getItem("bioscout.glossary.mode") || "az"; } catch {}
+
+function card(t) {
+  const see = (t.see || []).filter((i) => byId[i]).map((i) => `<a href="#${i}">${esc(byId[i].n)}</a>`).join(" · ");
+  return `<article class="term" id="${t.id}">
+    <h3><a class="self" href="#${t.id}">${esc(t.n)}</a>${t.sym ? ` <code>${esc(t.sym)}</code>` : ""}${t.u ? ` <span class="unit">${esc(t.u)}</span>` : ""}<span class="cat">${esc(t.c)}</span></h3>
+    <p>${esc(t.d)}</p>${see ? `<div class="meta">See also: ${see}</div>` : ""}</article>`;
+}
+function render() {
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const hits = T.filter((t) => !q || [t.n, t.sym, t.u, t.d, t.c].join(" ").toLowerCase().includes(q))
+                .sort((a, b) => a.n.localeCompare(b.n));
+  const groups = new Map();
+  for (const t of hits) {
+    const k = mode === "az" ? (/[a-z]/i.test(t.n[0]) ? t.n[0].toUpperCase() : "#") : t.c;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(t);
+  }
+  const keys = mode === "az" ? [...groups.keys()].sort() : CATS.filter((c) => groups.has(c));
+  const slug = (k) => "g-" + k.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  document.getElementById("jump").innerHTML = keys.map((k) => `<a href="#${slug(k)}">${esc(k)}</a>`).join("");
+  document.getElementById("list").innerHTML = keys.length
+    ? keys.map((k) => `<h2 id="${slug(k)}">${esc(k)}</h2>` + groups.get(k).map(card).join("")).join("")
+    : `<p class="empty">No term matches “${esc(q)}”.</p>`;
+  document.getElementById("byAZ").setAttribute("aria-pressed", mode === "az");
+  document.getElementById("byCat").setAttribute("aria-pressed", mode === "cat");
+}
+function setMode(m) { mode = m; try { localStorage.setItem("bioscout.glossary.mode", m); } catch {} render(); }
+document.getElementById("byAZ").onclick = () => setMode("az");
+document.getElementById("byCat").onclick = () => setMode("cat");
+document.getElementById("q").oninput = render;
+render();
+if (location.hash) document.getElementById(location.hash.slice(1))?.scrollIntoView();
+</script>
+</body>
+</html>
