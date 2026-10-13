@@ -176,6 +176,12 @@ export function addTrialYaml(text, name) {
   L.splice(j, 0, `  ${name}: {}`);
   return L.join("\n");
 }
+/** Files of one trial ([{name, data}] relative to the session) into the open session + its yaml entry. */
+export async function writeTrial(trial, files) {
+  for (const f of files) await writeFile(S.root, f.name, f.data);
+  if (!(S.cfg.trials || {})[trial]) { S.yaml = addTrialYaml(S.yaml, trial); await writeFile(S.root, "session.yaml", S.yaml); S.cfg = parseYaml(S.yaml); }
+  await refresh();
+}
 /** Mean vertical GRF of the static trial -> body mass (kg). */
 export async function weightFromStatic() {
   const st = S.cfg.top.static_trial; if (!st) throw new Error(T("ss_noStatic"));

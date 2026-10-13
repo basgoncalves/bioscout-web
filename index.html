@@ -1338,6 +1338,16 @@ try {
         </div>
       </div>
       <button type="button" class="ghost" id="labNewBtn" data-i18n="labNew">Next person (clear results)</button>
+      <!-- The last recording as ONE bioscout trial (labtrial.js): a .zip to download, or written
+           into the session folder open in Simulate's Batch mode. Nothing is kept in the browser. -->
+      <div id="labTrialBar" class="hidden" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
+        <div class="row" style="align-items:end">
+          <div><label for="labTrialName" data-i18n="lt_name">Trial name</label><input id="labTrialName" type="text"></div>
+          <div><button type="button" id="labTrialBtn" style="margin:0">Save trial (.zip)</button></div>
+        </div>
+        <p class="note" id="labTrialNote" style="margin:6px 0 0" data-i18n="lt_note">The recording is kept only until this page closes: save it as a trial (2_experimental/&lt;trial&gt;/marker_experimental.trc, estimated grf.mot, video; 3_iterations/bioscout_web/&lt;trial&gt;/ joint angles and planar inverse dynamics). With a session folder open in Simulate → Batch mode, every recording is written into that session by itself.</p>
+        <div class="status" id="labTrialStatus"></div>
+      </div>
     </div>
     <div class="card hidden" id="assessBanner"></div>
     <div class="card trainOnly" id="setup">
@@ -1633,8 +1643,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 172;
-window.BUILD_AT = "2026-10-13 19:10";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 173;
+window.BUILD_AT = "2026-10-13 19:40";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1743,6 +1753,8 @@ import { cleanEngineUrl, engineFromSearch, fileKind, makeEngineClient, EngineErr
          defaultReactionJoint, reactionForce, scaleRows, lineChartSVG, legendHTML,
          MUSCLE_COLORS } from "./src/osimlab.js";
 import { buildSessionFiles } from "./src/osimexport.js";
+import { buildLabTrial, trialZip, nextTrialName, saveTrialToSession } from "./src/labtrial.js";
+import { S as labSession } from "./src/simsession.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
 import { RTP_REGIONS, rtpPanelHTML, recentTest, INJURY } from "./src/rtp.js";
 import { DEFAULT_SYMPTOMS, collectCycle, phaseModel, cycleStarts,
@@ -7367,6 +7379,7 @@ function enterLab() {
       $(to).dispatchEvent(new Event("change", { bubbles: true }));
     });
   }
+  $("labTrialBtn").onclick = () => labTrialSave();
   $("labNewBtn").onclick = () => {
     leaveRecorder();
     eraseAthlete(LAB_NAME);
@@ -8658,6 +8671,7 @@ async function finish() {
       kept: live ? recKept : !!shareFile,
     } : null;
     render(lastResult, fps);
+    if (LAB) labTrialReady(lastResult, fps);
     say(tr("sayAnalysed", { frames: frames.length, fps: fps.toFixed(1) }) +
         (lastResult.trackStats ? " " + trackStatsText(lastResult.trackStats) : ""));
   } catch (err) {
@@ -10777,6 +10791,37 @@ function wireRepEditor(root, sess, after) {
   });
 }
 
+/* ---- the last take as a bioscout trial (lab demo only) ------------------- */
+let labTake = null;       // { res, frames, fps, videoBlob } of the last finished recording; gone with the page
+function labTrialReady(res, fps) {
+  labTake = { res, frames: frames.slice(), fps, videoBlob: videoBlob && videoBlob.size ? videoBlob : null };
+  const bar = $("labTrialBar"); if (!bar) return;
+  bar.classList.remove("hidden");
+  $("labTrialName").value = nextTrialName(res.activity, res.setIndex);
+  $("labTrialBtn").textContent = labSession.root ? tr("lt_write", { s: labSession.name }) : tr("lt_zip");
+  $("labTrialStatus").textContent = "";
+  if (labSession.root) labTrialSave();           // in a session every recording is filed by itself
+}
+async function labTrialSave() {
+  if (!labTake) return;
+  const { res, frames: fr, fps, videoBlob: vb } = labTake;
+  const trial = ($("labTrialName").value || "").trim().replace(/[^\w-]+/g, "_") || nextTrialName(res.activity, res.setIndex);
+  const st = $("labTrialStatus");
+  try {
+    st.textContent = tr("lt_packing");
+    const video = vb ? { name: "video." + extFor(vb.type), data: await blobBytes(vb) } : null;
+    const files = buildLabTrial({ res, frames: fr, fps, trial, video, massKg: res.massKg });
+    if (labSession.root) {
+      const where = await saveTrialToSession(files, trial);
+      st.textContent = tr("lt_written", { where });
+    } else {
+      const blob = trialZip(files), url = URL.createObjectURL(blob), a = document.createElement("a");
+      a.href = url; a.download = `${trial}.zip`; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
+      st.textContent = tr("lt_zipped", { trial, mb: (blob.size / 1e6).toFixed(1) });
+    }
+  } catch (e) { st.textContent = "✗ " + e.message; }
+}
 function render(res, fps) {
   shownRes = res; shownFps = fps;
   $("shareSetBtn").classList.toggle("hidden", !canShare(res));
