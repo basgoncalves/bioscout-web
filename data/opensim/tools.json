@@ -297,18 +297,22 @@
   },
   {
    "id": "ceinms",
-   "label": "CEINMS",
-   "options": {},
+   "label": "CEINMS (Python solver on the server; CEINMS.exe on a Windows lab PC)",
+   "options": {
+    "solver": "Solver: auto, python (mew, runs anywhere) or exe (CEINMS.exe, Windows + EMG)",
+    "mass": "Body mass (kg) -- default: the one given to Scale",
+    "jra": "Also joint contact forces (1 = yes)"
+   },
    "slots": [
     {
      "id": "emg_mot",
-     "label": "EMG envelopes, filtered and normalised (.mot/.sto)",
+     "label": "EMG envelopes, filtered and normalised (.mot/.sto) -- optional with the Python solver",
      "ext": [
       ".mot",
       ".sto"
      ],
      "template": null,
-     "required": true
+     "required": false
     },
     {
      "id": "ik_mot",
