@@ -997,12 +997,6 @@ export function mountProcess(root, { t, download }) {
         <button type="submit" style="margin:0;width:auto;padding:0 16px">${t("pr_run")}</button>
       </form>
       ${out.length ? `<div class="osimLog" style="max-height:150px">${out.map((o) => `<div style="${o.ok ? "" : "color:var(--warn)"}">&gt; ${escX(o.line)}${o.msg ? `\n  ${escX(o.msg)}` : ""}</div>`).join("")}</div>` : ""}
-      ${S.log.length ? `<details style="margin-top:8px"><summary>${t("pr_recipe")} (${S.log.length})</summary>
-        <textarea id="prRecipe" rows="5" style="width:100%;font:12px ui-monospace,Consolas,monospace;margin-top:6px">${escX(S.log.join("\n"))}</textarea>
-        <div class="row" style="gap:8px;margin-top:6px"><button type="button" class="ghost" id="prRunAll" style="margin:0">${t("pr_runAll")}</button>
-        <button type="button" class="ghost" id="prRecipeSave" style="margin:0">${t("pr_saveRecipe")}</button></div></details>` : ""}
-      <details style="margin-top:8px"><summary>${t("pr_cmdList")}</summary><table style="font-size:16px;margin-top:6px"><tbody>${HELP.map(([c, d], i) => `<tr><td style="font-family:ui-monospace,Consolas,monospace;white-space:nowrap;padding-right:8px">${escX(c)}</td><td>${escX(t(`pr_h${i}`) === `pr_h${i}` ? d : t(`pr_h${i}`))}</td></tr>`).join("")}</tbody></table>
-        <p class="note">${t("pr_cmdNote")}</p></details>
     </div>
     ${S.results.length ? `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>${t("pr_results")}</b>
       <span><button type="button" class="ghost" id="prResCsv" style="margin:0;width:auto;padding:6px 10px">${t("pr_saveCsv")}</button>

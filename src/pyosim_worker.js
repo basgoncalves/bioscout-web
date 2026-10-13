@@ -3,7 +3,7 @@
  * -> {id, log:[...]} while running, then {id, done:true, outputs:{name: text}} or {id, error}. */
 /* global importScripts, loadPyodide */
 const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
-const PY_FILES = ["__init__.py", "model.py", "io.py", "ik.py"];
+const PY_FILES = ["__init__.py", "model.py", "io.py", "ik.py", "scale.py"];
 let ready = null;
 
 function boot(base) {
@@ -46,6 +46,24 @@ ik.run("/job/" + a["model"], "/job/" + a["trc"], ("/job/" + a["tasks"]) if a.get
 `);
       const outputs = {};
       for (const f of ["setup_ik.xml", "ik.mot", "ik_marker_errors.sto"]) outputs[f] = py.FS.readFile("/job/" + f, { encoding: "utf8" });
+      self.postMessage({ id, done: true, outputs });
+    } else if (cmd === "scale") {
+      py.runPython(`
+from pyosim import scale
+a = dict(args)
+al = {}
+for pair in str(a.get("aliases") or "").replace(",", " ").split():
+    if "=" in pair:
+        k, v = pair.split("=", 1); al[k.strip()] = v.strip()
+mass = float(a["mass"]) if a.get("mass") not in (None, "") else None
+scale.run("/job/" + a["model"], "/job/" + a["trc"], "/job/" + a["setup"], "/job/" + a["out"], mass=mass,
+          markerset=("/job/" + a["markerset"]) if a.get("markerset") else None, aliases=al or None, log=js_log)
+`);
+      const base = args.out.replace(/\.osim$/, "");
+      const outputs = {};
+      for (const f of [args.setup, args.out, base + "_scale_factors.xml", "static_pose.mot"]) {
+        try { outputs[f] = py.FS.readFile("/job/" + f, { encoding: "utf8" }); } catch { /* optional */ }
+      }
       self.postMessage({ id, done: true, outputs });
     } else throw new Error("unknown command " + cmd);
   } catch (err) {

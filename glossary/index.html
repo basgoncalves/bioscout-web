@@ -94,8 +94,8 @@ const T = [
   { id:"addedkg", n:"Added / assisted load", c:"Kinetics", u:"kg", d:"External mass added (vest, bar) or assistance removed (band). It changes the forces in the dynamics but not the force model, which cannot see load.", see:["loaddir","surrogate"] },
   // Muscles & joint loads
   { id:"surrogate", n:"Force-model surrogate", c:"Muscles & joint loads", d:"A trained model that predicts the result of OpenSim static optimisation from kinematics, so muscle forces appear instantly in the browser. Treat the outputs as estimates: median R² on unseen subjects is 0.46 for muscles and 0.66 for contact force.", see:["so","jcf","muscleforce"] },
-  { id:"so", n:"Static optimisation", sym:"SO", c:"Muscles & joint loads", d:"Shares the net joint moments among muscles by minimising summed activation squared. It is run fully in the lab's Simulate page and approximated in the recorder by the surrogate.", see:["surrogate","ceinms"] },
-  { id:"ceinms", n:"CEINMS", c:"Muscles & joint loads", d:"Calibrated EMG-informed neuromusculoskeletal modelling toolbox. It is an alternative to SO in Simulate that uses measured EMG to drive the muscles.", see:["so"] },
+  { id:"so", n:"Static optimisation", sym:"SO", c:"Muscles & joint loads", d:"Shares the net joint moments among muscles by minimising summed activation squared. It is run fully in the lab's Simulate page and approximated in the recorder by the surrogate.", see:["surrogate","ceinms"], link:["OpenSim static optimisation","https://opensim.stanford.edu/"] },
+  { id:"ceinms", n:"CEINMS", c:"Muscles & joint loads", d:"Calibrated EMG-informed neuromusculoskeletal modelling toolbox. It is an alternative to SO in Simulate that uses measured EMG to drive the muscles.", see:["so"], link:["CEINMS paper (Pizzolato et al. 2015)","https://pmc.ncbi.nlm.nih.gov/articles/PMC4655131/"] },
   { id:"muscleforce", n:"Muscle force", c:"Muscles & joint loads", u:"N or BW", d:"Estimated force in each of the model's 80 lower-limb muscles, also grouped functionally (quadriceps, hamstrings, glutes, plantarflexors…). Shapes and rankings are more reliable than the newtons.", see:["surrogate","musclegroup"] },
   { id:"musclegroup", n:"Muscle group", c:"Muscles & joint loads", d:"Functional sum of model muscles, such as quadriceps = vasti + rectus femoris. Used to keep the plots readable.", see:["muscleforce"] },
   { id:"jcf", n:"Joint contact force", sym:"JCF", c:"Muscles & joint loads", u:"N or BW", d:"Compressive force between the joint surfaces (hip, knee, ankle). It is muscle force plus external load, so it is usually several times body weight.", see:["jointload","surrogate"] },
@@ -133,6 +133,7 @@ const T = [
   { id:"sto", n:".sto file", c:"Files & OpenSim", d:"OpenSim storage file. BioScout writes joint moments and the ground reaction per rep.", see:["moment","grf"] },
   { id:"modelfam", n:"Model family", c:"Files & OpenSim", d:"Which OpenSim model the export is signed for. Rajagopal uses knee flexion positive (0..+145) and GPK/gait2392 uses negative (−145..+10). The wrong choice loads with no error but gives a collapsed figure.", see:["mot"] },
   { id:"scale", n:"Scaling", c:"Files & OpenSim", d:"Fitting a generic OpenSim model to one person's marker positions. It is the first step of the Simulate pipeline.", see:["ik"] },
+  { id:"opensim", n:"OpenSim", c:"Files & OpenSim", d:"Open-source musculoskeletal modelling and simulation software from Stanford. BioScout exports OpenSim files and runs its tools (scale, IK, ID, SO, joint reaction) in Simulate.", see:["scale","ik","so","mot"], link:["opensim.stanford.edu","https://opensim.stanford.edu/"] },
   { id:"ik", n:"Inverse kinematics", sym:"IK", c:"Files & OpenSim", d:"Finds the joint angles that best match the measured markers each frame. The camera version replaces markers with pose landmarks.", see:["scale","id","landmark"] },
   { id:"jr", n:"Joint reaction analysis", c:"Files & OpenSim", d:"OpenSim tool that turns muscle forces into joint contact forces. It is the last step in Simulate.", see:["jcf","so"] },
   { id:"c3d", n:"C3D / marker file", c:"Files & OpenSim", d:"Motion-capture file with marker trajectories and analog channels (force plates, EMG). It is read on the Process page.", see:["emg","forceplate"] },
@@ -154,7 +155,7 @@ function card(t) {
   const see = (t.see || []).filter((i) => byId[i]).map((i) => `<a href="#${i}">${esc(byId[i].n)}</a>`).join(" · ");
   return `<article class="term" id="${t.id}">
     <h3><a class="self" href="#${t.id}">${esc(t.n)}</a>${t.sym ? ` <code>${esc(t.sym)}</code>` : ""}${t.u ? ` <span class="unit">${esc(t.u)}</span>` : ""}<span class="cat">${esc(t.c)}</span></h3>
-    <p>${esc(t.d)}</p>${see ? `<div class="meta">See also: ${see}</div>` : ""}</article>`;
+    <p>${esc(t.d)}</p>${see ? `<div class="meta">See also: ${see}</div>` : ""}${t.link ? `<div class="meta"><a href="${t.link[1]}" target="_blank" rel="noopener">${esc(t.link[0])} ↗</a></div>` : ""}</article>`;
 }
 function render() {
   const q = document.getElementById("q").value.trim().toLowerCase();

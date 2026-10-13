@@ -4,7 +4,7 @@
  * the tools run in a Web Worker with Pyodide + py/pyosim (pure-Python OpenSim).
  * For now: inverse kinematics only; the other sections say they need the engine.
  */
-const LOCAL_TOOLS = new Set(["ik"]);
+const LOCAL_TOOLS = new Set(["scale", "ik"]);
 const BASE = new URL("../", import.meta.url).href;
 
 /** A PNG of the main joint angles from an ik.mot (left vs right, like the course figures). */
@@ -73,6 +73,32 @@ export function makeLocalClient(spec) {
     });
   }
 
+  async function runScale() {
+    const sp = job.tools.scale, o = job.options.scale || {};
+    const trc = files["scale:static_trc"] || fail("bad_request", "drop the static trial markers (.trc)");
+    if (!job.model) fail("bad_request", "choose the generic model first");
+    const r = await fetch(BASE + "data/opensim/models/" + job.model);
+    if (!r.ok) fail("bad_request", `${job.model} is not available in the browser yet`);
+    const model = new File([await r.blob()], job.model.split("/").pop());
+    const setup = files["scale:scale_setup"] || new File([await (await fetch(BASE + "data/opensim/setup_files/setup_scale.xml")).blob()], "setup_scale.xml");
+    const trcName = /\.trc$/i.test(trc.name) ? trc.name : "static.trc";
+    const setupName = "setup_scale.xml";
+    const out = model.name.replace(/\.osim$/i, "") + "_scaled.osim";
+    const payload = { [model.name]: await model.arrayBuffer(), [trcName]: await trc.arrayBuffer(), [setupName]: await setup.arrayBuffer() };
+    const args = { model: model.name, trc: trcName, setup: setupName, out, mass: o.mass, aliases: o.aliases };
+    if (files["scale:markerset"]) { payload["markers.xml"] = await files["scale:markerset"].arrayBuffer(); args.markerset = "markers.xml"; }
+    sp.log = [];
+    const t0 = Date.now();
+    try {
+      outs.scale = await runWorker("scale", payload, args, (l) => { sp.log.push(...String(l).split("\n")); });
+      // the steps below use the new scaled model unless another one is chosen
+      if (outs.scale[out]) files["*:scaled"] = new File([outs.scale[out]], out);
+      Object.assign(sp, { state: "done", seconds: Math.round((Date.now() - t0) / 1000) });
+    } catch (e) {
+      Object.assign(sp, { state: "error", error: e.message });
+    }
+  }
+
   async function runIK() {
     const sp = job.tools.ik, o = job.options.ik || {};
     const trc = files["ik:motion_trc"] || fail("bad_request", "drop the motion trial markers (.trc)");
@@ -82,7 +108,8 @@ export function makeLocalClient(spec) {
     const args = { model: model.name, trc: trcName, t0: o.t0, t1: o.t1 };
     if (files["ik:taskset"]) { payload["tasks.xml"] = await files["ik:taskset"].arrayBuffer(); args.tasks = "tasks.xml"; }
     // a marker set dropped in Scale is put on the model, as Scale would
-    if (files["scale:markerset"]) { payload["markers.xml"] = await files["scale:markerset"].arrayBuffer(); args.markerset = "markers.xml"; }
+    // a scaled model already carries its (placed) markers; only the generic one needs the marker set
+    if (files["scale:markerset"] && !files["ik:model"] && !files["*:scaled"]) { payload["markers.xml"] = await files["scale:markerset"].arrayBuffer(); args.markerset = "markers.xml"; }
     sp.log = [];
     const t0 = Date.now();
     try {
@@ -104,13 +131,14 @@ export function makeLocalClient(spec) {
     toolClear: async (_id, tool, slot) => { delete files[`${tool}:${slot}`]; delete job.tools[tool].inputs[slot]; return snap(); },
     toolOptions: async (_id, tool, o) => { job.options[tool] = o; return snap(); },
     toolRun: async (_id, tool) => {
-      if (!LOCAL_TOOLS.has(tool)) fail("bad_request", "this step still needs the lab engine; only inverse kinematics runs in the browser so far");
+      if (!LOCAL_TOOLS.has(tool)) fail("bad_request", "this step is not in the browser yet; scale and inverse kinematics are");
       Object.assign(job.tools[tool], { state: "running", started: Date.now() / 1000, error: null });
-      runIK();                                   // in the background; the page polls status()
+      (tool === "scale" ? runScale : runIK)().catch((e) => Object.assign(job.tools[tool], { state: "error", error: e.message }));
       return snap();
     },
     toolOutputs: async (_id, tool) => ({ files: Object.entries(outs[tool] || {}).map(([path, v]) => ({ path, size: v.size ?? v.length })) }),
     toolBlob: (_id, tool, path) => { const v = (outs[tool] || {})[path]; return v == null ? null : v instanceof Blob ? v : new Blob([v], { type: "text/plain" }); },
+    getScaled: () => files["*:scaled"] || null,
     setScaled: (file) => { if (file) files["*:scaled"] = file; else delete files["*:scaled"]; },
     toolFileUrl: (_id, tool, path) => {
       const k = tool + "/" + path;

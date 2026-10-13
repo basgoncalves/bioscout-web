@@ -76,6 +76,10 @@ export function simHTML(ctx) {
         ${saved[tl.id] ? `<span class="sub">✓ ${esc(saved[tl.id])}</span>` : ""}</div>
     </details>`;
   });
+  // a model made by Scale in this browser becomes the scaled model by itself
+  const made = ctx.client && ctx.client.getScaled ? ctx.client.getScaled() : null;
+  if (made && made !== scaledFile) { scaledFile = made; scaledName = made.name; }
+  if (!made && ctx.client && ctx.client.getScaled && scaledFile) { scaledFile = null; scaledName = ""; }
   const si = spec.tools.findIndex((tl) => tl.id === "scale");
   const scaledHTML = `<div class="simModel"><label for="simScaled">${t("sim_scaled")}</label>
       <div class="simPick"><input id="simScaled" type="text" readonly placeholder="${esc(t("sim_scaled_none"))}" value="${esc(scaledName || "")}">
