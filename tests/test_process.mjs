@@ -91,6 +91,19 @@ ok(JSON.stringify(tree.derived.EMG1) === JSON.stringify(["EMG1·env50", "EMG1·e
 ok(!tree.raw.includes("EMG1·env50"), "processed columns are not listed as raw");
 ok(markerTriplets(V.current()).map((m) => m.name).join() === "LASI,RASI", "marker triplets from C3D and Vicon naming");
 
+// L02 commands (values checked against the L02 notebook on the course example data)
+const L2 = makeProcessor();
+L2.add([fromTable("P01_sj_1.csv", ["time", "Fz"], Array.from(fz, (v, i) => [i / fs, v]))]);
+ok(L2.run("impulse Fz 0.5 20").ok, "impulse command");
+const g = (m) => L2.S.results.find((q) => q.measure === m).value;
+near(g("net_impulse"), g("positive_impulse") + g("negative_impulse"), 1e-3, "net = positive + negative impulse");
+near(g("height_flight"), 30.66, 1e-3, "impulse command reports the flight-time height too");
+ok(L2.run("filters Fz 5 10 ma25 quiet 0 0.5").ok && L2.current().cols["Fz·lp10"] && L2.current().src["Fz·ma25"] === "Fz", "filters makes the columns and links them to the raw channel");
+near(L2.S.results.find((q) => q.measure === "lp10 quiet mean").value, 700, 1e-2, "a low-pass keeps the quiet-standing mean");
+const wk = fromTable("walk.csv", ["time", "Fz", "Fy"], Array.from({ length: 300 }, (_, i) => { const p = i / 299; return [i / 200, 600 * Math.sin(Math.PI * p) + 200 * Math.sin(3 * Math.PI * p), 100 * Math.sin(2 * Math.PI * p)]; }));
+L2.add([wk]);
+ok(L2.run("gait Fz Fy 60").ok && L2.S.results.some((q) => q.measure === "braking" && q.value < 0), "gait: braking reported negative whatever the walking direction");
+
 ok(chartSVG({ series: [{ x: [0, 1, 2], y: [1, 3, 2], color: "#000" }] }).svg.startsWith("<svg"), "chart draws");
 
 if (fails) { console.error(`${fails} failure(s)`); process.exit(1); }

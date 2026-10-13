@@ -565,26 +565,35 @@ try {
   .prFile > button:first-child { flex:1; }
   .prFile.sel > button:first-child { border-color:var(--accent); outline:1px solid var(--accent); }
   .prCols { max-height:220px; overflow:auto; margin-top:6px; border:1px solid var(--line); border-radius:10px; padding:4px 8px; }
-  .prCol { display:block; font-size:12.5px; padding:3px 0; word-break:break-all; }
+  .prCol { display:block; font-size:14.5px; padding:3px 0; word-break:break-all; }
   .prCol input { width:auto; display:inline-block; margin:0 6px 0 0; vertical-align:middle; min-height:0; }
   .prGroup { border-top:1px solid var(--line); padding:8px 0; }
   .prGroup summary { cursor:pointer; }
+  /* Process: larger type and the full width of the screen. */
+  #viewProcess { font-size:15.5px; }
+  #viewProcess .note { font-size:14.5px; }
+  #viewProcess label { font-size:14.5px; }
+  #viewProcess .sub { font-size:14px; }
+  #viewProcess .card b { font-size:16.5px; }
+  #viewProcess .osimLog { font-size:13.5px; }
+  .wrap:has(#viewProcess:not(.hidden)) { max-width:1500px !important; }
+  :root[data-layout="desktop"] section#viewProcess { max-width:none; }
   .prToolRow { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; padding:7px 0; border-top:1px solid var(--line); }
   .prToolRow:first-of-type { border-top:0; }
-  .prToolRow > button { width:auto; margin:0; padding:6px 10px; font-size:13px; min-width:150px; text-align:left; }
-  .prToolRow label { font-size:12px; color:var(--muted); display:inline-flex; align-items:center; gap:4px; margin:0; }
-  .prToolRow input, .prToolRow select { width:auto; max-width:170px; margin:0; padding:4px 6px; min-height:0; font-size:12.5px; }
-  .prToolRow input.prNum { width:72px; }
-  .prVis { display:grid; grid-template-columns:minmax(150px, 220px) 1fr; gap:12px; align-items:start; margin-top:10px; }
+  .prToolRow > button { width:auto; margin:0; padding:8px 12px; font-size:15px; min-width:190px; text-align:left; }
+  .prToolRow label { font-size:14px; color:var(--muted); display:inline-flex; align-items:center; gap:4px; margin:0; }
+  .prToolRow input, .prToolRow select { width:auto; max-width:220px; margin:0; padding:6px 8px; min-height:0; font-size:15px; }
+  .prToolRow input.prNum { width:84px; }
+  .prVis { display:grid; grid-template-columns:minmax(170px, 270px) 1fr; gap:12px; align-items:start; margin-top:10px; }
   @media (max-width: 680px) { .prVis { grid-template-columns:1fr; } .prChanList { max-height:150px !important; } }
   .prChanList { max-height:560px; overflow:auto; border:1px solid var(--line); border-radius:10px; padding:4px 8px; margin-top:6px; }
   .prPlots { min-width:0; }
   .prPlots .prPlot svg { user-select:none; -webkit-user-select:none; cursor:ew-resize; }
-  .prPlotTitle { font-size:13.5px; font-weight:600; margin:8px 0 2px; }
+  .prPlotTitle { font-size:16px; font-weight:600; margin:8px 0 2px; }
   .prPlotTitle:first-child { margin-top:0; }
   .prEmpty { border:1px dashed var(--line); border-radius:10px; padding:28px 12px; text-align:center; margin:2px 0 6px; }
   .prCmp { border:1px solid var(--line); border-radius:10px; padding:8px 10px; margin-top:10px; }
-  .prCmp table { font-size:12px; white-space:nowrap; }
+  .prCmp table { font-size:14px; white-space:nowrap; }
   .prCmp td, .prCmp th { padding:2px 6px; text-align:right; }
   .prCmp td:first-child, .prCmp th:first-child { text-align:left; }
   .prCmpRaw td { color:var(--muted); }
@@ -1544,7 +1553,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 138;
+window.BUILD = 139;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
