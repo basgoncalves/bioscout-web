@@ -63,8 +63,10 @@ export const HELP = [
   ["gait <Fz> <Fy> [mass_kg] [threshold]", "L02 A: stance time, peak 1, valley, peak 2, braking and propulsion (xBW); curves of all files"],
   ["impulse <Fz> [quiet_s] [threshold]", "L02 B: positive, negative and net impulse, take-off velocity, heights"],
   ["filters <col> 5 10 20 50 ma25 [quiet ab | quiet t0 t1]", "L02 C: several filters at once; peak, time of peak and quiet-window mean each"],
-  ["overlay <col> [norm]", "the same column from every file on one plot (norm: 0-100 %)"],  ["mass <kg>", "body mass typed by you; body weight = mass x g for every file"],
+  ["overlay <col> [norm]", "the same column from every file on one plot (norm: 0-100 %)"],
+  ["mass <kg>", "body mass typed by you; body weight = mass x g for every file"],
   ["step <op> [numbers] | step undo | step clear", "add to the processing applied to every channel: lowpass fc [order], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate"],
+  ["calc stats | area | impulse | flight | time", "between cursors A and B, on the ticked channels after the processing"],
 ];
 
 /**
@@ -190,6 +192,51 @@ export function makeProcessor() {
       if (S.cur >= 0 && S.ds[S.cur]) { const ds = S.ds[S.cur], k = Object.keys(ds.cols)[0]; if (k) STEPS[o].f(Float64Array.from(ds.cols[k]).slice(0, 400), ds, a, S); }
       S.pipe.push(st);
       return `${S.pipe.length}. ${stepLabel(st)} -- applied to every channel`;
+    },
+    /* Calculations between cursors A and B, on each ticked channel, after the processing chain.
+       calc stats | area | impulse | flight | time */
+    calc([what]) {
+      const ds = cur(), w = String(what || "stats").toLowerCase();
+      const c = (S.cursors || {})[ds.name]; if (!c) throw new Error("place cursors A and B on the plot first");
+      const [ta, tb] = c.slice().sort((x, y) => x - y);
+      if (w === "time") { addResult(ds, "calculate", "time A-B", tb - ta, "s"); return `${r3(tb - ta)} s between A and B`; }
+      if (w === "flight") {
+        const tf = tb - ta, h = (D.G * tf * tf) / 8;
+        addResult(ds, "calculate", "flight time (A take-off, B landing)", tf, "s"); addResult(ds, "calculate", "jump height (flight time)", 100 * h, "cm");
+        return `flight ${r3(tf)} s -> ${r3(100 * h)} cm`;
+      }
+      const keys = [...new Set(S.plot.cols.map((k) => rootOf(ds, k)))].filter((k) => ds.cols[k]);
+      if (!keys.length) throw new Error("tick a channel first");
+      const idx = []; ds.time.forEach((t, i) => { if (t >= ta && t <= tb) idx.push(i); });
+      if (idx.length < 2) throw new Error("A and B are too close together");
+      const cu = chainUnit(S.pipe, ""), bwN = S.massKg ? S.massKg * D.G : S.bw[ds.name];
+      const msgs = [];
+      for (const k of keys) {
+        const y = S.pipe.length ? processed(ds, k) : ds.cols[k], u = cu.unit || ds.units[k] || "";
+        const v = idx.map((i) => y[i]), tt = idx.map((i) => ds.time[i]), name = S.pipe.length ? `${k} (processed)` : k;
+        if (w === "stats") {
+          const st = D.stats(v, tt);
+          for (const [m, val] of Object.entries(st)) if (m !== "n" && m !== "rms") addResult(ds, "calculate", `${name} ${m.replace("t_", "time of ")}`, val, m.startsWith("t_") ? "s" : u);
+          msgs.push(`${k}: min ${r3(st.min)}, max ${r3(st.max)}, mean ${r3(st.mean)}`);
+        } else if (w === "area") {
+          const a = D.cumtrapz(Float64Array.from(v), Float64Array.from(tt)); const area = a[a.length - 1];
+          addResult(ds, "calculate", `${name} area A-B`, area, u ? `${u}·s` : "·s");
+          msgs.push(`${k}: area ${r3(area)} ${u}·s`);
+        } else if (w === "impulse") {
+          if (!(bwN > 0)) throw new Error("set the body mass first (Basic)");
+          // force in N, pointing up: undo ÷BW, and flip a plate that reports Fz downward
+          let F = cu.bw ? v.map((q) => q * bwN) : v.slice();
+          if (D.mean(F) < 0) F = F.map((q) => -q);
+          let pos = 0, neg = 0;
+          // samples from A up to (not including) B, each x 1/fs: the course notebook's sum
+          for (let i = 0; i < F.length - 1; i++) { const f = F[i] - bwN; if (f > 0) pos += f / ds.fs; else neg += f / ds.fs; }
+          const m = bwN / D.G, vto = (pos + neg) / m, h = (vto * vto) / (2 * D.G);
+          for (const [n, val, un] of [["positive impulse", pos, "N·s"], ["negative impulse", neg, "N·s"], ["net impulse", pos + neg, "N·s"], ["take-off velocity", vto, "m/s"], ["jump height (impulse)", 100 * h, "cm"]])
+            addResult(ds, "calculate", `${k} ${n}`, val, un);
+          msgs.push(`${k}: net impulse ${r3(pos + neg)} N·s, v ${r3(vto)} m/s, h ${r3(100 * h)} cm`);
+        } else throw new Error("calc stats | area | impulse | flight | time");
+      }
+      return msgs.join("; ");
     },
     /* body mass typed by the user, in kg: body weight = m g for every file */
     mass([kg]) {
@@ -675,6 +722,13 @@ export const TOOLS = [
     { k: "pr_tBandpass", f: [["n", "pr_fLow", 20], ["n", "pr_fHigh", 450], ["n", "pr_fOrder", 4]], cmd: (v) => `step bandpass ${v[0]} ${v[1]} ${v[2]}` },
     { k: "pr_tLowpass", f: [["n", "pr_fCutoff", 10], ["n", "pr_fOrder", 4]], cmd: (v) => `step lowpass ${v[0]} ${v[1]}` },
   ] },
+  { group: "pr_gCalc", note: "pr_calcNote", items: [
+    { k: "pr_cStats", f: [], cmd: () => "calc stats" },
+    { k: "pr_cArea", f: [], cmd: () => "calc area" },
+    { k: "pr_cImpulse", f: [], cmd: () => "calc impulse" },
+    { k: "pr_cFlight", f: [], cmd: () => "calc flight" },
+    { k: "pr_cTime", f: [], cmd: () => "calc time" },
+  ] },
 ];
 
 /** Mount the page into `root`. `t` translates, `download(name, text|blob)` saves a file. */
@@ -861,7 +915,7 @@ export function mountProcess(root, { t, download }) {
     const tabs = `<div class="prTabs">${TOOLS.map((g, gi) => `<button type="button" class="${gi === vis.toolTab ? "" : "ghost"}" data-ttab="${gi}">${t(g.group)}</button>`).join("")}</div>`;
     const chain = `<div class="prChain"><b>${t("pr_steps")}</b> ${S.pipe.length ? S.pipe.map((st, i) => `<span class="prChip">${i + 1}. ${escX(stepLabel(st))} <button type="button" data-unstep="${i + 1}" aria-label="${t("pr_remove")}">×</button></span>`).join("")
       + ` <button type="button" class="ghost" id="prStepsClear" style="margin:0;width:auto;padding:4px 12px">${t("pr_clearSteps")}</button>` : `<span class="sub">${t("pr_noSteps")}</span>`}</div>`;
-    return chain + tabs + [TOOLS[vis.toolTab]].map((g) => { const gi = vis.toolTab; return `<div class="prGroup">${g.items.map((it, ii) => {
+    return chain + tabs + [TOOLS[vis.toolTab]].map((g) => { const gi = vis.toolTab; return `<div class="prGroup">${g.note ? `<p class="note" style="margin:6px 0 4px">${t(g.note)}</p>` : ""}${g.items.map((it, ii) => {
       const id = `prT${gi}_${ii}`; let ci = 0;
       const fields = it.f.map(([type, lbl, def, pick], fi) => `<label>${t(lbl)} ${type === "c"
         ? colSel(`${id}_${fi}`, pick === "fz" ? (keys.find((k) => /^(Fz|Fz_N|Fz \(N\))$/i.test(k)) || "@fz")

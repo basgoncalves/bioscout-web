@@ -114,6 +114,19 @@ near(pa[500], Math.abs(D.lowpass(Ch.current().cols.a, 1000, 10)[500]), 1e-9, "ch
 ok(!Ch.run("step lowpass 900").ok, "a cut-off above fs/2 is refused when added");
 ok(Ch.run("step undo").ok && Ch.S.pipe.length === 1 && Ch.run("step clear").ok && !Ch.S.pipe.length, "undo and clear");
 
+// Calculate tab: impulse between cursors = the impulse command (same sum as the notebook)
+const Cl = makeProcessor();
+Cl.add([fromTable("P01_sj_2.csv", ["time", "Fz"], Array.from(fz, (v, i) => [i / fs, v]))]);
+Cl.run("mass " + 700 / 9.81); Cl.run("plot Fz");
+const toI = D.jumpHeightFlight(fz, fs).window;
+Cl.S.cursors["P01_sj_2.csv"] = [0, toI[0] / fs];
+ok(Cl.run("calc impulse").ok, "calc impulse");
+const Ref = makeProcessor(); Ref.add([fromTable("x.csv", ["time", "Fz"], Array.from(fz, (v, i) => [i / fs, v]))]); Ref.run("impulse Fz 1 20");
+near(Cl.S.results.find((q) => q.measure === "Fz jump height (impulse)").value, Ref.S.results.find((q) => q.measure === "height_impulse").value, 2e-3, "calc impulse = impulse command");
+Cl.S.cursors["P01_sj_2.csv"] = [toI[0] / fs, toI[1] / fs];
+ok(Cl.run("calc flight").ok && Math.abs(Cl.S.results.find((q) => q.measure === "jump height (flight time)").value - 30.66) < 0.05, "calc flight between cursors");
+ok(Cl.run("calc stats").ok && Cl.run("calc area").ok && !Cl.run("calc nonsense").ok, "calc stats / area; unknown calc refused");
+
 ok(chainUnit([{ op: "lowpass" }, { op: "normmax" }], "N").unit === "%", "% of max ends in %");
 ok(chainUnit([{ op: "divbw" }], "N").bw && chainUnit([{ op: "divbw" }], "N").unit === "×BW", "÷ body weight ends in ×BW");
 ok(/text-anchor="end"[^>]*>%<\/text>/.test(chartSVG({ series: [{ x: [0, 1], y: [0, 800], color: "#000" }, { x: [0, 1], y: [0, 100], color: "#000", axis: "r" }], yLabelR: "%" }).svg), "second y axis labelled on the right");
