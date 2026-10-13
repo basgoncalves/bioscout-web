@@ -1961,13 +1961,14 @@ const EN = {
   "zoomIn": "Larger text",
   "zoomOut": "Smaller text",
   "pr_gCalc": "Calculate",
-  "pr_calcNote": "Between cursors A and B, on each ticked channel (processed if there are steps, raw if not). Results go to the table at the bottom. Impulse: set the body mass, put A in quiet standing before the jump and B at take-off. Flight: A at take-off, B at landing.",
+  "pr_calcNote": "Between cursors A and B, on each ticked channel (processed if there are steps, raw if not). Results go to the table at the bottom. Jump height from impulse finds the phases itself: body weight (Basic, or the first 0.5 s), centre-of-mass velocity from the force, the lowest point where velocity returns to zero, take-off below 20 N; the cursors then mark the concentric phase. Flight: A at take-off, B at landing.",
   "pr_cStats": "Min, max, mean, SD, range",
   "pr_cArea": "Area under the curve (impulse)",
-  "pr_cImpulse": "Jump height from impulse (A quiet, B take-off)",
+  "pr_cImpulse": "Jump height from impulse (automatic: lowest point to take-off)",
   "pr_cFlight": "Jump height from flight time (A take-off, B landing)",
   "pr_cTime": "Time between A and B",
   "pr_h35": "between cursors A and B, on the ticked channels after the processing",
+  "pr_tBwSet": "Set body weight (mean between A and B)",
 };
 
 const PT = {
@@ -3904,13 +3905,14 @@ const PT = {
   "zoomIn": "Texto maior",
   "zoomOut": "Texto menor",
   "pr_gCalc": "Calcular",
-  "pr_calcNote": "Entre os cursores A e B, em cada canal marcado (processado se houver passos, bruto se não). Os resultados vão para a tabela no fim. Impulso: defina a massa corporal, ponha A na posição parada antes do salto e B na saída do solo. Voo: A na saída, B na aterragem.",
+  "pr_calcNote": "Entre os cursores A e B, em cada canal marcado (processado se houver passos, bruto se não). Os resultados vão para a tabela no fim. O impulso encontra as fases sozinho: peso corporal (Básico, ou o primeiro 0,5 s), velocidade do centro de massa a partir da força, ponto mais baixo onde a velocidade volta a zero, saída abaixo de 20 N; os cursores marcam depois a fase concêntrica. Voo: A na saída, B na aterragem.",
   "pr_cStats": "Mín, máx, média, DP, amplitude",
   "pr_cArea": "Área sob a curva (impulso)",
-  "pr_cImpulse": "Altura do salto pelo impulso (A parado, B saída)",
+  "pr_cImpulse": "Altura do salto pelo impulso (automático: ponto mais baixo até à saída)",
   "pr_cFlight": "Altura do salto pelo tempo de voo (A saída, B aterragem)",
   "pr_cTime": "Tempo entre A e B",
   "pr_h35": "entre os cursores A e B, nos canais marcados depois do processamento",
+  "pr_tBwSet": "Definir peso corporal (média entre A e B)",
 };
 
 const DE = {
@@ -5846,13 +5848,14 @@ const DE = {
   "zoomIn": "Größere Schrift",
   "zoomOut": "Kleinere Schrift",
   "pr_gCalc": "Berechnen",
-  "pr_calcNote": "Zwischen den Cursorn A und B, für jeden angehakten Kanal (verarbeitet, wenn es Schritte gibt, sonst roh). Ergebnisse landen in der Tabelle unten. Impuls: Körpermasse setzen, A in den ruhigen Stand vor dem Sprung, B auf den Absprung. Flug: A auf den Absprung, B auf die Landung.",
+  "pr_calcNote": "Zwischen den Cursorn A und B, für jeden angehakten Kanal (verarbeitet, wenn es Schritte gibt, sonst roh). Ergebnisse landen in der Tabelle unten. Der Impuls findet die Phasen selbst: Körpergewicht (Basis, oder die ersten 0,5 s), Schwerpunktgeschwindigkeit aus der Kraft, tiefster Punkt bei Geschwindigkeit null, Absprung unter 20 N; danach markieren die Cursor die konzentrische Phase. Flug: A auf den Absprung, B auf die Landung.",
   "pr_cStats": "Min, Max, Mittel, SD, Spannweite",
   "pr_cArea": "Fläche unter der Kurve (Impuls)",
-  "pr_cImpulse": "Sprunghöhe aus Impuls (A ruhig, B Absprung)",
+  "pr_cImpulse": "Sprunghöhe aus Impuls (automatisch: tiefster Punkt bis Absprung)",
   "pr_cFlight": "Sprunghöhe aus Flugzeit (A Absprung, B Landung)",
   "pr_cTime": "Zeit zwischen A und B",
   "pr_h35": "zwischen den Cursorn A und B, für die angehakten Kanäle nach der Verarbeitung",
+  "pr_tBwSet": "Körpergewicht setzen (Mittelwert zwischen A und B)",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };

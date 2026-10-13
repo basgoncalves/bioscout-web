@@ -197,7 +197,7 @@ export function makeProcessor() {
        calc stats | area | impulse | flight | time */
     calc([what]) {
       const ds = cur(), w = String(what || "stats").toLowerCase();
-      const c = (S.cursors || {})[ds.name]; if (!c) throw new Error("place cursors A and B on the plot first");
+      const c = (S.cursors || {})[ds.name] || [ds.time[0], ds.time[ds.time.length - 1]];
       const [ta, tb] = c.slice().sort((x, y) => x - y);
       if (w === "time") { addResult(ds, "calculate", "time A-B", tb - ta, "s"); return `${r3(tb - ta)} s between A and B`; }
       if (w === "flight") {
@@ -223,17 +223,16 @@ export function makeProcessor() {
           addResult(ds, "calculate", `${name} area A-B`, area, u ? `${u}·s` : "·s");
           msgs.push(`${k}: area ${r3(area)} ${u}·s`);
         } else if (w === "impulse") {
-          if (!(bwN > 0)) throw new Error("set the body mass first (Basic)");
-          // force in N, pointing up: undo ÷BW, and flip a plate that reports Fz downward
-          let F = cu.bw ? v.map((q) => q * bwN) : v.slice();
-          if (D.mean(F) < 0) F = F.map((q) => -q);
-          let pos = 0, neg = 0;
-          // samples from A up to (not including) B, each x 1/fs: the course notebook's sum
-          for (let i = 0; i < F.length - 1; i++) { const f = F[i] - bwN; if (f > 0) pos += f / ds.fs; else neg += f / ds.fs; }
-          const m = bwN / D.G, vto = (pos + neg) / m, h = (vto * vto) / (2 * D.G);
-          for (const [n, val, un] of [["positive impulse", pos, "N·s"], ["negative impulse", neg, "N·s"], ["net impulse", pos + neg, "N·s"], ["take-off velocity", vto, "m/s"], ["jump height (impulse)", 100 * h, "cm"]])
+          const r = D.jumpByImpulse(Float64Array.from(y), ds.fs, S.bw[ds.name] || (S.massKg ? S.massKg * D.G : null));
+          for (const [n, val, un] of [["body weight", r.bw, "N"], ["movement onset", r.tOnset, "s"], ["lowest point (concentric start)", r.tLow, "s"],
+            ["take-off", r.tTakeoff, "s"], ["eccentric (braking) impulse", r.eccImpulse, "N·s"], ["concentric impulse", r.conImpulse, "N·s"],
+            ["take-off velocity", r.vTakeoff, "m/s"], ["jump height (impulse)", 100 * r.height, "cm"],
+            ...(r.flightHeight != null ? [["jump height (flight time)", 100 * r.flightHeight, "cm"]] : [])])
             addResult(ds, "calculate", `${k} ${n}`, val, un);
-          msgs.push(`${k}: net impulse ${r3(pos + neg)} N·s, v ${r3(vto)} m/s, h ${r3(100 * h)} cm`);
+          // show the concentric phase with the cursors
+          S.cursors[ds.name] = [r.tLow, r.tTakeoff];
+          msgs.push(`${k}: BW ${r3(r.bw)} N; concentric ${r3(r.tLow)}-${r3(r.tTakeoff)} s, impulse ${r3(r.conImpulse)} N·s, v ${r3(r.vTakeoff)} m/s, h ${r3(100 * r.height)} cm${r.flightHeight != null ? ` (flight ${r3(100 * r.flightHeight)} cm)` : ""}`);
+          break;
         } else throw new Error("calc stats | area | impulse | flight | time");
       }
       return msgs.join("; ");
@@ -293,7 +292,7 @@ export function makeProcessor() {
       if (/^ab$/i.test(a || "")) { const cc = (S.cursors || {})[ds.name]; if (!cc) throw new Error("no cursors yet"); [t0, t1] = cc.slice().sort((x, y) => x - y); v = col(ds, b || "@fz"); }
       else { t0 = numArg(a, 0); t1 = numArg(b, 1); v = col(ds, c || "@fz"); }
       const y = []; ds.time.forEach((t, i) => { if (t >= t0 && t < t1) y.push(v.y[i]); });
-      const w = D.mean(y); S.bw[ds.name] = w; addResult(ds, "body weight", "body weight", w, "N"); addResult(ds, "body weight", "body mass", w / D.G, "kg");
+      const w = Math.abs(D.mean(y)); S.bw[ds.name] = w; S.massKg = null; addResult(ds, "body weight", "body weight", w, "N"); addResult(ds, "body weight", "body mass", w / D.G, "kg");
       return `body weight ${r3(w)} N (${r3(w / D.G)} kg)`;
     },
     /* L02 Station A (L02_DataAnalysis notebook): one stance, vertical + AP force in xBW. */
@@ -706,18 +705,12 @@ export function chartSVG({ series, xLabel = "s", yLabel = "", yLabelR = "", mark
  */
 export const TOOLS = [
   { group: "pr_gBasic", items: [
-    { k: "pr_tMinMax", f: [], ui: "minmax" },
-    { k: "pr_tMassSet", f: [["n", "pr_fMass", "", "mass"]], cmd: (v) => `mass ${v[0]}` },
-    { k: "pr_tScale", f: [["n", "pr_fFactor", 1]], cmd: (v) => `step scale ${v[0]}` },
-    { k: "pr_tXbw", f: [], cmd: () => "step divbw" },
-    { k: "pr_tNormMax", f: [], cmd: () => "step normmax" },
-    { k: "pr_tSmooth", f: [["n", "pr_fSamples", 25]], cmd: (v) => `step smooth ${v[0]}` },
-    { k: "pr_tDeriv", f: [], cmd: () => "step deriv" },
-    { k: "pr_tIntegrate", f: [], cmd: () => "step integrate" },
-  ] },
-  { group: "pr_gFilter", items: [
+    { k: "pr_tBwSet", f: [], ui: "bwab" },
     { k: "pr_tOffset", f: [], cmd: () => "step offset" },
     { k: "pr_tRectify", f: [], cmd: () => "step rectify" },
+    { k: "pr_tSmooth", f: [["n", "pr_fSamples", 25]], cmd: (v) => `step smooth ${v[0]}` },
+  ] },
+  { group: "pr_gFilter", items: [
     { k: "pr_tHighpass", f: [["n", "pr_fCutoff", 20], ["n", "pr_fOrder", 4]], cmd: (v) => `step highpass ${v[0]} ${v[1]}` },
     { k: "pr_tBandpass", f: [["n", "pr_fLow", 20], ["n", "pr_fHigh", 450], ["n", "pr_fOrder", 4]], cmd: (v) => `step bandpass ${v[0]} ${v[1]} ${v[2]}` },
     { k: "pr_tLowpass", f: [["n", "pr_fCutoff", 10], ["n", "pr_fOrder", 4]], cmd: (v) => `step lowpass ${v[0]} ${v[1]}` },
@@ -923,7 +916,7 @@ export function mountProcess(root, { t, download }) {
           : pl.raw[ci] ? (ci++ === 0 ? pl.raw[0].key : pre[ci - 1]) : "")
         : `<input id="${id}_${fi}" type="${type === "n" ? "number" : "text"}" step="any" value="${escX(pick === "mass" ? (S.massKg ?? "") : (def ?? ""))}"${type === "n" ? ' class="prNum"' : ""}${pick === "mass" ? ' placeholder="kg"' : ""}>`}</label>`).join("");
       const on = it.ui === "minmax" && vis.minmax;
-      return `<div class="prToolRow"><button type="button" data-tool="${gi}_${ii}"${it.ui && !on ? ' class="ghost"' : ""}>${t(it.k)}${it.ui ? (on ? " ✓" : "") : ""}</button>${fields}</div>`;
+      return `<div class="prToolRow"><button type="button" data-tool="${gi}_${ii}"${it.ui === "minmax" && !on ? ' class="ghost"' : ""}>${t(it.k)}${it.ui ? (on ? " ✓" : "") : ""}</button>${fields}</div>`;
     }).join("")}</div>`; }).join("");
   }
 
@@ -1039,6 +1032,7 @@ export function mountProcess(root, { t, download }) {
       b.onclick = () => {
         const [gi, ii] = b.dataset.tool.split("_").map(Number), it = TOOLS[gi].items[ii];
         if (it.ui === "minmax") { vis.minmax = !vis.minmax; render(); return; }
+        if (it.ui === "bwab") { const k = plotted(ds).raw[0]; const line = `bw ab ${quote(k ? k.key : "@fz")}`; q("#prCmd").value = line; exec(line); return; }
         const v = it.f.map((_, fi) => root.querySelector(`#prT${gi}_${ii}_${fi}`).value);
         const lines = [].concat(it.cmd(v));
         for (const line of lines.slice(0, -1)) say(P.run(line), line);

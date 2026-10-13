@@ -401,3 +401,44 @@ export function parseName(name) {
   const cond = parts.find((p) => p !== pid && !/^\d+$/.test(p) && !["squat", "jump", "trial1"].includes(p)) || "cond";
   return { participant: pid, condition: cond };
 }
+
+/**
+ * Jump height from the concentric impulse (force plate only, no position data).
+ *   body weight: given, else the mean of the first 0.5 s;  m = BW / g
+ *   a = (F - BW) / m, integrated (sample x 1/fs, as the course notebook) -> centre-of-mass velocity
+ *   movement onset: |F - BW| first exceeds 5 SD of the quiet period (at least 2 % BW)
+ *   take-off: F first below `threshold` after onset
+ *   lowest point = concentric start: the last zero crossing of the velocity before take-off
+ *     (going down, v < 0, then back to 0). A squat jump never goes negative: onset is used.
+ *   concentric impulse  J = sum (F - BW) / fs from the lowest point to take-off
+ *   take-off velocity   v = J / m (+ the residual of v at the lowest point) ;  height h = v^2 / 2g
+ * Also: flight-time height when a landing follows (F back above threshold).
+ * F may point down (Vicon): a negative mean is flipped.
+ */
+export function jumpByImpulse(F0, fs, bwGiven = null, threshold = 20) {
+  let F = Float64Array.from(F0);
+  if (mean(F) < 0) F = F.map((v) => -v);
+  const nq = Math.max(2, Math.trunc(0.5 * fs));
+  const quiet = Array.from(F.slice(0, nq));
+  const bw = bwGiven > 0 ? bwGiven : mean(quiet), m = bw / G;
+  const band = Math.max(5 * sd(quiet), 0.02 * bw);
+  let onset = F.findIndex((v, i) => i >= nq && Math.abs(v - bw) > band);
+  if (onset < 0) throw new Error("no movement found after the first 0.5 s of quiet standing");
+  // step back to where the force first left body weight
+  while (onset > 0 && Math.abs(F[onset - 1] - bw) > 0.25 * band) onset--;
+  let to = -1; for (let i = onset; i < F.length; i++) if (F[i] < threshold) { to = i; break; }
+  if (to < 0) throw new Error("no take-off found (force never drops below the threshold)");
+  // velocity integrated from the first sample, as the course notebook does (quiet standing adds ~0)
+  const v = new Float64Array(to + 1);
+  for (let i = 0; i < to; i++) v[i + 1] = v[i] + (F[i] - bw) / m / fs;
+  let low = onset;
+  for (let i = to - 1; i > onset; i--) if (v[i] < 0 && v[i + 1] >= 0) { low = i + 1; break; }
+  let ecc = 0, con = 0;
+  for (let i = onset; i < low; i++) ecc += (F[i] - bw) / fs;
+  for (let i = low; i < to; i++) con += (F[i] - bw) / fs;
+  const vto = v[to];          // = v(lowest point) + concentric impulse / m, with v(lowest point) = 0
+  let land = -1; for (let i = to; i < F.length; i++) if (F[i] >= threshold) { land = i; break; }
+  const tf = land > 0 ? (land - to) / fs : null;
+  return { bw, mass: m, iOnset: onset, iLow: low, iTakeoff: to, tOnset: onset / fs, tLow: low / fs, tTakeoff: to / fs,
+    eccImpulse: ecc, conImpulse: con, vTakeoff: vto, height: (vto * vto) / (2 * G), flightHeight: tf != null ? (G * tf * tf) / 8 : null };
+}
