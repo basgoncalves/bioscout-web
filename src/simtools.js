@@ -326,8 +326,14 @@ export function simWire(box, ctx) {
   // batch mode: the project folder feeds the sections and takes their outputs; quick run: one c3d does
   const modeHooks = {
     send,
-    setDir: (tool, h) => { dirs[tool] = h; },
+    setDir: (tool, h) => { if (h) dirs[tool] = h; else delete dirs[tool]; },
     setRenames: (tool, map) => { renames[tool] = map || {}; },
+    // every output of a finished step as {path, data} (for a .zip when no folder was granted)
+    outputs: async (tool) => {
+      const list = (await client.toolOutputs(id, tool)).files || [], out = [];
+      for (const f of list) { let blob = client.toolBlob ? client.toolBlob(id, tool, f.path) : null; if (!blob) blob = await (await fetch(client.toolFileUrl(id, tool, f.path))).blob(); out.push({ path: f.path, data: new Uint8Array(await blob.arrayBuffer()) }); }
+      return out;
+    },
     setOption: (tool, key, val) => ctx.act(() => client.toolOptions(id, tool, { ...((job.options || {})[tool] || {}), [key]: val })),
     setGeneric: (f) => { genericName = f ? f.name : ""; genericFile = f; if (client.setGeneric) client.setGeneric(f); },
     setScaled: (f) => { scaledName = f ? f.name : ""; scaledFile = f; if (client.setScaled) client.setScaled(f); },

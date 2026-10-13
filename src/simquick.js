@@ -13,14 +13,25 @@
  * waits for each. Nothing is kept in the browser; the folder is the result.
  */
 import { c3dToOpenSim } from "./c3dexport.js";
+import { makeZip } from "./zip.js";
 
 let T = (k) => k;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-export const Q = { root: null, name: "", c3ds: [], trial: "", static: "", staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms", "rra"]) };
+export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms", "rra"]) };
+Object.defineProperty(Q, "trial", { get: () => (Q.file ? Q.file.name : "") });
 
-async function listC3d(root) { const out = []; for await (const [n, h] of root.entries()) if (h.kind === "file" && /\.c3d$/i.test(n)) out.push(n); return out.sort(); }
-async function writeText(dir, name, data) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); }
+const PICK = { types: [{ description: "C3D", accept: { "application/octet-stream": [".c3d"] } }], excludeAcceptAllOption: false, multiple: false };
+async function pickC3d() {
+  if (window.showOpenFilePicker) { try { const [h] = await window.showOpenFilePicker(PICK); return { handle: h, file: await h.getFile() }; } catch { return null; } }
+  return new Promise((res) => { const i = document.createElement("input"); i.type = "file"; i.accept = ".c3d"; i.onchange = () => res(i.files[0] ? { handle: null, file: i.files[0] } : null); i.click(); });
+}
+/** The folder the results go to: asked once, opening in the c3d's own folder so it is one click. null -> a .zip instead. */
+async function resultsFolder() {
+  if (Q.root) return Q.root;
+  if (!window.showDirectoryPicker) return null;
+  try { Q.root = await window.showDirectoryPicker({ mode: "readwrite", startIn: Q.file.handle || "documents" }); return Q.root; } catch { return null; }
+}
 
 /** The first `seconds` of a .trc as a static trial (the subject usually stands still before moving). */
 function cropTrc(text, seconds) {
@@ -37,26 +48,29 @@ export async function runQuick(ctx, hooks) {
   const log = (s) => { Q.log.push(s); hooks.repaint(); };
   const wait = async (tool) => { for (;;) { await new Promise((r) => setTimeout(r, 1000)); const sp = (await client.status(id)).tools[tool]; if (sp.state === "done" || sp.state === "error") return sp; } };
   const have = new Set((ctx.health && ctx.health.tools) || STEPS);
+  const out = await resultsFolder();                 // before anything runs, while the click is fresh
   Q.busy = true; Q.log = []; Q.done = null;
+  const zipFiles = [];                               // when no folder: everything collected for one .zip
+  const stem = Q.trial.replace(/\.c3d$/i, ""), outName = `${stem}_simulations`;
   try {
-    const stem = Q.trial.replace(/\.c3d$/i, "");
-    const out = await Q.root.getDirectoryHandle(`${stem}_simulations`, { create: true });
-    const file = async (n) => (await Q.root.getFileHandle(n)).getFile();
-    for (const t of STEPS) hooks.setDir(t, out);
+    let dir = null;
+    if (out) { dir = await out.getDirectoryHandle(outName, { create: true }); for (const t of STEPS) hooks.setDir(t, dir); }
+    else { log(T("sq_zipMode")); for (const t of STEPS) hooks.setDir(t, null); }
+    const put = async (n, text) => { if (dir) await writeText(dir, n, text); else zipFiles.push({ name: `${outName}/${n}`, data: text }); };
     // 1. the c3d -> OpenSim files
     log(`${Q.trial}: export`);
-    const f = await file(Q.trial);
+    const f = Q.file.file;
     const ex = c3dToOpenSim(await f.arrayBuffer(), f.name);
-    for (const [n, text] of Object.entries(ex)) await writeText(out, n, text);
+    for (const [n, text] of Object.entries(ex)) await put(n, text);
     log(`  → ${Object.keys(ex).join(", ")}`);
     if (!ex["marker_experimental.trc"]) throw new Error("no markers in the c3d");
     // 2. the static trial: its own c3d, or the first seconds of this one
     let staticTrc;
-    if (Q.static && Q.static !== Q.trial) {
-      const sf = await file(Q.static); const sx = c3dToOpenSim(await sf.arrayBuffer(), sf.name);
-      staticTrc = sx["marker_experimental.trc"]; log(`${Q.static}: static trial`);
+    if (Q.staticFile) {
+      const sf = Q.staticFile.file; const sx = c3dToOpenSim(await sf.arrayBuffer(), sf.name);
+      staticTrc = sx["marker_experimental.trc"]; log(`${sf.name}: static trial`);
     } else { staticTrc = cropTrc(ex["marker_experimental.trc"], Q.staticSeconds); log(`static: the first ${Q.staticSeconds} s of ${Q.trial}`); }
-    await writeText(out, "static_marker_experimental.trc", staticTrc);
+    await put("static_marker_experimental.trc", staticTrc);
     hooks.send("scale:static_trc", new File([staticTrc], "static_marker_experimental.trc"));
     hooks.send("ik:motion_trc", new File([ex["marker_experimental.trc"]], "marker_experimental.trc"));
     if (ex["grf.mot"]) hooks.send("id:grf_mot", new File([ex["grf.mot"]], "grf.mot"));
@@ -70,28 +84,33 @@ export async function runQuick(ctx, hooks) {
       await client.toolRun(id, tool);
       const sp = await wait(tool);
       if (sp.state === "error") { log(`${tool}: failed — ${sp.error}`); if (tool === "scale" || tool === "ik") break; continue; }
-      await hooks.save(tool);
+      if (dir) await hooks.save(tool);
+      else for (const o of await hooks.outputs(tool)) zipFiles.push({ name: `${outName}/${o.path}`, data: o.data });
       log(`${tool}: done in ${sp.seconds} s`);
     }
-    Q.done = `${Q.name}/${stem}_simulations`;
-    log(T("sq_done", { dir: Q.done }));
+    if (dir) { Q.done = `${out.name}/${outName}`; log(T("sq_done", { dir: Q.done })); }
+    else {
+      const blob = makeZip(zipFiles), url = URL.createObjectURL(blob), a = document.createElement("a");
+      a.href = url; a.download = `${outName}.zip`; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
+      log(T("sq_zipped", { name: `${outName}.zip`, mb: (blob.size / 1e6).toFixed(1) }));
+    }
   } catch (e) { log("✗ " + e.message); }
   finally { Q.busy = false; hooks.repaint(); }
 }
 
 export function quickHTML(ctx) {
   T = ctx.t; const t = ctx.t;
-  const opt = (list, cur, none) => `<option value="">${esc(none)}</option>` + list.map((x) => `<option value="${esc(x)}"${x === cur ? " selected" : ""}>${esc(x)}</option>`).join("");
   return `<div class="simModel" id="simQuick">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><label style="margin:0">${t("sq_title")}</label>
-      <button type="button" class="ghost" data-sq-pick style="margin:0;width:auto;padding:6px 12px">${Q.root ? esc(Q.name) : t("sq_pick")}</button></div>
-    ${Q.root ? `
+    <label>${t("sq_title")}</label>
+    <div class="simPick"><input type="text" readonly placeholder="${esc(t("sq_pickFile"))}" value="${esc(Q.trial)}">
+      <button type="button" class="ghost" data-sq-pick title="${esc(t("sq_pickFile"))}">🔍</button></div>
     <div class="simOpts" style="margin-top:6px">
-      <label class="simOpt">${t("sq_trial")} <select data-sq-trial>${opt(Q.c3ds, Q.trial, t("ss_none"))}</select></label>
-      <label class="simOpt">${t("sq_static")} <select data-sq-static>${opt(Q.c3ds, Q.static, t("sq_staticNone"))}</select></label>
-      ${Q.static ? "" : `<label class="simOpt">${t("sq_staticSeconds")} <input type="text" data-sq-sec value="${Q.staticSeconds}" style="width:70px"></label>`}
+      <label class="simOpt">${t("sq_static")} <span class="simPick" style="display:inline-flex"><input type="text" readonly style="width:180px" placeholder="${esc(t("sq_staticNone"))}" value="${esc(Q.staticFile ? Q.staticFile.file.name : "")}">
+        <button type="button" class="ghost" data-sq-static>🔍</button>${Q.staticFile ? `<button type="button" class="ghost" data-sq-staticclear>${t("pr_remove")}</button>` : ""}</span></label>
+      ${Q.staticFile ? "" : `<label class="simOpt">${t("sq_staticSeconds")} <input type="text" data-sq-sec value="${Q.staticSeconds}" style="width:70px"></label>`}
     </div>
-    <p class="note" style="margin:6px 0 0">${t("sq_where", { dir: (Q.trial || "<trial>").replace(/\.c3d$/i, "") + "_simulations" })}</p>` : `<p class="note" style="margin:6px 0 0">${t("sq_intro")}</p>`}
+    <p class="note" style="margin:6px 0 0">${Q.file ? t("sq_where", { dir: Q.trial.replace(/\.c3d$/i, "") + "_simulations" }) : t("sq_intro")}</p>
   </div>`;
 }
 
@@ -105,16 +124,9 @@ export function quickFooterHTML(ctx) {
 
 export function quickWire(box, ctx, hooks) {
   const q = (s) => box.querySelector(s), on = (sel, ev, fn) => { const el = q(sel); if (el) el[ev] = fn; };
-  on("[data-sq-pick]", "onclick", async () => {
-    if (!window.showDirectoryPicker) { alert(ctx.t("sim_outdir_unsupported")); return; }
-    let h; try { h = await window.showDirectoryPicker({ mode: "readwrite" }); } catch { return; }
-    Q.root = h; Q.name = h.name; Q.c3ds = await listC3d(h); Q.log = [];
-    if (!Q.c3ds.includes(Q.trial)) Q.trial = Q.c3ds.find((n) => !/static/i.test(n)) || Q.c3ds[0] || "";
-    if (!Q.c3ds.includes(Q.static)) Q.static = Q.c3ds.find((n) => /static/i.test(n)) || "";
-    hooks.repaint();
-  });
-  on("[data-sq-trial]", "onchange", (e) => { Q.trial = e.target.value; hooks.repaint(); });
-  on("[data-sq-static]", "onchange", (e) => { Q.static = e.target.value; hooks.repaint(); });
+  on("[data-sq-pick]", "onclick", async () => { const r = await pickC3d(); if (!r) return; Q.file = r; Q.root = null; Q.log = []; hooks.repaint(); });
+  on("[data-sq-static]", "onclick", async () => { const r = await pickC3d(); if (!r) return; Q.staticFile = r; hooks.repaint(); });
+  on("[data-sq-staticclear]", "onclick", () => { Q.staticFile = null; hooks.repaint(); });
   on("[data-sq-sec]", "onchange", (e) => { const v = parseFloat(e.target.value); if (v > 0) Q.staticSeconds = v; });
   on("[data-sq-run]", "onclick", () => runQuick(ctx, hooks));
 }
