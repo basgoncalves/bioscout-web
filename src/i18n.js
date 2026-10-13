@@ -1838,7 +1838,7 @@ const EN = {
   "pr_tNormalise": "Normalise to MVC or peak (%)",
   "pr_tFz": "Vertical force from the most loaded plate",
   "pr_tBw": "Body weight from a quiet window",
-  "pr_tXbw": "Divide by body weight (xBW)",
+  "pr_tXbw": "Divide by body weight (xBW, from the body mass)",
   "pr_tContacts": "Contacts / stance phases + two peaks",
   "pr_tJump": "Jump height (flight time and impulse)",
   "pr_tCop": "Sway metrics from the plate's CoP",
@@ -1955,7 +1955,9 @@ const EN = {
   "pr_noSteps": "none yet: pick a step below (e.g. Filtering → Low-pass).",
   "pr_clearSteps": "Clear all",
   "pr_procShort": "processed",
-  "pr_h33": "add to the processing applied to every channel: lowpass fc [order], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
+  "pr_h33": "body mass typed by you; body weight = mass x g for every file",
+  "pr_tMassSet": "Set body mass",
+  "pr_h34": "add to the processing applied to every channel: lowpass fc [order], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
 };
 
 const PT = {
@@ -3886,7 +3888,9 @@ const PT = {
   "pr_noSteps": "nenhum ainda: escolha um passo abaixo (p. ex. Filtragem → Passa-baixo).",
   "pr_clearSteps": "Limpar tudo",
   "pr_procShort": "processado",
-  "pr_h33": "acrescentar ao processamento aplicado a todos os canais: lowpass fc [ordem], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
+  "pr_h33": "massa corporal escrita por si; peso corporal = massa x g em todos os ficheiros",
+  "pr_tMassSet": "Definir massa corporal",
+  "pr_h34": "acrescentar ao processamento aplicado a todos os canais: lowpass fc [ordem], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
 };
 
 const DE = {
@@ -5816,7 +5820,9 @@ const DE = {
   "pr_noSteps": "noch keine: wähle unten einen Schritt (z. B. Filtern → Tiefpass).",
   "pr_clearSteps": "Alle löschen",
   "pr_procShort": "verarbeitet",
-  "pr_h33": "zur Verarbeitung aller Kanäle hinzufügen: lowpass fc [Ordnung], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
+  "pr_h33": "von dir eingetippte Körpermasse; Körpergewicht = Masse x g für alle Dateien",
+  "pr_tMassSet": "Körpermasse setzen",
+  "pr_h34": "zur Verarbeitung aller Kanäle hinzufügen: lowpass fc [Ordnung], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };

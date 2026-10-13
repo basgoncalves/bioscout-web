@@ -63,7 +63,8 @@ export const HELP = [
   ["gait <Fz> <Fy> [mass_kg] [threshold]", "L02 A: stance time, peak 1, valley, peak 2, braking and propulsion (xBW); curves of all files"],
   ["impulse <Fz> [quiet_s] [threshold]", "L02 B: positive, negative and net impulse, take-off velocity, heights"],
   ["filters <col> 5 10 20 50 ma25 [quiet ab | quiet t0 t1]", "L02 C: several filters at once; peak, time of peak and quiet-window mean each"],
-  ["overlay <col> [norm]", "the same column from every file on one plot (norm: 0-100 %)"],  ["step <op> [numbers] | step undo | step clear", "add to the processing applied to every channel: lowpass fc [order], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate"],
+  ["overlay <col> [norm]", "the same column from every file on one plot (norm: 0-100 %)"],  ["mass <kg>", "body mass typed by you; body weight = mass x g for every file"],
+  ["step <op> [numbers] | step undo | step clear", "add to the processing applied to every channel: lowpass fc [order], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate"],
 ];
 
 /**
@@ -74,7 +75,7 @@ export const STEPS = {
   offset: { n: 0, label: () => "offset removed", f: (y) => { const m = D.mean(y); return y.map((v) => v - m); } },
   rectify: { n: 0, label: () => "rectified", f: (y) => y.map(Math.abs) },
   scale: { n: 1, label: ([k]) => `× ${k}`, f: (y, ds, [k]) => y.map((v) => v * k) },
-  divbw: { n: 0, label: () => "÷ body weight", f: (y, ds, a, S) => { const b = S.bw[ds.name]; if (!b) throw new Error("no body weight yet (bw)"); return y.map((v) => v / b); } },
+  divbw: { n: 0, label: () => "÷ body weight", f: (y, ds, a, S) => { const b = S.massKg ? S.massKg * D.G : S.bw[ds.name]; if (!b) throw new Error("type the body mass (kg) first"); return y.map((v) => v / b); } },
   normmax: { n: 0, label: () => "% of max", f: (y) => { const m = D.max(Array.from(y, Math.abs)); return y.map((v) => (100 * v) / m); } },
   smooth: { n: 1, label: ([n]) => `moving average ${n}`, f: (y, ds, [n]) => D.movingAverage(y, n) },
   deriv: { n: 0, label: () => "d/dt", f: (y, ds) => D.numGradient(y, ds.time) },
@@ -156,7 +157,7 @@ export function makeProcessor() {
 
   /** A channel after the processing chain (cached per file, channel and chain). */
   function processed(ds, key) {
-    const sig = JSON.stringify(S.pipe) + "|" + (S.bw[ds.name] || "");
+    const sig = JSON.stringify(S.pipe) + "|" + (S.massKg || S.bw[ds.name] || "");
     if (!ds._pc || ds._pc.sig !== sig) ds._pc = { sig, map: {} };
     if (ds._pc.map[key]) return ds._pc.map[key];
     let y = Float64Array.from(ds.cols[key]);
@@ -178,6 +179,12 @@ export function makeProcessor() {
       if (S.cur >= 0 && S.ds[S.cur]) { const ds = S.ds[S.cur], k = Object.keys(ds.cols)[0]; if (k) STEPS[o].f(Float64Array.from(ds.cols[k]).slice(0, 400), ds, a, S); }
       S.pipe.push(st);
       return `${S.pipe.length}. ${stepLabel(st)} -- applied to every channel`;
+    },
+    /* body mass typed by the user, in kg: body weight = m g for every file */
+    mass([kg]) {
+      const m = numArg(kg); if (!(m > 0 && m < 400)) throw new Error("body mass in kg, e.g. 72.5");
+      S.massKg = m; for (const d of S.ds) S.bw[d.name] = m * D.G;
+      return `body mass ${m} kg = ${r3(m * D.G)} N body weight`;
     },
     use([n]) { const i = +n - 1; if (!S.ds[i]) throw new Error(`no file ${n}`); S.cur = i; S.plot = { cols: [], xy: null, curves: null, marks: [] }; return `using ${S.ds[i].name}`; },
     plot(args) { const ds = cur(); S.plot = { cols: [...new Set(args.map((a) => rootOf(ds, col(ds, a).key)))].filter((k) => ds.cols[k]), xy: null, curves: null, marks: [] }; return args.length ? `plotting ${S.plot.cols.length} column(s)` : "plot cleared"; },
@@ -628,7 +635,7 @@ export function chartSVG({ series, xLabel = "s", yLabel = "", marks = [], equal 
 export const TOOLS = [
   { group: "pr_gBasic", items: [
     { k: "pr_tMinMax", f: [], ui: "minmax" },
-    { k: "pr_tBwAB", f: [["c", "pr_fCol", null, "fz"]], cmd: (v) => `bw ab ${quote(v[0])}` },
+    { k: "pr_tMassSet", f: [["n", "pr_fMass", "", "mass"]], cmd: (v) => `mass ${v[0]}` },
     { k: "pr_tOffset", f: [], cmd: () => "step offset" },
     { k: "pr_tRectify", f: [], cmd: () => "step rectify" },
     { k: "pr_tScale", f: [["n", "pr_fFactor", 1]], cmd: (v) => `step scale ${v[0]}` },
@@ -642,39 +649,6 @@ export const TOOLS = [
     { k: "pr_tLowpass", f: [["n", "pr_fCutoff", 10], ["n", "pr_fOrder", 4]], cmd: (v) => `step lowpass ${v[0]} ${v[1]}` },
     { k: "pr_tHighpass", f: [["n", "pr_fCutoff", 20], ["n", "pr_fOrder", 4]], cmd: (v) => `step highpass ${v[0]} ${v[1]}` },
     { k: "pr_tBandpass", f: [["n", "pr_fLow", 20], ["n", "pr_fHigh", 450], ["n", "pr_fOrder", 4]], cmd: (v) => `step bandpass ${v[0]} ${v[1]} ${v[2]}` },
-    { k: "pr_tFilters", f: [["c", "pr_fCol", null, "fz"], ["s", "pr_fCutoffs", "5 10 20 50"], ["n", "pr_fSamples", 25], ["s", "pr_fQuietWin", "ab"]],
-      cmd: (v) => `filters ${quote(v[0])} ${v[1]} ma${v[2]} quiet ${v[3]}` },
-  ] },
-  { group: "pr_gEmg", items: [
-    { k: "pr_tEnvelope", f: [["n", "pr_fWindowMs", 100]], cmd: (v) => `step envelope ${v[0]}` },
-    { k: "pr_tEnvelopeBand", f: [["n", "pr_fWindowMs", 100]], cmd: (v) => [`step bandpass 20 450 4`, `step envelope ${v[0]}`] },
-    { k: "pr_tNormalise", f: [], cmd: () => "step normmax" },
-  ] },
-  { group: "pr_gForce", items: [
-    { k: "pr_tFz", f: [], cmd: () => "fz" },
-    { k: "pr_tBw", f: [["n", "pr_fFrom", 0], ["n", "pr_fTo", 1]], cmd: (v) => `bw ${v[0]} ${v[1]}` },
-    { k: "pr_tPeaks", f: [["c", "pr_fCol", null, "fz"], ["s", "pr_fThreshold", "1.3bw"], ["n", "pr_fHalf", 50]], cmd: (v) => `peaks ${quote(v[0])} ${v[1]} ${v[2]}` },
-    { k: "pr_tContacts", f: [["c", "pr_fCol", null, "fz"], ["n", "pr_fThresholdN", 20], ["n", "pr_fMinSamples", 20]], cmd: (v) => `contacts ${quote(v[0])} ${v[1]} ${v[2]}` },
-    { k: "pr_tJump", f: [["c", "pr_fCol", null, "fz"], ["n", "pr_fThresholdN", 20], ["n", "pr_fQuiet", 1]], cmd: (v) => `jump ${quote(v[0])} ${v[1]} ${v[2]}` },
-    { k: "pr_tImpulse", f: [["c", "pr_fCol", null, "fz"], ["n", "pr_fQuiet", 0.5], ["n", "pr_fThresholdN", 20]], cmd: (v) => `impulse ${quote(v[0])} ${v[1]} ${v[2]}` },
-    { k: "pr_tGait", f: [["c", "pr_fVert", null, "fz"], ["c", "pr_fAp", null, "fy"], ["n", "pr_fMass", ""], ["n", "pr_fThresholdN", 20]],
-      cmd: (v) => `gait ${quote(v[0])} ${quote(v[1])} ${v[2] || ""} ${v[3]}`.replace(/\s+/g, " ").trim() },
-  ] },
-  { group: "pr_gBalance", items: [
-    { k: "pr_tCop", f: [], cmd: () => "cop" },
-    { k: "pr_tCopCols", f: [["c", "pr_fColX"], ["c", "pr_fColY"]], cmd: (v) => `cop ${quote(v[0])} ${quote(v[1])}` },
-  ] },
-  { group: "pr_gJoints", items: [
-    { k: "pr_tPower", f: [["c", "pr_fMoment"], ["c", "pr_fAngle"]], cmd: (v) => `power ${quote(v[0])} ${quote(v[1])}` },
-    { k: "pr_tMarkerErr", f: [], cmd: () => "markererr" },
-  ] },
-  { group: "pr_gCompare", items: [
-    { k: "pr_tOverlay", f: [["c", "pr_fCol"], ["s", "pr_fMode", "time"]], cmd: (v) => `overlay ${quote(v[0])} ${v[1]}` },
-    { k: "pr_tMeanSd", f: [["c", "pr_fCol"]], cmd: (v) => `meansd ${quote(v[0])}` },
-    { k: "pr_tMeanSdContacts", f: [["c", "pr_fCol"]], cmd: (v) => `meansd ${quote(v[0])} contacts` },
-    { k: "pr_tCompare", f: [["s", "pr_fMeasure", "height (flight"], ["s", "pr_fCondA", "A"], ["s", "pr_fCondB", "B"]], cmd: (v) => `compare ${quote(v[0])} ${v[1]} ${v[2]}` },
-    { k: "pr_tValues", f: [["s", "pr_fLabel", "fascicle_mm"], ["s", "pr_fValues", "45.1 47.8 44.0"]], cmd: (v) => `values ${quote(v[0])} ${v[1]}` },
-    { k: "pr_tChange", f: [["s", "pr_fLabel", "pennation"], ["n", "pr_fBefore", 18], ["n", "pr_fAfter", 45.9]], cmd: (v) => `change ${quote(v[0])} ${v[1]} ${v[2]}` },
   ] },
 ];
 
@@ -863,7 +837,7 @@ export function mountProcess(root, { t, download }) {
         ? colSel(`${id}_${fi}`, pick === "fz" ? (keys.find((k) => /^(Fz|Fz_N|Fz \(N\))$/i.test(k)) || "@fz")
           : pick === "fy" ? (keys.find((k) => /(^|[ ._-])Fy(_N)?$/.test(k) && !/·/.test(k)) || "")
           : pl.raw[ci] ? (ci++ === 0 ? pl.raw[0].key : pre[ci - 1]) : "")
-        : `<input id="${id}_${fi}" type="${type === "n" ? "number" : "text"}" step="any" value="${escX(def ?? "")}"${type === "n" ? ' class="prNum"' : ""}>`}</label>`).join("");
+        : `<input id="${id}_${fi}" type="${type === "n" ? "number" : "text"}" step="any" value="${escX(pick === "mass" ? (S.massKg ?? "") : (def ?? ""))}"${type === "n" ? ' class="prNum"' : ""}${pick === "mass" ? ' placeholder="kg"' : ""}>`}</label>`).join("");
       const on = it.ui === "minmax" && vis.minmax;
       return `<div class="prToolRow"><button type="button" data-tool="${gi}_${ii}"${it.ui && !on ? ' class="ghost"' : ""}>${t(it.k)}${it.ui ? (on ? " ✓" : "") : ""}</button>${fields}</div>`;
     }).join("")}</div>`; }).join("");
