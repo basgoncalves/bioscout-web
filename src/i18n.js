@@ -271,7 +271,7 @@ const EN = {
   "inj_concussion": "Concussion",
   "inj_neckStrain": "Neck strain",
   "osimOpen": "OpenSim trial (markers and force plates)",
-  "osimIntro": "Take a marker and force-plate trial through scaling, inverse kinematics, inverse dynamics, static optimisation and joint reaction loads. OpenSim cannot run in a browser, so the work is done by the lab engine on a PC: open the link your lecturer shows, or paste it here.",
+  "osimIntro": "Run OpenSim and CEINMS step by step: scale, inverse kinematics, inverse dynamics, muscle analysis, residual reduction, static optimisation and CEINMS. OpenSim cannot run in a browser, so the work is done by the lab engine on a PC: open the link your lecturer shows, or paste it here.",
   "osimLink": "Engine link or address",
   "osimCode": "Session code",
   "osimConnect": "Connect",
@@ -2033,6 +2033,7 @@ const EN = {
   "sim_opt_t1": "To (s)",
   "sim_opt_jra": "Also joint reaction loads (1 = yes, 0 = no)",
   "sim_slot_id_grf_mot": "Ground reaction forces (.mot)",
+  "simPreviewNote": "Connect to the lab engine to run these steps. You can already see what each one needs and download the template setup files.",
 };
 
 const PT = {
@@ -4041,6 +4042,7 @@ const PT = {
   "sim_opt_t1": "Até (s)",
   "sim_opt_jra": "Também cargas de reação articular (1 = sim, 0 = não)",
   "sim_slot_id_grf_mot": "Forças de reação do solo (.mot)",
+  "simPreviewNote": "Ligue-se ao motor do laboratório para correr estes passos. Já pode ver o que cada um precisa e descarregar os ficheiros de configuração modelo.",
 };
 
 const DE = {
@@ -6048,6 +6050,7 @@ const DE = {
   "sim_opt_t1": "Bis (s)",
   "sim_opt_jra": "Auch Gelenkreaktionslasten (1 = ja, 0 = nein)",
   "sim_slot_id_grf_mot": "Bodenreaktionskräfte (.mot)",
+  "simPreviewNote": "Verbinde dich mit der Labor-Engine, um diese Schritte auszuführen. Du kannst schon sehen, was jeder braucht, und die Vorlagen herunterladen.",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };

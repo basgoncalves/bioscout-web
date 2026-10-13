@@ -33,16 +33,16 @@ export function simHTML(ctx) {
   T = t;
   const models = (health.models && health.models.length ? health.models : spec.models) || [];
   const stateLine = (sp) => {
-    if (!sp || sp.state === "idle") return "";
+    if (!sp || !sp.state || sp.state === "idle") return "";
     const text = sp.state === "queued" ? t("osimQueued", { n: sp.ahead || 0 })
       : sp.state === "running" ? t("osimRunning", { s: Math.max(0, Math.round(Date.now() / 1000 - sp.started)) })
       : sp.state === "done" ? t("osimDone", { s: sp.seconds ?? 0 }) : t("osimFailed", { err: sp.error || "" });
     const log = sp.log && sp.log.length ? `<details><summary class="sub" style="cursor:pointer">${t("osimLog")}</summary><div class="osimLog">${sp.log.map(esc).join("\n")}</div></details>` : "";
     return `<p class="osimState${sp.state === "error" ? " err" : ""}">${esc(text)}</p>${sp.state === "error" || sp.state === "done" ? log : ""}`;
   };
-  const badge = (sp) => (!sp || sp.state === "idle" ? "" : `<span class="simBadge ${sp.state}">${esc(t("sim_st_" + sp.state))}</span>`);
+  const badge = (sp) => (!sp || !sp.state || sp.state === "idle" ? "" : `<span class="simBadge ${sp.state}">${esc(t("sim_st_" + sp.state))}</span>`);
   const sections = spec.tools.map((tl, i) => {
-    const sp = (job.tools || {})[tl.id] || {}, have = sp.inputs || {};
+    const sp = (job.tools || {})[tl.id] || { state: "idle" }, have = sp.inputs || {};
     const slots = tl.slots.map((sl) => {
       const got = have[sl.id];
       return `<label class="simDrop${got ? " has" : ""}" data-drop="${tl.id}:${sl.id}">

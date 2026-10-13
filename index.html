@@ -590,6 +590,8 @@ try {
   .prJumpStat.main b { font-size:48px !important; color:var(--accent); line-height:1.05; }
   .prJumpStat small { font-size:.5em; font-weight:600; color:var(--muted); }
   /* Simulate (src/simtools.js) */
+  fieldset.simPreview { border:0; padding:0; margin:0; min-width:0; }
+  fieldset.simPreview .simDrop { cursor:default; opacity:.75; }
   .simModel { border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-top:10px; }
   .simTool { border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-top:10px; }
   .simTool > summary { cursor:pointer; font-size:17px; }
@@ -1591,7 +1593,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 149;
+window.BUILD = 150;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -7169,6 +7171,13 @@ function renderOsim() {
       if (!url || !code) { osim.err = tr("osimErrLink"); renderOsim(); return; }
       osimConnect(url, code);
     };
+    // The sections are shown before connecting too (read-only): what each tool
+    // needs, and the template setup files, without an engine running.
+    if (!osim.spec) { loadSimSpec().then((sp) => { osim.spec = sp; renderOsim(); }); return; }
+    box.insertAdjacentHTML("beforeend", `<p class="note banner" style="margin:14px 0 0">${tr("simPreviewNote")}</p>
+      <fieldset disabled class="simPreview">${simHTML({ t: tr, esc, client: null, health: { models: [] },
+        job: { id: "", model: null, tools: {}, options: {} }, outputs: {}, open: osim.open, err: null })}</fieldset>`);
+    box.querySelectorAll(".simPreview details.simTool").forEach((d) => { d.ontoggle = () => { d.open ? osim.open.add(d.dataset.tool) : osim.open.delete(d.dataset.tool); }; });
     return;
   }
   const st = osim.job, h = osim.health;
