@@ -44,11 +44,11 @@ export function simHTML(ctx) {
   const sections = spec.tools.map((tl, i) => {
     const sp = (job.tools || {})[tl.id] || { state: "idle" }, have = sp.inputs || {};
     const slots = tl.slots.map((sl) => {
-      const got = have[sl.id];
+      const got = have[sl.id], fname = dropNames[`${tl.id}:${sl.id}`];
       return `<label class="simDrop${got ? " has" : ""}" data-drop="${tl.id}:${sl.id}">
         <input type="file" accept="${sl.ext.join(",")}" data-file="${tl.id}:${sl.id}" hidden>
         <span class="simSlot">${esc(slotLabel(tl.id, sl))}${sl.required ? " *" : ""}</span>
-        <span class="sub">${got ? `✓ ${t("sim_dropped")} (${sizeText(got)}) <a href="#" data-clear="${tl.id}:${sl.id}">${t("pr_remove")}</a>`
+        <span class="sub">${got ? `✓ ${fname ? `<b class="simFname">${esc(fname)}</b>` : t("sim_dropped")} (${sizeText(got)}) <a href="#" data-clear="${tl.id}:${sl.id}">${t("pr_remove")}</a>`
           : `${t("sim_dropHere")} ${sl.ext.join(" ")}${sl.template ? ` · ${t("sim_default")}: <a href="${TPL}${esc(sl.template)}" download>${esc(sl.template)}</a>` : ""}`}</span>
       </label>`;
     }).join("");
@@ -85,6 +85,9 @@ function slotLabel(tool, sl) {
   return sl.label;
 }
 let T = (k) => k;
+/* Browsers never reveal a file's folder, only its name: keep the name of
+ * every file dropped this session so the slot can show what is in it. */
+const dropNames = {};
 
 /** Wire the drawn page. */
 export function simWire(box, ctx) {
@@ -92,14 +95,14 @@ export function simWire(box, ctx) {
   const sel = box.querySelector("#simModel");
   if (sel) sel.onchange = () => sel.value && ctx.act(() => client.setModel(id, sel.value));
   box.querySelectorAll("details.simTool").forEach((d) => { d.ontoggle = () => { d.open ? ctx.open.add(d.dataset.tool) : ctx.open.delete(d.dataset.tool); }; });
-  const send = (key, file) => { const [tool, slot] = key.split(":"); ctx.act(() => client.toolUpload(id, tool, slot, file)); };
+  const send = (key, file) => { dropNames[key] = file.name; const [tool, slot] = key.split(":"); ctx.act(() => client.toolUpload(id, tool, slot, file)); };
   box.querySelectorAll("[data-file]").forEach((inp) => { inp.onchange = () => inp.files[0] && send(inp.dataset.file, inp.files[0]); });
   box.querySelectorAll("[data-drop]").forEach((z) => {
     z.ondragover = (e) => { e.preventDefault(); z.classList.add("over"); };
     z.ondragleave = () => z.classList.remove("over");
     z.ondrop = (e) => { e.preventDefault(); z.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) send(z.dataset.drop, f); };
   });
-  box.querySelectorAll("[data-clear]").forEach((a) => { a.onclick = (e) => { e.preventDefault(); const [tool, slot] = a.dataset.clear.split(":"); ctx.act(() => client.toolClear(id, tool, slot)); }; });
+  box.querySelectorAll("[data-clear]").forEach((a) => { a.onclick = (e) => { e.preventDefault(); delete dropNames[a.dataset.clear]; const [tool, slot] = a.dataset.clear.split(":"); ctx.act(() => client.toolClear(id, tool, slot)); }; });
   box.querySelectorAll("[data-opt]").forEach((inp) => {
     inp.onchange = () => {
       const tool = inp.dataset.opt.split(":")[0], o = {};

@@ -592,6 +592,7 @@ try {
   .prJumpStat.main b { font-size:48px !important; color:var(--accent); line-height:1.05; }
   .prJumpStat small { font-size:.5em; font-weight:600; color:var(--muted); }
   /* Simulate (src/simtools.js) */
+  .simFname { word-break:break-all; font-weight:600; }
   fieldset.simPreview { border:0; padding:0; margin:0; min-width:0; }
   fieldset.simPreview .simDrop { cursor:default; opacity:.75; }
   .simModel { border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-top:10px; }
@@ -1605,7 +1606,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 157;
+window.BUILD = 158;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -7230,7 +7231,7 @@ function renderOsim() {
       <a href="#" id="osimDisconnect">${tr("osimDisconnect")}</a></p>
     ${h.fake ? `<p class="note banner" style="margin:8px 0 0">${tr("osimFake")}</p>` : ""}
     ${simHTML(ctx)}
-    <p class="note" style="margin:10px 0 0">${tr("osimHonest")}</p>`;
+    <p class="note" style="margin:10px 0 0">${tr(h.local ? "sim_localNote" : "osimHonest")}</p>`;
   $("osimDisconnect").onclick = (e) => {
     e.preventDefault();
     clearTimeout(osim.timer);
