@@ -25,6 +25,15 @@ const TKEY = "bioscout.terms.v3";
 export const LANGUAGES = { en: "English", pt: "Português", de: "Deutsch" };
 
 const EN = {
+  sim_local: "Run in this browser (beta: inverse kinematics)",
+  sim_localNote: "No server: the files stay on this device and the OpenSim IK runs here in Python (Pyodide). The first run downloads about 30 MB once. Other steps still need the lab engine.",
+  sim_localOn: "Running in this browser (beta: inverse kinematics only).",
+  "doorGlossary": "Glossary",
+  "doorGlossaryNote": "Every variable, metric and term in BioScout, A-Z or by topic, with where it comes from.",
+  "devModeBtn": "Developer mode",
+  "devPwLabel": "Password",
+  "devEnter": "Enter",
+  "devPwWrong": "Wrong password.",
   sim_connecting: "Connecting to the simulation server…",
   sim_waking: "The simulation server is waking up (this can take a minute or two)…",
   "bfStart": "Start",
@@ -2042,6 +2051,15 @@ const EN = {
 };
 
 const PT = {
+  sim_local: "Executar neste navegador (beta: cinemática inversa)",
+  sim_localNote: "Sem servidor: os ficheiros ficam neste dispositivo e a IK do OpenSim corre aqui em Python (Pyodide). A primeira execução descarrega cerca de 30 MB uma vez. Os outros passos ainda precisam do motor do laboratório.",
+  sim_localOn: "A executar neste navegador (beta: só cinemática inversa).",
+  "doorGlossary": "Glossário",
+  "doorGlossaryNote": "Todas as variáveis, métricas e termos do BioScout, de A a Z ou por tema, com a sua origem.",
+  "devModeBtn": "Modo de programador",
+  "devPwLabel": "Palavra-passe",
+  "devEnter": "Entrar",
+  "devPwWrong": "Palavra-passe errada.",
   sim_connecting: "A ligar ao servidor de simulação…",
   sim_waking: "O servidor de simulação está a acordar (pode demorar um ou dois minutos)…",
   "bfStart": "Começar",
@@ -4056,6 +4074,15 @@ const PT = {
 };
 
 const DE = {
+  sim_local: "Im Browser ausführen (Beta: inverse Kinematik)",
+  sim_localNote: "Kein Server: Die Dateien bleiben auf diesem Gerät, die OpenSim-IK läuft hier in Python (Pyodide). Der erste Lauf lädt einmalig etwa 30 MB. Die anderen Schritte brauchen noch die Labor-Engine.",
+  sim_localOn: "Läuft in diesem Browser (Beta: nur inverse Kinematik).",
+  "doorGlossary": "Glossar",
+  "doorGlossaryNote": "Alle Variablen, Kennwerte und Begriffe in BioScout, von A bis Z oder nach Thema, mit ihrer Herkunft.",
+  "devModeBtn": "Entwicklermodus",
+  "devPwLabel": "Passwort",
+  "devEnter": "Öffnen",
+  "devPwWrong": "Falsches Passwort.",
   sim_connecting: "Verbindung zum Simulationsserver…",
   sim_waking: "Der Simulationsserver startet (das kann ein bis zwei Minuten dauern)…",
   "bfStart": "Start",

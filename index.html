@@ -556,6 +556,8 @@ try {
              box-shadow:var(--shadow); cursor:pointer; font:inherit; }
   .labDoor:hover, .labDoor:focus-visible { border-color:var(--accent); }
   .labDoor svg { flex:none; width:40px; height:40px; color:var(--accent); }
+  a.labDoor { color:inherit; text-decoration:none; }
+  .devBox { margin:22px 4px 0; text-align:center; }
   .labDoor b { display:block; font-size:17px; margin-bottom:2px; }
   .labDoor span { color:var(--muted); font-size:13px; line-height:1.4; }
   .labHead { display:flex; justify-content:space-between; align-items:center; gap:8px; }
@@ -1266,6 +1268,16 @@ try {
       <button type="button" class="labDoor" id="doorRecord"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/><circle cx="9.5" cy="12" r="2.5"/></svg><div><b data-i18n="doorRecord">Record</b><span data-i18n="doorRecordNote">Film a movement with this device and read its joint angles, moments and estimated loads.</span></div></button>
       <button type="button" class="labDoor" id="doorProcess"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 20h18"/><path d="M4 16l4-6 4 3 4-8 4 5"/><circle cx="8" cy="10" r="1"/><circle cx="16" cy="5" r="1"/></svg><div><b data-i18n="doorProcess">Process</b><span data-i18n="doorProcessNote">Open lab files (force plates, EMG, motion capture, OpenSim results), filter, plot and analyse them.</span></div></button>
       <button type="button" class="labDoor" id="doorSimulate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="4" r="2"/><path d="M12 6v7M8 9h8M12 13l-3 8M12 13l3 8"/><path d="M5 12c-1 2-1 4 0 6M19 12c1 2 1 4 0 6"/></svg><div><b data-i18n="doorSimulate">Simulate</b><span data-i18n="doorSimulateNote">Run OpenSim and CEINMS on a marker and force-plate trial: scaling, IK, ID, static optimisation, muscle and joint contact forces.</span></div></button>
+      <a class="labDoor" id="doorGlossary" href="./glossary/" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 4h11a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M18 20h2V6"/><path d="M8 8h6M8 12h6"/></svg><div><b data-i18n="doorGlossary">Glossary</b><span data-i18n="doorGlossaryNote">Every variable, metric and term in BioScout, A-Z or by topic, with where it comes from.</span></div></a>
+    </div>
+    <div class="devBox">
+      <button type="button" class="ghost" id="devModeBtn" data-i18n="devModeBtn">Developer mode</button>
+      <form id="devForm" class="hidden row" style="margin-top:8px;align-items:end">
+        <div><label for="devPw" data-i18n="devPwLabel">Password</label>
+          <input id="devPw" type="password" autocomplete="off"></div>
+        <button type="submit" id="devEnterBtn" data-i18n="devEnter">Enter</button>
+      </form>
+      <p class="note hidden" id="devWrong" style="margin:6px 0 0" data-i18n="devPwWrong">Wrong password.</p>
     </div>
   </section>
 
@@ -1593,7 +1605,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 154;
+window.BUILD = 155;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1696,6 +1708,7 @@ import { foreperiod, classify as rtClassify, summarise as rtSummarise,
 import { SPORT_IDS, allowedIn, sportActivities } from "./src/sports.js";
 import { makeBallTracker, ballAfterStrokes, bodyBox, strokeSummary } from "./src/balltrack.js";
 import { loadSpec as loadSimSpec, simHTML, simWire } from "./src/simtools.js";
+import { makeLocalClient } from "./src/localengine.js";
 import { cleanEngineUrl, engineFromSearch, fileKind, makeEngineClient, EngineError,
          pickAngles, pickMoments, markerErrors, topMuscles, worstReserve, reactionJoints,
          defaultReactionJoint, reactionForce, scaleRows, lineChartSVG, legendHTML,
@@ -1967,27 +1980,38 @@ window.__mlBooted = true;   // the watchdog above can stand down
 const OSIM_MODEL = "gpk";
 const DEMO = new URLSearchParams(location.search).get("demo");
 
-/* Lab demo is what a visitor gets. The full app (athletes, dashboard,
- * accounts, feed) opens only on a device that has once been to ?full=1, and
- * ?full=0 puts it back. ?lab=1 is the lab demo for that visit only, whatever
- * the device is set to -- so a shortcut to it can sit beside the full app's
- * without one switching the other. This keeps a classroom of students in the recorder --
- * it is a front door, not a lock: the page source is public, so the thing
- * that actually stops new accounts is the server refusing sign-ups. */
-const FULL_KEY = "bioscout.full.v1";
+/* Lab demo is what everybody gets. The full app (athletes, dashboard,
+ * accounts, feed, training recorder) is DEVELOPER MODE, opened only by
+ *   - loading the page with exactly #viewLogin as its hash, or
+ *   - the "Developer mode" button on the lab home, which asks for DEV_PASSWORD
+ *     and then reloads on #viewLogin.
+ * It lasts for this tab only (sessionStorage), so a reload inside the full app
+ * stays there but a new tab or ?lab=1 is the lab demo again. The plain URL is
+ * rewritten to ?lab=1 so the address bar says which version this is.
+ *
+ * This is a front door, not a lock: the page source is public, password
+ * included. What actually protects accounts is the server refusing sign-ups. */
+const DEV_KEY = "bioscout.dev.v1";
+const DEV_PASSWORD = "gohan";          // change the developer-mode password here
 // The screen the page was opened on, read before the recorder's start-up
 // rewrites the hash: a reload of Process must come back to Process.
 const ENTRY_VIEW = location.hash.slice(1);
 const LAB_NAME = "Lab demo";
 const LAB = !DEMO && (() => {
   try {
+    localStorage.removeItem("bioscout.full.v1");   // the old ?full=1 switch, retired
     const q = new URLSearchParams(location.search);
-    if (q.get("full") === "0") localStorage.removeItem(FULL_KEY);
-    else if (q.has("full")) localStorage.setItem(FULL_KEY, "1");
-    if (q.has("lab")) return true;
-    return localStorage.getItem(FULL_KEY) !== "1";
+    if (ENTRY_VIEW === "viewLogin" && !q.has("lab")) { sessionStorage.setItem(DEV_KEY, "1"); return false; }
+    if (q.has("lab")) { sessionStorage.removeItem(DEV_KEY); return true; }
+    return sessionStorage.getItem(DEV_KEY) !== "1";
   } catch { return true; }
 })();
+if (LAB && !location.search) history.replaceState(history.state, "", location.pathname + "?lab=1" + location.hash);
+// Typing #viewLogin into the address bar of an open lab tab changes only the
+// hash, which reloads nothing -- so do the reload that the rule above expects.
+window.addEventListener("hashchange", () => {
+  if (LAB && location.hash === "#viewLogin") location.replace(location.pathname + "#viewLogin");
+});
 
 // ?fresh=1 tears out every service worker and cache for this origin, then
 // reloads. A cache-first worker can strand a browser on an old build with no
@@ -7174,6 +7198,14 @@ function renderOsim() {
     // The sections are shown before connecting too (read-only): what each tool
     // needs, and the template setup files, without an engine running.
     if (!osim.spec) { loadSimSpec().then((sp) => { osim.spec = sp; renderOsim(); }); return; }
+    box.insertAdjacentHTML("beforeend", `<button type="button" id="osimLocalBtn" class="ghost" style="margin-top:10px">${tr("sim_local")}</button>
+      <p class="note" style="margin:4px 0 0">${tr("sim_localNote")}</p>`);
+    $("osimLocalBtn").onclick = async () => {
+      const c = makeLocalClient(osim.spec);
+      osim.client = c; osim.health = await c.health(); osim.job = await c.newJob();
+      osim.res = {}; osim.toolOut = {}; osim.err = null; osim.open.add("ik");
+      osimSync();
+    };
     box.insertAdjacentHTML("beforeend", `<p class="note banner" style="margin:14px 0 0">${tr("simPreviewNote")}</p>
       <fieldset disabled class="simPreview">${simHTML({ t: tr, esc, client: null, health: { models: [] },
         job: { id: "", model: null, tools: {}, options: {} }, outputs: {}, open: osim.open, err: null })}</fieldset>`);
@@ -7194,7 +7226,7 @@ function renderOsim() {
       processMounted.then((m) => m && m.load([file]));
     },
   };
-  box.innerHTML = `<p class="sub" style="font-size:15px;margin:0">${tr("simConnected")}
+  box.innerHTML = `<p class="sub" style="font-size:15px;margin:0">${tr(h.local ? "sim_localOn" : "simConnected")}
       <a href="#" id="osimDisconnect">${tr("osimDisconnect")}</a></p>
     ${h.fake ? `<p class="note banner" style="margin:8px 0 0">${tr("osimFake")}</p>` : ""}
     ${simHTML(ctx)}
@@ -7297,6 +7329,12 @@ function enterLab() {
   $("doorRecord").onclick = () => showView("viewRecord");
   $("doorProcess").onclick = () => { showView("viewProcess"); openProcess(); };
   $("doorSimulate").onclick = () => { showView("viewSimulate"); openSimulate(); };
+  $("devModeBtn").onclick = () => { $("devForm").classList.toggle("hidden"); $("devPw").focus(); };
+  $("devForm").onsubmit = (e) => {
+    e.preventDefault();
+    if ($("devPw").value === DEV_PASSWORD) location.replace(location.pathname + "#viewLogin");
+    else { $("devWrong").classList.remove("hidden"); $("devPw").select(); }
+  };
   // Where to land: the engine's link -> Simulate; a reload keeps the screen it was on.
   const want = linked ? "viewSimulate" : ENTRY_VIEW;
   const land = LAB_VIEWS.includes(want) ? want : "viewHome";
