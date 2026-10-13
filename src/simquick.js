@@ -19,31 +19,26 @@ let T = (k) => k;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms", "rra"]) };
-Object.defineProperty(Q, "trial", { get: () => (Q.file ? Q.file.name : "") });
+Object.defineProperty(Q, "trial", { get: () => (Q.file && Q.file.file ? Q.file.file.name : "") });
 
-const PICK = { types: [{ description: "C3D motion capture", accept: { "application/octet-stream": [".c3d", ".C3D"] } }], multiple: false };
-/** A .c3d: the File System Access picker when it works (it also remembers the file's folder),
- *  else a plain file input. -> { handle|null, file } or null when cancelled. */
+/** A .c3d through an ordinary file input: showOpenFilePicker hangs without a dialog in embedded
+ *  browsers (the Claude pane, automation), so it is not used. -> { handle: null, file } or null. */
 function pickC3d() {
-  const viaInput = () => new Promise((res) => {
+  return new Promise((res) => {
     const i = document.createElement("input"); i.type = "file"; i.accept = ".c3d,.C3D"; i.style.display = "none";
     document.body.appendChild(i);
-    i.onchange = () => { const f = i.files && i.files[0]; i.remove(); res(f ? { handle: null, file: f } : null); };
-    i.oncancel = () => { i.remove(); res(null); };
+    let done = false; const finish = (v) => { if (done) return; done = true; i.remove(); res(v); };
+    i.onchange = () => finish(i.files && i.files[0] ? { handle: null, file: i.files[0] } : null);
+    i.oncancel = () => finish(null);
+    window.addEventListener("focus", () => setTimeout(() => finish(i.files && i.files[0] ? { handle: null, file: i.files[0] } : null), 800), { once: true });
     i.click();
   });
-  if (!window.showOpenFilePicker) return viaInput();
-  return window.showOpenFilePicker(PICK)
-    .then(async ([h]) => ({ handle: h, file: await h.getFile() }))
-    .catch((e) => (e && e.name === "AbortError" ? null : viaInput()));   // not supported here (e.g. an embedded browser): the input works everywhere
 }
 /** The folder the results go to: asked once, opening in the c3d's own folder so it is one click. null -> a .zip instead. */
 async function resultsFolder() {
   if (Q.root) return Q.root;
   if (!window.showDirectoryPicker) return null;
-  const opts = { mode: "readwrite" }; if (Q.file.handle) opts.startIn = Q.file.handle;
-  try { Q.root = await window.showDirectoryPicker(opts); return Q.root; }
-  catch (e) { if (e && e.name !== "AbortError") { try { Q.root = await window.showDirectoryPicker({ mode: "readwrite" }); return Q.root; } catch { return null; } } return null; }
+  try { Q.root = await window.showDirectoryPicker({ mode: "readwrite" }); return Q.root; } catch { return null; }
 }
 
 /** The first `seconds` of a .trc as a static trial (the subject usually stands still before moving). */
