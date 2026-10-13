@@ -87,6 +87,14 @@ export function makeEngineClient({ url, code, fetchFn = (...a) => fetch(...a) })
     run: (job, step) => call(`/api/job/${job}/run`, { method: "POST", body: JSON.stringify({ step }) }),
     result: (job, what) => call(`/api/job/${job}/result?what=${what}`),
     bundleUrl: (job) => `${url}/api/job/${job}/bundle?code=${encodeURIComponent(code)}`,
+    // one tool at a time (Simulate page sections, bioscout/lab/tools.py)
+    setModel: (job, name) => call(`/api/job/${job}/tools/model`, { method: "POST", body: JSON.stringify({ name }) }),
+    toolUpload: (job, tool, slot, file) => call(`/api/job/${job}/tools/${tool}/file?slot=${encodeURIComponent(slot)}&name=${encodeURIComponent(file.name)}`, { method: "POST", body: file }),
+    toolClear: (job, tool, slot) => call(`/api/job/${job}/tools/${tool}/clear?slot=${encodeURIComponent(slot)}`, { method: "POST" }),
+    toolOptions: (job, tool, opts) => call(`/api/job/${job}/tools/${tool}/options`, { method: "POST", body: JSON.stringify(opts) }),
+    toolRun: (job, tool) => call(`/api/job/${job}/tools/${tool}/run`, { method: "POST" }),
+    toolOutputs: (job, tool) => call(`/api/job/${job}/tools/${tool}/outputs`),
+    toolFileUrl: (job, tool, path) => `${url}/api/job/${job}/tools/${tool}/download?path=${encodeURIComponent(path)}&code=${encodeURIComponent(code)}`,
   };
 }
 

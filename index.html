@@ -589,6 +589,22 @@ try {
   .prJumpStat b { font-size:30px !important; font-weight:700; }
   .prJumpStat.main b { font-size:48px !important; color:var(--accent); line-height:1.05; }
   .prJumpStat small { font-size:.5em; font-weight:600; color:var(--muted); }
+  /* Simulate (src/simtools.js) */
+  .simModel { border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-top:10px; }
+  .simTool { border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-top:10px; }
+  .simTool > summary { cursor:pointer; font-size:17px; }
+  .simDrop { display:block; border:1.5px dashed var(--line); border-radius:10px; padding:10px 12px; margin:8px 0 0; cursor:pointer; }
+  .simDrop.has { border-style:solid; border-color:var(--accent); }
+  .simDrop.over, .simDrop:hover { border-color:var(--accent); }
+  .simSlot { display:block; font-weight:600; color:var(--ink); margin-bottom:2px; }
+  .simOpts { display:flex; flex-wrap:wrap; gap:8px 16px; margin-top:8px; }
+  .simOpt input { width:auto; min-width:120px; display:inline-block; }
+  .simBadge { font-size:13px; padding:2px 8px; border-radius:999px; border:1px solid var(--line); margin-left:6px; font-weight:600; }
+  .simBadge.done { background:var(--accent); color:#111; border-color:var(--accent); }
+  .simBadge.error { color:var(--warn); border-color:var(--warn); }
+  .simOuts { margin-top:10px; }
+  .simOut { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; padding:4px 0; }
+  .simOut button { width:auto; margin:0; padding:4px 10px; }
   .prTabs { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0 4px; }
   .prTabs button { width:auto; margin:0; padding:9px 16px; }
   .prChain { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 12px; margin-top:8px;
@@ -1575,7 +1591,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 147;
+window.BUILD = 149;
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1677,6 +1693,7 @@ import { foreperiod, classify as rtClassify, summarise as rtSummarise,
          reactionTrend, sequence, GAMES, GAME_IDS, gameOf } from "./src/reaction.js";
 import { SPORT_IDS, allowedIn, sportActivities } from "./src/sports.js";
 import { makeBallTracker, ballAfterStrokes, bodyBox, strokeSummary } from "./src/balltrack.js";
+import { loadSpec as loadSimSpec, simHTML, simWire } from "./src/simtools.js";
 import { cleanEngineUrl, engineFromSearch, fileKind, makeEngineClient, EngineError,
          pickAngles, pickMoments, markerErrors, topMuscles, worstReserve, reactionJoints,
          defaultReactionJoint, reactionForce, scaleRows, lineChartSVG, legendHTML,
@@ -7050,7 +7067,7 @@ function boot() {
  * engine on a PC (see src/osimlab.js). `osim.job` is the engine's own record
  * of this trial and is the only state that matters: every button sends one
  * request and repaints from what comes back. */
-const osim = { client: null, health: null, job: null, res: {}, err: null, joint: null, timer: null };
+const osim = { client: null, health: null, job: null, res: {}, err: null, joint: null, timer: null, spec: null, toolOut: {}, open: new Set() };
 function osimErrText(e) {
   const map = { offline: "osimErrOffline", bad_code: "osimErrCode", no_job: "osimErrNoJob" };
   return map[e && e.code] ? tr(map[e.code]) : tr("osimErr", { err: (e && e.message) || String(e) });
@@ -7095,8 +7112,14 @@ async function osimSync() {
       }
     }
   }
+  for (const [tool, sp] of Object.entries(osim.job.tools || {})) {
+    if (sp.state !== "done") { delete osim.toolOut[tool]; continue; }
+    if (osim.toolOut[tool] === undefined) {
+      try { osim.toolOut[tool] = (await osim.client.toolOutputs(osim.job.id, tool)).files; } catch { osim.toolOut[tool] = []; }
+    }
+  }
   renderOsim();
-  if (Object.values(s).some((x) => x.state === "queued" || x.state === "running")) {
+  if ([...Object.values(s), ...Object.values(osim.job.tools || {})].some((x) => x.state === "queued" || x.state === "running")) {
     osim.timer = setTimeout(async () => {
       try { osim.job = await osim.client.status(osim.job.id); }
       catch (e) { osim.err = osimErrText(e); if (e.code === "no_job") { osim.client = null; osim.job = null; } }
@@ -7148,138 +7171,33 @@ function renderOsim() {
     };
     return;
   }
-  const st = osim.job, h = osim.health, s = st.steps, r = osim.res;
-  const done = (id) => s[id] && s[id].state === "done";
-  const tick = (ok) => (ok ? "\u2713" : "\u2014");
-  // 1. data
-  const data = `<div class="osimStep"><h3>1 \u00b7 ${tr("osimStepData")}</h3>
-    <p class="note" style="margin:0 0 8px">${tr("osimDataNote", { markerset: esc(h.markerset) })}</p>
-    <label for="osimStatic">${tick(st.ready.static)} ${tr("osimStatic")}</label>
-    <input id="osimStatic" type="file" accept=".c3d,.trc">
-    <label for="osimMotion" style="margin-top:8px">${tick(st.ready.motion)} ${tr("osimMotion")}</label>
-    <input id="osimMotion" type="file" accept=".c3d,.trc,.mot,.sto" multiple>
-    <div class="row" style="margin-top:8px;align-items:flex-end">
-      <div><label for="osimMass">${tr("labMass")}</label>
-        <input id="osimMass" type="number" step="0.1" inputmode="decimal" value="${st.mass}"></div>
-      ${h.example ? `<div><button type="button" class="ghost" id="osimExample" style="margin:0">${tr("osimExample")}</button></div>` : ""}
-    </div>
-    ${st.example ? `<p class="sub" style="font-size:12.5px;margin:6px 0 0">${tr("osimUsingExample")}</p>` : ""}
-    <div style="margin-top:10px">${osimRunBtn("export", tr("osimRunData"), st.ready.static && st.ready.motion)}</div>
-    ${osimStateLine("export")}</div>`;
-  // 2. scale
-  let scaleOut = "";
-  if (r.scale) {
-    const rows = scaleRows(r.scale.factors);
-    scaleOut = rows.length ? `<table style="margin-top:8px"><thead><tr><th>${tr("osimSegment")}</th><th>x</th><th>y</th><th>z</th></tr></thead>
-      <tbody>${rows.map((x) => `<tr><td>${esc(x.segment)}</td>${x.scales.map((v) => `<td>${v.toFixed(3)}</td>`).join("")}</tr>`).join("")}</tbody></table>
-      <p class="note" style="margin:6px 0 0">${tr("osimScaleNote", { mass: r.scale.mass })}</p>` : `<p class="note">${tr("osimScaleNoFactors")}</p>`;
+  const st = osim.job, h = osim.health;
+  if (!osim.spec) {
+    box.innerHTML = `<p class="note">${tr("loading")}</p>`;
+    loadSimSpec().then((sp) => { osim.spec = sp; renderOsim(); });
+    return;
   }
-  const scale = `<div class="osimStep"><h3>2 \u00b7 ${tr("osimStepScale")}</h3>
-    <p class="note" style="margin:0 0 8px">${tr("osimScaleIntro", { model: esc(h.model) })}</p>
-    ${osimRunBtn("scale", tr("osimRunScale"), done("export"))}${osimStateLine("scale")}${scaleOut}</div>`;
-  // 3. IK + ID
-  let ikOut = "";
-  if (r.ik) {
-    const a = pickAngles(r.ik);
-    const ser = a.series.map((x) => ({ ...x, label: osimSideName(x) }));
-    const me = r.ik_errors ? markerErrors(r.ik_errors) : null;
-    ikOut += `<b style="font-size:13.5px;display:block;margin-top:10px">${tr("osimAngles")}</b>
-      ${lineChartSVG({ time: r.ik.time, series: ser, yUnit: "\u00b0" })}${legendHTML(ser)}
-      ${me ? `<p class="note${me.max_cm > 4 || me.rms_cm > 2 ? " banner" : ""}" style="margin:6px 0 0">${
-        tr("osimMarkerErr", { rms: me.rms_cm.toFixed(1), max: me.max_cm.toFixed(1) })}</p>` : ""}
-      ${a.flipped ? `<p class="note" style="margin:4px 0 0">${tr("osimKneeFlipped")}</p>` : ""}`;
-  }
-  if (r.id) {
-    const m = pickMoments(r.id, r.id.mass);
-    const ser = m.series.map((x) => ({ ...x, label: osimSideName(x) }));
-    ikOut += `<b style="font-size:13.5px;display:block;margin-top:12px">${tr("osimMoments")}</b>
-      ${lineChartSVG({ time: r.id.time, series: ser, yUnit: "N\u00b7m/kg" })}${legendHTML(ser)}
-      <p class="note" style="margin:4px 0 0">${tr("osimMomentNote")}</p>`;
-  }
-  const ikid = `<div class="osimStep"><h3>3 \u00b7 ${tr("osimStepIkId")}</h3>
-    ${osimRunBtn("ikid", tr("osimRunIkId"), done("scale"))}${osimStateLine("ikid")}${ikOut}</div>`;
-  // 4. SO + JRL
-  let soOut = "";
-  if (r.so) {
-    const top = topMuscles(r.so, 6);
-    const ser = top.map((x, i) => ({ label: x.column, y: x.y, color: MUSCLE_COLORS[i % MUSCLE_COLORS.length] }));
-    const res = worstReserve(r.so);
-    soOut += `<b style="font-size:13.5px;display:block;margin-top:10px">${tr("osimMuscles")}</b>
-      ${lineChartSVG({ time: r.so.time, series: ser, yUnit: "N" })}${legendHTML(ser)}
-      ${res ? `<p class="note${res.peak > 30 ? " banner" : ""}" style="margin:6px 0 0">${
-        tr("osimReserve", { nm: res.peak.toFixed(0), col: esc(res.column) })}</p>` : ""}`;
-  }
-  if (r.jra) {
-    const joints = reactionJoints(r.jra);
-    if (!joints.some((j) => j.key === osim.joint)) osim.joint = defaultReactionJoint(joints);
-    const f = osim.joint ? reactionForce(r.jra, osim.joint, r.jra.mass) : null;
-    if (f) {
-      const ser = [{ label: tr("osimResultant"), y: f.resultant, color: "#2f6fe4" }];
-      soOut += `<b style="font-size:13.5px;display:block;margin-top:12px">${tr("osimJrl")}</b>
-        <select id="osimJoint" style="margin:4px 0 6px">${joints.map((j) =>
-          `<option value="${esc(j.key)}"${j.key === osim.joint ? " selected" : ""}>${esc(j.joint)}</option>`).join("")}</select>
-        ${lineChartSVG({ time: r.jra.time, series: ser, yUnit: "BW" })}
-        <p class="note" style="margin:4px 0 0">${tr("osimJrlNote", { peak: f.peak.toFixed(2) })}</p>`;
-    }
-  }
-  const so = `<div class="osimStep"><h3>4 \u00b7 ${tr("osimStepSo")}</h3>
-    <p class="note" style="margin:0 0 8px">${tr("osimSoIntro")}</p>
-    ${osimRunBtn("so", tr("osimRunSo"), done("ikid"))}${osimStateLine("so")}${soOut}</div>`;
-  // 5-6. mew and CEINMS (engines that offer them): joint reactions, and the
-  // peak beside SO's for the same joint so the three solvers can be compared.
-  const hasStep = (id) => (h.steps || []).includes(id);
-  const jrlOf = (res) => {
-    if (!res) return null;
-    const joints = reactionJoints(res);
-    const key = joints.some((j) => j.key === osim.joint) ? osim.joint : defaultReactionJoint(joints);
-    return key ? { key, f: reactionForce(res, key, res.mass) } : null;
+  const ctx = {
+    t: tr, esc, client: osim.client, health: h, job: st, outputs: osim.toolOut, open: osim.open, err: osim.err,
+    act: (fn) => osimDo(fn),
+    openInProcess: (file) => {
+      showView("viewProcess"); openProcess();
+      processMounted.then((m) => m && m.load([file]));
+    },
   };
-  const jrlChart = (res, color) => {
-    const j = jrlOf(res); if (!j || !j.f) return "";
-    return `${lineChartSVG({ time: res.time, series: [{ label: tr("osimResultant"), y: j.f.resultant, color }], yUnit: "BW" })}
-      <p class="note" style="margin:4px 0 0">${esc(j.key.split("_on_")[0])}: ${tr("osimPeakBw", { peak: j.f.peak.toFixed(2) })}</p>`;
-  };
-  const extra = (id, n, titleKey, introKey, runKey, res, color) => hasStep(id) ? `<div class="osimStep"><h3>${n} \u00b7 ${tr(titleKey)}</h3>
-    <p class="note" style="margin:0 0 8px">${tr(introKey)}</p>
-    ${osimRunBtn(id, tr(runKey), done("so"))}${osimStateLine(id)}${jrlChart(res, color)}</div>` : "";
-  const mew = extra("mew", 5, "osimStepMew", "osimMewIntro", "osimRunMew", r.mew_jra, "#e8871a");
-  const ceinms = extra("ceinms", 6, "osimStepCeinms", "osimCeinmsIntro", "osimRunCeinms", r.ceinms_jra, "#7d5bbe");
-  const peaks = [["SO", r.jra], ["mew", r.mew_jra], ["CEINMS", r.ceinms_jra]].map(([nm, res]) => [nm, jrlOf(res)]).filter(([, j]) => j && j.f);
-  const compare = peaks.length > 1 ? `<div class="osimStep"><h3>${tr("osimCompareTitle")}</h3>
-    <table><thead><tr><th>${tr("osimSolver")}</th><th>${tr("osimJoint")}</th><th>${tr("osimPeak")}</th></tr></thead><tbody>${
-      peaks.map(([nm, j]) => `<tr><td>${nm}</td><td>${esc(j.key.split("_on_")[0])}</td><td>${j.f.peak.toFixed(2)} BW</td></tr>`).join("")}</tbody></table>
-    <p class="note" style="margin:6px 0 0">${tr("osimCompareNote")}</p></div>` : "";
-  const any = ["scale", "ikid", "so", "mew", "ceinms"].some(done);
-  box.innerHTML = `<p class="sub" style="font-size:12.5px;margin:0">${tr("osimConnected", { model: esc(h.model) })}
+  box.innerHTML = `<p class="sub" style="font-size:15px;margin:0">${tr("simConnected")}
       <a href="#" id="osimDisconnect">${tr("osimDisconnect")}</a></p>
-    ${h.fake ? `<p class="note banner" style="margin:8px 0 0">${tr("osimFake")}</p>` : ""}${err}
-    ${data}${scale}${ikid}${so}${mew}${ceinms}${compare}
-    ${any ? `<a class="ghost" href="${esc(osim.client.bundleUrl(st.id))}" style="display:block;text-align:center;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:10px;text-decoration:none;color:var(--ink)">${tr("osimDownload")}</a>` : ""}
+    ${h.fake ? `<p class="note banner" style="margin:8px 0 0">${tr("osimFake")}</p>` : ""}
+    ${simHTML(ctx)}
     <p class="note" style="margin:10px 0 0">${tr("osimHonest")}</p>`;
-  const id = st.id, c = osim.client;
   $("osimDisconnect").onclick = (e) => {
     e.preventDefault();
     clearTimeout(osim.timer);
     try { sessionStorage.removeItem("bioscout.osim"); } catch { /* nothing kept */ }
-    osim.client = null; osim.job = null; osim.res = {}; osim.err = null;
+    osim.client = null; osim.job = null; osim.res = {}; osim.toolOut = {}; osim.err = null;
     renderOsim();
   };
-  const sendFiles = (input, slot) => async () => {
-    for (const f of input.files) {
-      const kind = fileKind(f.name, slot);
-      if (!kind) { osim.err = tr("osimErrFile", { name: f.name }); renderOsim(); return; }
-      await osimDo(() => c.upload(id, kind, f));
-      if (osim.err) return;
-    }
-  };
-  $("osimStatic").onchange = sendFiles($("osimStatic"), "static");
-  $("osimMotion").onchange = sendFiles($("osimMotion"), "motion");
-  $("osimMass").onchange = () => osimDo(() => c.setMass(id, parseFloat($("osimMass").value)));
-  if ($("osimExample")) $("osimExample").onclick = () => osimDo(() => c.example(id));
-  box.querySelectorAll("[data-osim-run]").forEach((b) => {
-    b.onclick = () => osimDo(() => c.run(id, b.dataset.osimRun));
-  });
-  if ($("osimJoint")) $("osimJoint").onchange = () => { osim.joint = $("osimJoint").value; renderOsim(); };
+  simWire(box, ctx);
 }
 function osimInit() {
   /* Only reachable through the lab engine's own link: without an engine

@@ -1,0 +1,370 @@
+{
+ "tools": [
+  {
+   "id": "scale",
+   "label": "Scale",
+   "options": {
+    "mass": "Body mass (kg)",
+    "aliases": "Marker aliases, e.g. LASI=LASIS RMALL=RLMA (only if your lab names differ)"
+   },
+   "slots": [
+    {
+     "id": "static_trc",
+     "label": "Static trial markers (.trc)",
+     "ext": [
+      ".trc"
+     ],
+     "template": null,
+     "required": true
+    },
+    {
+     "id": "markerset",
+     "label": "Marker set (.xml)",
+     "ext": [
+      ".xml"
+     ],
+     "template": "markers_pyCGM.xml",
+     "required": false
+    },
+    {
+     "id": "scale_setup",
+     "label": "Scale setup, measurement set (.xml)",
+     "ext": [
+      ".xml"
+     ],
+     "template": "setup_scale.xml",
+     "required": false
+    }
+   ]
+  },
+  {
+   "id": "ik",
+   "label": "Inverse kinematics",
+   "options": {
+    "t0": "From (s)",
+    "t1": "To (s)"
+   },
+   "slots": [
+    {
+     "id": "motion_trc",
+     "label": "Motion trial markers (.trc)",
+     "ext": [
+      ".trc"
+     ],
+     "template": null,
+     "required": true
+    },
+    {
+     "id": "taskset",
+     "label": "IK task set (.xml)",
+     "ext": [
+      ".xml"
+     ],
+     "template": "IK_task_set.xml",
+     "required": false
+    },
+    {
+     "id": "model",
+     "label": "Model (.osim) -- default: the scaled model",
+     "ext": [
+      ".osim"
+     ],
+     "template": null,
+     "required": false
+    }
+   ]
+  },
+  {
+   "id": "id",
+   "label": "Inverse dynamics",
+   "options": {},
+   "slots": [
+    {
+     "id": "grf_mot",
+     "label": "Ground reaction forces (.mot)",
+     "ext": [
+      ".mot",
+      ".sto"
+     ],
+     "template": null,
+     "required": true
+    },
+    {
+     "id": "grf_xml",
+     "label": "External loads (.xml) -- default: made from the .mot",
+     "ext": [
+      ".xml"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "ik_mot",
+     "label": "Joint angles (.mot) -- default: the IK result",
+     "ext": [
+      ".mot",
+      ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "model",
+     "label": "Model (.osim) -- default: the scaled model",
+     "ext": [
+      ".osim"
+     ],
+     "template": null,
+     "required": false
+    }
+   ]
+  },
+  {
+   "id": "ma",
+   "label": "Muscle analysis",
+   "options": {},
+   "slots": [
+    {
+     "id": "grf_mot",
+     "label": "Ground reaction forces (.mot) -- default: from ID",
+     "ext": [
+      ".mot",
+      ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "ik_mot",
+     "label": "Joint angles (.mot) -- default: the IK result",
+     "ext": [
+      ".mot",
+      ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "model",
+     "label": "Model (.osim) -- default: the scaled model",
+     "ext": [
+      ".osim"
+     ],
+     "template": null,
+     "required": false
+    }
+   ]
+  },
+  {
+   "id": "rra",
+   "label": "Residual reduction analysis",
+   "options": {
+    "t0": "From (s) -- default: first force on a plate",
+    "t1": "To (s) -- default: last force on a plate"
+   },
+   "slots": [
+    {
+     "id": "ik_mot",
+     "label": "Joint angles (.mot) -- default: the IK result",
+     "ext": [
+      ".mot",
+      ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "grf_mot",
+     "label": "Ground reaction forces (.mot) -- default: from ID",
+     "ext": [
+      ".mot",
+      ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "grf_xml",
+     "label": "External loads (.xml) -- default: from ID",
+     "ext": [
+      ".xml"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "rra_setup",
+     "label": "RRA setup template (.xml) -- default: built here",
+     "ext": [
+      ".xml"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "rra_actuators",
+     "label": "RRA actuators (.xml) -- default: built from the model",
+     "ext": [
+      ".xml"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "rra_tasks",
+     "label": "RRA tasks (.xml) -- default: every free coordinate",
+     "ext": [
+      ".xml"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "model",
+     "label": "Model (.osim) -- default: the scaled model",
+     "ext": [
+      ".osim"
+     ],
+     "template": null,
+     "required": false
+    }
+   ]
+  },
+  {
+   "id": "so",
+   "label": "Static optimisation",
+   "options": {
+    "jra": "Also joint reaction loads (1 = yes)"
+   },
+   "slots": [
+    {
+     "id": "ik_mot",
+     "label": "Joint angles (.mot) -- default: the IK result",
+     "ext": [
+      ".mot",
+      ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "grf_mot",
+     "label": "Ground reaction forces (.mot) -- default: from ID",
+     "ext": [
+      ".mot",
+      ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "grf_xml",
+     "label": "External loads (.xml) -- default: from ID",
+     "ext": [
+      ".xml"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "actuators",
+     "label": "Reserve actuators (.xml)",
+     "ext": [
+      ".xml"
+     ],
+     "template": "actuators_so.xml",
+     "required": false
+    },
+    {
+     "id": "so_setup",
+     "label": "SO setup (.xml)",
+     "ext": [
+      ".xml"
+     ],
+     "template": "setup_SO.xml",
+     "required": false
+    },
+    {
+     "id": "model",
+     "label": "Model (.osim) -- default: the scaled model",
+     "ext": [
+      ".osim"
+     ],
+     "template": null,
+     "required": false
+    }
+   ]
+  },
+  {
+   "id": "ceinms",
+   "label": "CEINMS",
+   "options": {},
+   "slots": [
+    {
+     "id": "emg_mot",
+     "label": "EMG envelopes, filtered and normalised (.mot/.sto)",
+     "ext": [
+      ".mot",
+      ".sto"
+     ],
+     "template": null,
+     "required": true
+    },
+    {
+     "id": "ik_mot",
+     "label": "Joint angles (.mot) -- default: the IK result",
+     "ext": [
+      ".mot",
+      ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "id_sto",
+     "label": "Joint moments (.sto) -- default: the ID result",
+     "ext": [
+      ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "ceinms_cfg",
+     "label": "CEINMS execution config (.xml)",
+     "ext": [
+      ".xml"
+     ],
+     "template": "ceinms_cfg.xml",
+     "required": false
+    },
+    {
+     "id": "excitation_generator",
+     "label": "Excitation generator (.xml)",
+     "ext": [
+      ".xml"
+     ],
+     "template": "excitationGenerator.xml",
+     "required": false
+    },
+    {
+     "id": "model",
+     "label": "Model (.osim) -- default: the scaled model",
+     "ext": [
+      ".osim"
+     ],
+     "template": null,
+     "required": false
+    }
+   ]
+  }
+ ],
+ "models": [
+  "Digital Athlete/Digital_Athlete.osim",
+  "Full_Body_with_ball.osim",
+  "GPK_v4_016.osim",
+  "Neck_model.osim",
+  "Rajagopal2015.osim",
+  "arm26_ball.osim"
+ ]
+}
