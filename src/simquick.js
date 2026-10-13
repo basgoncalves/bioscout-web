@@ -64,9 +64,24 @@ export async function runQuick(ctx, hooks) {
   const stem = Q.trial.replace(/\.c3d$/i, ""), outName = `${stem}_simulation`;
   try {
     let dir = null;
-    if (out) { dir = await out.getDirectoryHandle(outName, { create: true }); for (const t of STEPS) hooks.setDir(t, dir); }
-    else { log(T("sq_zipMode")); for (const t of STEPS) hooks.setDir(t, null); }
-    const put = async (n, text) => { if (dir) await writeText(dir, n, text); else zipFiles.push({ name: `${outName}/${n}`, data: text }); };
+    if (out) {
+      try { dir = await out.getDirectoryHandle(outName, { create: true }); for (const t of STEPS) hooks.setDir(t, dir); }
+      catch (e) { log(`${outName}: ${e.message} — ${T("sq_zipMode")}`); }
+    } else log(T("sq_zipMode"));
+    if (!dir) for (const t of STEPS) hooks.setDir(t, null);
+    // a folder just created inside a cloud-synced directory (ucloud / OneDrive "files on demand") can refuse
+    // the first write with NotFoundError: re-open the folder and retry, and fall back to the .zip if it keeps refusing
+    const put = async (n, text) => {
+      if (!dir) { zipFiles.push({ name: `${outName}/${n}`, data: text }); return; }
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { await writeText(dir, n, text); return; }
+        catch (e) {
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+          try { dir = await out.getDirectoryHandle(outName, { create: true }); } catch { /* keep the old handle */ }
+          if (attempt === 2) { log(`${n}: ${e.message} — ${T("sq_zipMode")}`); dir = null; for (const t of STEPS) hooks.setDir(t, null); zipFiles.push({ name: `${outName}/${n}`, data: text }); }
+        }
+      }
+    };
     // 1. the c3d -> OpenSim files
     log(`${Q.trial}: export`);
     const f = Q.file.file;
@@ -94,12 +109,12 @@ export async function runQuick(ctx, hooks) {
       await client.toolRun(id, tool);
       const sp = await wait(tool);
       if (sp.state === "error") { log(`${tool}: failed — ${sp.error}`); if (tool === "scale" || tool === "ik") break; continue; }
-      if (dir) await hooks.save(tool);
-      else for (const o of await hooks.outputs(tool)) zipFiles.push({ name: `${outName}/${o.path}`, data: o.data });
+      if (dir) { try { await hooks.save(tool); } catch (e) { log(`${tool}: ${e.message} — ${T("sq_zipMode")}`); dir = null; for (const t of STEPS) hooks.setDir(t, null); } }
+      if (!dir) for (const o of await hooks.outputs(tool)) zipFiles.push({ name: `${outName}/${o.path}`, data: o.data });
       log(`${tool}: done in ${sp.seconds} s`);
     }
     if (dir) { Q.done = `${out.name}/${outName}`; log(T("sq_done", { dir: Q.done })); }
-    else {
+    else if (zipFiles.length) {
       const blob = makeZip(zipFiles), url = URL.createObjectURL(blob), a = document.createElement("a");
       a.href = url; a.download = `${outName}.zip`; document.body.appendChild(a); a.click();
       setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
