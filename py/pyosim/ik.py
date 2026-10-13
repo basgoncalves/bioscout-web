@@ -83,13 +83,14 @@ def solve(model, times, markers, marker_w, coord_tasks=None, t_range=None, log=p
         x = sol.x; first = False
         P = kin.markers(x[None])[0]
         e = np.linalg.norm(P - obs, axis=1)[ok]
-        errs.append((np.sqrt(np.mean(e ** 2)), e.max()))
+        errs.append((np.sqrt(np.mean(e ** 2)), e.max(), float(np.sum(e ** 2))))
         out.append(model.full_q(dict(zip(free, x))))
     t = times[sel]
     return t, out, np.array(errs), names
 
 
-def run(model_path, trc_path, task_path, out_mot, t_range=None, log=print, markerset=None):
+def run(model_path, trc_path, task_path, out_mot, t_range=None, log=print, markerset=None,
+        errors_path=None, setup_path=None):
     model = model_path if isinstance(model_path, Model) else Model(model_path)
     if markerset:
         model.load_markerset(markerset)
@@ -103,6 +104,35 @@ def run(model_path, trc_path, task_path, out_mot, t_range=None, log=print, marke
     data = np.array([[ti] + [np.degrees(q[n]) if n in rot else q[n] for n in model.coord_order]
                      for ti, q in zip(t, qs)])
     write_mot(out_mot, cols, data)
+    if errors_path:   # as OpenSim's _ik_marker_errors.sto
+        write_mot(errors_path, ["time", "total_squared_error", "marker_error_RMS", "marker_error_max"],
+                  np.column_stack([t, errs[:, 2], errs[:, 0], errs[:, 1]]), name="Model Marker Errors from IK",
+                  degrees=False)
+    if setup_path:
+        write_setup(setup_path, model_path, trc_path, task_path, out_mot, t if len(t) else None)
     log(f"[ik] {len(t)} frames, {len(used)} markers; RMS error mean {errs[:,0].mean()*1000:.1f} mm, "
         f"max {errs[:,1].max()*1000:.1f} mm")
     return out_mot, errs
+
+
+def write_setup(path, model_path, trc_path, task_path, out_mot, t):
+    """An OpenSim InverseKinematicsTool setup that reproduces this run in the desktop GUI."""
+    b = lambda p: os.path.basename(p) if isinstance(p, str) else "scaled.osim"
+    tr = f"{t[0]:.6f} {t[-1]:.6f}" if t is not None else ""
+    with open(path, "w", newline="\n") as f:
+        f.write(f"""<?xml version="1.0" encoding="UTF-8" ?>
+<OpenSimDocument Version="40000">
+\t<InverseKinematicsTool name="ik">
+\t\t<model_file>{b(model_path)}</model_file>
+\t\t<constraint_weight>Inf</constraint_weight>
+\t\t<accuracy>1e-05</accuracy>
+\t\t<IKTaskSet file="{b(task_path) if task_path else ''}" />
+\t\t<marker_file>{b(trc_path)}</marker_file>
+\t\t<coordinate_file>Unassigned</coordinate_file>
+\t\t<time_range>{tr}</time_range>
+\t\t<report_errors>true</report_errors>
+\t\t<output_motion_file>{b(out_mot)}</output_motion_file>
+\t\t<report_marker_locations>false</report_marker_locations>
+\t</InverseKinematicsTool>
+</OpenSimDocument>
+""")
