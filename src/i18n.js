@@ -1964,10 +1964,9 @@ const EN = {
   "pr_calcNote": "Between cursors A and B, on each ticked channel (processed if there are steps, raw if not). Results go to the table at the bottom. Jump height from impulse finds the phases itself: body weight (Basic, or the first 0.5 s), centre-of-mass velocity from the force, the lowest point where velocity returns to zero, take-off below 20 N; the cursors then mark the concentric phase. Flight: A at take-off, B at landing.",
   "pr_cStats": "Min, max, mean, SD, range",
   "pr_cArea": "Area under the curve (impulse)",
-  "pr_cImpulse": "Jump height from impulse (automatic: lowest point to take-off)",
+  "pr_cImpulse": "Jump height from impulse (automatic; two ticked plates are summed)",
   "pr_cFlight": "Jump height from flight time (A take-off, B landing)",
   "pr_cTime": "Time between A and B",
-  "pr_h35": "between cursors A and B, on the ticked channels after the processing",
   "pr_tBwSet": "Set body weight (mean between A and B)",
   "pr_jTitle": "Jump: impulse and centre-of-mass velocity",
   "pr_jNote": "Body weight {bw} N. The velocity comes from (F − BW)/m integrated over time; it goes negative while the body moves down and returns to zero at the lowest point ({low} s). The concentric impulse from there to take-off ({to} s) gives the take-off velocity {v} m/s, so h = v²/2g = {h} cm.",
@@ -2034,6 +2033,10 @@ const EN = {
   "sim_opt_jra": "Also joint reaction loads (1 = yes, 0 = no)",
   "sim_slot_id_grf_mot": "Ground reaction forces (.mot)",
   "simPreviewNote": "Connect to the lab engine to run these steps. You can already see what each one needs and download the template setup files.",
+  "pr_tSum": "Sum ticked channels (two force plates)",
+  "pr_sumNeedTwo": "Tick two or more channels to sum, e.g. FP4 Fz and FP5 Fz.",
+  "pr_h35": "add columns into one channel (a person on two force plates)",
+  "pr_h36": "between cursors A and B, on the ticked channels after the processing",
 };
 
 const PT = {
@@ -3973,10 +3976,9 @@ const PT = {
   "pr_calcNote": "Entre os cursores A e B, em cada canal marcado (processado se houver passos, bruto se não). Os resultados vão para a tabela no fim. O impulso encontra as fases sozinho: peso corporal (Básico, ou o primeiro 0,5 s), velocidade do centro de massa a partir da força, ponto mais baixo onde a velocidade volta a zero, saída abaixo de 20 N; os cursores marcam depois a fase concêntrica. Voo: A na saída, B na aterragem.",
   "pr_cStats": "Mín, máx, média, DP, amplitude",
   "pr_cArea": "Área sob a curva (impulso)",
-  "pr_cImpulse": "Altura do salto pelo impulso (automático: ponto mais baixo até à saída)",
+  "pr_cImpulse": "Altura do salto pelo impulso (automático; duas plataformas marcadas são somadas)",
   "pr_cFlight": "Altura do salto pelo tempo de voo (A saída, B aterragem)",
   "pr_cTime": "Tempo entre A e B",
-  "pr_h35": "entre os cursores A e B, nos canais marcados depois do processamento",
   "pr_tBwSet": "Definir peso corporal (média entre A e B)",
   "pr_jTitle": "Salto: impulso e velocidade do centro de massa",
   "pr_jNote": "Peso corporal {bw} N. A velocidade vem de (F − PC)/m integrada no tempo; é negativa enquanto o corpo desce e volta a zero no ponto mais baixo ({low} s). O impulso concêntrico daí até à saída ({to} s) dá a velocidade de saída {v} m/s, logo h = v²/2g = {h} cm.",
@@ -4043,6 +4045,10 @@ const PT = {
   "sim_opt_jra": "Também cargas de reação articular (1 = sim, 0 = não)",
   "sim_slot_id_grf_mot": "Forças de reação do solo (.mot)",
   "simPreviewNote": "Ligue-se ao motor do laboratório para correr estes passos. Já pode ver o que cada um precisa e descarregar os ficheiros de configuração modelo.",
+  "pr_tSum": "Somar canais marcados (duas plataformas)",
+  "pr_sumNeedTwo": "Marque dois ou mais canais para somar, p. ex. FP4 Fz e FP5 Fz.",
+  "pr_h35": "somar colunas num só canal (uma pessoa em duas plataformas)",
+  "pr_h36": "entre os cursores A e B, nos canais marcados depois do processamento",
 };
 
 const DE = {
@@ -5981,10 +5987,9 @@ const DE = {
   "pr_calcNote": "Zwischen den Cursorn A und B, für jeden angehakten Kanal (verarbeitet, wenn es Schritte gibt, sonst roh). Ergebnisse landen in der Tabelle unten. Der Impuls findet die Phasen selbst: Körpergewicht (Basis, oder die ersten 0,5 s), Schwerpunktgeschwindigkeit aus der Kraft, tiefster Punkt bei Geschwindigkeit null, Absprung unter 20 N; danach markieren die Cursor die konzentrische Phase. Flug: A auf den Absprung, B auf die Landung.",
   "pr_cStats": "Min, Max, Mittel, SD, Spannweite",
   "pr_cArea": "Fläche unter der Kurve (Impuls)",
-  "pr_cImpulse": "Sprunghöhe aus Impuls (automatisch: tiefster Punkt bis Absprung)",
+  "pr_cImpulse": "Sprunghöhe aus Impuls (automatisch; zwei angehakte Platten werden summiert)",
   "pr_cFlight": "Sprunghöhe aus Flugzeit (A Absprung, B Landung)",
   "pr_cTime": "Zeit zwischen A und B",
-  "pr_h35": "zwischen den Cursorn A und B, für die angehakten Kanäle nach der Verarbeitung",
   "pr_tBwSet": "Körpergewicht setzen (Mittelwert zwischen A und B)",
   "pr_jTitle": "Sprung: Impuls und Schwerpunktgeschwindigkeit",
   "pr_jNote": "Körpergewicht {bw} N. Die Geschwindigkeit ist (F − KG)/m über die Zeit integriert; sie ist negativ, solange der Körper sinkt, und wird am tiefsten Punkt ({low} s) wieder null. Der konzentrische Impuls von dort bis zum Absprung ({to} s) ergibt die Absprunggeschwindigkeit {v} m/s, also h = v²/2g = {h} cm.",
@@ -6051,6 +6056,10 @@ const DE = {
   "sim_opt_jra": "Auch Gelenkreaktionslasten (1 = ja, 0 = nein)",
   "sim_slot_id_grf_mot": "Bodenreaktionskräfte (.mot)",
   "simPreviewNote": "Verbinde dich mit der Labor-Engine, um diese Schritte auszuführen. Du kannst schon sehen, was jeder braucht, und die Vorlagen herunterladen.",
+  "pr_tSum": "Angehakte Kanäle summieren (zwei Kraftplatten)",
+  "pr_sumNeedTwo": "Hake zwei oder mehr Kanäle zum Summieren an, z. B. FP4 Fz und FP5 Fz.",
+  "pr_h35": "Spalten zu einem Kanal addieren (eine Person auf zwei Kraftplatten)",
+  "pr_h36": "zwischen den Cursorn A und B, für die angehakten Kanäle nach der Verarbeitung",
 };
 
 const DICTS = { en: EN, pt: PT, de: DE };

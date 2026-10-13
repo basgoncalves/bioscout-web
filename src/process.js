@@ -66,6 +66,7 @@ export const HELP = [
   ["overlay <col> [norm]", "the same column from every file on one plot (norm: 0-100 %)"],
   ["mass <kg>", "body mass typed by you; body weight = mass x g for every file"],
   ["step <op> [numbers] | step undo | step clear", "add to the processing applied to every channel: lowpass fc [order], highpass, bandpass lo hi, smooth n, offset, rectify, envelope ms, scale k, divbw, normmax, deriv, integrate"],
+  ["sum <col> <col> ...", "add columns into one channel (a person on two force plates)"],
   ["calc stats | area | impulse | flight | time", "between cursors A and B, on the ticked channels after the processing"],
 ];
 
@@ -177,7 +178,27 @@ export function makeProcessor() {
     for (const st of S.pipe) y = Float64Array.from(STEPS[st.op].f(y, ds, st.args, S));
     return (ds._pc.map[key] = y);
   }
+  /* Two (or more) plates under one person: their forces summed into one channel,
+     "FP5 Fz + FP4 Fz", kept as a raw channel so every tool and plot can use it. */
+  function sumColumns(ds, keys) {
+    const ks = keys.map((k) => col(ds, k).key);
+    const name = ks.join(" + ");
+    if (!ds.cols[name]) {
+      const out = new Float64Array(ds.time.length);
+      for (const k of ks) { const y = ds.cols[k]; for (let i = 0; i < out.length; i++) out[i] += Number.isFinite(y[i]) ? y[i] : 0; }
+      ds.cols[name] = out;
+      const u = ds.units[ks[0]]; if (u) ds.units[name] = u;
+    }
+    return name;
+  }
   const C = {
+    /* sum <col> <col> ...: one channel with the columns added (two force plates) */
+    sum(args) {
+      const ds = cur(); if (args.length < 2) throw new Error("sum needs two or more columns");
+      const name = sumColumns(ds, args);
+      S.plot = { cols: [name], xy: null, curves: null, marks: [] };
+      return `${name}: summed`;
+    },
     /* the chain: "step lowpass 10 4", "step undo", "step clear", "step remove 2" */
     step([op, ...args]) {
       if (!op) throw new Error("step <operation> [numbers]");
@@ -205,8 +226,10 @@ export function makeProcessor() {
         addResult(ds, "calculate", "flight time (A take-off, B landing)", tf, "s"); addResult(ds, "calculate", "jump height (flight time)", 100 * h, "cm");
         return `flight ${r3(tf)} s -> ${r3(100 * h)} cm`;
       }
-      const keys = [...new Set(S.plot.cols.map((k) => rootOf(ds, k)))].filter((k) => ds.cols[k]);
+      let keys = [...new Set(S.plot.cols.map((k) => rootOf(ds, k)))].filter((k) => ds.cols[k]);
       if (!keys.length) throw new Error("tick a channel first");
+      // a jump on two plates: the person's force is the sum of both
+      if (w === "impulse" && keys.length > 1) keys = [sumColumns(ds, keys)];
       const idx = []; ds.time.forEach((t, i) => { if (t >= ta && t <= tb) idx.push(i); });
       if (idx.length < 2) throw new Error("A and B are too close together");
       const cu = chainUnit(S.pipe, ""), bwN = S.massKg ? S.massKg * D.G : S.bw[ds.name];
@@ -706,6 +729,7 @@ export function chartSVG({ series, xLabel = "s", yLabel = "", yLabelR = "", mark
  */
 export const TOOLS = [
   { group: "pr_gBasic", items: [
+    { k: "pr_tSum", f: [], ui: "sum" },
     { k: "pr_tBwSet", f: [], ui: "bwab" },
     { k: "pr_tOffset", f: [], cmd: () => "step offset" },
     { k: "pr_tRectify", f: [], cmd: () => "step rectify" },
@@ -1059,7 +1083,17 @@ export function mountProcess(root, { t, download }) {
       b.onclick = () => {
         const [gi, ii] = b.dataset.tool.split("_").map(Number), it = TOOLS[gi].items[ii];
         if (it.ui === "minmax") { vis.minmax = !vis.minmax; render(); return; }
-        if (it.ui === "bwab") { const k = plotted(ds).raw[0]; const line = `bw ab ${quote(k ? k.key : "@fz")}`; q("#prCmd").value = line; exec(line); return; }
+        if (it.ui === "sum") {
+          const ks = plotted(ds).raw.map((r) => r.key);
+          if (ks.length < 2) { say({ ok: false, msg: t("pr_sumNeedTwo") }, "sum"); render(); return; }
+          const line = `sum ${ks.map(quote).join(" ")}`; q("#prCmd").value = line; exec(line); return;
+        }
+        if (it.ui === "bwab") {
+          const ks = plotted(ds).raw.map((r) => r.key);
+          // two plates ticked: body weight from their sum
+          if (ks.length > 1) { const r1 = P.run(`sum ${ks.map(quote).join(" ")}`); say(r1, `sum ${ks.map(quote).join(" ")}`); }
+          const k = plotted(ds).raw[0]; const line = `bw ab ${quote(k ? k.key : "@fz")}`; q("#prCmd").value = line; exec(line); return;
+        }
         const v = it.f.map((_, fi) => root.querySelector(`#prT${gi}_${ii}_${fi}`).value);
         const lines = [].concat(it.cmd(v));
         for (const line of lines.slice(0, -1)) say(P.run(line), line);
