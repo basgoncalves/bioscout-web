@@ -1,26 +1,41 @@
 /**
  * simsession.js -- Batch mode of Simulate: the per-step page working inside a
- * bioscout session folder, in the layout the Python bioscout reads
- * (bioscout/session/config.py):
+ * bioscout PROJECT folder, in the layout the Python bioscout reads
+ * (bioscout/session/config.py, e.g. Charite_Data/tests/_data):
  *
- *   <session>/session.yaml
- *   <session>/2_experimental/<trial>/marker_experimental.trc, grf.mot, GRF.xml, emg.mot
- *   <session>/3_iterations/<iteration>/<model_scaled>.osim, markers.xml
- *   <session>/3_iterations/<iteration>/<trial>/external_biomechanics/ik.mot, inverse_dynamics.sto, figures ...
+ *   <project>/models/generic/<family>/<model>.osim           models_dir
+ *   <project>/models/personalised/<subject>/<session>/<iteration>_scaled.osim
+ *   <project>/setupFiles/markers_*.xml, setup_scale.xml ...   setup_dir
+ *   <project>/simulations/<subject>/<session>/session.yaml
+ *       1_c3dfiles/*.c3d · 2_experimental/<trial>/ · 3_iterations/<iteration>/<trial>/external_biomechanics/
  *
- * One iteration = one scaled model. Iteration file keys are iteration-relative.
- * Only the keys this page needs are read; anything else in session.yaml is left
- * untouched (an iteration is added as a text block, never by rewriting the file).
+ * session.yaml: `models_dir` / `setup_dir` (relative to project_dir) root the
+ * iteration file keys (`./generic/...`, `./personalised/<subject>/<session>/...`,
+ * `./markers.xml`); without them a key is relative to the iteration folder.
+ * Only the keys this page needs are read; the rest of the file is left as it
+ * is (blocks are added as text, never by rewriting the file).
  */
 import { c3dToOpenSim } from "./c3dexport.js";
 
 let T = (k) => k;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-export const S = {           // the one open session
-  root: null, name: "", yaml: "", cfg: null, trials: [], iterations: [], iteration: "", trial: "",
+export const S = {           // the one open project + session
+  root: null, name: "", simDir: "simulations", subjects: [], subject: "", sessions: [], session: "", ses: "",   // ses = simDir/subject/session
+  yaml: "", cfg: null, trials: [], iterations: [], iteration: "", trial: "",
   c3dDir: "1_c3dfiles", c3ds: [], msg: "", busy: false, runLog: [], newIt: null, weight: null,
 };
+const sp = (rel) => `${S.ses}/${rel}`;                       // session-relative -> project-relative
+const hasRoot = (key) => (["model_generic", "model_scaled"].includes(key) ? S.cfg.top.models_dir : S.cfg.top.setup_dir) || "";
+/** An iteration file key -> project-relative path (models_dir / setup_dir when set, else the iteration folder). */
+export function itPath(it, key, val) {
+  if (!val) return null;
+  const v = String(val).replace(/<subject>/g, S.subject).replace(/<session>/g, S.session).replace(/<iteration>/g, it);
+  if (/^[a-zA-Z]:|^\//.test(v)) return null;                 // absolute: not reachable from the folder handle
+  const root = hasRoot(key);
+  if (root) return `${root}/${v.replace(/^\.\//, "")}`;
+  return sp(`3_iterations/${it}/${v}`);
+}
 
 // ------------------------------------------------------------------ folder helpers
 async function dirAt(root, path, create = false) {
@@ -65,8 +80,10 @@ export function parseYaml(text) {
 }
 /** As bioscout.session.config.scaffold_session_yaml: trials from the c3d names, no guessed
  *  trial type, body_mass only when known, project_dir relative (<project>/simulations/<subject>/<session>). */
-export function scaffoldYaml({ subject, session, bodyMass, staticTrial, trials }) {
+export function scaffoldYaml({ subject, session, bodyMass, staticTrial, trials, modelsDir = "", setupDir = "" }) {
   const lines = [`subject: ${subject || "subject"}`, `session: '${session}'`, `project_dir: ../../..`];
+  if (modelsDir) lines.push(`models_dir: ${modelsDir}`);
+  if (setupDir) lines.push(`setup_dir: ${setupDir}`);
   if (bodyMass) lines.push(`body_mass: ${bodyMass}`);
   if (staticTrial) lines.push(`static_trial: ${staticTrial}`);
   lines.push(`trials:`);
@@ -98,54 +115,86 @@ export function addIterationYaml(text, name, fields) {
 }
 
 // ------------------------------------------------------------------ open / refresh
-export async function openSession(root) {
+async function firstDir(root, names) { for (const d of names) { try { await dirAt(root, d); return d; } catch { /* next */ } } return null; }
+export async function openProject(root) {
   S.root = root; S.name = root.name; S.msg = "";
-  const f = await readFile(root, "session.yaml");
+  S.simDir = await firstDir(root, ["simulations", "Simulations"]) || "simulations";
+  S.subjects = await listDirs(root, S.simDir);
+  if (!S.subjects.includes(S.subject)) S.subject = S.subjects[0] || "";
+  await openSubject();
+}
+export async function openSubject() {
+  S.sessions = S.subject ? await listDirs(S.root, `${S.simDir}/${S.subject}`) : [];
+  if (!S.sessions.includes(S.session)) S.session = S.sessions[0] || "";
+  await openSession();
+}
+export async function openSession() {
+  S.ses = `${S.simDir}/${S.subject}/${S.session}`;
+  S.yaml = ""; S.cfg = { top: {}, trials: {}, iterations: {} }; S.trials = []; S.iterations = []; S.c3ds = [];
+  if (!S.subject || !S.session) return;
+  const root = S.root;
+  const f = await readFile(root, sp("session.yaml"));
   S.yaml = f ? await f.text() : "";
-  S.trials = await listDirs(root, "2_experimental");
-  S.iterations = await listDirs(root, "3_iterations");
-  S.c3dDir = await c3dDir(root);
-  S.c3ds = await listFiles(root, S.c3dDir, /\.c3d$/i);
+  S.trials = await listDirs(root, sp("2_experimental"));
+  S.iterations = await listDirs(root, sp("3_iterations"));
+  S.c3dDir = await firstDir(root, C3D_DIRS.map(sp)) ? (await firstDir(root, C3D_DIRS.map(sp))).slice(S.ses.length + 1) : C3D_DIRS[0];
+  S.c3ds = await listFiles(root, sp(S.c3dDir), /\.c3d$/i);
   if (!S.yaml) {
     const names = S.c3ds.length ? S.c3ds.map((n) => n.replace(/\.c3d$/i, "")) : S.trials;
-    S.yaml = scaffoldYaml({ subject: "", session: root.name, staticTrial: names.find((t) => /^static/i.test(t)) || "", trials: names });
-    await writeFile(root, "session.yaml", S.yaml);
+    S.yaml = scaffoldYaml({ subject: S.subject, session: S.session, staticTrial: names.find((t) => /^static/i.test(t)) || "", trials: names,
+      modelsDir: await firstDir(root, ["models"]) || "", setupDir: await firstDir(root, ["setupFiles", "setup_files"]) || "" });
+    await writeFile(root, sp("session.yaml"), S.yaml);
     S.msg = T("ss_scaffolded");
   }
   S.cfg = parseYaml(S.yaml);
   if (!S.iterations.includes(S.iteration)) S.iteration = S.iterations[0] || "";
   if (!S.trials.includes(S.trial)) S.trial = "";
 }
-async function refresh() { if (S.root) await openSession(S.root); }
+async function refresh() { if (S.root) await openSession(); }
 
 /** Create 3_iterations/<name>, its yaml block, and copy the marker set in. */
-/** The iteration keys of bioscout.session.config.IterationKeys this page lets you set, with defaults. */
-export function iterationDefaults(genericName) {
-  const g = genericName || "GPK_v4_016.osim";
-  return { model_generic: g, model_scaled: g.replace(/\.osim$/i, "") + "_scaled.osim", markerset: "markers.xml",
+/** The iteration keys of bioscout.session.config.IterationKeys this page lets you set, with defaults
+ *  in the project layout (models_dir / setup_dir) when the session has one, else iteration-relative. */
+export function iterationDefaults(name, genericName) {
+  const g = genericName || "GPK_v4_016.osim", md = S.cfg && S.cfg.top.models_dir, sd = S.cfg && S.cfg.top.setup_dir;
+  const fam = /^GPK/i.test(g) ? "GPK" : /catelli/i.test(g) ? "Catelli" : g.replace(/\.osim$/i, "");
+  return {
+    model_generic: md ? `./generic/${fam}/${g}` : g,
+    model_scaled: md ? `./personalised/<subject>/<session>/${name || "<iteration>"}_scaled.osim` : g.replace(/\.osim$/i, "") + "_scaled.osim",
+    markerset: sd ? "./markers_pyCGM.xml" : "markers.xml",
+    scale_tool: sd ? "./setup_scale.xml" : "",
+    so_actuators: sd ? "./actuators_so.xml" : "",
     linear_scaling: "true", marker_placer: "true", preserve_mass_distribution: "true", muscle_opt: "false", mvic_factor: "1.0",
-    fmax_scaling: "", so_actuators: "", label: "", color: "black", group: "" };
+    fmax_scaling: "", label: "", color: "black", group: "generic",
+  };
+}
+/** Write a bundled app file (model / setup template) to a project path when it is not there yet. */
+async function ensureFile(path, url, blob) {
+  if (await readFile(S.root, path)) return;
+  let data = blob || null;
+  if (!data) { try { const r = await fetch(url); if (r.ok) data = await r.blob(); } catch { /* none */ } }
+  if (data) await writeFile(S.root, path, data);
 }
 export async function createIteration(name, fields, { genericFile, markersetFile }) {
   if (!S.root || !name) return;
-  await dirAt(S.root, "3_iterations/" + name, true);
+  await dirAt(S.root, sp("3_iterations/" + name), true);
   fields = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== "" && v != null));
-  const gname = fields.model_generic;
-  // the generic model goes into the iteration folder, so the yaml's iteration-relative path holds for the Python bioscout too
-  let gblob = genericFile && genericFile.name === gname ? genericFile : null;
-  if (!gblob && gname && !/[\\/]/.test(gname)) { try { const r = await fetch(new URL("../data/opensim/models/" + gname, import.meta.url)); if (r.ok) gblob = await r.blob(); } catch { /* keep the name only */ } }
-  if (gblob) await writeFile(S.root, `3_iterations/${name}/${gname}`, gblob);
-  if (markersetFile && fields.markerset && !/[\\/]/.test(fields.markerset)) await writeFile(S.root, `3_iterations/${name}/${fields.markerset}`, markersetFile);
-  else if (!markersetFile && fields.markerset === "markers.xml") delete fields.markerset;
+  fields.model_scaled = (fields.model_scaled || "").replace(/<iteration>/g, name);
+  // the generic model, marker set and setup files go where the yaml says, so the Python bioscout finds them too
+  const gp = itPath(name, "model_generic", fields.model_generic);
+  if (gp) await ensureFile(gp, new URL("../data/opensim/models/" + gp.split("/").pop(), import.meta.url), genericFile && genericFile.name === gp.split("/").pop() ? genericFile : null);
+  const mp = itPath(name, "markerset", fields.markerset);
+  if (mp) await ensureFile(mp, new URL("../data/opensim/setup_files/" + mp.split("/").pop(), import.meta.url), markersetFile);
+  for (const k of ["scale_tool", "so_actuators"]) { const pth = itPath(name, k, fields[k]); if (pth) await ensureFile(pth, new URL("../data/opensim/setup_files/" + pth.split("/").pop(), import.meta.url)); }
   S.yaml = addIterationYaml(S.yaml, name, fields);
-  await writeFile(S.root, "session.yaml", S.yaml);
+  await writeFile(S.root, sp("session.yaml"), S.yaml);
   S.iteration = name;
   await refresh();
 }
 
 /** Picked C3D files are copied into 1_c3dfiles/ first (the session's raw captures), then exported. */
 export async function addC3d(files, log) {
-  for (const f of files) { await writeFile(S.root, `${S.c3dDir}/${f.name}`, f); log(`${f.name} → ${S.c3dDir}/`); }
+  for (const f of files) { await writeFile(S.root, sp(`${S.c3dDir}/${f.name}`), f); log(`${f.name} → ${S.c3dDir}/`); }
   await refresh();
 }
 /** 1_c3dfiles/*.c3d -> 2_experimental/<stem>/ (marker_experimental.trc, grf.mot, emg.mot), as bioscout's export. */
@@ -153,14 +202,14 @@ export async function exportC3d(log, { onlyMissing = true } = {}) {
   let n = 0;
   for (const name of S.c3ds) {
     const stem = name.replace(/\.c3d$/i, "");
-    if (onlyMissing && await readFile(S.root, `2_experimental/${stem}/marker_experimental.trc`)) { log(`${stem}: already exported`); continue; }
-    const f = await readFile(S.root, `${S.c3dDir}/${name}`); if (!f) continue;
+    if (onlyMissing && await readFile(S.root, sp(`2_experimental/${stem}/marker_experimental.trc`))) { log(`${stem}: already exported`); continue; }
+    const f = await readFile(S.root, sp(`${S.c3dDir}/${name}`)); if (!f) continue;
     log(`${stem}: reading ${(f.size / 1e6).toFixed(1)} MB`);
     const out = c3dToOpenSim(await f.arrayBuffer(), f.name);
-    for (const [fn, text] of Object.entries(out)) await writeFile(S.root, `2_experimental/${stem}/${fn}`, text);
+    for (const [fn, text] of Object.entries(out)) await writeFile(S.root, sp(`2_experimental/${stem}/${fn}`), text);
     log(`${stem}: ${Object.keys(out).join(", ")} → 2_experimental/${stem}`); n++;
     // a trial exported for the first time gets its yaml entry
-    if (!(S.cfg.trials || {})[stem]) { S.yaml = addTrialYaml(S.yaml, stem); await writeFile(S.root, "session.yaml", S.yaml); S.cfg = parseYaml(S.yaml); }
+    if (!(S.cfg.trials || {})[stem]) { S.yaml = addTrialYaml(S.yaml, stem); await writeFile(S.root, sp("session.yaml"), S.yaml); S.cfg = parseYaml(S.yaml); }
   }
   if (!S.c3ds.length) log(T("ss_noC3d", { dir: S.c3dDir }));
   await refresh();
@@ -178,14 +227,14 @@ export function addTrialYaml(text, name) {
 }
 /** Files of one trial ([{name, data}] relative to the session) into the open session + its yaml entry. */
 export async function writeTrial(trial, files) {
-  for (const f of files) await writeFile(S.root, f.name, f.data);
-  if (!(S.cfg.trials || {})[trial]) { S.yaml = addTrialYaml(S.yaml, trial); await writeFile(S.root, "session.yaml", S.yaml); S.cfg = parseYaml(S.yaml); }
+  for (const f of files) await writeFile(S.root, sp(f.name), f.data);
+  if (!(S.cfg.trials || {})[trial]) { S.yaml = addTrialYaml(S.yaml, trial); await writeFile(S.root, sp("session.yaml"), S.yaml); S.cfg = parseYaml(S.yaml); }
   await refresh();
 }
 /** Mean vertical GRF of the static trial -> body mass (kg). */
 export async function weightFromStatic() {
   const st = S.cfg.top.static_trial; if (!st) throw new Error(T("ss_noStatic"));
-  const f = await readFile(S.root, `2_experimental/${st}/grf.mot`); if (!f) throw new Error(`2_experimental/${st}/grf.mot`);
+  const f = await readFile(S.root, sp(`2_experimental/${st}/grf.mot`)); if (!f) throw new Error(`2_experimental/${st}/grf.mot`);
   const L = (await f.text()).split(/\r?\n/), h = L.findIndex((l) => l.trim().toLowerCase() === "endheader");
   const cols = L[h + 1].trim().split(/[\t ]+/), rows = L.slice(h + 2).filter((l) => l.trim()).map((l) => l.trim().split(/[\t ]+/).map(Number));
   const vy = cols.map((c, i) => (/force.*vy$/i.test(c) ? i : -1)).filter((i) => i >= 0);
@@ -196,37 +245,45 @@ export async function weightFromStatic() {
   return { trial: st, plates: vy.length, frames: rows.length, meanN: mean, kg: mean / 9.80665 };
 }
 export async function setBodyMass(kg) {
-  S.yaml = setTopKey(S.yaml, "body_mass", (+kg).toFixed(2)); await writeFile(S.root, "session.yaml", S.yaml); S.cfg = parseYaml(S.yaml);
+  S.yaml = setTopKey(S.yaml, "body_mass", (+kg).toFixed(2)); await writeFile(S.root, sp("session.yaml"), S.yaml); S.cfg = parseYaml(S.yaml);
 }
 export async function setSubject(name) {
-  S.yaml = setTopKey(S.yaml, "subject", name); await writeFile(S.root, "session.yaml", S.yaml); S.cfg = parseYaml(S.yaml);
+  S.yaml = setTopKey(S.yaml, "subject", name); await writeFile(S.root, sp("session.yaml"), S.yaml); S.cfg = parseYaml(S.yaml);
 }
 export async function setStaticTrial(name) {
-  S.yaml = setTopKey(S.yaml, "static_trial", name); await writeFile(S.root, "session.yaml", S.yaml); S.cfg = parseYaml(S.yaml);
+  S.yaml = setTopKey(S.yaml, "static_trial", name); await writeFile(S.root, sp("session.yaml"), S.yaml); S.cfg = parseYaml(S.yaml);
 }
 
 /** Put the chosen iteration + trial into the step sections. hooks: send(key, file), setDir(tool, handle), setGeneric(file), setScaled(file) */
 export async function applySelection(hooks) {
-  if (!S.root) return;
+  if (!S.root || !S.session) return;
   const it = S.iteration, cfg = (S.cfg.iterations || {})[it] || {};
   if (it) {
-    const itDir = await dirAt(S.root, "3_iterations/" + it, true);
-    hooks.setDir("scale", itDir);
-    const relOk = (p) => p && !p.startsWith("..") && !/^[a-zA-Z]:/.test(p);
-    if (relOk(cfg.markerset)) { const f = await readFile(S.root, `3_iterations/${it}/${cfg.markerset}`); if (f) hooks.send("scale:markerset", f); }
-    if (relOk(cfg.model_generic)) { const f = await readFile(S.root, `3_iterations/${it}/${cfg.model_generic}`); if (f) hooks.setGeneric(f); }
-    if (relOk(cfg.model_scaled)) { const f = await readFile(S.root, `3_iterations/${it}/${cfg.model_scaled}`); hooks.setScaled(f || null); }
+    // Scale writes the scaled model where the yaml says (models/personalised/<subject>/<session>/<it>_scaled.osim)
+    const scaled = itPath(it, "model_scaled", cfg.model_scaled);
+    const outDir = scaled ? scaled.split("/").slice(0, -1).join("/") : sp("3_iterations/" + it);
+    hooks.setDir("scale", await dirAt(S.root, outDir, true));
+    const gp = itPath(it, "model_generic", cfg.model_generic);
+    const gname = gp ? gp.split("/").pop() : null;
+    hooks.setRenames("scale", scaled && gname ? { [gname.replace(/\.osim$/i, "") + "_scaled.osim"]: scaled.split("/").pop(),
+      [gname.replace(/\.osim$/i, "") + "_scaled_scale_factors.xml"]: scaled.split("/").pop().replace(/\.osim$/i, "") + "_scale_factors.xml" } : {});
+    const mp = itPath(it, "markerset", cfg.markerset); if (mp) { const f = await readFile(S.root, mp); if (f) hooks.send("scale:markerset", f); }
+    const stp = itPath(it, "scale_tool", cfg.scale_tool); if (stp) { const f = await readFile(S.root, stp); if (f) hooks.send("scale:scale_setup", f); }
+    if (gp) { const f = await readFile(S.root, gp); if (f) hooks.setGeneric(f); }
+    if (scaled) { const f = await readFile(S.root, scaled); hooks.setScaled(f || null); }
   }
   const st = S.cfg.top.static_trial;
-  if (st) { const f = await readFile(S.root, `2_experimental/${st}/marker_experimental.trc`); if (f) hooks.send("scale:static_trc", f); }
+  if (st) { const f = await readFile(S.root, sp(`2_experimental/${st}/marker_experimental.trc`)); if (f) hooks.send("scale:static_trc", f); }
   if (S.cfg.top.body_mass) hooks.setOption("scale", "mass", String(+S.cfg.top.body_mass));
   if (S.trial) {
-    const base = `2_experimental/${S.trial}/`;
+    const base = sp(`2_experimental/${S.trial}/`);
     const trc = await readFile(S.root, base + "marker_experimental.trc"), grf = await readFile(S.root, base + "grf.mot"), xml = await readFile(S.root, base + "GRF.xml");
     if (trc) hooks.send("ik:motion_trc", trc);
     if (grf) hooks.send("id:grf_mot", grf);
     if (xml) hooks.send("id:grf_xml", xml);
-    if (it) { const out = await dirAt(S.root, `3_iterations/${it}/${S.trial}/external_biomechanics`, true); hooks.setDir("ik", out); hooks.setDir("id", out); }
+    if (it) { const out = await dirAt(S.root, sp(`3_iterations/${it}/${S.trial}/external_biomechanics`), true); hooks.setDir("ik", out); hooks.setDir("id", out); }
+    const tr = ((S.cfg.trials || {})[S.trial] || {}).time_range;
+    if (tr) { const m = String(tr).match(/[-\d.]+/g); if (m && m.length === 2) { hooks.setOption("ik", "t0", m[0]); hooks.setOption("ik", "t1", m[1]); } }
   }
 }
 
@@ -284,6 +341,12 @@ export function sessionHTML(ctx) {
     <p class="note" style="margin:4px 0 8px">${t("ss_intro")}</p>
     ${S.root ? `
     <div class="simOpts">
+      <label class="simOpt">${t("ss_subjectSel")} <select data-ss-subjsel>${opt(S.subjects, S.subject, t("ss_none"))}</select></label>
+      <label class="simOpt">${t("ss_session")} <select data-ss-sessel>${opt(S.sessions, S.session, t("ss_none"))}</select></label>
+      <span class="sub">${esc(S.ses)}${top.models_dir ? ` · models_dir ${esc(top.models_dir)}` : ""}${top.setup_dir ? ` · setup_dir ${esc(top.setup_dir)}` : ""}</span>
+    </div>` : ""}
+    ${S.root && S.session ? `
+    <div class="simOpts">
       <label class="simOpt">${t("ss_subject")} <input type="text" data-ss-subject value="${esc(top.subject || "")}"></label>
       <label class="simOpt">${t("ss_static")} <select data-ss-static>${opt(S.trials, top.static_trial || "", t("ss_none"))}</select></label>
       <label class="simOpt">${t("sim_opt_mass")} <input type="text" data-ss-mass value="${esc(top.body_mass || "")}" style="width:90px"></label>
@@ -316,9 +379,11 @@ export function sessionWire(box, ctx, hooks) {
   if (pick) pick.onclick = async () => {
     if (!window.showDirectoryPicker) { alert(ctx.t("sim_outdir_unsupported")); return; }
     let h; try { h = await window.showDirectoryPicker({ mode: "readwrite" }); } catch { return; }
-    await openSession(h); await applySelection(hooks); hooks.repaint();
+    await openProject(h); await applySelection(hooks); hooks.repaint();
   };
   const on = (sel, ev, fn) => { const el = q(sel); if (el) el[ev] = fn; };
+  on("[data-ss-subjsel]", "onchange", async (e) => { S.subject = e.target.value; S.session = ""; await openSubject(); await applySelection(hooks); hooks.repaint(); });
+  on("[data-ss-sessel]", "onchange", async (e) => { S.session = e.target.value; await openSession(); await applySelection(hooks); hooks.repaint(); });
   on("[data-ss-subject]", "onchange", async (e) => { await setSubject(e.target.value.trim()); });
   on("[data-ss-static]", "onchange", async (e) => { await setStaticTrial(e.target.value); await applySelection(hooks); hooks.repaint(); });
   on("[data-ss-mass]", "onchange", async (e) => { const v = parseFloat(e.target.value); if (v > 0) { await setBodyMass(v); hooks.setOption("scale", "mass", String(v)); } });
@@ -327,7 +392,7 @@ export function sessionWire(box, ctx, hooks) {
   on("[data-ss-kgcancel]", "onclick", () => { S.weight = null; hooks.repaint(); });
   on("[data-ss-iteration]", "onchange", async (e) => { S.iteration = e.target.value; await applySelection(hooks); hooks.repaint(); });
   on("[data-ss-trial]", "onchange", async (e) => { S.trial = e.target.value; await applySelection(hooks); hooks.repaint(); });
-  on("[data-ss-itnew]", "onclick", () => { S.newIt = { name: "", fields: iterationDefaults(hooks.genericName()) }; if (!hooks.markersetFile()) S.newIt.fields.markerset = ""; hooks.repaint(); });
+  on("[data-ss-itnew]", "onclick", () => { S.newIt = { name: "", fields: iterationDefaults("", hooks.genericName()) }; hooks.repaint(); });
   on("[data-ss-itcancel]", "onclick", () => { S.newIt = null; hooks.repaint(); });
   on("[data-ss-itsave]", "onclick", async () => {
     const fields = {}; let name = "";

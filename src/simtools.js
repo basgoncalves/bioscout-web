@@ -131,6 +131,7 @@ let c3dMsg = "";             // what the last "Convert C3D" did        // a gene
 const dirs = {};             // tool or "*" -> FileSystemDirectoryHandle (Chrome / Edge)
 const saved = {};            // tool -> "n files -> folder"
 const autoSaved = {};        // tool -> run start time already written
+const renames = {};          // tool -> {output name: name to write} (batch mode: <generic>_scaled.osim -> <iteration>_scaled.osim)
 const dirFor = (tool) => dirs[tool] || dirs["*"] || null;
 const dirName = (tool) => (dirs[tool] ? dirs[tool].name : tool !== "*" && dirs["*"] ? dirs["*"].name + " (all)" : "");
 async function saveOutputs(ctx, tool) {
@@ -140,7 +141,7 @@ async function saveOutputs(ctx, tool) {
   for (const f of files) {
     let blob = ctx.client.toolBlob ? ctx.client.toolBlob(ctx.job.id, tool, f.path) : null;
     if (!blob) blob = await (await fetch(ctx.client.toolFileUrl(ctx.job.id, tool, f.path))).blob();
-    const parts = f.path.split("/"); let d = dir;
+    const parts = ((renames[tool] || {})[f.path] || f.path).split("/"); let d = dir;
     for (const sub of parts.slice(0, -1)) d = await d.getDirectoryHandle(sub, { create: true });
     const fh = await d.getFileHandle(parts[parts.length - 1], { create: true });
     const w = await fh.createWritable(); await w.write(blob); await w.close(); n++;
@@ -321,6 +322,7 @@ export function simWire(box, ctx) {
   if (ctx.batch) sessionWire(box, ctx, {
     send,
     setDir: (tool, h) => { dirs[tool] = h; },
+    setRenames: (tool, map) => { renames[tool] = map || {}; },
     setOption: (tool, key, val) => ctx.act(() => client.toolOptions(id, tool, { ...((job.options || {})[tool] || {}), [key]: val })),
     setGeneric: (f) => { genericName = f ? f.name : ""; genericFile = f; if (client.setGeneric) client.setGeneric(f); },
     setScaled: (f) => { scaledName = f ? f.name : ""; scaledFile = f; if (client.setScaled) client.setScaled(f); },

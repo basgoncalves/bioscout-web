@@ -19,7 +19,7 @@ export const trialFolderName = (activity, n) => `${String(activity || "trial").t
 
 /** Next free <activity>_NN in the open session, or the set index. */
 export function nextTrialName(activity, setIndex) {
-  if (!session.root) return trialFolderName(activity, setIndex || 1);
+  if (!session.root || !session.session) return trialFolderName(activity, setIndex || 1);
   const re = new RegExp(`^${String(activity || "trial").toLowerCase()}_(\\d+)$`);
   const used = session.trials.map((t) => (t.match(re) || [])[1]).filter(Boolean).map(Number);
   return trialFolderName(activity, used.length ? Math.max(...used) + 1 : 1);
@@ -71,7 +71,7 @@ export function trialZip(files) { return makeZip(files); }
 
 /** Into the open session folder (Batch mode); -> the trial name. */
 export async function saveTrialToSession(files, trial) {
-  if (!session.root) throw new Error("no session folder open");
+  if (!session.root || !session.session) throw new Error("no session open in Batch mode");
   await writeTrial(trial, files);
-  return `${session.name}/2_experimental/${trial}`;
+  return `${session.name}/${session.ses}/2_experimental/${trial}`;
 }
