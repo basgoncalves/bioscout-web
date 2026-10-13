@@ -10,4 +10,5 @@ export const SHIPPED = [/^index\.html$/, /^sw\.js$/, /^src\//, /^data\//,
   /^assets\//, /^manifest\.webmanifest$/, /^privacy\.html$/, /^formats\.html$/, /^glossary\//];
 export const isShipped = (f) => SHIPPED.some((re) => re.test(f));
 export const BUILD_RE = /window\.BUILD = (\d+);/;
+export const BUILD_AT_RE = /window\.BUILD_AT = "[^"]*";/;
 export const buildOf = (html) => { const m = (html || "").match(BUILD_RE); return m ? +m[1] : null; };

@@ -224,7 +224,7 @@ def run(generic_path, static_trc, out_osim, setup_path=None, mass=None, markerse
         sm = Model(work)
         names = [n for n in sm.markers if n in exp and np.isfinite(exp[n]).all()]
         t0 = np.array([0.0]); mk = {n: exp[n][None] for n in names}
-        _, qs, errs, used = _ik.solve(sm, t0, mk, {n: 1.0 for n in names}, log=log)
+        _, qs, errs, used, _per = _ik.solve(sm, t0, mk, {n: 1.0 for n in names}, log=log)
         q = qs[0]
         T = sm.body_transforms(q)
         placed = {}

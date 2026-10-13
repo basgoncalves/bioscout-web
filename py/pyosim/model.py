@@ -195,6 +195,7 @@ class Model:
         root = ET.parse(path).getroot()
         m = root.find("Model")
         self.name = m.get("name")
+        self.gravity = _vec(m.findtext("gravity") or "0 -9.80665 0")
         self.coords = {}
         self.bodies = {}
         for b in m.find("BodySet/objects"):

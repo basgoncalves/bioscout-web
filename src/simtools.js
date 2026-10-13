@@ -14,6 +14,8 @@
  * tools.py); this module only draws the page and talks to it.
  */
 import { parseTrc, editTaskWeights, viewTrc } from "./trcview.js";
+import { buildSetup, downloadText } from "./simsetup.js";
+const SETUP_TOOLS = new Set(["scale", "ik", "id", "ma", "so"]);   // steps whose OpenSim setup .xml can be written before running
 const TPL = "./data/opensim/setup_files/";
 let spec = null;
 export async function loadSpec() {
@@ -67,7 +69,10 @@ export function simHTML(ctx) {
       <p class="note" style="margin:4px 0 8px">${t("sim_note_" + tl.id)}</p>
       ${slots}${opts ? `<div class="simOpts">${opts}${tl.id === "ik" ? `<button type="button" class="ghost" data-view${trcIK ? "" : " disabled"}>${esc(t("sim_v_btn"))}</button>` : ""}</div>` : ""}
       ${tl.id === "ik" ? `<button type="button" class="ghost" data-tw style="margin-top:8px">${esc(t("sim_tw_btn"))}</button>` : ""}
-      <button type="button" data-run="${tl.id}" style="margin-top:10px"${(!job.model && !(scaledName && tl.id !== "scale")) || busy ? " disabled" : ""}>${esc(t("sim_run", { tool: t("sim_tool_" + tl.id) }))}</button>
+      <div class="simRunRow" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+      <button type="button" data-run="${tl.id}"${(!job.model && !genericName && !(scaledName && tl.id !== "scale")) || busy ? " disabled" : ""}>${esc(t("sim_run", { tool: t("sim_tool_" + tl.id) }))}</button>
+      ${SETUP_TOOLS.has(tl.id) ? `<button type="button" class="ghost" data-setup="${tl.id}" title="${esc(t("sim_setup_title"))}">${esc(t("sim_setup_btn"))}</button>` : ""}
+      ${setupMsg[tl.id] ? `<span class="sub">${esc(setupMsg[tl.id])}</span>` : ""}</div>
       ${stateLine(sp)}${outHTML}
       <div class="simOutDir"><span class="sub">${esc(t("sim_outdir"))}:</span>
         <input type="text" readonly value="${esc(dirName(tl.id) || t("sim_outdir_none"))}">
@@ -92,8 +97,12 @@ export function simHTML(ctx) {
   return `<div class="simModel">
 
       <label for="simModel">${t("sim_generic")}</label>
-      <select id="simModel"><option value="">${t("sim_chooseModel")}</option>${models.map((m) => `<option value="${esc(m)}"${m === job.model ? " selected" : ""}>${esc(m)}</option>`).join("")}</select>
-      <p class="note" style="margin:6px 0 0">${t("sim_modelNote")}</p>
+      ${genericName
+        ? `<div class="simPick"><input type="text" readonly value="${esc(genericName)}"><button type="button" class="ghost" data-genericclear>${t("pr_remove")}</button></div>`
+        : `<div class="simPick"><select id="simModel"><option value="">${t("sim_chooseModel")}</option>${models.map((m) => `<option value="${esc(m)}"${m === job.model ? " selected" : ""}>${esc(m)}</option>`).join("")}</select>
+        <button type="button" class="ghost" data-genericpick title="${esc(t("sim_generic_pick"))}">🔍</button></div>`}
+      <input type="file" accept=".osim" data-genericfile hidden>
+      <p class="note" style="margin:6px 0 0">${t("sim_modelNote")} ${t("sim_generic_own")}</p>
     </div>
     ${ctx.err ? `<p class="note banner" style="margin:8px 0 0">${esc(ctx.err)}</p>` : ""}
     <div class="simTools">${sectionsHTML}</div>
@@ -112,6 +121,8 @@ const dropNames = {};
 const dropFiles = {};
 let trcIK = null;            // the parsed motion .trc of the IK section
 let scaledName = "", scaledFile = null;
+let genericName = "", genericFile = null;
+const setupMsg = {};         // per tool: what the last "Setup .xml" click did        // a generic .osim the user dropped (instead of the dropdown)
 const dirs = {};             // tool or "*" -> FileSystemDirectoryHandle (Chrome / Edge)
 const saved = {};            // tool -> "n files -> folder"
 const autoSaved = {};        // tool -> run start time already written
@@ -174,6 +185,29 @@ export function simWire(box, ctx) {
       saveOutputs(ctx, tool).catch((e) => { saved[tool] = "✗ " + e.message; }).then(() => ctx.act(() => client.status(id)));
     }
   }
+  const gf = box.querySelector("[data-genericfile]");
+  if (gf) {
+    const uploadGeneric = (f) => ctx.act(async () => {
+      // the lab engine: Scale starts from it, and so do the later steps unless a scaled model is set
+      let st = null;
+      for (const tl of spec.tools) if (tl.slots.some((x) => x.id === "model") && (tl.id === "scale" || !scaledFile)) st = f ? await client.toolUpload(id, tl.id, "model", f) : await client.toolClear(id, tl.id, "model");
+      return st || client.status(id);
+    });
+    const gp = box.querySelector("[data-genericpick]");
+    if (gp) gp.onclick = () => gf.click();
+    gf.onchange = () => {
+      const f = gf.files[0]; if (!f) return;
+      genericName = f.name; genericFile = f;
+      if (client.setGeneric) { client.setGeneric(f); ctx.act(() => client.status(id)); return; }
+      uploadGeneric(f);
+    };
+    const gc = box.querySelector("[data-genericclear]");
+    if (gc) gc.onclick = () => {
+      genericName = ""; genericFile = null;
+      if (client.setGeneric) { client.setGeneric(null); ctx.act(() => client.status(id)); return; }
+      uploadGeneric(null);
+    };
+  }
   const sf = box.querySelector("[data-scaledfile]");
   if (sf) {
     box.querySelector("[data-scaledpick]").onclick = () => sf.click();
@@ -227,6 +261,38 @@ export function simWire(box, ctx) {
       const tool = inp.dataset.opt.split(":")[0], o = {};
       box.querySelectorAll(`[data-opt^="${tool}:"]`).forEach((x) => { o[x.dataset.opt.split(":")[1]] = x.value; });
       ctx.act(() => client.toolOptions(id, tool, o));
+    };
+  });
+  // the ik.mot a later step would use: dropped here, or the one IK made in this session
+  const motTextFor = async (filesOf) => {
+    if (filesOf.ik_mot) return filesOf.ik_mot.text();
+    try {
+      if ((ctx.outputs.ik || []).some((f) => f.path === "ik.mot")) {
+        const blob = client.toolBlob ? client.toolBlob(id, "ik", "ik.mot") : await (await fetch(client.toolFileUrl(id, "ik", "ik.mot"))).blob();
+        if (blob) return blob.text();
+      }
+    } catch { /* no time range then */ }
+    return null;
+  };
+  box.querySelectorAll("[data-setup]").forEach((b) => {
+    b.onclick = async () => {
+      const tool = b.dataset.setup;
+      const names = {}, filesOf = {};
+      for (const [k, v] of Object.entries(dropNames)) if (k.startsWith(tool + ":")) names[k.slice(tool.length + 1)] = v;
+      for (const [k, v] of Object.entries(dropFiles)) if (k.startsWith(tool + ":")) filesOf[k.slice(tool.length + 1)] = v;
+      // files not dropped here come from earlier steps, as the run itself would take them
+      if (!names.ik_mot && (ctx.outputs.ik || []).some((f) => f.path === "ik.mot")) names.ik_mot = "ik.mot";
+      const model = tool === "scale" ? (genericName || job.model) : (names.model || scaledName || genericName || job.model);
+      const setupFile = filesOf.scale_setup || filesOf.so_setup || null;
+      const trcFile = filesOf.static_trc || filesOf.motion_trc || null;
+      try {
+        const r = await buildSetup({ tool, names, files: filesOf, options: (job.options || {})[tool] || {}, model, setupFile,
+          trcText: trcFile ? await trcFile.text() : null, motText: await motTextFor(filesOf) });
+        if (!r) throw new Error("no template for this step");
+        downloadText(r.name, r.xml);
+        setupMsg[tool] = "✓ " + r.name;
+      } catch (e) { setupMsg[tool] = "✗ " + e.message; }
+      ctx.act(() => client.status(id));
     };
   });
   box.querySelectorAll("[data-run]").forEach((b) => { b.onclick = () => { ctx.open.add(b.dataset.run); ctx.act(() => client.toolRun(id, b.dataset.run)); }; });

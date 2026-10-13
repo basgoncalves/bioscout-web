@@ -16,7 +16,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { isShipped, buildOf, BUILD_RE } from "./shipped.mjs";
+import { isShipped, buildOf, BUILD_RE, BUILD_AT_RE } from "./shipped.mjs";
 
 const git = (...a) => { try { return execFileSync("git", a, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; } };
 const check = process.argv.includes("--check");
@@ -42,6 +42,7 @@ if (unstaged) {
 }
 const html = readFileSync("index.html", "utf8");
 if (!BUILD_RE.test(html)) { console.error("build: no window.BUILD line in index.html"); process.exit(1); }
-writeFileSync("index.html", html.replace(BUILD_RE, `window.BUILD = ${next};`));
+const stamp = new Date().toLocaleString("sv-SE", { timeZone: "Europe/Vienna" }).slice(0, 16); // 2026-10-13 16:50, local time
+writeFileSync("index.html", html.replace(BUILD_RE, `window.BUILD = ${next};`).replace(BUILD_AT_RE, `window.BUILD_AT = "${stamp}";`));
 git("add", "index.html");
 console.log(`build ${head} -> ${next}`);

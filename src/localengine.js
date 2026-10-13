@@ -2,42 +2,11 @@
  * localengine.js -- Simulate without a server: the same client API as the lab
  * engine (osimlab.js makeEngineClient), but the files stay in this browser and
  * the tools run in a Web Worker with Pyodide + py/pyosim (pure-Python OpenSim).
- * For now: inverse kinematics only; the other sections say they need the engine.
+ * Scale, inverse kinematics and inverse dynamics; the other sections say they need the engine.
  */
-const LOCAL_TOOLS = new Set(["scale", "ik"]);
+import { markerErrorsFigure, kinematicsMomentsFigure, inverseDynamicsFigure, residualsFigure } from "./simfigs.js";
+const LOCAL_TOOLS = new Set(["scale", "ik", "id"]);
 const BASE = new URL("../", import.meta.url).href;
-
-/** A PNG of the main joint angles from an ik.mot (left vs right, like the course figures). */
-async function anglesFigure(mot) {
-  const L = mot.split(/\r?\n/), h = L.findIndex((l) => l.trim().toLowerCase() === "endheader");
-  const cols = L[h + 1].split("\t"), rows = L.slice(h + 2).filter((l) => l.trim()).map((l) => l.split("\t").map(Number));
-  const col = (n) => { const i = cols.indexOf(n); return i < 0 ? null : rows.map((r) => r[i]); };
-  const t = col("time");
-  const panels = [["pelvis_tilt", "pelvis_list", "pelvis_rotation"], ["hip_flexion_r", "hip_flexion_l"], ["hip_adduction_r", "hip_adduction_l"],
-    ["knee_angle_r", "knee_angle_l"], ["ankle_angle_r", "ankle_angle_l"], ["lumbar_extension", "lumbar_bending", "lumbar_rotation"]]
-    .map((ns) => ns.filter((n) => col(n))).filter((ns) => ns.length);
-  const W = 1200, ph = 260, H = 40 + Math.ceil(panels.length / 2) * ph;
-  const c = document.createElement("canvas"); c.width = W; c.height = H;
-  const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, W, H);
-  g.fillStyle = "#111"; g.font = "bold 18px sans-serif"; g.fillText("Inverse kinematics - joint angles (deg)", 20, 26);
-  const COL = ["#d1495b", "#2e86ab", "#3a7d44"];
-  panels.forEach((ns, pi) => {
-    const x0 = (pi % 2) * (W / 2) + 60, y0 = 40 + Math.floor(pi / 2) * ph + 20, w = W / 2 - 90, hh = ph - 60;
-    const ys = ns.flatMap((n) => col(n)).filter(isFinite);
-    let lo = Math.min(...ys), hi = Math.max(...ys); if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
-    const X = (v) => x0 + (v - t[0]) / (t[t.length - 1] - t[0] || 1) * w, Y = (v) => y0 + hh - (v - lo) / (hi - lo) * hh;
-    g.strokeStyle = "#999"; g.lineWidth = 1; g.strokeRect(x0, y0, w, hh);
-    g.fillStyle = "#333"; g.font = "12px sans-serif";
-    g.fillText(hi.toFixed(0), x0 - 40, y0 + 10); g.fillText(lo.toFixed(0), x0 - 40, y0 + hh);
-    g.fillText(t[0].toFixed(2) + " s", x0, y0 + hh + 16); g.fillText(t[t.length - 1].toFixed(2) + " s", x0 + w - 40, y0 + hh + 16);
-    ns.forEach((n, k) => {
-      const v = col(n); g.strokeStyle = COL[k % 3]; g.lineWidth = 2; g.beginPath();
-      v.forEach((y, i) => (i ? g.lineTo(X(t[i]), Y(y)) : g.moveTo(X(t[i]), Y(y)))); g.stroke();
-      g.fillStyle = COL[k % 3]; g.fillText(n, x0 + 8 + k * 150, y0 - 6);
-    });
-  });
-  return await new Promise((r) => c.toBlob(r, "image/png"));
-}
 
 export function makeLocalClient(spec) {
   const job = { id: "local", model: null, steps: {}, tools: {}, options: {}, local: true };
@@ -50,7 +19,7 @@ export function makeLocalClient(spec) {
   const fail = (code, message) => { const e = new Error(message); e.code = code; throw e; };
 
   async function modelFile(tool) {
-    const own = files[`${tool}:model`] || files["*:scaled"];
+    const own = files[`${tool}:model`] || files["*:scaled"] || files["*:generic"];
     if (own) return own;
     if (!job.model) fail("bad_request", "choose a model first");
     const r = await fetch(BASE + "data/opensim/models/" + job.model);
@@ -76,10 +45,13 @@ export function makeLocalClient(spec) {
   async function runScale() {
     const sp = job.tools.scale, o = job.options.scale || {};
     const trc = files["scale:static_trc"] || fail("bad_request", "drop the static trial markers (.trc)");
-    if (!job.model) fail("bad_request", "choose the generic model first");
-    const r = await fetch(BASE + "data/opensim/models/" + job.model);
-    if (!r.ok) fail("bad_request", `${job.model} is not available in the browser yet`);
-    const model = new File([await r.blob()], job.model.split("/").pop());
+    let model = files["*:generic"] || null;              // a generic .osim dropped by the user wins
+    if (!model) {
+      if (!job.model) fail("bad_request", "choose the generic model first");
+      const r = await fetch(BASE + "data/opensim/models/" + job.model);
+      if (!r.ok) fail("bad_request", `${job.model} is not available in the browser yet`);
+      model = new File([await r.blob()], job.model.split("/").pop());
+    }
     const setup = files["scale:scale_setup"] || new File([await (await fetch(BASE + "data/opensim/setup_files/setup_scale.xml")).blob()], "setup_scale.xml");
     const trcName = /\.trc$/i.test(trc.name) ? trc.name : "static.trc";
     const setupName = "setup_scale.xml";
@@ -93,6 +65,32 @@ export function makeLocalClient(spec) {
       outs.scale = await runWorker("scale", payload, args, (l) => { sp.log.push(...String(l).split("\n")); });
       // the steps below use the new scaled model unless another one is chosen
       if (outs.scale[out]) files["*:scaled"] = new File([outs.scale[out]], out);
+      Object.assign(sp, { state: "done", seconds: Math.round((Date.now() - t0) / 1000) });
+    } catch (e) {
+      Object.assign(sp, { state: "error", error: e.message });
+    }
+  }
+
+  async function runID() {
+    const sp = job.tools.id, o = job.options.id || {};
+    const grf = files["id:grf_mot"] || fail("bad_request", "drop the ground reaction forces (.mot)");
+    // joint angles: dropped here, or the ik.mot this browser made
+    const ikf = files["id:ik_mot"] || (outs.ik && outs.ik["ik.mot"] ? new File([outs.ik["ik.mot"]], "ik.mot") : null)
+      || fail("bad_request", "drop the joint angles (.mot) or run inverse kinematics first");
+    const model = await modelFile("id");
+    const grfName = /\.(mot|sto)$/i.test(grf.name) ? grf.name : "grf.mot", ikName = /\.(mot|sto)$/i.test(ikf.name) ? ikf.name : "ik.mot";
+    const payload = { [model.name]: await model.arrayBuffer(), [grfName]: await grf.arrayBuffer(), [ikName]: await ikf.arrayBuffer() };
+    const args = { model: model.name, grf: grfName, ik: ikName, t0: o.t0, t1: o.t1, cutoff: o.cutoff };
+    if (files["id:grf_xml"]) { payload["loads.xml"] = await files["id:grf_xml"].arrayBuffer(); args.loads = "loads.xml"; }
+    sp.log = [];
+    const t0 = Date.now();
+    try {
+      outs.id = await runWorker("id", payload, args, (l) => { sp.log.push(...String(l).split("\n")); });
+      // the figures bioscout writes next to its ID results
+      const ikTxt = await ikf.text(), idTxt = outs.id["inverse_dynamics.sto"], grfTxt = await grf.text();
+      try { outs.id["inverse_dynamics.png"] = await inverseDynamicsFigure(idTxt); } catch { /* optional */ }
+      try { outs.id["kinematics_moments.png"] = await kinematicsMomentsFigure(ikTxt, idTxt, outs.ik && outs.ik["ik_marker_errors_all.sto"]); } catch { /* optional */ }
+      try { outs.id["residuals.png"] = await residualsFigure(idTxt, grfTxt); } catch { /* optional */ }
       Object.assign(sp, { state: "done", seconds: Math.round((Date.now() - t0) / 1000) });
     } catch (e) {
       Object.assign(sp, { state: "error", error: e.message });
@@ -114,7 +112,9 @@ export function makeLocalClient(spec) {
     const t0 = Date.now();
     try {
       outs.ik = await runWorker("ik", payload, args, (l) => { sp.log.push(...String(l).split("\n")); });
-      try { outs.ik["ik_joint_angles.png"] = await anglesFigure(outs.ik["ik.mot"]); } catch { /* figure is optional */ }
+      // the figures bioscout writes next to its IK results
+      try { outs.ik["ik_joint_angles.png"] = await kinematicsMomentsFigure(outs.ik["ik.mot"], null, outs.ik["ik_marker_errors_all.sto"]); } catch { /* figure is optional */ }
+      try { if (outs.ik["ik_marker_errors_all.sto"]) outs.ik["_ik_marker_errors_plot.png"] = await markerErrorsFigure(outs.ik["ik_marker_errors_all.sto"]); } catch { /* optional */ }
       Object.assign(sp, { state: "done", seconds: Math.round((Date.now() - t0) / 1000) });
     } catch (e) {
       Object.assign(sp, { state: "error", error: e.message });
@@ -131,13 +131,15 @@ export function makeLocalClient(spec) {
     toolClear: async (_id, tool, slot) => { delete files[`${tool}:${slot}`]; delete job.tools[tool].inputs[slot]; return snap(); },
     toolOptions: async (_id, tool, o) => { job.options[tool] = o; return snap(); },
     toolRun: async (_id, tool) => {
-      if (!LOCAL_TOOLS.has(tool)) fail("bad_request", "this step is not in the browser yet; scale and inverse kinematics are");
+      if (!LOCAL_TOOLS.has(tool)) fail("bad_request", "this step is not in the browser yet; scale, inverse kinematics and inverse dynamics are");
       Object.assign(job.tools[tool], { state: "running", started: Date.now() / 1000, error: null });
-      (tool === "scale" ? runScale : runIK)().catch((e) => Object.assign(job.tools[tool], { state: "error", error: e.message }));
+      (tool === "scale" ? runScale : tool === "id" ? runID : runIK)().catch((e) => Object.assign(job.tools[tool], { state: "error", error: e.message }));
       return snap();
     },
     toolOutputs: async (_id, tool) => ({ files: Object.entries(outs[tool] || {}).map(([path, v]) => ({ path, size: v.size ?? v.length })) }),
     toolBlob: (_id, tool, path) => { const v = (outs[tool] || {})[path]; return v == null ? null : v instanceof Blob ? v : new Blob([v], { type: "text/plain" }); },
+    getGeneric: () => files["*:generic"] || null,
+    setGeneric: (file) => { if (file) files["*:generic"] = file; else delete files["*:generic"]; },
     getScaled: () => files["*:scaled"] || null,
     setScaled: (file) => { if (file) files["*:scaled"] = file; else delete files["*:scaled"]; },
     toolFileUrl: (_id, tool, path) => {

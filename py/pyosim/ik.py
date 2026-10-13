@@ -62,7 +62,7 @@ def solve(model, times, markers, marker_w, coord_tasks=None, t_range=None, log=p
             R = np.hstack([R, C])
         return R[0], ((R[1:] - R[0]) / H).T
 
-    out, errs = [], []
+    out, errs, per = [], [], []
     first = True
     for k in np.where(sel)[0]:
         obs = np.array([markers[n][k] for n in names])
@@ -82,11 +82,13 @@ def solve(model, times, markers, marker_w, coord_tasks=None, t_range=None, log=p
                             xtol=1e-10, ftol=1e-10, gtol=1e-10, max_nfev=500 if first else 100)
         x = sol.x; first = False
         P = kin.markers(x[None])[0]
-        e = np.linalg.norm(P - obs, axis=1)[ok]
+        d = np.linalg.norm(P - obs, axis=1)
+        e = d[ok]
         errs.append((np.sqrt(np.mean(e ** 2)), e.max(), float(np.sum(e ** 2))))
+        per.append(np.where(ok, d, np.nan))                  # per-marker distance (m), as _ik_marker_errors_all.sto
         out.append(model.full_q(dict(zip(free, x))))
     t = times[sel]
-    return t, out, np.array(errs), names
+    return t, out, np.array(errs), names, np.array(per)
 
 
 def run(model_path, trc_path, task_path, out_mot, t_range=None, log=print, markerset=None,
@@ -97,7 +99,7 @@ def run(model_path, trc_path, task_path, out_mot, t_range=None, log=print, marke
         log(f"[ik] markers from {os.path.basename(markerset)} ({len(model.markers)})")
     times, markers, rate = read_trc(trc_path)
     mw, ct = read_tasks(task_path) if task_path else ({}, {})
-    t, qs, errs, used = solve(model, times, markers, mw, ct, t_range, log)
+    t, qs, errs, used, per = solve(model, times, markers, mw, ct, t_range, log)
     cols = ["time"] + model.coord_order
     # as OpenSim: degrees for rotational coordinates, but coupled (dependent) ones stay in radians
     rot = {n for n, c in model.coords.items() if not c.translational and c.coupled is None}
@@ -108,6 +110,9 @@ def run(model_path, trc_path, task_path, out_mot, t_range=None, log=print, marke
         write_mot(errors_path, ["time", "total_squared_error", "marker_error_RMS", "marker_error_max"],
                   np.column_stack([t, errs[:, 2], errs[:, 0], errs[:, 1]]), name="Model Marker Errors from IK",
                   degrees=False)
+        # per-marker distances (m), as bioscout's _ik_marker_errors_all.sto
+        allp = os.path.join(os.path.dirname(errors_path), "ik_marker_errors_all.sto")
+        write_mot(allp, ["time"] + list(used), np.column_stack([t, per]), name="Per-marker errors from IK", degrees=False)
     if setup_path:
         write_setup(setup_path, model_path, trc_path, task_path, out_mot, t if len(t) else None)
     log(f"[ik] {len(t)} frames, {len(used)} markers; RMS error mean {errs[:,0].mean()*1000:.1f} mm, "

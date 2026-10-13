@@ -977,7 +977,10 @@ export function mountProcess(root, { t, download }) {
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
         <b style="font-size:16px">${t("pr_title")}</b>
-        <button type="button" class="ghost labHomeBtn" style="margin:0;width:auto;padding:6px 12px">${t("labHome")}</button>
+        <span style="display:flex;gap:6px">
+          ${document.documentElement.dataset.fromSim ? `<button type="button" class="ghost labSimBtn" style="margin:0;width:auto;padding:6px 12px">${t("pr_backSim")}</button>` : ""}
+          <button type="button" class="ghost labHomeBtn" style="margin:0;width:auto;padding:6px 12px">${t("labHome")}</button>
+        </span>
       </div>
       <p class="note" style="margin:4px 0 10px">${t("pr_intro")}</p>
       <label class="prDrop" for="prFiles"><input id="prFiles" type="file" multiple style="display:none"
