@@ -25,11 +25,14 @@ def read_tasks(path):
 def solve(model, times, markers, marker_w, coord_tasks=None, t_range=None, log=print):
     coord_tasks = coord_tasks or {}
     names = [n for n in marker_w if n in markers and n in model.markers]
-    if len(names) < 6:
-        common = [n for n in model.markers if n in markers and not np.isnan(markers[n]).all()]
-        log(f"[ik] task set matches only {len(names)} markers; using all {len(common)} markers "
-            f"shared by model and .trc with weight 1")
-        marker_w = {n: 1.0 for n in common}
+    common = [n for n in model.markers if n in markers and not np.isnan(markers[n]).all()]
+    # a task set written for another lab's marker names would track a handful of markers and
+    # leave the rest unused: when it covers less than half of what model and .trc share, every
+    # shared marker is tracked with weight 1 instead (the task-set weights only where they match)
+    if len(names) < 6 or len(names) < 0.5 * len(common):
+        log(f"[ik] task set names only {len(names)} of the {len(common)} markers shared by model and .trc; "
+            f"tracking all {len(common)} (task-set weights where named, 1 elsewhere)")
+        marker_w = {n: marker_w.get(n, 1.0) for n in common}
         names = common
     missing = [n for n in marker_w if n not in markers or n not in model.markers]
     if len(names) < 6:
@@ -62,11 +65,26 @@ def solve(model, times, markers, marker_w, coord_tasks=None, t_range=None, log=p
             R = np.hstack([R, C])
         return R[0], ((R[1:] - R[0]) / H).T
 
+    # frames with too few task markers (subject outside the volume, start/end of a sprint
+    # trial) cannot be solved: trimmed at the ends, the last pose held through gaps inside
+    vis = np.array([(~np.isnan(np.array([markers[n][k] for n in names])).any(axis=1)).sum() for k in range(len(times))])
+    MIN = 6
+    idx = np.where(sel & (vis >= MIN))[0]
+    if not len(idx):
+        raise ValueError(f"no frame in the time range has {MIN} or more of the task markers")
+    sel = sel & (np.arange(len(times)) >= idx[0]) & (np.arange(len(times)) <= idx[-1])
+    trimmed = int(sel.sum() - len(idx))
+    if idx[0] > np.where(sel | True)[0][0] or trimmed:
+        log(f"[ik] solving {times[idx[0]]:.3f}-{times[idx[-1]]:.3f} s ({int(sel.sum())} frames); "
+            f"{trimmed} frames inside with < {MIN} markers keep the last pose")
     out, errs, per = [], [], []
     first = True
     for k in np.where(sel)[0]:
         obs = np.array([markers[n][k] for n in names])
         ok = ~np.isnan(obs).any(axis=1)
+        if ok.sum() < MIN:
+            out.append(model.full_q(dict(zip(free, x)))); errs.append((np.nan, np.nan, np.nan)); per.append(np.full(len(names), np.nan))
+            continue
         obs = np.nan_to_num(obs)
         cache = {}
 

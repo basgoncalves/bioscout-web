@@ -1,6 +1,6 @@
 /**
  * simquick.js -- Quick run of Simulate: ONE c3d file, everything the engine can
- * do with it, written next to the file in <trial>_simulations/:
+ * do with it, written next to the file in <trial>_simulation/:
  *
  *   marker_experimental.trc, grf.mot, emg.mot      the c3d exported (c3dexport.js)
  *   static_marker_experimental.trc                  the static c3d, or the first seconds of the trial
@@ -59,7 +59,7 @@ export async function runQuick(ctx, hooks) {
   const out = await resultsFolder();                 // before anything runs, while the click is fresh
   Q.busy = true; Q.log = []; Q.done = null;
   const zipFiles = [];                               // when no folder: everything collected for one .zip
-  const stem = Q.trial.replace(/\.c3d$/i, ""), outName = `${stem}_simulations`;
+  const stem = Q.trial.replace(/\.c3d$/i, ""), outName = `${stem}_simulation`;
   try {
     let dir = null;
     if (out) { dir = await out.getDirectoryHandle(outName, { create: true }); for (const t of STEPS) hooks.setDir(t, dir); }
@@ -118,7 +118,8 @@ export function quickHTML(ctx) {
         <button type="button" class="ghost" data-sq-static>🔍</button>${Q.staticFile ? `<button type="button" class="ghost" data-sq-staticclear>${t("pr_remove")}</button>` : ""}</span></label>
       ${Q.staticFile ? "" : `<label class="simOpt">${t("sq_staticSeconds")} <input type="text" data-sq-sec value="${Q.staticSeconds}" style="width:70px"></label>`}
     </div>
-    <p class="note" style="margin:6px 0 0">${Q.file ? t("sq_where", { dir: Q.trial.replace(/\.c3d$/i, "") + "_simulations" }) : t("sq_intro")}</p>
+    <p class="note" style="margin:6px 0 0">${Q.file ? (Q.root ? t("sq_where", { dir: Q.root.name + "/" + Q.trial.replace(/\.c3d$/i, "") + "_simulation" }) : t("sq_noFolder", { dir: Q.trial.replace(/\.c3d$/i, "") + "_simulation" })) : t("sq_intro")}</p>
+    ${Q.file && !Q.root ? `<button type="button" class="ghost" data-sq-folder style="margin-top:6px">${t("sq_confirmFolder")}</button>` : ""}
   </div>`;
 }
 
@@ -132,9 +133,15 @@ export function quickFooterHTML(ctx) {
 
 export function quickWire(box, ctx, hooks) {
   const q = (s) => box.querySelector(s), on = (sel, ev, fn) => { const el = q(sel); if (el) el[ev] = fn; };
-  on("[data-sq-pick]", "onclick", async () => { const r = await pickC3d(); if (!r) return; Q.file = r; Q.root = null; Q.log = []; hooks.repaint(); });
+  on("[data-sq-pick]", "onclick", async () => {
+    const r = await pickC3d(); if (!r) return;
+    Q.file = r; Q.root = null; Q.log = []; hooks.repaint();
+    // the folder right away, so Simulate itself needs no dialog: the browser can only write where you confirmed once
+    await resultsFolder(); hooks.repaint();
+  });
   on("[data-sq-static]", "onclick", async () => { const r = await pickC3d(); if (!r) return; Q.staticFile = r; hooks.repaint(); });
   on("[data-sq-staticclear]", "onclick", () => { Q.staticFile = null; hooks.repaint(); });
+  on("[data-sq-folder]", "onclick", async () => { await resultsFolder(); hooks.repaint(); });
   on("[data-sq-sec]", "onchange", (e) => { const v = parseFloat(e.target.value); if (v > 0) Q.staticSeconds = v; });
   on("[data-sq-run]", "onclick", () => runQuick(ctx, hooks));
 }
