@@ -13,6 +13,7 @@
  * OpenSim runs in the lab engine on a PC (bioscout/lab/web_engine.py +
  * tools.py); this module only draws the page and talks to it.
  */
+import { parseTrc, editTaskWeights, viewTrc } from "./trcview.js";
 const TPL = "./data/opensim/setup_files/";
 let spec = null;
 export async function loadSpec() {
@@ -64,7 +65,8 @@ export function simHTML(ctx) {
     return `<details class="simTool"${ctx.open.has(tl.id) ? " open" : ""} data-tool="${tl.id}">
       <summary><b>${i + 1} · ${esc(t("sim_tool_" + tl.id))}</b> ${badge(sp)}</summary>
       <p class="note" style="margin:4px 0 8px">${t("sim_note_" + tl.id)}</p>
-      ${slots}${opts ? `<div class="simOpts">${opts}</div>` : ""}
+      ${slots}${opts ? `<div class="simOpts">${opts}${tl.id === "ik" ? `<button type="button" class="ghost" data-view${trcIK ? "" : " disabled"}>${esc(t("sim_v_btn"))}</button>` : ""}</div>` : ""}
+      ${tl.id === "ik" ? `<button type="button" class="ghost" data-tw style="margin-top:8px">${esc(t("sim_tw_btn"))}</button>` : ""}
       <button type="button" data-run="${tl.id}" style="margin-top:10px"${!job.model || busy ? " disabled" : ""}>${esc(t("sim_run", { tool: t("sim_tool_" + tl.id) }))}</button>
       ${stateLine(sp)}${outHTML}
     </details>`;
@@ -88,6 +90,8 @@ let T = (k) => k;
 /* Browsers never reveal a file's folder, only its name: keep the name of
  * every file dropped this session so the slot can show what is in it. */
 const dropNames = {};
+const dropFiles = {};
+let trcIK = null;            // the parsed motion .trc of the IK section
 
 /** Wire the drawn page. */
 export function simWire(box, ctx) {
@@ -95,14 +99,48 @@ export function simWire(box, ctx) {
   const sel = box.querySelector("#simModel");
   if (sel) sel.onchange = () => sel.value && ctx.act(() => client.setModel(id, sel.value));
   box.querySelectorAll("details.simTool").forEach((d) => { d.ontoggle = () => { d.open ? ctx.open.add(d.dataset.tool) : ctx.open.delete(d.dataset.tool); }; });
-  const send = (key, file) => { dropNames[key] = file.name; const [tool, slot] = key.split(":"); ctx.act(() => client.toolUpload(id, tool, slot, file)); };
+  const ikOpts = () => ({ ...((job.options || {}).ik || {}) });
+  const send = (key, file) => {
+    dropNames[key] = file.name; dropFiles[key] = file;
+    const [tool, slot] = key.split(":");
+    if (key === "ik:motion_trc") {
+      // the time range defaults to the whole trial
+      file.text().then((txt) => {
+        try { trcIK = parseTrc(txt); } catch { trcIK = null; }
+        ctx.act(async () => {
+          await client.toolUpload(id, tool, slot, file);
+          if (!trcIK) return client.status(id);
+          const T = trcIK.t;
+          return client.toolOptions(id, "ik", { ...ikOpts(), t0: String(+T[0].toFixed(5)), t1: String(+T[T.length - 1].toFixed(5)) });
+        });
+      });
+      return;
+    }
+    ctx.act(() => client.toolUpload(id, tool, slot, file));
+  };
+  const vb = box.querySelector("[data-view]");
+  if (vb) vb.onclick = async () => {
+    const o = ikOpts();
+    const r = await viewTrc(ctx.t, trcIK, [o.t0 === "" || o.t0 == null ? NaN : +o.t0, o.t1 === "" || o.t1 == null ? NaN : +o.t1]);
+    if (r) ctx.act(() => client.toolOptions(id, "ik", { ...o, t0: String(r.t0), t1: String(r.t1) }));
+  };
+  const tw = box.querySelector("[data-tw]");
+  if (tw) tw.onclick = async () => {
+    let xml = null;
+    try {
+      xml = dropFiles["ik:taskset"] ? await dropFiles["ik:taskset"].text()
+        : await (await fetch(new URL("../data/opensim/setup_files/IK_task_set.xml", import.meta.url))).text();
+    } catch { xml = null; }
+    const out = await editTaskWeights(ctx.t, { names: trcIK ? trcIK.names : [], xml });
+    if (out) send("ik:taskset", new File([out], "IK_task_set_edited.xml", { type: "text/xml" }));
+  };
   box.querySelectorAll("[data-file]").forEach((inp) => { inp.onchange = () => inp.files[0] && send(inp.dataset.file, inp.files[0]); });
   box.querySelectorAll("[data-drop]").forEach((z) => {
     z.ondragover = (e) => { e.preventDefault(); z.classList.add("over"); };
     z.ondragleave = () => z.classList.remove("over");
     z.ondrop = (e) => { e.preventDefault(); z.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) send(z.dataset.drop, f); };
   });
-  box.querySelectorAll("[data-clear]").forEach((a) => { a.onclick = (e) => { e.preventDefault(); delete dropNames[a.dataset.clear]; const [tool, slot] = a.dataset.clear.split(":"); ctx.act(() => client.toolClear(id, tool, slot)); }; });
+  box.querySelectorAll("[data-clear]").forEach((a) => { a.onclick = (e) => { e.preventDefault(); delete dropNames[a.dataset.clear]; delete dropFiles[a.dataset.clear]; if (a.dataset.clear === "ik:motion_trc") trcIK = null; const [tool, slot] = a.dataset.clear.split(":"); ctx.act(() => client.toolClear(id, tool, slot)); }; });
   box.querySelectorAll("[data-opt]").forEach((inp) => {
     inp.onchange = () => {
       const tool = inp.dataset.opt.split(":")[0], o = {};
