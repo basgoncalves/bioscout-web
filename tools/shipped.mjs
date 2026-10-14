@@ -11,4 +11,7 @@ export const SHIPPED = [/^index\.html$/, /^sw\.js$/, /^src\//, /^data\//,
 export const isShipped = (f) => SHIPPED.some((re) => re.test(f));
 export const BUILD_RE = /window\.BUILD = (\d+);/;
 export const BUILD_AT_RE = /window\.BUILD_AT = "[^"]*";/;
+export const RELEASE_RE = /window\.RELEASE = "([^"]*)";/;
+/** The release a build number belongs to: a new release (V1 -> V2) starts again at build 1. */
+export const releaseOf = (html) => { const m = (html || "").match(RELEASE_RE); return m ? m[1] : null; };
 export const buildOf = (html) => { const m = (html || "").match(BUILD_RE); return m ? +m[1] : null; };

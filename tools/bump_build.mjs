@@ -16,7 +16,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { isShipped, buildOf, BUILD_RE, BUILD_AT_RE } from "./shipped.mjs";
+import { isShipped, buildOf, releaseOf, BUILD_RE, BUILD_AT_RE } from "./shipped.mjs";
 
 const git = (...a) => { try { return execFileSync("git", a, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; } };
 const check = process.argv.includes("--check");
@@ -28,6 +28,7 @@ const head = buildOf(git("show", "HEAD:index.html"));
 if (head == null) process.exit(0);                       // first commit, or no stamp yet
 const index = buildOf(git("show", ":index.html"));       // what is about to be committed
 if (index != null && index > head) process.exit(0);      // bumped by hand already
+if (releaseOf(git("show", ":index.html")) !== releaseOf(git("show", "HEAD:index.html"))) process.exit(0);   // a new release restarts the count
 
 const next = head + 1;
 if (check) { console.log(`would bump build ${head} -> ${next}`); process.exit(0); }

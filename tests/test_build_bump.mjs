@@ -13,7 +13,7 @@
  *   node tests/test_build_bump.mjs
  */
 import { execFileSync } from "node:child_process";
-import { isShipped, buildOf } from "../tools/shipped.mjs";
+import { isShipped, buildOf, releaseOf } from "../tools/shipped.mjs";
 
 const git = (...a) => { try { return execFileSync("git", a, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; } };
 
@@ -21,6 +21,8 @@ const changed = git("diff", "--name-only", "HEAD~1", "HEAD");
 if (changed == null) { console.log("ok    no parent commit here (shallow clone or no git) -- nothing to compare"); process.exit(0); }
 const shipped = changed.split("\n").filter(Boolean).filter(isShipped);
 const was = buildOf(git("show", "HEAD~1:index.html")), now = buildOf(git("show", "HEAD:index.html"));
+const newRelease = releaseOf(git("show", "HEAD~1:index.html")) !== releaseOf(git("show", "HEAD:index.html"));
+if (newRelease) { console.log(`ok    new release ${releaseOf(git("show", "HEAD:index.html"))}: build restarts at ${now}`); process.exit(0); }
 if (shipped.length && was != null && !(now > was)) {
   console.error(`FAIL  HEAD changes ${shipped.slice(0, 4).join(", ")}${shipped.length > 4 ? ", ..." : ""} but window.BUILD is still ${now}`);
   console.error(`      set window.BUILD = ${was + 1} in index.html and amend -- or run: git config core.hooksPath .githooks`);
