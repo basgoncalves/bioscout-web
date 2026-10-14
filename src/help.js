@@ -63,6 +63,7 @@ const MOVES = {
   dip: ["dip", "dips", "fundo", "fundos"],
   pushup: ["push up", "pushup", "push ups", "pushups", "press up", "flexao", "flexoes",
            "liegestutz", "liegestuetz", "liegestutze", "liegestuetze"],
+  kick: ["football kick", "kick", "shot on goal", "chute", "remate", "schuss", "torschuss"],
   kickback: ["kick back", "kickback", "coice", "coices", "glute kick"],
   plank: ["plank", "prancha", "unterarmstutz"],
   sideplank: ["side plank", "prancha lateral", "seitstutz"],

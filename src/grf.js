@@ -27,7 +27,7 @@ import { interpNan, smooth } from "./kinematics.js";
 
 export const G = 9.80665;
 export const HAND_TASKS = ["pullup", "dip", "pushup"];
-export const NO_FEET = ["pullup", "dip", "neck", "kickback"];
+export const NO_FEET = ["pullup", "dip", "neck", "kickback", "kick"];
 
 const isNum = (v) => typeof v === "number" && Number.isFinite(v);
 const clamp01 = (x) => Math.max(0, Math.min(1, x));

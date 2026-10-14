@@ -1375,6 +1375,7 @@ try {
           <option value="pushup" data-i18n="pushup">Push-up</option>
           <option value="jumpshot" data-i18n="jumpshot">Basketball jump shot</option>
           <option value="stroke" data-i18n="stroke">Tennis / padel strokes</option>
+          <option value="kick" data-i18n="kick">Football kick</option>
           <option value="squat" data-i18n="squat">Squat</option>
           <option value="cmj" data-i18n="cmj">Countermovement jump</option>
           <option value="sj" data-i18n="sj">Squat jump</option>
@@ -1651,8 +1652,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 6;
-window.BUILD_AT = "2026-10-14 20:23";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 7;
+window.BUILD_AT = "2026-10-14 20:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1974,7 +1975,8 @@ let frames = [];          // { t_ms, lm } per detected frame
 const ballTracker = makeBallTracker();
 const ballView = { canvas: null, ctx: null, vw: 0, vh: 0 };
 function ballGrab(src, t, lm) {
-  if ($("activity").value !== "stroke") return;
+  const act = $("activity").value;
+  if (act !== "stroke" && act !== "kick") return;
   const vw = src.videoWidth, vh = src.videoHeight;
   if (!vw || !vh) return;
   const k = 480 / Math.max(vw, vh);
@@ -1989,7 +1991,10 @@ function ballGrab(src, t, lm) {
     }
     ballView.vw = vw; ballView.vh = vh;
     ballView.ctx.drawImage(src, 0, 0, w, h);
-    ballTracker.push(ballView.ctx.getImageData(0, 0, w, h).data, w, h, t, lm ? bodyBox(lm, vw, vh) : null);
+    // A football is not optic yellow: for kicks the tracker follows any small
+    // thing that moved outside the player's box, and allows a bigger blob.
+    ballTracker.push(ballView.ctx.getImageData(0, 0, w, h).data, w, h, t, lm ? bodyBox(lm, vw, vh) : null,
+                     act === "kick" ? { colour: false, maxBlob: 1500 } : {});
   } catch (err) { console.warn("ball tracking failed", err); }
 }
 /** Line the ball track up with the strokes just found and write each
@@ -2009,6 +2014,11 @@ function attachBall(res, fps) {
     r.ball_speed_kmh = b.speed_ms != null ? +(b.speed_ms * 3.6).toFixed(1) : null;
     r.ball_method = b.method;
     r.impact = b.impact;
+    // A kick with no ball followed falls back to the estimate from foot speed.
+    if (res.activity === "kick") {
+      r.ball_measured = r.ball_speed_ms != null;
+      if (!r.ball_measured) { r.ball_speed_ms = r.ball_speed_est_ms ?? null; r.ball_speed_kmh = r.ball_speed_est_kmh ?? null; }
+    }
   });
   res.wallM = wallM;
   res.ballPoints = ballTracker.track.length;
@@ -3390,6 +3400,15 @@ const PEAK_VARS = {
   release_elbow_deg:  { label: "Elbow at release", unit: "°", dp: 0 },
   apex_offset_s:      { label: "Release vs jump apex", unit: "s", dp: 2 },
   load_s:             { label: "Dip to release", unit: "s", dp: 2 },
+  legs_to_arm_s:      { label: "Legs to arm (peak knee → peak elbow extension)", unit: "s", dp: 2 },
+  release_wrist_speed_ms: { label: "Wrist speed at release", unit: "m/s", dp: 1 },
+  knee_ext_vel_dps:   { label: "Peak knee extension velocity", unit: "°/s", dp: 0 },
+  elbow_ext_vel_dps:  { label: "Peak elbow extension velocity", unit: "°/s", dp: 0 },
+  fade_m:             { label: "Fade (hip drift, dip to follow-through)", unit: "m", dp: 2 },
+  ball_speed_kmh:     { label: "Ball speed", unit: "km/h", dp: 0 },
+  foot_speed_kmh:     { label: "Foot speed at impact", unit: "km/h", dp: 0 },
+  backswing_knee_flex_deg: { label: "Backswing knee flexion", unit: "°", dp: 0 },
+  support_knee_flex_deg: { label: "Support knee at impact", unit: "°", dp: 0 },
   jump_height_m:      { label: "Jump height", unit: "m", dp: 2 },
   /* Gait measures worth carrying between sets.
    *
@@ -8630,7 +8649,7 @@ async function finish() {
     lastResult = analyse(poses, fps, { heightM, activity,
                                        osimModel: OSIM_MODEL, hold: isNeckHold });
     lastResult.detection = detection;
-    if (activity === "stroke") attachBall(lastResult, fps);
+    if (activity === "stroke" || activity === "kick") attachBall(lastResult, fps);
     // Where the frames came from decides what can honestly be said about the
     // timing: a file was sampled on a grid we chose, a camera delivered
     // whatever it managed.
@@ -8953,7 +8972,7 @@ function viewNote(res) {
   const bits = [];
   const spec = ACTIVITIES[res.activity] || {};
   const sagittal = res.activity === "squat" || spec.jump || res.activity === "slsquat"
-                   || spec.gait || spec.kickback;
+                   || spec.gait || spec.kickback || spec.kick;
   if (sagittal && (v.view === "frontal" || v.view === "oblique")) {
     bits.push(tr("viewNotSagittal", { view: tr("view_" + v.view),
                                       frontality: v.frontality }));
@@ -8989,6 +9008,7 @@ function viewNote(res) {
     bits.push(tr("bothFeetDown"));
   }
   if (spec.kickback) bits.push(tr("kickbackNoKinetics"));
+  if (spec.kick) bits.push(tr("kickNote"));
   if (spec.generic) bits.push(tr("moreNoKinetics"));
   return bits.length
     ? `<p class="note banner">${bits.join(" ")}</p>` : "";
@@ -10147,9 +10167,50 @@ function strokePanel(res) {
     <p class="note" style="margin-top:10px">${how} ${tr("strokeNoteHand")}</p>`;
 }
 
+/* The kick's own panel: the best and mean ball speed, how it was got, and the
+ * mechanics behind it per leg. */
+function kickPanel(res) {
+  const live = res.reps.filter((r) => !r.removed);
+  if (!live.length) return "";
+  const nums = (a, k) => a.map((r) => r[k]).filter((x) => Number.isFinite(x));
+  const mean = (v) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : null);
+  const ball = nums(live, "ball_speed_kmh"), measured = live.filter((r) => r.ball_measured).length;
+  const best = ball.length ? Math.max(...ball) : null;
+  const leg = (sd) => {
+    const m = live.filter((r) => r.kick_side === sd);
+    if (!m.length) return "";
+    const f = (k, d) => { const v = mean(nums(m, k)); return v == null ? "—" : v.toFixed(d); };
+    return `<tr><td>${tr(sd === "l" ? "left" : "right")} (${m.length})</td><td>${f("ball_speed_kmh", 0)}</td>
+      <td>${f("knee_ext_vel_dps", 0)}</td><td>${f("hip_flex_vel_dps", 0)}</td><td>${f("hip_knee_lag_s", 3)}</td>
+      <td>${f("backswing_hip_ext_deg", 0)}°</td><td>${f("follow_hip_flex_deg", 0)}°</td>
+      <td>${f("trunk_lean_impact_deg", 0)}°</td><td>${f("approach_speed_ms", 1)}</td></tr>`;
+  };
+  return `<p class="sub" style="margin:8px 0 0">${tr("kickBest", { best: best != null ? best.toFixed(0) : "—",
+      mean: mean(ball) != null ? mean(ball).toFixed(0) : "—", measured, n: live.length })}</p>
+    <table style="margin-top:8px"><thead><tr><th>${tr("legCol")}</th><th>${tr("ballKmh")}</th>
+      <th>${tr("kneeWhip")}</th><th>${tr("hipWhip")}</th><th>${tr("hipKneeLag")}</th><th>${tr("backswingHip")}</th>
+      <th>${tr("followHip")}</th><th>${tr("trunkImpact")}</th><th>${tr("approachMs")}</th></tr></thead>
+      <tbody>${leg("r")}${leg("l")}</tbody></table>`;
+}
+/* How alike the attempts were: the spread of the release, which is what
+ * shooting coaches mean by a repeatable shot, whatever went in. */
+function shotConsistency(res) {
+  const live = res.reps.filter((r) => !r.removed);
+  if (live.length < 3) return "";
+  const sd = (k) => {
+    const v = live.map((r) => r[k]).filter((x) => Number.isFinite(x));
+    if (v.length < 3) return null;
+    const m = v.reduce((a, b) => a + b, 0) / v.length;
+    return Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / (v.length - 1));
+  };
+  const h = sd("release_height_m"), a = sd("apex_offset_s"), e = sd("release_elbow_deg"), f = sd("fade_m");
+  return `<p class="sub" style="margin:8px 0 0">${tr("shotConsistency", {
+    n: live.length, h: h != null ? (h * 100).toFixed(1) : "—", a: a != null ? (a * 1000).toFixed(0) : "—",
+    e: e != null ? e.toFixed(1) : "—", f: f != null ? (f * 100).toFixed(1) : "—" })}</p>`;
+}
 function shotSummary(res) {
   const tapped = res.reps.filter((r) => r.made === true || r.made === false);
-  if (!tapped.length) return `<p class="note">${tr("noteTapOutcome")}</p>`;
+  if (!tapped.length) return shotConsistency(res) + `<p class="note">${tr("noteTapOutcome")}</p>`;
   const made = tapped.filter((r) => r.made === true);
   const missed = tapped.filter((r) => r.made === false);
   const pct = Math.round((100 * made.length) / tapped.length);
@@ -10158,7 +10219,7 @@ function shotSummary(res) {
     untapped: res.reps.length - tapped.length })}</p>`;
   const MIN = 3;
   if (made.length < MIN || missed.length < MIN) {
-    return line + `<p class="note">${tr("noteTooFewToCompare", { min: MIN })}</p>`;
+    return shotConsistency(res) + line + `<p class="note">${tr("noteTooFewToCompare", { min: MIN })}</p>`;
   }
   const mean = (a, k) => {
     const v = a.map((r) => r[k]).filter((x) => Number.isFinite(x));
@@ -10166,7 +10227,8 @@ function shotSummary(res) {
   };
   const KEYS = [["release_height_m", 2, "m"], ["apex_offset_s", 2, "s"],
                 ["release_elbow_deg", 0, "\u00b0"], ["knee_flex_at_dip_deg", 0, "\u00b0"],
-                ["load_s", 2, "s"]];
+                ["load_s", 2, "s"], ["legs_to_arm_s", 2, "s"], ["release_wrist_speed_ms", 1, "m/s"],
+                ["knee_ext_vel_dps", 0, "\u00b0/s"], ["elbow_ext_vel_dps", 0, "\u00b0/s"], ["fade_m", 2, "m"]];
   const rows = KEYS.map(([k, dp, unit]) => {
     const a = mean(made, k), b = mean(missed, k);
     if (a == null || b == null) return "";
@@ -10175,7 +10237,7 @@ function shotSummary(res) {
       <td>${b.toFixed(dp)}<span class="sub"> ${unit}</span></td>
       <td>${(a - b >= 0 ? "+" : "") + (a - b).toFixed(dp)}</td></tr>`;
   }).join("");
-  return line + `<table style="margin-top:8px"><thead><tr>
+  return shotConsistency(res) + line + `<table style="margin-top:8px"><thead><tr>
       <th>${tr("measure")}</th><th>${tr("shotMadeCol")}</th>
       <th>${tr("shotMissedCol")}</th><th>${tr("shotDiffCol")}</th>
     </tr></thead><tbody>${rows}</tbody></table>
@@ -10856,6 +10918,7 @@ function render(res, fps) {
       : res.refused === "noStrokes" ? `<p class="note banner">${tr("noStrokesFound")}</p>`
       : res.refused === "noHeelRaises" ? `<p class="note banner">${tr("noHeelRaises")}</p>`
       : res.refused === "noKickbacks" ? `<p class="note banner">${tr("noKickbacks")}</p>`
+      : res.refused === "noKicks" ? `<p class="note banner">${tr("noKicks")}</p>`
       : res.refused === "noStrides" ? `<p class="note banner">${
           tr(res.activity === "walk" ? "noStridesWalk" : "noStrides")}</p>`
       : (res.removedReps || []).length ? ""
@@ -11074,6 +11137,7 @@ function render(res, fps) {
       <td>${nn(r.apex_offset_s, 2)}</td>
       <td>${nn(r.release_elbow_deg, 0)}\u00b0</td>
       <td>${nn(r.knee_flex_at_dip_deg, 0)}\u00b0</td>
+      <td>${nn(r.legs_to_arm_s, 2)}</td><td>${nn(r.release_wrist_speed_ms, 1)}</td>
       ${madeCell(r)}</tr>`).join("");
 
   const isStroke = res.activity === "stroke";
@@ -11088,6 +11152,15 @@ function render(res, fps) {
    * is for a single-leg squat. The heel raise had no row of its own and fell
    * through to the pull-up's, which read fields it does not have. */
   const isKick = res.activity === "kickback";
+  const isFoot = res.activity === "kick";
+  const ballCell = (r) => (r.ball_speed_kmh == null ? "—"
+    : r.ball_measured ? nn(r.ball_speed_kmh, 0) : `~${nn(r.ball_speed_kmh, 0)}`);
+  const footRows = !isFoot ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
+      <td>${sideName(r.kick_side)}</td>
+      <td>${ballCell(r)}</td><td>${nn(r.foot_speed_kmh, 0)}</td>
+      <td>${nn(r.knee_ext_vel_dps, 0)}</td>
+      <td>${nn(r.backswing_knee_flex_deg, 0)}°</td>
+      <td>${nn(r.support_knee_flex_deg, 0)}°</td></tr>`).join("");
   const isHR = res.activity === "heelraise";
   const kickRows = !isKick ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
       <td>${sideName(r.stance_side)}</td>
@@ -11129,6 +11202,7 @@ function render(res, fps) {
     : isShot
     ? `<tr><th>${tr("shotN")}</th><th>${tr("releaseH")}</th><th>${tr("vsApex")}</th>
         <th>${tr("elbowAtRelease")}</th><th>${tr("kneeAtDip")}</th>
+        <th>${tr("legsToArm")}</th><th>${tr("wristMs")}</th>
         <th>${tr("madeCol")}</th></tr>`
     : isDip
     ? `<tr><th>${tr("rep")}</th><th>${tr("down")}</th><th>${tr("up")}</th>
@@ -11140,6 +11214,10 @@ function render(res, fps) {
     ? `<tr><th>${tr("stride")}</th><th>${tr("colFoot")}</th><th>${tr("strideS")}</th>
         <th>${tr("contactS")}</th><th>${tr("flightS")}</th><th>${tr("dutyFactor")}</th>
         <th>${tr("cadence")}</th></tr>`
+    : isFoot
+    ? `<tr><th>${tr("kickN")}</th><th>${tr("legCol")}</th><th>${tr("ballKmh")}</th>
+        <th>${tr("footKmh")}</th><th>${tr("kneeWhip")}</th><th>${tr("backswingKnee")}</th>
+        <th>${tr("supportKnee")}</th></tr>`
     : isKick
     ? `<tr><th>${tr("rep")}</th><th>${tr("legCol")}</th><th>${tr("kickS")}</th>
         <th>${tr("returnS")}</th><th>${tr("hipExtTop")}</th><th>${tr("hipRange")}</th></tr>`
@@ -11204,7 +11282,7 @@ function render(res, fps) {
    * mean of a left kick and a right kick is neither leg. The table's mean row
    * stays over every rep, as the single-leg squat's does. */
   const legMeans = [];
-  if ((isKick || isHR) && meanRep) {
+  if ((isKick || isHR || isFoot) && meanRep) {
     for (const sd of ["l", "r"]) {
       const mine = res.reps.filter((r) => r.stance_side === sd);
       if (!mine.length || mine.length === res.reps.length) continue;
@@ -11231,7 +11309,8 @@ function render(res, fps) {
     ? `<tr class="meanrow"><td>${tr("mean")}</td>
          <td>${ms("release_height_m")}</td><td>${ms("apex_offset_s")}</td>
          <td>${ms("release_elbow_deg", 0)}\u00b0</td>
-         <td>${ms("knee_flex_at_dip_deg", 0)}\u00b0</td><td>\u2014</td></tr>`
+         <td>${ms("knee_flex_at_dip_deg", 0)}\u00b0</td>
+         <td>${ms("legs_to_arm_s")}</td><td>${ms("release_wrist_speed_ms", 1)}</td><td>\u2014</td></tr>`
     : isDip
     ? `<tr class="meanrow"><td>${tr("mean")}</td>
          <td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
@@ -11247,6 +11326,12 @@ function render(res, fps) {
     // where a left row and a right row can be read against each other. This
     // branch was already unreachable (meanRep is null for gait) and referred to
     // a list that no longer exists.
+    : isFoot
+    ? `<tr class="meanrow"><td>${tr("mean")}</td><td>—</td>
+         <td>${ms("ball_speed_kmh", 0)}</td><td>${ms("foot_speed_kmh", 0)}</td>
+         <td>${ms("knee_ext_vel_dps", 0)}</td>
+         <td>${ms("backswing_knee_flex_deg", 0)}°</td>
+         <td>${ms("support_knee_flex_deg", 0)}°</td></tr>`
     : isKick
     ? `<tr class="meanrow"><td>${tr("mean")}</td><td>—</td>
          <td>${ms("kick_s")}</td><td>${ms("return_s")}</td>
@@ -11288,12 +11373,13 @@ function render(res, fps) {
     ${setSwitcher(res)}
     <table><thead>${head}</thead><tbody>${
       isStroke ? strokeRows : isShot ? shotRows : isDip ? dipRows : isSL ? slRows : isRun ? runRows
-             : isKick ? kickRows : isHR ? hrRows
+             : isKick ? kickRows : isFoot ? footRows : isHR ? hrRows
              : isSide ? sideRows : isJump ? jumpRows : rows()}${meanRow}</tbody></table>
     ${removedLine(res)}
     ${qualitySummary(qCounts)}
     <div id="shotSummaryBox">${isShot ? shotSummary(res) : ""}</div>
     ${isStroke ? strokePanel(res) : ""}
+    ${isFoot ? kickPanel(res) : ""}
     ${runPanel}
     ${suspect.length ? `<p class="note banner">${
       tr("heightsDisagree", { n: suspect.length, total: n })}</p>` : ""}

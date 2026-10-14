@@ -117,7 +117,7 @@ const GLOBALS = new Set(["Math","JSON","Date","Number","String","Object","Array"
   "localStorage","sessionStorage","indexedDB","caches","fetch","setTimeout","clearTimeout",
   "setInterval","clearInterval","queueMicrotask","requestAnimationFrame","alert","prompt","confirm",
   "URL","URLSearchParams","Blob","Response","DecompressionStream","File","FileReader","FormData","Image","Audio","atob","btoa",
-  "structuredClone","createImageBitmap","AbortController","CustomEvent","Event","TextEncoder",
+  "structuredClone","createImageBitmap","AbortController","CustomEvent","Event","TextEncoder","DOMParser",
   "TextDecoder","performance","crypto","self","Intl","ArrayBuffer","Uint8Array","Uint8ClampedArray",
   "Int32Array","Uint32Array","Float32Array","Float64Array","DataView","XMLSerializer","encodeURIComponent","decodeURIComponent",
   "getComputedStyle","MediaRecorder","ResizeObserver","IntersectionObserver","Worker","OffscreenCanvas",

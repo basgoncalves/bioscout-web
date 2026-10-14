@@ -1403,6 +1403,11 @@ function summariseRep(r, activity) {
     o.heel_lift = r.heel_lift ?? null;
     o.up_s = r.up_s ?? null;
     o.down_s = r.down_s ?? null;
+  } else if (activity === "kick") {
+    o.stance_side = r.kick_side ?? null;
+    for (const k of ["ball_speed_kmh", "foot_speed_kmh", "knee_ext_vel_dps", "backswing_knee_flex_deg",
+                     "support_knee_flex_deg", "follow_hip_flex_deg"]) o[k] = r[k] ?? null;
+    o.ball_measured = !!r.ball_measured;
   } else if (activity === "kickback") {
     // The leg that kicked, and what its hip did. Extension positive.
     o.stance_side = r.stance_side ?? null;
@@ -1518,6 +1523,9 @@ export function summariseSession(session) {
                 trend("contact_s", "Ground contact time", "s", false),
                 trend("flight_s", "Flight time", "s", true),
                 trend("duty_factor", "Duty factor", "", false));
+  } else if (activity === "kick") {
+    trends.push(trend("ball_speed_kmh", "Ball speed", "km/h", true),
+                trend("knee_ext_vel_dps", "Knee whip", "°/s", true));
   } else if (activity === "kickback") {
     // Range shrinking and the trunk starting to help are what fatigue looks
     // like in a kick back.

@@ -72,7 +72,7 @@ export const MOVEMENT_MET = {
   // moderate-vigorous resistance values; holds and small-muscle work lower.
   deadlift: 6.0, lunge: 5.0, bridge: 3.5, ohpress: 5.0, curl: 3.5, row: 5.0, raise: 3.5,
   plank: 3.8, sideplank: 3.8, wallsit: 3.8,
-  cmj: 8.0, sj: 7.0, jumpshot: 7.0, sidestep: 8.0,
+  cmj: 8.0, sj: 7.0, jumpshot: 7.0, kick: 7.0, sidestep: 8.0,
   // Tennis, singles (7.3) and padel sit close together in the compendium.
   stroke: 7.3,
   run: 9.8, walk: 3.5,

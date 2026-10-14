@@ -1,5 +1,5 @@
 /**
- * balltrack.js -- finding a tennis or padel ball in the camera picture, and
+ * balltrack.js -- finding a tennis or padel ball (or, colour-blind, a football) in the camera picture, and
  * what can honestly be said about it afterwards.
  *
  * There is no ball model here. A ball is the one small thing in the picture
@@ -50,7 +50,7 @@ export function makeBallTracker({ minDiff = 22, minPix = 3, maxPix = 500 } = {})
     track,
     reset() { prev = null; track.length = 0; },
     /** `box`: the player, { x0, y0, x1, y1 } in frame fractions, or null. */
-    push(rgba, w, h, t, box = null) {
+    push(rgba, w, h, t, box = null, { colour = true, maxBlob = maxPix } = {}) {
       const first = !prev || pw !== w || ph !== h;
       if (first) { prev = new Uint8Array(w * h); pw = w; ph = h; }
       const cw = Math.ceil(w / CELL), ch = Math.ceil(h / CELL);
@@ -66,7 +66,7 @@ export function makeBallTracker({ minDiff = 22, minPix = 3, maxPix = 500 } = {})
           prev[k] = L;
           if (first || d < minDiff) continue;
           if (inRow && x >= bx0 && x <= bx1) continue;
-          if (!isBallColour(r, g, b)) continue;
+          if (colour && !isBallColour(r, g, b)) continue;
           const c = (y / CELL | 0) * cw + (x / CELL | 0);
           cnt[c]++; sx[c] += x; sy[c] += y;
         }
@@ -83,7 +83,7 @@ export function makeBallTracker({ minDiff = 22, minPix = 3, maxPix = 500 } = {})
         }
         if (s > best) { best = s; bi = cy * cw + cx; }
       }
-      if (bi < 0 || best < minPix || best > maxPix) return null;
+      if (bi < 0 || best < minPix || best > maxBlob) return null;
       const cy = (bi / cw) | 0, cx = bi % cw;
       let n = 0, X = 0, Y = 0;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {

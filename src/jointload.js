@@ -38,7 +38,7 @@ export const PLANES = {
   frontal: { cols: [2, 1], dirs: ["jlSup", "jlLat", "jlInf", "jlMed"] },
 };
 export const JOINTS = ["hip", "knee", "ankle"];
-const NO_LEGS = new Set(["pullup", "dip", "pushup", "neck", "kickback",
+const NO_LEGS = new Set(["pullup", "dip", "pushup", "neck", "kickback", "kick",
   // 2026-10-09 movements: angles and timing only (openChain), see kinematics.js
   "plank", "sideplank", "wallsit", "deadlift", "lunge", "bridge", "ohpress", "curl", "row", "raise"]);
 

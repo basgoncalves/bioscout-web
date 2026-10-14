@@ -2347,6 +2347,150 @@ export function kickbackRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
 }
 
 // ---------------------------------------------------------------------------
+// the football kick
+// ---------------------------------------------------------------------------
+/* A kick is found from the FOOT: the kicking foot is by far the fastest thing
+ * on the body for a tenth of a second, while the other foot is planted beside
+ * the ball. That is what tells it from running, where the swing foot is fast
+ * too but the hips travel with it and the feet take turns.
+ *
+ * What a single phone sees and what it does not:
+ *   - foot speed is the toe (else the ankle) in the picture plane, in metres
+ *     per second through the athlete's own pixels-per-metre. Side-on that is
+ *     most of it; any component toward the camera is lost, so it is a floor.
+ *     At 30 fps the foot moves ~0.6 m between frames at impact, so the peak
+ *     is sampled, not caught -- at 12-20 fps live it reads clearly low.
+ *   - ball speed is MEASURED when the ball tracker follows the ball out of
+ *     the frame after impact; otherwise it is ESTIMATED as 1.25 x foot speed
+ *     (instep kicks: ball/foot speed ratio 1.1-1.35, Lees & Nolan 1998;
+ *     Kellis & Katis 2007), and labelled as an estimate.
+ *   - the angles are sagittal: backswing knee flexion, hip extension, the
+ *     knee's extension velocity into impact (the "whip"), the support knee,
+ *     trunk lean at impact and the height of the follow-through. */
+export const DEFAULT_KICK_CFG = {
+  smoothWin: 3,
+  // Peak foot speed, in leg-lengths (F._scale, hip-to-ankle) per second. A leg
+  // is ~0.9 m, so 9 is ~8 m/s: a firm pass. A jogging swing foot is 4-7.
+  minPeak: 9,
+  // At the peak the kicking foot must be this many times faster than the other
+  // foot (planted), and than the hips (no running stride).
+  footRatio: 3, hipRatio: 2.6,
+  // Two kicks cannot be closer than this.
+  minGapS: 1.0,
+  // The kick runs out from the peak to where foot speed falls to this share,
+  edgeFrac: 0.2,
+  // and no further than this before / after impact.
+  backS: 1.0, followS: 0.6,
+};
+
+export function buildKickFeatures(poses) {
+  const F = buildSquatFeatures(poses);
+  const facing = facingSign(poses);
+  const frames = Object.keys(poses).map(Number).sort((a, b) => a - b);
+  const lo = F._lo, n = F._n;
+  for (const k of ["foot_x_l", "foot_y_l", "foot_x_r", "foot_y_r", "hipS_l", "hipS_r", "trunk_pitch"]) F[k] = new Array(n).fill(NaN);
+  for (const fi of frames) {
+    const i = fi - lo, lm = poses[fi];
+    const sh = mid(lm.left_shoulder, lm.right_shoulder), hp = mid(lm.left_hip, lm.right_hip);
+    for (const [sd, side] of [["l", "left"], ["r", "right"]]) {
+      const p = lm[side + "_foot_index"] || lm[side + "_ankle"];
+      if (p) { F["foot_x_" + sd][i] = p[0]; F["foot_y_" + sd][i] = p[1]; }
+      F["hipS_" + sd][i] = hipFlexSigned(sh, lm[side + "_hip"], lm[side + "_knee"], facing);
+    }
+    if (sh && hp) F.trunk_pitch[i] = (Math.atan2(facing * (sh[0] - hp[0]), hp[1] - sh[1]) * 180) / Math.PI;
+  }
+  F._facing = facing;
+  return F;
+}
+
+/** Speed of a 2-D track, px per frame, central differences on smoothed positions. */
+function trackSpeed(xs, ys, win) {
+  const x = smooth(interpNan(xs), win), y = smooth(interpNan(ys), win), n = x.length;
+  return x.map((_, i) => {
+    const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1);
+    return b > a ? Math.hypot(x[b] - x[a], y[b] - y[a]) / (b - a) : NaN;
+  });
+}
+
+export function findKickReps(F, cfg = DEFAULT_KICK_CFG) {
+  const c = { ...DEFAULT_KICK_CFG, ...cfg }, fps = F._fps || 30, n = F._n;
+  const toLegs = fps / F._scale;                             // px/frame -> legs/s
+  const sp = { l: trackSpeed(F.foot_x_l, F.foot_y_l, c.smoothWin).map((v) => v * toLegs),
+               r: trackSpeed(F.foot_x_r, F.foot_y_r, c.smoothWin).map((v) => v * toLegs) };
+  const hipSp = trackSpeed(F.hip_cx, F.hip_cy, c.smoothWin).map((v) => v * toLegs);
+  const sec = (x) => Math.max(1, Math.round(x * fps));
+  const cands = [];
+  for (const sd of ["l", "r"]) {
+    const v = sp[sd], o = sp[sd === "l" ? "r" : "l"];
+    for (let i = 1; i < n - 1; i++) {
+      if (!(v[i] >= c.minPeak && v[i] >= v[i - 1] && v[i] > v[i + 1])) continue;
+      if (!(v[i] >= c.footRatio * (o[i] || 0))) continue;
+      if (!(v[i] >= c.hipRatio * (hipSp[i] || 0))) continue;
+      cands.push({ i, sd, v: v[i] });
+    }
+  }
+  cands.sort((a, b) => b.v - a.v);
+  const kept = [];
+  for (const k of cands) if (!kept.some((q) => Math.abs(q.i - k.i) < sec(c.minGapS))) kept.push(k);
+  kept.sort((a, b) => a.i - b.i);
+  const reps = [], sides = [];
+  for (const k of kept) {
+    const v = sp[k.sd], edge = c.edgeFrac * k.v;
+    let a = k.i; while (a > 0 && k.i - a < sec(c.backS) && v[a - 1] > edge) a--;
+    let z = k.i; while (z < n - 1 && z - k.i < sec(c.followS) && v[z + 1] > edge) z++;
+    a = Math.max(0, Math.min(a, k.i - 3)); z = Math.min(n - 1, Math.max(z, k.i + 3));
+    reps.push([a, k.i, z]); sides.push(k.sd);
+  }
+  return { reps, repSides: sides, footSpeed: sp, hipSpeed: hipSp, kickSig: null,
+           refused: reps.length ? null : "noKicks" };
+}
+
+export function kickMetrics(F, rep, fps, pxPerM, found, idx) {
+  const [b0, pk, b1] = rep, sd = found.repSides[idx], st = sd === "l" ? "r" : "l";
+  const r1 = (v, d = 1) => (isNum(v) ? +v.toFixed(d) : null);
+  const legsToMs = pxPerM > 0 ? F._scale / pxPerM : null;   // legs/s -> m/s
+  const v = found.footSpeed[sd];
+  const footPeak = v[pk];
+  const knee = interpNan(F["knee_flex_" + sd]), sknee = interpNan(F["knee_flex_" + st]);
+  const hip = interpNan(F["hipS_" + sd]), pitch = interpNan(F.trunk_pitch);
+  const rate = (arr, i) => (i > 0 && i < arr.length - 1 ? (arr[i + 1] - arr[i - 1]) * fps / 2 : NaN);
+  let kneeMax = -Infinity, hipMin = Infinity, kneeExtV = 0, hipFlexV = 0, follow = -Infinity, tKnee = pk, tHip = pk;
+  for (let i = b0; i <= pk; i++) {
+    if (knee[i] > kneeMax) kneeMax = knee[i];
+    if (hip[i] < hipMin) hipMin = hip[i];
+  }
+  for (let i = Math.max(1, b0); i <= Math.min(pk + 1, F._n - 2); i++) {
+    const kv = -rate(knee, i), hv = rate(hip, i);
+    if (kv > kneeExtV) { kneeExtV = kv; tKnee = i; }
+    if (hv > hipFlexV) { hipFlexV = hv; tHip = i; }
+  }
+  for (let i = pk; i <= b1; i++) if (hip[i] > follow) follow = hip[i];
+  // Run-up: how fast the hips were travelling in the half second before the swing.
+  const hs = found.hipSpeed, w0 = Math.max(0, b0 - Math.round(0.5 * fps)), app = [];
+  for (let i = w0; i <= b0; i++) if (isNum(hs[i])) app.push(hs[i]);
+  const foot_ms = legsToMs ? footPeak * legsToMs : null;
+  return {
+    kick_side: sd, stance_side: sd,
+    contact_frame: F._lo + pk,
+    foot_speed_ms: r1(foot_ms, 2),
+    foot_speed_kmh: r1(foot_ms != null ? foot_ms * 3.6 : null),
+    ball_speed_est_ms: r1(foot_ms != null ? 1.25 * foot_ms : null, 2),
+    ball_speed_est_kmh: r1(foot_ms != null ? 1.25 * foot_ms * 3.6 : null),
+    backswing_knee_flex_deg: r1(kneeMax),
+    backswing_hip_ext_deg: r1(isFinite(hipMin) ? -hipMin : NaN),
+    knee_ext_vel_dps: r1(kneeExtV, 0),
+    hip_flex_vel_dps: r1(hipFlexV, 0),
+    // Proximal-to-distal: the hip's peak before the knee's is the textbook whip.
+    hip_knee_lag_s: r1((tKnee - tHip) / fps, 3),
+    support_knee_flex_deg: r1(sknee[pk]),
+    trunk_lean_impact_deg: r1(pitch[pk]),
+    follow_hip_flex_deg: r1(isFinite(follow) ? follow : NaN),
+    approach_speed_ms: r1(app.length && legsToMs ? nanmedian(app) * legsToMs : null, 2),
+    swing_s: r1((pk - b0) / fps, 3), follow_s: r1((b1 - pk) / fps, 3),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // the jump shot
 // ---------------------------------------------------------------------------
 /* Shooting mechanics from one side-on camera, and nothing about the ball.
@@ -2583,7 +2727,34 @@ export function shotMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_SHOT_CFG) {
   }
   const flight = air / fps;
   const G = 9.80665;
+  /* The chain, legs to hand. Peak knee-extension and elbow-extension rates in
+   * the push from the dip to release, and how long after the legs the arm
+   * peaked: a shot that lets the legs finish before the arm starts loses the
+   * energy the legs made ("two-motion" shot), one that fires both at once is
+   * all arm. Wrist speed at release is the hand's speed in the picture plane
+   * -- a floor under the ball's launch speed, not the ball. Fade is how far
+   * the hips drifted sideways in the picture from the dip to the end of the
+   * follow-through. */
+  const rate = (arr, i) => (i > 0 && i < arr.length - 1 ? (arr[i + 1] - arr[i - 1]) * fps / 2 : NaN);
+  let kneeV = 0, elbowV = 0, tK = dip, tE = rel;
+  for (let i = Math.max(1, dip); i <= Math.min(rel + 1, F._n - 2); i++) {
+    const kv = -rate(knee, i), ev = -rate(elbow, i);
+    if (kv > kneeV) { kneeV = kv; tK = i; }
+    if (ev > elbowV) { elbowV = ev; tE = i; }
+  }
+  const wx = interpNan(F.wrist_x), hipX = interpNan(F.hip_cx);
+  const wristV = rel > 0 && rel < F._n - 1 && pxPerM > 0
+    ? Math.hypot(wx[rel + 1] - wx[rel - 1], wristY[rel + 1] - wristY[rel - 1]) * fps / 2 / pxPerM : NaN;
+  const fade = pxPerM > 0 && isNum(hipX[dip]) && isNum(hipX[end]) ? Math.abs(hipX[end] - hipX[dip]) / pxPerM : NaN;
+  const extras = {
+    knee_ext_vel_dps: kneeV ? +kneeV.toFixed(0) : null,
+    elbow_ext_vel_dps: elbowV ? +elbowV.toFixed(0) : null,
+    legs_to_arm_s: kneeV && elbowV ? +((tE - tK) / fps).toFixed(3) : null,
+    release_wrist_speed_ms: isNum(wristV) ? +wristV.toFixed(2) : null,
+    fade_m: isNum(fade) ? +fade.toFixed(2) : null,
+  };
   return {
+    ...extras,
     release_height_m: m(F._floorY - wristY[rel]),
     dip_hand_m: m(F._floorY - wristY[dip]),
     release_elbow_deg: isNum(elbow[rel]) ? +elbow[rel].toFixed(1) : null,
@@ -3133,6 +3304,16 @@ export const ACTIVITIES = {
     coords: kickbackRepCoordinates, reference: squatReferencePositions,
     phases: ["kick_s", "return_s"],
   },
+  /* Football kick: per leg, like the kick back, and open chain for the same
+   * reason -- the kicking leg is in the air, and the moment that matters is the
+   * impact, which no force plate or pose model sees. */
+  kick: {
+    label: "football kick", perLeg: true, kick: true, openChain: true,
+    columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_KICK_CFG,
+    features: buildKickFeatures, findReps: findKickReps,
+    coords: perLegRepCoordinates, reference: squatReferencePositions,
+    phases: ["swing_s", "follow_s"],
+  },
   sidestep: {
     label: "side step", perLeg: true, travels: true, frontalTask: true,
     columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_SIDESTEP_CFG,
@@ -3417,6 +3598,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       if (spec.kickback) {
         Object.assign(s, kickbackMetrics(F, b, fps, found.repSides ? found.repSides[i] : "l"));
       }
+      if (spec.kick) Object.assign(s, kickMetrics(F, b, fps, pxPerM, found, i));
       if (spec.generic) Object.assign(s, moreMetrics(activity, F, b, fps, found, i));
     } else {
       /* The peak is taken from the MEASUREMENT, not from the exported column.

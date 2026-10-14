@@ -15,7 +15,7 @@
 export const SPORTS = {
   strength: ["squat", "slsquat", "pullup", "dip", "pushup", "kickback", "heelraise", "cmj", "sj", "neck",
     "deadlift", "lunge", "bridge", "ohpress", "curl", "row", "raise", "plank", "sideplank", "wallsit"],
-  basketball: ["jumpshot", "stroke", "cmj", "sj", "sidestep", "run", "walk"],
+  basketball: ["jumpshot", "stroke", "kick", "cmj", "sj", "sidestep", "run", "walk"],
   /* The two scripted sessions (protocol.js). Their movement lists are what
    * the session may contain: the circuit's three for the first, anything the
    * app counts rep for rep for the second. The recorder picks the movement
