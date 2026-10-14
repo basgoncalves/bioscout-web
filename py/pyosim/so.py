@@ -35,7 +35,11 @@ def read_actuators(*paths):
 
 # curves (Thelen 2003 shapes; close to Millard's defaults over the physiological range)
 def f_active(l):  return np.exp(-((l - 1.0) ** 2) / 0.45)
-def f_passive(l): return np.where(l > 1, (np.exp(4 * (l - 1) / 0.6) - 1) / (np.exp(4) - 1), 0.0)
+def f_passive(l):
+    # capped at 1.4 x optimal length: with a rigid tendon the fibre stretch is overestimated in deep flexion
+    # (deep squats), and the exponential would otherwise give kN of passive force from a silent muscle
+    l = np.minimum(l, 1.4)
+    return np.where(l > 1, (np.exp(4 * (l - 1) / 0.6) - 1) / (np.exp(4) - 1), 0.0)
 def f_velocity(v):                     # v: fibre velocity / (vmax * lopt), shortening < 0
     v = np.clip(v, -0.999, 1.0)
     return np.where(v <= 0, (1 + v) / (1 - v / 0.25), 1.8 - 0.8 * (1 + 0.0) / (1 + v * 7.56))

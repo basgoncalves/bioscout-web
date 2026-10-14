@@ -2,10 +2,11 @@
  * localengine.js -- Simulate without a server: the same client API as the lab
  * engine (osimlab.js makeEngineClient), but the files stay in this browser and
  * the tools run in a Web Worker with Pyodide + py/pyosim (pure-Python OpenSim).
- * Scale, inverse kinematics and inverse dynamics; the other sections say they need the engine.
+ * Scale, IK, ID, MA, SO + JRA and a Python version of CEINMS; RRA says it needs the engine.
  */
 import { markerErrorsFigure, kinematicsMomentsFigure, inverseDynamicsFigure, residualsFigure, taskFigure } from "./simfigs.js";
-const LOCAL_TOOLS = new Set(["scale", "ik", "id", "so", "ma"]);
+import { muscleGroupsFigure, muscleMomentsFigure, jrfFigure, jrfCoverageFigure, bodyWeight } from "./simstack.js";
+const LOCAL_TOOLS = new Set(["scale", "ik", "id", "so", "ma", "ceinms_cal", "ceinms"]);
 const BASE = new URL("../", import.meta.url).href;
 
 export function makeLocalClient(spec) {
@@ -17,6 +18,41 @@ export function makeLocalClient(spec) {
   let worker = null, seq = 0;
   const snap = () => JSON.parse(JSON.stringify(job));
   const fail = (code, message) => { const e = new Error(message); e.code = code; throw e; };
+
+  const txt = async (f) => (f ? (typeof f === "string" ? f : await f.text()) : null);
+  const ikFile = (tool) => files[`${tool}:ik_mot`] || (outs.ik && outs.ik["ik.mot"] ? new File([outs.ik["ik.mot"]], "ik.mot") : null) || files["so:ik_mot"];
+  const idFile = (tool) => files[`${tool}:id_sto`] || (outs.id && outs.id["inverse_dynamics.sto"] ? new File([outs.id["inverse_dynamics.sto"]], "inverse_dynamics.sto") : null) || files["so:id_sto"];
+  /** What the pose / GRF header of the figures needs, from ID's results or the files given. */
+  async function header() {
+    const grf = files["so:grf_mot"] || files["id:grf_mot"] || null;
+    const xml = (outs.id && outs.id["GRF.xml"]) || await txt(files["so:grf_xml"] || files["id:grf_xml"]);
+    const bodies = (outs.id && outs.id["body_positions.sto"]) || await txt(files["so:bodies"]);
+    return { grf, xml, hdr: { grfText: await txt(grf), grfXml: xml, bodiesText: bodies } };
+  }
+  /** Muscle figures + joint reactions (JRA) for a set of muscle forces. tag: "so" | "ceinms". */
+  async function forcesFollowUp(sp, out, tag, model, ikf, forcesName, extra) {
+    const { grf, xml, hdr } = await header();
+    const ikTxt = await ikf.text(), idf = idFile(tag === "so" ? "so" : "ceinms"), idTxt = idf ? await idf.text() : null;
+    const figs = { "muscle_groups.png": () => muscleGroupsFigure({ forceText: out[forcesName], actText: out[extra.act], emgText: extra.emg && out[extra.emg], hdr }) };
+    if (idTxt) for (const sd of ["r", "l"]) figs[`muscle_moments_${sd}.png`] = () => muscleMomentsFigure({ side: sd, idText: idTxt, ikText: ikTxt, forceText: tag === "so" ? out[forcesName] : null, musclesText: extra.moments && out[extra.moments], hdr });
+    for (const [n, f] of Object.entries(figs)) { try { out[n] = await f(); } catch (e) { sp.log.push(`${n}: ${e.message}`); } }
+    const want = String(((job.options || {})[tag] || {}).jra ?? "1").trim() !== "0";
+    if (!want) return;
+    if (!grf) { sp.log.push("joint reactions: no ground reaction forces (run ID or drop grf.mot)"); return; }
+    sp.log.push("joint reactions (JRA) …");
+    const payload = { [model.name]: await model.arrayBuffer(), "ik.mot": await ikf.arrayBuffer(), "forces.sto": new TextEncoder().encode(out[forcesName]).buffer, "grf.mot": await grf.arrayBuffer() };
+    const args = { model: model.name, ik: "ik.mot", forces: "forces.sto", grf: "grf.mot", out: `jra_${tag}.sto` };
+    if (xml) { payload["loads.xml"] = new TextEncoder().encode(xml).buffer; args.loads = "loads.xml"; }
+    try {
+      const r = await runWorker("jra", payload, args, (l) => { sp.log.push(...String(l).split("\n")); });
+      Object.assign(out, r);
+      const bw = bodyWeight(await model.text()), label = tag === "so" ? "SO" : "CEINMS", jraText = r[args.out];
+      const jf = { [`jrf_${tag}.png`]: () => jrfFigure({ jraText, bw, label, hdr }),
+        [`jrf_${tag}_coverage_frontal.png`]: () => jrfCoverageFigure({ jraText, bw, plane: "frontal", label, hdr }),
+        [`jrf_${tag}_coverage_sagittal.png`]: () => jrfCoverageFigure({ jraText, bw, plane: "sagittal", label, hdr }) };
+      for (const [n, f] of Object.entries(jf)) { try { out[n] = await f(); } catch (e) { sp.log.push(`${n}: ${e.message}`); } }
+    } catch (e) { sp.log.push("joint reactions failed: " + e.message); }
+  }
 
   async function modelFile(tool) {
     const own = files[`${tool}:model`] || files["*:scaled"] || files["*:generic"];
@@ -118,6 +154,7 @@ export function makeLocalClient(spec) {
     const t0 = Date.now();
     try {
       outs.so = await runWorker("so", payload, args, (l) => { sp.log.push(...String(l).split("\n")); });
+      await forcesFollowUp(sp, outs.so, "so", model, ikf, "SO_StaticOptimization_force.sto", { act: "SO_StaticOptimization_activation.sto" });
       Object.assign(sp, { state: "done", seconds: Math.round((Date.now() - t0) / 1000) });
     } catch (e) {
       Object.assign(sp, { state: "error", error: e.message });
@@ -142,6 +179,47 @@ export function makeLocalClient(spec) {
     } catch (e) {
       Object.assign(sp, { state: "error", error: e.message });
     }
+  }
+
+  // CEINMS, the Python version (pyosim/ceinms.py): calibration, then execution
+  async function ceinmsInputs(tool) {
+    const ikf = ikFile(tool) || fail("bad_request", "drop the joint angles (.mot) or run inverse kinematics first");
+    const idf = idFile(tool) || fail("bad_request", "run inverse dynamics first (or drop its .sto)");
+    const emg = files[`${tool}:emg_mot`] || files["ceinms_cal:emg_mot"] || files["ceinms:emg_mot"] || null;
+    const o = { ...((job.options || {})[tool] || {}) };
+    const payload = { "ik.mot": await ikf.arrayBuffer(), "id.sto": await idf.arrayBuffer() };
+    const args = { cmd: tool, ik: "ik.mot", id: "id.sto", approach: o.approach, alpha: o.alpha, beta: o.beta, gamma: o.gamma, mode: o.mode, gammas: o.gammas, tol: o.tol };
+    if (emg) { payload["emg.mot"] = await emg.arrayBuffer(); args.emg = "emg.mot"; }
+    return { ikf, payload, args };
+  }
+  async function runCeinmsCal() {
+    const sp = job.tools.ceinms_cal;
+    const { payload, args } = await ceinmsInputs("ceinms_cal");
+    const model = await modelFile("ceinms_cal");
+    payload[model.name] = await model.arrayBuffer(); args.model = model.name;
+    sp.log = ["Python version of CEINMS calibration (not CEINMS.exe)"];
+    const t0 = Date.now();
+    try {
+      outs.ceinms_cal = await runWorker("ceinms_cal", payload, args, (l) => { sp.log.push(...String(l).split("\n")); });
+      const cm = Object.keys(outs.ceinms_cal).find((n) => n.endsWith("_calibrated.osim"));
+      if (cm) files["*:calibrated"] = new File([outs.ceinms_cal[cm]], cm);
+      Object.assign(sp, { state: "done", seconds: Math.round((Date.now() - t0) / 1000) });
+    } catch (e) { Object.assign(sp, { state: "error", error: e.message }); }
+  }
+  async function runCeinms() {
+    const sp = job.tools.ceinms;
+    const { ikf, payload, args } = await ceinmsInputs("ceinms");
+    const model = files["ceinms:model"] || files["*:calibrated"] || await modelFile("ceinms");
+    payload[model.name] = await model.arrayBuffer(); args.model = model.name;
+    const cal = files["ceinms:calibration"] || (outs.ceinms_cal && outs.ceinms_cal["calibration.json"] ? new File([outs.ceinms_cal["calibration.json"]], "calibration.json") : null);
+    if (cal) { payload["calibration.json"] = await cal.arrayBuffer(); args.calibration = "calibration.json"; }
+    sp.log = ["Python version of CEINMS execution (not CEINMS.exe)" + (files["*:calibrated"] && model === files["*:calibrated"] ? ", on the calibrated model" : ", on the uncalibrated model")];
+    const t0 = Date.now();
+    try {
+      outs.ceinms = await runWorker("ceinms", payload, args, (l) => { sp.log.push(...String(l).split("\n")); });
+      await forcesFollowUp(sp, outs.ceinms, "ceinms", model, ikf, "CEINMS_forces.sto", { act: "CEINMS_activations.sto", emg: "CEINMS_emg_activations.sto", moments: "CEINMS_moments.sto" });
+      Object.assign(sp, { state: "done", seconds: Math.round((Date.now() - t0) / 1000) });
+    } catch (e) { Object.assign(sp, { state: "error", error: e.message }); }
   }
 
   async function runIK() {
@@ -178,9 +256,9 @@ export function makeLocalClient(spec) {
     toolClear: async (_id, tool, slot) => { delete files[`${tool}:${slot}`]; delete job.tools[tool].inputs[slot]; return snap(); },
     toolOptions: async (_id, tool, o) => { job.options[tool] = o; return snap(); },
     toolRun: async (_id, tool) => {
-      if (!LOCAL_TOOLS.has(tool)) fail("bad_request", "this step is not in the browser yet; scale, inverse kinematics, inverse dynamics, muscle analysis and static optimisation are");
+      if (!LOCAL_TOOLS.has(tool)) fail("bad_request", "this step is not in the browser yet; scale, inverse kinematics, inverse dynamics, muscle analysis, static optimisation (+ joint reactions) and CEINMS (Python version) are");
       Object.assign(job.tools[tool], { state: "running", started: Date.now() / 1000, error: null });
-      (tool === "scale" ? runScale : tool === "id" ? runID : tool === "so" ? runSO : tool === "ma" ? runMA : runIK)().catch((e) => Object.assign(job.tools[tool], { state: "error", error: e.message }));
+      ({ scale: runScale, id: runID, so: runSO, ma: runMA, ceinms_cal: runCeinmsCal, ceinms: runCeinms }[tool] || runIK)().catch((e) => Object.assign(job.tools[tool], { state: "error", error: e.message }));
       return snap();
     },
     toolOutputs: async (_id, tool) => ({ files: Object.entries(outs[tool] || {}).map(([path, v]) => ({ path, size: v.size ?? v.length })) }),

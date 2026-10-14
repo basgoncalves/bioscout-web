@@ -3,7 +3,7 @@
  * -> {id, log:[...]} while running, then {id, done:true, outputs:{name: text}} or {id, error}. */
 /* global importScripts, loadPyodide */
 const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
-const PY_FILES = ["__init__.py", "model.py", "io.py", "ik.py", "scale.py", "id.py", "muscles.py", "so.py", "ma.py"];
+const PY_FILES = ["__init__.py", "model.py", "io.py", "ik.py", "scale.py", "id.py", "muscles.py", "so.py", "ma.py", "jra.py", "ceinms.py"];
 let ready = null;
 
 function boot(base) {
@@ -108,6 +108,39 @@ ma.run(Model("/job/" + a["model"]), "/job/" + a["ik"], "/job/ma", forces_sto=("/
 `);
       const outputs = {};
       for (const f of py.FS.readdir("/job/ma")) if (f.endsWith(".sto")) outputs[f] = py.FS.readFile("/job/ma/" + f, { encoding: "utf8" });
+      self.postMessage({ id, done: true, outputs });
+    } else if (cmd === "jra") {
+      py.runPython(`
+from pyosim import jra
+from pyosim import id as idtool
+from pyosim.model import Model
+a = dict(args)
+loads = ("/job/" + a["loads"]) if a.get("loads") else None
+if not loads:
+    loads = idtool.make_grf_xml(Model("/job/" + a["model"]), "/job/" + a["grf"], "/job/" + a["ik"], "/job/GRF.xml", log=js_log)
+jra.run("/job/" + a["model"], "/job/" + a["ik"], "/job/" + a["forces"], loads, "/job/" + a["out"],
+        loads_mot=("/job/" + a["grf"]) if a.get("grf") else None, log=js_log)
+`);
+      self.postMessage({ id, done: true, outputs: { [args.out]: py.FS.readFile("/job/" + args.out, { encoding: "utf8" }) } });
+    } else if (cmd === "ceinms_cal" || cmd === "ceinms") {
+      py.runPython(`
+from pyosim import ceinms
+a = dict(args)
+num = lambda k: float(a[k]) if a.get(k) not in (None, "") else None
+tr = (float(a["t0"]), float(a["t1"])) if a.get("t0") not in (None, "") and a.get("t1") not in (None, "") else None
+emg = ("/job/" + a["emg"]) if a.get("emg") else None
+if a["cmd"] == "ceinms_cal":
+    ceinms.calibrate("/job/" + a["model"], "/job/" + a["ik"], "/job/" + a["id"], emg, "/job/out", approach=a.get("approach") or "hybrid",
+                     alpha=num("alpha"), beta=num("beta"), gamma=num("gamma"), t_range=tr, log=js_log)
+else:
+    gs = [float(x) for x in str(a.get("gammas") or "").replace(",", " ").split()] or [1, 10, 30, 100, 300]
+    ceinms.execute("/job/" + a["model"], "/job/" + a["ik"], "/job/" + a["id"], "/job/out", emg_mot=emg, approach=a.get("approach") or "hybrid",
+                   mode=(a.get("mode") or "execution").strip().lower(), alpha=num("alpha"), beta=num("beta"), gamma=num("gamma"),
+                   gammas=gs, tol=num("tol"), calibration=("/job/" + a["calibration"]) if a.get("calibration") else None, t_range=tr, log=js_log)
+`);
+      const outputs = {};
+      for (const f of py.FS.readdir("/job/out")) if (!f.startsWith(".")) outputs[f] = py.FS.readFile("/job/out/" + f, { encoding: "utf8" });
+      py.runPython("import shutil; shutil.rmtree('/job/out', ignore_errors=True)");
       self.postMessage({ id, done: true, outputs });
     } else throw new Error("unknown command " + cmd);
   } catch (err) {

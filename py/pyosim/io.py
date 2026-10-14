@@ -30,7 +30,7 @@ def read_sto(path):
     j = i + 1
     while not lines[j].strip():
         j += 1
-    cols = lines[j].split()
+    cols = [c.strip() for c in lines[j].split("\t")] if "\t" in lines[j] else lines[j].split()
     data = np.array([[float(x) for x in l.split()] for l in lines[j + 1:] if l.strip()])
     header = "\n".join(lines[:i])
     deg = "indegrees=yes" in header.replace(" ", "").lower()

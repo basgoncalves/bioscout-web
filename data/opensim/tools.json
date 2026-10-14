@@ -234,7 +234,7 @@
    "id": "so",
    "label": "Static optimisation",
    "options": {
-    "jra": "Also joint reaction loads (1 = yes)"
+    "jra": "Also joint reaction loads (1 = yes, 0 = no) -- default 1"
    },
    "slots": [
     {
@@ -296,17 +296,18 @@
    ]
   },
   {
-   "id": "ceinms",
-   "label": "CEINMS (Python solver on the server; CEINMS.exe on a Windows lab PC)",
+   "id": "ceinms_cal",
+   "label": "CEINMS calibration (Python version)",
    "options": {
-    "solver": "Solver: auto, python (mew, runs anywhere) or exe (CEINMS.exe, Windows + EMG)",
-    "mass": "Body mass (kg) -- default: the one given to Scale",
-    "jra": "Also joint contact forces (1 = yes)"
+    "approach": "Approach: hybrid, emg_informed, emg_driven or static_optimisation",
+    "alpha": "alpha (moment tracking) -- default: from the approach",
+    "beta": "beta (effort) -- default: from the approach",
+    "gamma": "gamma (EMG tracking) -- default: from the approach"
    },
    "slots": [
     {
      "id": "emg_mot",
-     "label": "EMG envelopes, filtered and normalised (.mot/.sto) -- optional with the Python solver",
+     "label": "EMG (.mot/.sto), raw or envelopes -- default: the exported emg.mot",
      "ext": [
       ".mot",
       ".sto"
@@ -334,26 +335,71 @@
      "required": false
     },
     {
-     "id": "ceinms_cfg",
-     "label": "CEINMS execution config (.xml)",
+     "id": "model",
+     "label": "Model (.osim) -- default: the scaled model",
      "ext": [
-      ".xml"
+      ".osim"
      ],
-     "template": "ceinms_cfg.xml",
+     "template": null,
+     "required": false
+    }
+   ]
+  },
+  {
+   "id": "ceinms",
+   "label": "CEINMS execution (Python version)",
+   "options": {
+    "approach": "Approach: hybrid, emg_informed, emg_driven or static_optimisation",
+    "alpha": "alpha (moment tracking) -- default: from the approach",
+    "beta": "beta (effort) -- default: from the approach",
+    "gamma": "gamma (EMG tracking) -- default: from the approach",
+    "mode": "Run: execution (one solve), loop (one per gamma) or optimise (gamma searched)",
+    "gammas": "Loop gammas, e.g. 1 10 30 100 300",
+    "tol": "Optimise: moment RMSE allowed (% of range) -- default 5",
+    "jra": "Also joint reaction loads (1 = yes, 0 = no) -- default 1"
+   },
+   "slots": [
+    {
+     "id": "emg_mot",
+     "label": "EMG (.mot/.sto), raw or envelopes -- default: the exported emg.mot",
+     "ext": [
+      ".mot",
+      ".sto"
+     ],
+     "template": null,
      "required": false
     },
     {
-     "id": "excitation_generator",
-     "label": "Excitation generator (.xml)",
+     "id": "ik_mot",
+     "label": "Joint angles (.mot) -- default: the IK result",
      "ext": [
-      ".xml"
+      ".mot",
+      ".sto"
      ],
-     "template": "excitationGenerator.xml",
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "id_sto",
+     "label": "Joint moments (.sto) -- default: the ID result",
+     "ext": [
+      ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "calibration",
+     "label": "Calibration (calibration.json) -- default: the calibration result",
+     "ext": [
+      ".json"
+     ],
+     "template": null,
      "required": false
     },
     {
      "id": "model",
-     "label": "Model (.osim) -- default: the scaled model",
+     "label": "Model (.osim) -- default: the calibrated model, else the scaled one",
      "ext": [
       ".osim"
      ],

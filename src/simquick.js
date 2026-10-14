@@ -18,7 +18,7 @@ import { makeZip } from "./zip.js";
 let T = (k) => k;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms", "rra"]), export: true };
+export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms_cal", "ceinms", "rra"]), export: true };
 Object.defineProperty(Q, "trial", { get: () => (Q.file && Q.file.file ? Q.file.file.name : "") });
 
 async function writeText(dir, name, data) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); }
@@ -74,7 +74,7 @@ function cropTrc(text, seconds) {
   return head.join("\n") + "\n" + keep.join("\n") + "\n";
 }
 
-const STEPS = ["scale", "ik", "id", "ma", "so", "jra", "ceinms"];
+const STEPS = ["scale", "ik", "id", "ma", "so", "ceinms_cal", "ceinms"];
 
 export async function runQuick(ctx, hooks) {
   const { client, job } = ctx, id = job.id;
@@ -131,6 +131,7 @@ export async function runQuick(ctx, hooks) {
     hooks.send("scale:static_trc", new File([staticTrc], "static_marker_experimental.trc"));
     hooks.send("ik:motion_trc", new File([ex["marker_experimental.trc"]], "marker_experimental.trc"));
     if (ex["grf.mot"]) hooks.send("id:grf_mot", new File([ex["grf.mot"]], "grf.mot"));
+    if (ex["emg.mot"]) for (const tl of ["ceinms_cal", "ceinms"]) hooks.send(`${tl}:emg_mot`, new File([ex["emg.mot"]], "emg.mot"));
     // a skipped step's earlier results in the folder stand in for it (scaled model, ik.mot, inverse_dynamics.sto)
     if (dir) {
       const have = async (n) => { try { return await (await dir.getFileHandle(n)).getFile(); } catch { return null; } };
@@ -143,10 +144,13 @@ export async function runQuick(ctx, hooks) {
       { const f = await have("SO_StaticOptimization_force.sto"); if (f) hooks.send("ma:so_force", f); }   // muscle moments from an earlier SO run
       if (Q.skip.has("id")) { const f = await have("inverse_dynamics.sto"); if (f) { hooks.send("so:id_sto", f); log("id: using inverse_dynamics.sto from the folder"); } }
       const gx = await have("GRF.xml"); if (gx) hooks.send("id:grf_xml", gx);
+      const bp = await have("body_positions.sto"); if (bp) hooks.send("so:bodies", bp);          // the poses on the SO / JRA figures
+      if (Q.skip.has("ceinms_cal")) { const cj = await have("calibration.json"); if (cj) { hooks.send("ceinms:calibration", cj); log("ceinms calibration: using calibration.json from the folder"); }
+        for await (const [n, h] of dir.entries()) if (h.kind === "file" && /_calibrated\.osim$/i.test(n)) { hooks.send("ceinms:model", await h.getFile()); log(`ceinms: using ${n} from the folder`); } }
     }
     await new Promise((r) => setTimeout(r, 400));
     // 3. the steps, in order, each waiting for the last
-    const order = ["scale", "ik", ...(ex["grf.mot"] ? ["id", "ma", "rra", "so", "ceinms"] : ["ma"])];   // the order of the sections
+    const order = ["scale", "ik", ...(ex["grf.mot"] ? ["id", "ma", "rra", "so", "ceinms_cal", "ceinms"] : ["ma"])];   // the order of the sections
     for (const tool of order) {
       if (Q.skip.has(tool)) { log(`${tool}: ${T("sq_skipped")}`); continue; }
       if (!have.has(tool)) { log(`${tool}: ${T("sq_needsEngine")}`); continue; }

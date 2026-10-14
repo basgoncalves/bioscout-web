@@ -193,7 +193,7 @@ export async function residualsFigure(idText, grfText) {
 const R_COL = "#c0392b", L_COL = "#2f7bd6";
 const sideCol = (s) => (s === "r" ? R_COL : s === "l" ? L_COL : "#000");
 
-function grfBySide(grfText, grfXml) {
+export function grfBySide(grfText, grfXml) {
   const g = readSto(grfText);
   const sideOf = {};                                        // force identifier -> r|l
   if (grfXml) {
@@ -214,7 +214,7 @@ function grfBySide(grfText, grfXml) {
   return out;
 }
 
-function footEvents(t, vy, side, thr = 20) {
+export function footEvents(t, vy, side, thr = 20) {
   const ev = [];
   for (let i = 1; i < vy.length; i++) {
     if (vy[i - 1] < thr && vy[i] >= thr) ev.push({ t: t[i], name: `${side.toUpperCase()} foot strike`, side, on: true });
