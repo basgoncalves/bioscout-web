@@ -99,6 +99,18 @@ export async function runQuick(ctx, hooks) {
     hooks.send("scale:static_trc", new File([staticTrc], "static_marker_experimental.trc"));
     hooks.send("ik:motion_trc", new File([ex["marker_experimental.trc"]], "marker_experimental.trc"));
     if (ex["grf.mot"]) hooks.send("id:grf_mot", new File([ex["grf.mot"]], "grf.mot"));
+    // a skipped step's earlier results in the folder stand in for it (scaled model, ik.mot, inverse_dynamics.sto)
+    if (dir) {
+      const have = async (n) => { try { return await (await dir.getFileHandle(n)).getFile(); } catch { return null; } };
+      if (Q.skip.has("scale")) {
+        let scaled = null;
+        for await (const [n, h] of dir.entries()) if (h.kind === "file" && /_scaled\.osim$/i.test(n)) scaled = await h.getFile();
+        if (scaled) { hooks.setScaled(scaled); log(`scale: using ${scaled.name} from the folder`); }
+      }
+      if (Q.skip.has("ik")) { const f = await have("ik.mot"); if (f) { hooks.send("id:ik_mot", f); hooks.send("so:ik_mot", f); log("ik: using ik.mot from the folder"); } }
+      if (Q.skip.has("id")) { const f = await have("inverse_dynamics.sto"); if (f) { hooks.send("so:id_sto", f); log("id: using inverse_dynamics.sto from the folder"); } }
+      const gx = await have("GRF.xml"); if (gx) hooks.send("id:grf_xml", gx);
+    }
     await new Promise((r) => setTimeout(r, 400));
     // 3. the steps, in order, each waiting for the last
     const order = ["scale", "ik", ...(ex["grf.mot"] ? ["id", "ma", "rra", "so", "ceinms"] : [])];
