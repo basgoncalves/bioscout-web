@@ -26,7 +26,7 @@ export function makeLocalClient(spec) {
   async function header() {
     const grf = files["so:grf_mot"] || files["id:grf_mot"] || null;
     const xml = (outs.id && outs.id["GRF.xml"]) || await txt(files["so:grf_xml"] || files["id:grf_xml"]);
-    const bodies = (outs.id && outs.id["body_positions.sto"]) || await txt(files["so:bodies"]);
+    const bodies = (outs.ik && outs.ik["body_positions.sto"]) || (outs.id && outs.id["body_positions.sto"]) || await txt(files["so:bodies"]);
     return { grf, xml, hdr: { grfText: await txt(grf), grfXml: xml, bodiesText: bodies } };
   }
   /** Muscle figures + joint reactions (JRA) for a set of muscle forces. tag: "so" | "ceinms". */
@@ -39,8 +39,9 @@ export function makeLocalClient(spec) {
       } catch (e) { sp.log.push("skeleton poses: " + e.message); }
     }
     const ikTxt = await ikf.text(), idf = idFile(tag === "so" ? "so" : "ceinms"), idTxt = idf ? await idf.text() : null;
-    const figs = { "muscle_groups.png": () => muscleGroupsFigure({ forceText: out[forcesName], actText: out[extra.act], emgText: extra.emg && out[extra.emg], hdr }) };
-    if (idTxt) for (const sd of ["r", "l"]) figs[`muscle_moments_${sd}.png`] = () => muscleMomentsFigure({ side: sd, idText: idTxt, ikText: ikTxt, forceText: tag === "so" ? out[forcesName] : null, musclesText: extra.moments && out[extra.moments], hdr });
+    const pre = tag === "so" ? "" : "ceinms_";          // SO and CEINMS write into the same folder
+    const figs = { [`${pre}muscle_groups.png`]: () => muscleGroupsFigure({ forceText: out[forcesName], actText: out[extra.act], emgText: extra.emg && out[extra.emg], hdr }) };
+    if (idTxt) for (const sd of ["r", "l"]) figs[`${pre}muscle_moments_${sd}.png`] = () => muscleMomentsFigure({ side: sd, idText: idTxt, ikText: ikTxt, forceText: tag === "so" ? out[forcesName] : null, musclesText: extra.moments && out[extra.moments], hdr });
     for (const [n, f] of Object.entries(figs)) { try { out[n] = await f(); } catch (e) { sp.log.push(`${n}: ${e.message}`); } }
     const want = String(((job.options || {})[tag] || {}).jra ?? "1").trim() !== "0";
     if (!want) return;
@@ -134,7 +135,7 @@ export function makeLocalClient(spec) {
       try {
         const xml = outs.id["GRF.xml"] || (files["id:grf_xml"] ? await files["id:grf_xml"].text() : null);
         outs.id["kinematics_moments.png"] = await taskFigure({ ikText: ikTxt, idText: idTxt, errAllText: outs.ik && outs.ik["ik_marker_errors_all.sto"],
-          grfText: grfTxt, grfXml: xml, bodiesText: outs.id["body_positions.sto"] });
+          grfText: grfTxt, grfXml: xml, bodiesText: (outs.ik && outs.ik["body_positions.sto"]) || outs.id["body_positions.sto"] });
       } catch (e) { sp.log.push("figure: " + e.message); }
       try { outs.id["residuals.png"] = await residualsFigure(idTxt, grfTxt); } catch { /* optional */ }
       Object.assign(sp, { state: "done", seconds: Math.round((Date.now() - t0) / 1000) });
@@ -269,6 +270,40 @@ export function makeLocalClient(spec) {
     },
     toolOutputs: async (_id, tool) => ({ files: Object.entries(outs[tool] || {}).map(([path, v]) => ({ path, size: v.size ?? v.length })) }),
     toolBlob: (_id, tool, path) => { const v = (outs[tool] || {})[path]; return v == null ? null : v instanceof Blob ? v : new Blob([v], { type: "text/plain" }); },
+    /** Every figure again from the result files of a trial folder ({name: text}), nothing re-run except
+     *  body_positions.sto when it is missing (model + ik.mot). -> {name: Blob|text} to write back. */
+    figuresOnly: async (f, model, log = () => {}) => {
+      const out = {}, fig = async (n, fn) => { try { out[n] = await fn(); log(`  ${n}`); } catch (e) { log(`  ${n}: ${e.message}`); } };
+      if (!f["body_positions.sto"] && f["ik.mot"] && model) {
+        try {
+          const r = await runWorker("bodies", { [model.name]: await model.arrayBuffer(), "ik.mot": new TextEncoder().encode(f["ik.mot"]).buffer }, { model: model.name, ik: "ik.mot" }, () => {});
+          f["body_positions.sto"] = out["body_positions.sto"] = r["body_positions.sto"]; log("  body_positions.sto (from the model + ik.mot)");
+        } catch (e) { log("  body_positions.sto: " + e.message); }
+      }
+      const hdr = { grfText: f["grf.mot"] || null, grfXml: f["GRF.xml"] || null, bodiesText: f["body_positions.sto"] || null };
+      const ik = f["ik.mot"], id = f["inverse_dynamics.sto"], err = f["ik_marker_errors_all.sto"];
+      if (ik) await fig("ik_joint_angles.png", () => kinematicsMomentsFigure(ik, null, err));
+      if (err) await fig("_ik_marker_errors_plot.png", () => markerErrorsFigure(err));
+      if (id) {
+        await fig("inverse_dynamics.png", () => inverseDynamicsFigure(id));
+        if (ik) await fig("kinematics_moments.png", () => taskFigure({ ikText: ik, idText: id, errAllText: err, grfText: hdr.grfText, grfXml: hdr.grfXml, bodiesText: hdr.bodiesText }));
+        if (hdr.grfText) await fig("residuals.png", () => residualsFigure(id, hdr.grfText));
+      }
+      const bw = model ? bodyWeight(await model.text()) : null;
+      for (const [tag, label, force, act, extra] of [["so", "SO", "SO_StaticOptimization_force.sto", "SO_StaticOptimization_activation.sto", {}],
+        ["ceinms", "CEINMS", "CEINMS_forces.sto", "CEINMS_activations.sto", { emg: "CEINMS_emg_activations.sto", moments: "CEINMS_moments.sto" }]]) {
+        const fo = f[force]; if (!fo) continue;
+        const pre = tag === "so" ? "" : "ceinms_";
+        await fig(`${pre}muscle_groups.png`, () => muscleGroupsFigure({ forceText: fo, actText: f[act], emgText: extra.emg && f[extra.emg], hdr }));
+        if (id) for (const sd of ["r", "l"]) await fig(`${pre}muscle_moments_${sd}.png`, () => muscleMomentsFigure({ side: sd, idText: id, ikText: ik, forceText: tag === "so" ? fo : null, musclesText: extra.moments && f[extra.moments], hdr }));
+        const jr = f[`jra_${tag}.sto`];
+        if (jr && bw) {
+          await fig(`jrf_${tag}.png`, () => jrfFigure({ jraText: jr, bw, label, hdr }));
+          for (const plane of ["frontal", "sagittal"]) await fig(`jrf_${tag}_coverage_${plane}.png`, () => jrfCoverageFigure({ jraText: jr, bw, plane, label, hdr }));
+        }
+      }
+      return out;
+    },
     getGeneric: () => files["*:generic"] || null,
     setGeneric: (file) => { if (file) files["*:generic"] = file; else delete files["*:generic"]; },
     getScaled: () => files["*:scaled"] || null,

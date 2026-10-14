@@ -173,6 +173,31 @@ export async function runQuick(ctx, hooks) {
   finally { Q.busy = false; hooks.repaint(); }
 }
 
+/** Every figure of the trial again from the files already in <trial>_simulation/ -- no analysis re-run
+ *  (body_positions.sto is made from the model + ik.mot when it is missing). */
+export async function redoFigures(ctx, hooks) {
+  const log = (s) => { Q.log.push(s); hooks.repaint(); };
+  Q.busy = true; Q.log = []; hooks.repaint();
+  try {
+    const out = await resultsFolder();
+    if (!out) throw new Error(T("sq_figsNoFolder"));
+    const outName = `${Q.trial.replace(/\.c3d$/i, "")}_simulation`;
+    const dir = await out.getDirectoryHandle(outName);
+    const f = {}; let model = null;
+    for await (const [n, h] of dir.entries()) {
+      if (h.kind !== "file") continue;
+      if (/\.(sto|mot|xml)$/i.test(n)) f[n] = await (await h.getFile()).text();
+      if (/_scaled\.osim$/i.test(n) && !/_calibrated/.test(n)) model = await h.getFile();
+    }
+    if (!model && ctx.client.getScaled) model = ctx.client.getScaled();
+    log(`${outName}: ${T("sq_figsRunning")}`);
+    const figs = await ctx.client.figuresOnly(f, model, log);
+    for (const [n, v] of Object.entries(figs)) await writeText(dir, n, v);
+    log(T("sq_figsDone", { n: Object.keys(figs).length, dir: `${out.name}/${outName}` }));
+  } catch (e) { log("✗ " + e.message); }
+  finally { Q.busy = false; hooks.repaint(); }
+}
+
 export function quickHTML(ctx) {
   T = ctx.t; const t = ctx.t;
   return `<div class="simModel" id="simQuick">
@@ -197,6 +222,7 @@ export function quickFooterHTML(ctx) {
   const t = ctx.t;
   return `<div style="margin-top:12px">
     <button type="button" data-sq-run class="simGo"${Q.busy || !Q.trial ? " disabled" : ""}>${Q.busy ? t("sq_running") : t("sq_simulate")}</button>
+    <button type="button" data-sq-figs class="ghost" style="margin-top:8px;width:100%"${Q.busy || !Q.trial ? " disabled" : ""} title="${esc(t("sq_figsTitle"))}">${t("sq_figs")}</button>
     ${Q.log.length ? `<div class="osimLog" style="margin-top:8px">${Q.log.map(esc).join("\n")}</div>` : ""}
   </div>`;
 }
@@ -215,4 +241,5 @@ export function quickWire(box, ctx, hooks) {
   on("[data-sq-export]", "onchange", (e) => { Q.export = !e.target.checked; hooks.repaint(); });
   on("[data-sq-sec]", "onchange", (e) => { const v = parseFloat(e.target.value); if (v > 0) Q.staticSeconds = v; });
   on("[data-sq-run]", "onclick", () => runQuick(ctx, hooks));
+  on("[data-sq-figs]", "onclick", () => redoFigures(ctx, hooks));
 }

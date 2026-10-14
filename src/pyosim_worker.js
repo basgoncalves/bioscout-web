@@ -43,9 +43,14 @@ tr = (float(a["t0"]), float(a["t1"])) if a.get("t0") not in (None, "") and a.get
 ik.run("/job/" + a["model"], "/job/" + a["trc"], ("/job/" + a["tasks"]) if a.get("tasks") else None,
        "/job/ik.mot", tr, log=js_log, markerset=("/job/" + a["markerset"]) if a.get("markerset") else None,
        errors_path="/job/ik_marker_errors.sto", setup_path="/job/setup_ik.xml")
+try:
+    from pyosim import id as idtool
+    idtool.write_body_positions("/job/" + a["model"], "/job/ik.mot", "/job/body_positions.sto")
+except Exception as e:
+    js_log("[ik] body positions not written: " + str(e))
 `);
       const outputs = {};
-      for (const f of ["setup_ik.xml", "ik.mot", "ik_marker_errors.sto", "ik_marker_errors_all.sto"]) {
+      for (const f of ["setup_ik.xml", "ik.mot", "ik_marker_errors.sto", "ik_marker_errors_all.sto", "body_positions.sto"]) {
         try { outputs[f] = py.FS.readFile("/job/" + f, { encoding: "utf8" }); } catch { /* optional */ }
       }
       self.postMessage({ id, done: true, outputs });
