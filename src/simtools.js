@@ -59,8 +59,11 @@ export function simHTML(ctx) {
       </label>`;
     }).join("");
     const opts = Object.entries(tl.options || {}).map(([k, lbl]) => {
-      const v = ((job.options || {})[tl.id] || {})[k] ?? "";
-      return `<label class="simOpt">${esc(t("sim_opt_" + k) !== "sim_opt_" + k ? t("sim_opt_" + k) : lbl)} <input type="text" data-opt="${tl.id}:${k}" value="${esc(v)}"></label>`;
+      const v = ((job.options || {})[tl.id] || {})[k] ?? (tl.defaults || {})[k] ?? "";
+      const ch = (tl.choices || {})[k];
+      const field = ch ? `<select data-opt="${tl.id}:${k}">${ch.map((c) => `<option value="${esc(c)}"${c === v ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>`
+        : `<input type="text" data-opt="${tl.id}:${k}" value="${esc(v)}">`;
+      return `<label class="simOpt">${esc(t("sim_opt_" + k) !== "sim_opt_" + k ? t("sim_opt_" + k) : lbl)} ${field}</label>`;
     }).join("");
     const busy = sp.state === "queued" || sp.state === "running";
     const outs = ctx.outputs[tl.id];
@@ -270,7 +273,10 @@ export function simWire(box, ctx) {
   box.querySelectorAll("[data-clear]").forEach((a) => { a.onclick = (e) => { e.preventDefault(); delete dropNames[a.dataset.clear]; delete dropFiles[a.dataset.clear]; if (a.dataset.clear === "ik:motion_trc") trcIK = null; const [tool, slot] = a.dataset.clear.split(":"); ctx.act(() => client.toolClear(id, tool, slot)); }; });
   box.querySelectorAll("[data-opt]").forEach((inp) => {
     inp.onchange = () => {
-      const tool = inp.dataset.opt.split(":")[0], o = {};
+      const [tool, key] = inp.dataset.opt.split(":"), o = {};
+      // an approach (CEINMS) fills in its alpha / beta / gamma; they stay editable
+      const pre = (((spec.tools.find((x) => x.id === tool) || {}).presets || {})[key] || {})[inp.value];
+      if (pre) for (const [pk, pv] of Object.entries(pre)) { const el = box.querySelector(`[data-opt="${tool}:${pk}"]`); if (el) el.value = pv; }
       box.querySelectorAll(`[data-opt^="${tool}:"]`).forEach((x) => { o[x.dataset.opt.split(":")[1]] = x.value; });
       ctx.act(() => client.toolOptions(id, tool, o));
     };

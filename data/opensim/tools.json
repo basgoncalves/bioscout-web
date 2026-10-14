@@ -293,7 +293,10 @@
      "template": null,
      "required": false
     }
-   ]
+   ],
+   "defaults": {
+    "jra": "1"
+   }
   },
   {
    "id": "ceinms_cal",
@@ -343,7 +346,45 @@
      "template": null,
      "required": false
     }
-   ]
+   ],
+   "defaults": {
+    "approach": "hybrid",
+    "alpha": "100",
+    "beta": "0.5",
+    "gamma": "100"
+   },
+   "choices": {
+    "approach": [
+     "hybrid",
+     "emg_informed",
+     "emg_driven",
+     "static_optimisation"
+    ]
+   },
+   "presets": {
+    "approach": {
+     "hybrid": {
+      "alpha": "100",
+      "beta": "0.5",
+      "gamma": "100"
+     },
+     "emg_informed": {
+      "alpha": "100",
+      "beta": "1",
+      "gamma": "30"
+     },
+     "emg_driven": {
+      "alpha": "0",
+      "beta": "0.01",
+      "gamma": "1000"
+     },
+     "static_optimisation": {
+      "alpha": "100",
+      "beta": "1",
+      "gamma": "0"
+     }
+    }
+   }
   },
   {
    "id": "ceinms",
@@ -406,7 +447,54 @@
      "template": null,
      "required": false
     }
-   ]
+   ],
+   "defaults": {
+    "approach": "hybrid",
+    "alpha": "100",
+    "beta": "0.5",
+    "gamma": "100",
+    "mode": "execution",
+    "gammas": "1 10 30 100 300",
+    "tol": "5",
+    "jra": "1"
+   },
+   "choices": {
+    "approach": [
+     "hybrid",
+     "emg_informed",
+     "emg_driven",
+     "static_optimisation"
+    ],
+    "mode": [
+     "execution",
+     "loop",
+     "optimise"
+    ]
+   },
+   "presets": {
+    "approach": {
+     "hybrid": {
+      "alpha": "100",
+      "beta": "0.5",
+      "gamma": "100"
+     },
+     "emg_informed": {
+      "alpha": "100",
+      "beta": "1",
+      "gamma": "30"
+     },
+     "emg_driven": {
+      "alpha": "0",
+      "beta": "0.01",
+      "gamma": "1000"
+     },
+     "static_optimisation": {
+      "alpha": "100",
+      "beta": "1",
+      "gamma": "0"
+     }
+    }
+   }
   }
  ],
  "models": [
