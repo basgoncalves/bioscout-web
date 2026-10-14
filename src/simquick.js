@@ -184,10 +184,13 @@ export function quickHTML(ctx) {
         <button type="button" class="ghost" data-sq-static>🔍</button>${Q.staticFile ? `<button type="button" class="ghost" data-sq-staticclear>${t("pr_remove")}</button>` : ""}</span></label>
       ${Q.staticFile ? "" : `<label class="simOpt">${t("sq_staticSeconds")} <input type="text" data-sq-sec value="${Q.staticSeconds}" style="width:70px"></label>`}
     </div>
-    <label class="simOpt" style="margin-top:6px;display:flex;gap:6px;align-items:center"><input type="checkbox" data-sq-export${Q.export ? " checked" : ""}> ${t("sq_export")}</label>
     <p class="note" style="margin:6px 0 0">${Q.file ? (Q.root ? t("sq_where", { dir: Q.root.name + "/" + Q.trial.replace(/\.c3d$/i, "") + "_simulation" }) : t("sq_noFolder", { dir: Q.trial.replace(/\.c3d$/i, "") + "_simulation" })) : t("sq_intro")}</p>
     ${Q.file && !Q.root ? `<button type="button" class="ghost" data-sq-folder style="margin-top:6px">${t("sq_confirmFolder")}</button>` : ""}
-  </div>`;
+  </div>
+  <details class="simTool${Q.export ? "" : " skipped"}" data-tool="c3d">
+    <summary><b>0 · ${t("sq_exportTitle")}</b> <label class="simSkip" onclick="event.stopPropagation()"><input type="checkbox" data-sq-export${Q.export ? "" : " checked"}> ${esc(t("sq_skip"))}</label></summary>
+    <p class="note" style="margin:4px 0 8px">${t("sq_export")}</p>
+  </details>`;
 }
 
 export function quickFooterHTML(ctx) {
@@ -209,7 +212,7 @@ export function quickWire(box, ctx, hooks) {
   on("[data-sq-static]", "onclick", async () => { const r = await pickC3d(); if (!r) return; Q.staticFile = r; hooks.repaint(); });
   on("[data-sq-staticclear]", "onclick", () => { Q.staticFile = null; hooks.repaint(); });
   on("[data-sq-folder]", "onclick", async () => { await resultsFolder(); hooks.repaint(); });
-  on("[data-sq-export]", "onchange", (e) => { Q.export = e.target.checked; });
+  on("[data-sq-export]", "onchange", (e) => { Q.export = !e.target.checked; hooks.repaint(); });
   on("[data-sq-sec]", "onchange", (e) => { const v = parseFloat(e.target.value); if (v > 0) Q.staticSeconds = v; });
   on("[data-sq-run]", "onclick", () => runQuick(ctx, hooks));
 }
