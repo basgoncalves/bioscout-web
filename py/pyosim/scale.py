@@ -198,6 +198,9 @@ def run(generic_path, static_trc, out_osim, setup_path=None, mass=None, markerse
     model = Model(generic_path)
     if markerset:
         model.load_markerset(markerset)
+        if getattr(model, "dropped_markers", None):
+            d, b = model.dropped_markers
+            log(f"[scale] {len(d)} marker(s) of the marker set left out, on bodies the model does not have ({', '.join(b)}): {' '.join(d)}")
     frames, ts = _mean_markers(static_trc, t_range)
     exp = {n: np.nanmean(v, axis=0) for n, v in frames.items()}
     log(f"[scale] static trial: {len(ts)} frames averaged ({ts[0]:.3f}-{ts[-1]:.3f} s), {len(exp)} markers")

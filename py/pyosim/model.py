@@ -239,9 +239,14 @@ class Model:
         self.markers = {mk.get("name"): (_path_name(mk.findtext("socket_parent_frame") or mk.findtext("body")),
                                          _vec(mk.findtext("location")))
                         for mk in objs if mk.tag == "Marker"}
+        # a lab marker set often covers the whole body; a lower-limb model keeps only the markers it can carry
         missing = {b for b, _ in self.markers.values()} - set(self.bodies) - {"ground"}
         if missing:
-            raise ValueError(f"marker set uses bodies not in the model: {', '.join(sorted(missing))}")
+            dropped = sorted(n for n, (b, _) in self.markers.items() if b in missing)
+            self.markers = {n: v for n, v in self.markers.items() if v[0] not in missing}
+            self.dropped_markers = (dropped, sorted(missing))
+            if not self.markers:
+                raise ValueError(f"no marker of the marker set is on a body of the model (it uses {', '.join(sorted(missing))})")
 
     @staticmethod
     def _body_of(frame):

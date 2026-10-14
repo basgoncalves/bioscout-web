@@ -114,6 +114,9 @@ def run(model_path, trc_path, task_path, out_mot, t_range=None, log=print, marke
     model = model_path if isinstance(model_path, Model) else Model(model_path)
     if markerset:
         model.load_markerset(markerset)
+        if getattr(model, "dropped_markers", None):
+            d, b = model.dropped_markers
+            log(f"[ik] {len(d)} marker(s) of the marker set left out, on bodies the model does not have ({', '.join(b)}): {' '.join(d)}")
         log(f"[ik] markers from {os.path.basename(markerset)} ({len(model.markers)})")
     times, markers, rate = read_trc(trc_path)
     mw, ct = read_tasks(task_path) if task_path else ({}, {})

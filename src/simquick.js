@@ -124,10 +124,12 @@ export async function runQuick(ctx, hooks) {
   Q.busy = true; Q.log = []; Q.done = null;
   const zipFiles = [];                               // when no folder: everything collected for one .zip
   const stem = Q.trial.replace(/\.c3d$/i, ""), outName = `${stem}_simulation`;
+  const started = new Date();
+  let logDir = null;                                 // out.log goes here at the end, whatever happened
   try {
     let dir = null;
     if (out) {
-      try { dir = await out.getDirectoryHandle(outName, { create: true }); for (const t of STEPS) hooks.setDir(t, dir); }
+      try { dir = await out.getDirectoryHandle(outName, { create: true }); logDir = dir; for (const t of STEPS) hooks.setDir(t, dir); }
       catch (e) { log(`${outName}: ${e.message} — ${T("sq_zipMode")}`); }
     } else log(T("sq_zipMode"));
     if (!dir) for (const t of STEPS) hooks.setDir(t, null);
@@ -223,7 +225,15 @@ export async function runQuick(ctx, hooks) {
       log(T("sq_zipped", { name: `${outName}.zip`, mb: (blob.size / 1e6).toFixed(1) }));
     }
   } catch (e) { log("✗ " + e.message); }
-  finally { Q.busy = false; hooks.repaint(); }
+  finally {
+    // out.log: this run's lines, then every step's own log (the failed ones say why)
+    try {
+      const st = await client.status(id), lines = [`BioScout Web ${window.RELEASE || ""} build ${window.BUILD || ""} — Quick run`, `trial: ${Q.trial}`, `started: ${started.toLocaleString()}`, `finished: ${new Date().toLocaleString()}`, "", ...Q.log, ""];
+      for (const t of STEPS) { const sp = st.tools[t]; if (sp && sp.log && sp.log.length && (sp.started || 0) * 1000 >= started.getTime() - 2000) lines.push(`---- ${t} (${sp.state}${sp.error ? ": " + sp.error : ""})`, ...sp.log, ""); }
+      if (logDir) await writeText(logDir, "out.log", lines.join("\n"));
+    } catch { /* the log is a convenience */ }
+    Q.busy = false; hooks.repaint();
+  }
 }
 
 /** Every figure of the trial again from the files already in <trial>_simulation/ -- no analysis re-run
