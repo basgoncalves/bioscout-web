@@ -140,13 +140,13 @@ export async function runQuick(ctx, hooks) {
         if (scaled) { hooks.setScaled(scaled); log(`scale: using ${scaled.name} from the folder`); }
       }
       if (Q.skip.has("ik")) { const f = await have("ik.mot"); if (f) { hooks.send("id:ik_mot", f); hooks.send("so:ik_mot", f); hooks.send("ma:ik_mot", f); log("ik: using ik.mot from the folder"); } }
-      if (Q.skip.has("so")) { const f = await have("SO_StaticOptimization_force.sto"); if (f) { hooks.send("ma:so_force", f); log("so: using SO_StaticOptimization_force.sto from the folder"); } }
+      { const f = await have("SO_StaticOptimization_force.sto"); if (f) hooks.send("ma:so_force", f); }   // muscle moments from an earlier SO run
       if (Q.skip.has("id")) { const f = await have("inverse_dynamics.sto"); if (f) { hooks.send("so:id_sto", f); log("id: using inverse_dynamics.sto from the folder"); } }
       const gx = await have("GRF.xml"); if (gx) hooks.send("id:grf_xml", gx);
     }
     await new Promise((r) => setTimeout(r, 400));
     // 3. the steps, in order, each waiting for the last
-    const order = ["scale", "ik", ...(ex["grf.mot"] ? ["id", "rra", "so", "ma", "ceinms"] : ["ma"])];
+    const order = ["scale", "ik", ...(ex["grf.mot"] ? ["id", "ma", "rra", "so", "ceinms"] : ["ma"])];   // the order of the sections
     for (const tool of order) {
       if (Q.skip.has(tool)) { log(`${tool}: ${T("sq_skipped")}`); continue; }
       if (!have.has(tool)) { log(`${tool}: ${T("sq_needsEngine")}`); continue; }
