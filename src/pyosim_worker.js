@@ -3,7 +3,7 @@
  * -> {id, log:[...]} while running, then {id, done:true, outputs:{name: text}} or {id, error}. */
 /* global importScripts, loadPyodide */
 const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
-const PY_FILES = ["__init__.py", "model.py", "io.py", "ik.py", "scale.py", "id.py", "muscles.py", "so.py"];
+const PY_FILES = ["__init__.py", "model.py", "io.py", "ik.py", "scale.py", "id.py", "muscles.py", "so.py", "ma.py"];
 let ready = null;
 
 function boot(base) {
@@ -98,6 +98,16 @@ so.run(Model("/job/" + a["model"]), "/job/" + a["ik"], "/job/" + a["id"], "/job/
       for (const f of ["SO_StaticOptimization_force.sto", "SO_StaticOptimization_activation.sto"]) {
         try { outputs[f] = py.FS.readFile("/job/so/" + f, { encoding: "utf8" }); } catch { /* optional */ }
       }
+      self.postMessage({ id, done: true, outputs });
+    } else if (cmd === "ma") {
+      py.runPython(`
+from pyosim import ma
+from pyosim.model import Model
+a = dict(args)
+ma.run(Model("/job/" + a["model"]), "/job/" + a["ik"], "/job/ma", forces_sto=("/job/" + a["forces"]) if a.get("forces") else None, log=js_log)
+`);
+      const outputs = {};
+      for (const f of py.FS.readdir("/job/ma")) if (f.endsWith(".sto")) outputs[f] = py.FS.readFile("/job/ma/" + f, { encoding: "utf8" });
       self.postMessage({ id, done: true, outputs });
     } else throw new Error("unknown command " + cmd);
   } catch (err) {

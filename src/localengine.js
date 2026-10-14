@@ -5,7 +5,7 @@
  * Scale, inverse kinematics and inverse dynamics; the other sections say they need the engine.
  */
 import { markerErrorsFigure, kinematicsMomentsFigure, inverseDynamicsFigure, residualsFigure, taskFigure } from "./simfigs.js";
-const LOCAL_TOOLS = new Set(["scale", "ik", "id", "so"]);
+const LOCAL_TOOLS = new Set(["scale", "ik", "id", "so", "ma"]);
 const BASE = new URL("../", import.meta.url).href;
 
 export function makeLocalClient(spec) {
@@ -124,6 +124,26 @@ export function makeLocalClient(spec) {
     }
   }
 
+  async function runMA() {
+    const sp = job.tools.ma;
+    const ikf = files["ma:ik_mot"] || (outs.ik && outs.ik["ik.mot"] ? new File([outs.ik["ik.mot"]], "ik.mot") : null)
+      || fail("bad_request", "drop the joint angles (.mot) or run inverse kinematics first");
+    const model = await modelFile("ma");
+    const payload = { [model.name]: await model.arrayBuffer(), "ik.mot": await ikf.arrayBuffer() };
+    const args = { model: model.name, ik: "ik.mot" };
+    // muscle moments (moment arm x force) when static optimisation has run or its forces were dropped
+    const fs = files["ma:so_force"] || (outs.so && outs.so["SO_StaticOptimization_force.sto"] ? new File([outs.so["SO_StaticOptimization_force.sto"]], "so_force.sto") : null);
+    if (fs) { payload["so_force.sto"] = await fs.arrayBuffer(); args.forces = "so_force.sto"; }
+    sp.log = [];
+    const t0 = Date.now();
+    try {
+      outs.ma = await runWorker("ma", payload, args, (l) => { sp.log.push(...String(l).split("\n")); });
+      Object.assign(sp, { state: "done", seconds: Math.round((Date.now() - t0) / 1000) });
+    } catch (e) {
+      Object.assign(sp, { state: "error", error: e.message });
+    }
+  }
+
   async function runIK() {
     const sp = job.tools.ik, o = job.options.ik || {};
     const trc = files["ik:motion_trc"] || fail("bad_request", "drop the motion trial markers (.trc)");
@@ -158,9 +178,9 @@ export function makeLocalClient(spec) {
     toolClear: async (_id, tool, slot) => { delete files[`${tool}:${slot}`]; delete job.tools[tool].inputs[slot]; return snap(); },
     toolOptions: async (_id, tool, o) => { job.options[tool] = o; return snap(); },
     toolRun: async (_id, tool) => {
-      if (!LOCAL_TOOLS.has(tool)) fail("bad_request", "this step is not in the browser yet; scale, inverse kinematics, inverse dynamics and static optimisation are");
+      if (!LOCAL_TOOLS.has(tool)) fail("bad_request", "this step is not in the browser yet; scale, inverse kinematics, inverse dynamics, muscle analysis and static optimisation are");
       Object.assign(job.tools[tool], { state: "running", started: Date.now() / 1000, error: null });
-      (tool === "scale" ? runScale : tool === "id" ? runID : tool === "so" ? runSO : runIK)().catch((e) => Object.assign(job.tools[tool], { state: "error", error: e.message }));
+      (tool === "scale" ? runScale : tool === "id" ? runID : tool === "so" ? runSO : tool === "ma" ? runMA : runIK)().catch((e) => Object.assign(job.tools[tool], { state: "error", error: e.message }));
       return snap();
     },
     toolOutputs: async (_id, tool) => ({ files: Object.entries(outs[tool] || {}).map(([path, v]) => ({ path, size: v.size ?? v.length })) }),

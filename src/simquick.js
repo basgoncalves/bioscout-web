@@ -18,7 +18,7 @@ import { makeZip } from "./zip.js";
 let T = (k) => k;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms", "rra", "ma"]), export: true };
+export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms", "rra"]), export: true };
 Object.defineProperty(Q, "trial", { get: () => (Q.file && Q.file.file ? Q.file.file.name : "") });
 
 async function writeText(dir, name, data) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); }
@@ -139,13 +139,14 @@ export async function runQuick(ctx, hooks) {
         for await (const [n, h] of dir.entries()) if (h.kind === "file" && /_scaled\.osim$/i.test(n)) scaled = await h.getFile();
         if (scaled) { hooks.setScaled(scaled); log(`scale: using ${scaled.name} from the folder`); }
       }
-      if (Q.skip.has("ik")) { const f = await have("ik.mot"); if (f) { hooks.send("id:ik_mot", f); hooks.send("so:ik_mot", f); log("ik: using ik.mot from the folder"); } }
+      if (Q.skip.has("ik")) { const f = await have("ik.mot"); if (f) { hooks.send("id:ik_mot", f); hooks.send("so:ik_mot", f); hooks.send("ma:ik_mot", f); log("ik: using ik.mot from the folder"); } }
+      if (Q.skip.has("so")) { const f = await have("SO_StaticOptimization_force.sto"); if (f) { hooks.send("ma:so_force", f); log("so: using SO_StaticOptimization_force.sto from the folder"); } }
       if (Q.skip.has("id")) { const f = await have("inverse_dynamics.sto"); if (f) { hooks.send("so:id_sto", f); log("id: using inverse_dynamics.sto from the folder"); } }
       const gx = await have("GRF.xml"); if (gx) hooks.send("id:grf_xml", gx);
     }
     await new Promise((r) => setTimeout(r, 400));
     // 3. the steps, in order, each waiting for the last
-    const order = ["scale", "ik", ...(ex["grf.mot"] ? ["id", "ma", "rra", "so", "ceinms"] : [])];
+    const order = ["scale", "ik", ...(ex["grf.mot"] ? ["id", "rra", "so", "ma", "ceinms"] : ["ma"])];
     for (const tool of order) {
       if (Q.skip.has(tool)) { log(`${tool}: ${T("sq_skipped")}`); continue; }
       if (!have.has(tool)) { log(`${tool}: ${T("sq_needsEngine")}`); continue; }
