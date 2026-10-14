@@ -197,7 +197,7 @@ try {
   button.faceBtn .mouth.open { fill:var(--fc); }
   button.faceBtn.on { border-color:var(--fc); background:color-mix(in srgb, var(--fc) 12%, transparent); }
   button.faceBtn.on .fc { fill-opacity:1; }
-  #osimBatch.on, #osimQuick.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent); }
+  #osimBatch.on, #osimQuick.on, #osimStep.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent); }
   .simSkip { float:right; font-size:13px; font-weight:400; color:var(--muted); display:inline-flex; gap:4px; align-items:center; cursor:pointer; }
   details.simTool.skipped { opacity:.45; }
   details.simTool.skipped > summary { pointer-events:none; }
@@ -1321,7 +1321,8 @@ try {
   <section id="viewSimulate" class="hidden">
     <div class="card" id="osimCard">
       <div class="labHead"><b style="font-size:16px" data-i18n="doorSimulate">Simulate</b>
-        <span style="display:flex;gap:6px"><button type="button" class="ghost" id="osimQuick" data-i18n="sq_tab">Quick run</button>
+        <span style="display:flex;gap:6px"><button type="button" class="ghost" id="osimStep" data-i18n="sim_stepTab">Step-by-step</button>
+        <button type="button" class="ghost" id="osimQuick" data-i18n="sq_tab">Quick run</button>
         <button type="button" class="ghost" id="osimBatch" data-i18n="ss_batch">Batch mode</button>
         <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></span></div>
       <button type="button" class="ghost hidden" id="osimToggle" style="margin:0" data-i18n="osimOpen">OpenSim trial (markers and force plates)</button>
@@ -1650,8 +1651,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "beta V1";
-window.BUILD = 198;
-window.BUILD_AT = "2026-10-14 11:42";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 199;
+window.BUILD_AT = "2026-10-14 12:02";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -7318,9 +7319,12 @@ function osimInit() {
     renderOsim();
   };
   $("osimToggle").onclick = open;
-  const osimMode = () => { $("osimBatch").classList.toggle("on", osim.batch); $("osimQuick").classList.toggle("on", osim.quick); renderOsim(); };
-  $("osimBatch").onclick = () => { osim.batch = !osim.batch; if (osim.batch) osim.quick = false; osimMode(); };
-  $("osimQuick").onclick = () => { osim.quick = !osim.quick; if (osim.quick) osim.batch = false; osimMode(); };
+  // three modes, one at a time: step-by-step (each section run by hand), quick run (one c3d), batch (a project)
+  const osimMode = () => { $("osimBatch").classList.toggle("on", osim.batch); $("osimQuick").classList.toggle("on", osim.quick); $("osimStep").classList.toggle("on", !osim.batch && !osim.quick); renderOsim(); };
+  $("osimStep").onclick = () => { osim.batch = false; osim.quick = false; osimMode(); };
+  $("osimBatch").onclick = () => { osim.batch = true; osim.quick = false; osimMode(); };
+  $("osimQuick").onclick = () => { osim.quick = true; osim.batch = false; osimMode(); };
+  $("osimStep").classList.toggle("on", !osim.batch && !osim.quick);
   open();
   // Arriving by the engine's own link opens the card already connected.
   const linked = engineFromSearch(location.search);
