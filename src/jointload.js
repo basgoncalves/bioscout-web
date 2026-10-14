@@ -181,6 +181,26 @@ export function loadEvents(rep, activity, spec, side, grf, kneeSign = 1) {
       push("jlEvPeakLoad", argmax(grf, first, last));
       push("jlEvPushOff", argmin(hip, first, last));
     }
+  } else if (fam === "jump" && activity === "jumpshot" && tyOk && rep.bounds) {
+    /* The shot, as a coach reads it: the lowest point of the dip (preparation),
+     * the fastest the body is rising, take-off, the release, and the landing a
+     * quarter of a second on -- the moment the knees take the load. */
+    const vel = diff(smooth(ty, 3), t);
+    const apex = argmax(ty);
+    const on = (i) => grf[i] > 0.05 * Math.max(...grf);
+    let off = -1; for (let i = apex; i > 0; i--) if (on(i - 1)) { off = i; break; }
+    let land = -1; for (let i = apex + 1; i < n; i++) if (on(i)) { land = i; break; }
+    const end0 = off > 0 ? off : apex;
+    const low = argmin(ty, 0, end0);
+    push("jlEvLowCOM", low);
+    if (end0 - low >= 2) push("jlEvPeakVel", argmax(vel, low, end0));
+    if (off > 0) push("jlEvTakeoff", off);
+    const rel = rep.bounds[1] - rep.bounds[0];
+    if (rel > 0 && rel < n) push("jlEvRelease", rel);
+    if (land > 0) {
+      const dt = (t[n - 1] - t[0]) / Math.max(1, n - 1);
+      push("jlEvLand250", Math.min(n - 1, land + Math.round(0.25 / (dt || 0.033))));
+    }
   } else if (fam === "jump") {
     const total = grf;
     const apex = tyOk ? argmax(ty) : argmin(smooth(total, 5), Math.floor(n * 0.2), Math.floor(n * 0.9));
@@ -212,7 +232,7 @@ export function loadEvents(rep, activity, spec, side, grf, kneeSign = 1) {
   ev.sort((a, b) => a.i - b.i);
   const out = [];
   for (const e of ev) if (!out.length || e.i - out[out.length - 1].i >= 2) out.push(e);
-  if (out.length >= 2) return out.slice(0, 4);
+  if (out.length >= 2) return out.slice(0, activity === "jumpshot" ? 5 : 4);
   // Nothing recognisable: four evenly spaced instants, labelled by time.
   return [0.125, 0.375, 0.625, 0.875].map((f) => ({ key: null, i: Math.round(f * (n - 1)) }));
 }
@@ -249,7 +269,27 @@ export function poseAt(rep, i, kneeSign = 1) {
   const a0 = tilt + q("lumbar_extension") * D2R;
   const neck = [-LTR * Math.sin(a0), LTR * Math.cos(a0), 0];
   const head = [neck[0] - 0.07 * Math.sin(a0), neck[1] + 0.07 * Math.cos(a0), 0];
-  return { limbs, pelvis: [0, 0, 0], neck, head };
+  /* Arms, where the rep carries them (the jump shot): shoulder flexion from
+   * the trunk line pointing down, elbow flexion on top, both in degrees and
+   * positive toward the front. Upper arm 0.186 and forearm 0.146 of height. */
+  let arms = null;
+  if (rep.arm) {
+    arms = {};
+    for (const s of ["r", "l"]) {
+      const A = rep.arm[s];
+      if (!A) continue;
+      const at = (a) => { const v = a ? a[Math.min(i, a.length - 1)] : NaN; return isNum(v) ? v : null; };
+      const sh = at(A.shoulder), el = at(A.elbow);
+      if (sh == null) continue;
+      const z = s === "r" ? 0.17 : -0.17;
+      const b = a0 + sh * D2R, c = b + (el || 0) * D2R;
+      const shP = [neck[0], neck[1] - 0.03, z];
+      const elP = [shP[0] + 0.186 * Math.sin(b), shP[1] - 0.186 * Math.cos(b), z];
+      const wrP = [elP[0] + 0.146 * Math.sin(c), elP[1] - 0.146 * Math.cos(c), z];
+      arms[s] = { shoulder: shP, elbow: elP, wrist: wrP };
+    }
+  }
+  return { limbs, pelvis: [0, 0, 0], neck, head, arms };
 }
 
 // ── drawing ──────────────────────────────────────────────────────────────────
@@ -307,6 +347,13 @@ function skeletonSVG(pose, plane, cx, footY, scale, colR, colL, lift = 0) {
   let g = line(pose.pelvis, pose.neck, "var(--muted)", 2.2)
     + `<circle cx="${f1(X(pose.head))}" cy="${f1(Y(pose.head))}" r="${f1(0.05 * scale)}" fill="var(--muted)"/>`
     + line(pose.limbs.l.hip, pose.limbs.r.hip, "var(--muted)", 2.2);
+  // arms: far one first, behind the legs' colours
+  for (const [s, col] of [["l", colL], ["r", colR]]) {
+    const A = pose.arms && pose.arms[s];
+    if (!A) continue;
+    g += line(A.shoulder, A.elbow, col, 2) + line(A.elbow, A.wrist, col, 1.8)
+       + `<circle cx="${f1(X(A.wrist))}" cy="${f1(Y(A.wrist))}" r="2.2" fill="${col}"/>`;
+  }
   // far leg first, so the analysed colours read on top in a side view
   for (const [s, col] of [["l", colL], ["r", colR]]) {
     const L = pose.limbs[s];

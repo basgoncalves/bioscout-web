@@ -2545,8 +2545,9 @@ export const DEFAULT_SHOT_CFG = {
   holdS: 2.5,
   // Two shots cannot be closer than this.
   minGapS: 0.8,
-  // How long after release the follow-through is worth keeping, in seconds.
-  followS: 0.45,
+  // How long after release the window runs, in seconds: long enough for the
+  // landing and the quarter second after it (the load figure's last instant).
+  followS: 0.9,
   // Below this the clip is frontal and the sagittal measures are not valid.
   minFrontality: 0.6,
 };
@@ -2554,10 +2555,11 @@ export const DEFAULT_SHOT_CFG = {
 /** Jump-shot features: the jump, plus the shooting arm. */
 export function buildShotFeatures(poses, cfg = DEFAULT_SHOT_CFG) {
   const F = buildJumpFeatures(poses);
+  const shotFacing = facingSign(poses);
   const frames = Object.keys(poses).map(Number).sort((a, b) => a - b);
   const n = F._n, lo = F._lo;
   for (const k of ["wrist_y_l", "wrist_y_r", "wrist_x_l", "wrist_x_r",
-                   "elbow_flex_l", "elbow_flex_r", "head_y", "over_l", "over_r"]) {
+                   "elbow_flex_l", "elbow_flex_r", "head_y", "over_l", "over_r", "sh_flex_l", "sh_flex_r"]) {
     F[k] = new Array(n).fill(NaN);
   }
   for (const fi of frames) {
@@ -2574,6 +2576,13 @@ export function buildShotFeatures(poses, cfg = DEFAULT_SHOT_CFG) {
     if (rw && isNum(shY)) F.over_r[i] = (shY - rw[1]) / F._scale;
     F.elbow_flex_l[i] = 180 - angle3(ls, le, lw);
     F.elbow_flex_r[i] = 180 - angle3(rs, re, rw);
+    /* Shoulder flexion for the stick figure: the upper arm against the trunk
+     * line continued down through the shoulder, positive toward the front --
+     * hipFlexSigned with a point mirrored above the shoulder as the "trunk". */
+    const hp = mid(lm.left_hip, lm.right_hip);
+    for (const [sd, S, E] of [["l", ls, le], ["r", rs, re]]) {
+      if (S && E && hp) F["sh_flex_" + sd][i] = hipFlexSigned([2 * S[0] - hp[0], 2 * S[1] - hp[1]], S, E, shotFacing);
+    }
     if (lm.nose) F.head_y[i] = lm.nose[1];
   }
   /* The shooting hand is the one that goes highest.
@@ -3585,6 +3594,10 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       }
       if (spec.shot) {
         Object.assign(s, shotMetrics(F, b, fps, pxPerM, conf));
+        // Both arms over the rep, for the stick figures (jointload.js poseAt).
+        const cut = (a) => (a ? interpNan(a).slice(b[0], b[2] + 1).map((v) => (isNum(v) ? +v.toFixed(1) : null)) : null);
+        s.arm = { r: { shoulder: cut(F.sh_flex_r), elbow: cut(F.elbow_flex_r) },
+                  l: { shoulder: cut(F.sh_flex_l), elbow: cut(F.elbow_flex_l) } };
       }
       if (spec.stroke) {
         Object.assign(s, strokeMetrics(F, b, fps, pxPerM, found, i));
