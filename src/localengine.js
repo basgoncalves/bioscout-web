@@ -4,7 +4,7 @@
  * the tools run in a Web Worker with Pyodide + py/pyosim (pure-Python OpenSim).
  * Scale, inverse kinematics and inverse dynamics; the other sections say they need the engine.
  */
-import { markerErrorsFigure, kinematicsMomentsFigure, inverseDynamicsFigure, residualsFigure } from "./simfigs.js";
+import { markerErrorsFigure, kinematicsMomentsFigure, inverseDynamicsFigure, residualsFigure, taskFigure } from "./simfigs.js";
 const LOCAL_TOOLS = new Set(["scale", "ik", "id", "so"]);
 const BASE = new URL("../", import.meta.url).href;
 
@@ -89,7 +89,11 @@ export function makeLocalClient(spec) {
       // the figures bioscout writes next to its ID results
       const ikTxt = await ikf.text(), idTxt = outs.id["inverse_dynamics.sto"], grfTxt = await grf.text();
       try { outs.id["inverse_dynamics.png"] = await inverseDynamicsFigure(idTxt); } catch { /* optional */ }
-      try { outs.id["kinematics_moments.png"] = await kinematicsMomentsFigure(ikTxt, idTxt, outs.ik && outs.ik["ik_marker_errors_all.sto"]); } catch { /* optional */ }
+      try {
+        const xml = outs.id["GRF.xml"] || (files["id:grf_xml"] ? await files["id:grf_xml"].text() : null);
+        outs.id["kinematics_moments.png"] = await taskFigure({ ikText: ikTxt, idText: idTxt, errAllText: outs.ik && outs.ik["ik_marker_errors_all.sto"],
+          grfText: grfTxt, grfXml: xml, bodiesText: outs.id["body_positions.sto"] });
+      } catch (e) { sp.log.push("figure: " + e.message); }
       try { outs.id["residuals.png"] = await residualsFigure(idTxt, grfTxt); } catch { /* optional */ }
       Object.assign(sp, { state: "done", seconds: Math.round((Date.now() - t0) / 1000) });
     } catch (e) {

@@ -81,7 +81,7 @@ idtool.run(model, "/job/" + a["ik"], loads, "/job/inverse_dynamics.sto", loads_m
            t_range=tr, cutoff=float(a.get("cutoff") or 6), log=js_log, setup_path="/job/setup_id.xml")
 `);
       const outputs = {};
-      for (const f of ["setup_id.xml", "inverse_dynamics.sto", "GRF.xml"]) {
+      for (const f of ["setup_id.xml", "inverse_dynamics.sto", "GRF.xml", "body_positions.sto"]) {
         try { outputs[f] = py.FS.readFile("/job/" + f, { encoding: "utf8" }); } catch { /* optional */ }
       }
       self.postMessage({ id, done: true, outputs });

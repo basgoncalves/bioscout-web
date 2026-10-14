@@ -197,6 +197,16 @@ def run(model_path, coords_mot, loads_xml, out_sto, loads_mot=None, t_range=None
         if i % 50 == 0:
             log(f"[id] frame {i + 1}/{len(t)}")
 
+    # body origins in ground (for the skeleton drawn over the figures)
+    try:
+        TB = kin.bodies(Q); bcols, bdata = ["time"], [t]
+        for b in model.bodies:
+            o = np.broadcast_to(TB[b][1], (len(t), 3))
+            for a, ax in enumerate("xyz"):
+                bcols.append(f"{b}_{ax}"); bdata.append(o[:, a])
+        write_mot(os.path.join(os.path.dirname(out_sto) or ".", "body_positions.sto"), bcols, np.column_stack(bdata), name="Body origins in ground (m)", degrees=False)
+    except Exception as e:                                  # the figure is optional
+        log(f"[id] body positions not written: {e}")
     cols = ["time"] + [n + ("_force" if model.coords[n].translational else "_moment") for n in model.coord_order]
     write_mot(out_sto, cols, np.column_stack([t, out]), name="Inverse Dynamics Generalized Forces", degrees=False)
     log(f"[id] wrote {os.path.basename(out_sto)}")
