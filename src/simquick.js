@@ -18,7 +18,7 @@ import { makeZip } from "./zip.js";
 let T = (k) => k;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms_cal", "ceinms", "rra"]), export: true };
+export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms_cal", "ceinms", "rra"]), export: true, setupDir: null, setupLoaded: false };
 Object.defineProperty(Q, "trial", { get: () => (Q.file && Q.file.file ? Q.file.file.name : "") });
 
 async function writeText(dir, name, data) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); }
@@ -55,6 +55,31 @@ async function knownFolderFor(file) {
     } catch { /* not this one */ }
   }
   return null;
+}
+
+/** The project's setup-files folder (marker set, IK task set, scale setup), kept across visits. */
+async function loadSetupDir() {
+  if (Q.setupLoaded) return; Q.setupLoaded = true;
+  try { const db = await idb(); Q.setupDir = await new Promise((res) => { const r = db.transaction(STORE).objectStore(STORE).get("setup"); r.onsuccess = () => res(r.result || null); r.onerror = () => res(null); }); } catch { /* none */ }
+}
+async function saveSetupDir(h) { try { const db = await idb(); const tx = db.transaction(STORE, "readwrite").objectStore(STORE); h ? tx.put(h, "setup") : tx.delete("setup"); } catch { /* not kept */ } }
+const trcNames = (trc) => (trc.split(/\r?\n/)[3] || "").split("\t").slice(2).map((x) => x.trim()).filter((x) => x && !/^\*\d+$/.test(x));
+/** From the setup folder: the marker set, IK task set and scale setup whose marker names best match the trial. */
+async function pickSetupFiles(dir, names, log) {
+  if ((await dir.queryPermission({ mode: "read" })) !== "granted" && (await dir.requestPermission({ mode: "read" })) !== "granted") { log("setup files: no permission for " + dir.name); return {}; }
+  const have = new Set(names), best = {};
+  for await (const [n, h] of dir.entries()) {
+    if (h.kind !== "file" || !/\.xml$/i.test(n)) continue;
+    const file = await h.getFile(), txt = await file.text();
+    const kind = /<ScaleTool/.test(txt) ? "scale_setup" : /<IKTaskSet/.test(txt) && !/<IKTool/.test(txt) ? "taskset" : /<MarkerSet/.test(txt) ? "markerset" : null;
+    if (!kind) continue;
+    const re = kind === "taskset" ? /<IKMarkerTask\s+name="([^"]+)"/g : kind === "scale_setup" ? /<(?:MarkerPair|IKMarkerTask)[^>]*>|<markers>\s*([^<]+)<\/markers>|<IKMarkerTask\s+name="([^"]+)"/g : /<Marker\s+name="([^"]+)"/g;
+    const got = new Set(); for (const m of txt.matchAll(re)) for (const g of [m[1], m[2]]) if (g) g.trim().split(/\s+/).forEach((x) => got.add(x));
+    const hit = [...got].filter((x) => have.has(x)).length;
+    if (hit && (!best[kind] || hit > best[kind].hit)) best[kind] = { hit, of: got.size, file };
+  }
+  for (const [k, v] of Object.entries(best)) log(`setup files: ${v.file.name} as the ${k === "taskset" ? "IK task set" : k === "scale_setup" ? "scale setup" : "marker set"} (${v.hit} of ${v.of} names in the trial)`);
+  return best;
 }
 
 /** The folder the results go to: asked once, opening in the c3d's own folder so it is one click. null -> a .zip instead. */
@@ -130,6 +155,13 @@ export async function runQuick(ctx, hooks) {
     await put("static_marker_experimental.trc", staticTrc);
     hooks.send("scale:static_trc", new File([staticTrc], "static_marker_experimental.trc"));
     hooks.send("ik:motion_trc", new File([ex["marker_experimental.trc"]], "marker_experimental.trc"));
+    await loadSetupDir();
+    if (Q.setupDir) {
+      const b = await pickSetupFiles(Q.setupDir, trcNames(ex["marker_experimental.trc"]), log);
+      if (b.markerset) hooks.send("scale:markerset", b.markerset.file);
+      if (b.taskset) hooks.send("ik:taskset", b.taskset.file);
+      if (b.scale_setup) hooks.send("scale:scale_setup", b.scale_setup.file);
+    }
     if (ex["grf.mot"]) hooks.send("id:grf_mot", new File([ex["grf.mot"]], "grf.mot"));
     if (ex["emg.mot"]) for (const tl of ["ceinms_cal", "ceinms"]) hooks.send(`${tl}:emg_mot`, new File([ex["emg.mot"]], "emg.mot"));
     // a skipped step's earlier results in the folder stand in for it (scaled model, ik.mot, inverse_dynamics.sto)
@@ -161,6 +193,13 @@ export async function runQuick(ctx, hooks) {
       if (dir) { try { await hooks.save(tool); } catch (e) { log(`${tool}: ${e.message} — ${T("sq_zipMode")}`); dir = null; for (const t of STEPS) hooks.setDir(t, null); } }
       if (!dir) for (const o of await hooks.outputs(tool)) zipFiles.push({ name: `${outName}/${o.path}`, data: o.data });
       log(`${tool}: done in ${sp.seconds} s`);
+      if (tool === "ik") {
+        try {
+          const e = (await hooks.outputs("ik")).find((o) => o.path === "ik_marker_errors_all.sto");
+          const n = e ? String(e.data).split(/\r?\n/).find((l) => l.startsWith("time")).split(/\s+/).length - 1 : 0, of = trcNames(ex["marker_experimental.trc"]).length;
+          if (n && n < 0.5 * of) log(`⚠ ${T("sq_fewMarkers", { n, of })}`);
+        } catch { /* only a warning */ }
+      }
     }
     if (dir) { Q.done = `${out.name}/${outName}`; log(T("sq_done", { dir: Q.done })); }
     else if (zipFiles.length) {
@@ -209,6 +248,8 @@ export function quickHTML(ctx) {
         <button type="button" class="ghost" data-sq-static>🔍</button>${Q.staticFile ? `<button type="button" class="ghost" data-sq-staticclear>${t("pr_remove")}</button>` : ""}</span></label>
       ${Q.staticFile ? "" : `<label class="simOpt">${t("sq_staticSeconds")} <input type="text" data-sq-sec value="${Q.staticSeconds}" style="width:70px"></label>`}
     </div>
+    <div class="simOpts" style="margin-top:6px"><label class="simOpt">${t("sq_setup")} <span class="simPick" style="display:inline-flex"><input type="text" readonly style="width:180px" placeholder="${esc(t("sq_setupNone"))}" value="${esc(Q.setupDir ? Q.setupDir.name : "")}">
+      <button type="button" class="ghost" data-sq-setup title="${esc(t("sq_setupPick"))}">📁</button>${Q.setupDir ? `<button type="button" class="ghost" data-sq-setupclear>${t("pr_remove")}</button>` : ""}</span></label></div>
     <p class="note" style="margin:6px 0 0">${Q.file ? (Q.root ? t("sq_where", { dir: Q.root.name + "/" + Q.trial.replace(/\.c3d$/i, "") + "_simulation" }) : t("sq_noFolder", { dir: Q.trial.replace(/\.c3d$/i, "") + "_simulation" })) : t("sq_intro")}</p>
     ${Q.file && !Q.root ? `<button type="button" class="ghost" data-sq-folder style="margin-top:6px">${t("sq_confirmFolder")}</button>` : ""}
   </div>
@@ -240,6 +281,9 @@ export function quickWire(box, ctx, hooks) {
   on("[data-sq-folder]", "onclick", async () => { await resultsFolder(); hooks.repaint(); });
   on("[data-sq-export]", "onchange", (e) => { Q.export = !e.target.checked; hooks.repaint(); });
   on("[data-sq-sec]", "onchange", (e) => { const v = parseFloat(e.target.value); if (v > 0) Q.staticSeconds = v; });
+  if (!Q.setupLoaded) loadSetupDir().then(() => Q.setupDir && hooks.repaint());
+  on("[data-sq-setup]", "onclick", async () => { try { Q.setupDir = await window.showDirectoryPicker({ mode: "read" }); await saveSetupDir(Q.setupDir); hooks.repaint(); } catch { /* cancelled */ } });
+  on("[data-sq-setupclear]", "onclick", async () => { Q.setupDir = null; await saveSetupDir(null); hooks.repaint(); });
   on("[data-sq-run]", "onclick", () => runQuick(ctx, hooks));
   on("[data-sq-figs]", "onclick", () => redoFigures(ctx, hooks));
 }
