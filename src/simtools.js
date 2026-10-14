@@ -70,8 +70,9 @@ export function simHTML(ctx) {
     const outHTML = sp.state === "done" && outs ? `<div class="simOuts"><b>${t("sim_outputs")}</b>${outs.length ? outs.map((f) => `<div class="simOut">
         <a href="${esc(ctx.client.toolFileUrl(job.id, tl.id, f.path))}" download>${esc(f.path)}</a> <span class="sub">${sizeText(f.size)}</span>
         ${/\.(mot|sto|trc)$/i.test(f.path) ? `<button type="button" class="ghost" data-openproc="${tl.id}:${esc(f.path)}">${t("sim_openProcess")}</button>` : ""}</div>`).join("") : `<p class="note">${t("sim_noOutputs")}</p>`}</div>` : "";
-    const skipped = ctx.quick && quick.skip.has(tl.id);
-    const skipBox = ctx.quick ? `<label class="simSkip" onclick="event.stopPropagation()"><input type="checkbox" data-skip="${tl.id}"${skipped ? " checked" : ""}> ${esc(t("sq_skip"))}</label>` : "";
+    const skipSet = ctx.quick ? quick.skip : ctx.batch ? session.skip : null;
+    const skipped = !!skipSet && skipSet.has(tl.id);
+    const skipBox = skipSet ? `<label class="simSkip" onclick="event.stopPropagation()"><input type="checkbox" data-skip="${tl.id}"${skipped ? " checked" : ""}> ${esc(t("sq_skip"))}</label>` : "";
     return `<details class="simTool${skipped ? " skipped" : ""}"${ctx.open.has(tl.id) && !skipped ? " open" : ""} data-tool="${tl.id}">
       <summary><b>${i + 1} · ${esc(t("sim_tool_" + tl.id))}</b> ${badge(sp)}${skipBox}</summary>
       <p class="note" style="margin:4px 0 8px">${t("sim_note_" + tl.id)}</p>
@@ -334,6 +335,7 @@ export function simWire(box, ctx) {
     send,
     setDir: (tool, h) => { if (h) dirs[tool] = h; else delete dirs[tool]; },
     setRenames: (tool, map) => { renames[tool] = map || {}; },
+    clear: (tool, slot) => { delete dropNames[`${tool}:${slot}`]; delete dropFiles[`${tool}:${slot}`]; return client.toolClear(id, tool, slot).catch(() => {}); },
     // every output of a finished step as {path, data} (for a .zip when no folder was granted)
     outputs: async (tool) => {
       const list = (await client.toolOutputs(id, tool)).files || [], out = [];
@@ -349,7 +351,7 @@ export function simWire(box, ctx) {
     save: (tool) => ctx.act(async () => { osimOutputsRefresh && await osimOutputsRefresh(); await saveOutputs(ctx, tool); return client.status(id); }),
     repaint: () => ctx.act(() => client.status(id)),
   };
-  box.querySelectorAll("[data-skip]").forEach((cb) => { cb.onchange = () => { cb.checked ? quick.skip.add(cb.dataset.skip) : quick.skip.delete(cb.dataset.skip); ctx.act(() => client.status(id)); }; });
+  box.querySelectorAll("[data-skip]").forEach((cb) => { cb.onchange = () => { const set = ctx.quick ? quick.skip : session.skip; cb.checked ? set.add(cb.dataset.skip) : set.delete(cb.dataset.skip); ctx.act(() => client.status(id)); }; });
   if (ctx.batch) sessionWire(box, ctx, modeHooks);
   if (ctx.quick) quickWire(box, ctx, modeHooks);
   box.querySelectorAll("[data-openproc]").forEach((b) => {

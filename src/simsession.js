@@ -24,6 +24,9 @@ export const S = {           // the one open project + session
   root: null, name: "", simDir: "simulations", subjects: [], subject: "", sessions: [], session: "", ses: "",   // ses = simDir/subject/session
   yaml: "", cfg: null, trials: [], iterations: [], iteration: "", trial: "",
   c3dDir: "1_c3dfiles", c3ds: [], msg: "", busy: false, runLog: [], newIt: null, weight: null,
+  skip: new Set(["rra", "ceinms_cal", "ceinms"]),   // the steps' skip ticks, as in Quick run
+  exportSkip: false,                                 // step 0: 1_c3dfiles -> 2_experimental (only trials not exported yet)
+  pick: null,                                        // ticked trials (Set); null = every non-static trial
 };
 const sp = (rel) => `${S.ses}/${rel}`;                       // session-relative -> project-relative
 const hasRoot = (key) => (["model_generic", "model_scaled"].includes(key) ? S.cfg.top.models_dir : S.cfg.top.setup_dir) || "";
@@ -287,33 +290,123 @@ export async function applySelection(hooks) {
   }
 }
 
-/** IK then ID for every non-static trial of the iteration. */
+// ------------------------------------------------------------------ running the iteration
+/* Per trial, the bioscout layout (as Charite_Data/.../3_iterations/<it>/<trial>/):
+ *   external_biomechanics/  IK + ID (+ body_positions.sto, the task figures)
+ *   muscle_analysis/        _MuscleAnalysis_*.sto
+ *   static_optimisation/    SO forces / activations + muscle_groups / muscle_moments_*.png
+ *   joint_contact_forces/   jra_so.sto, jra_ceinms.sto + jrf_*.png
+ *   ceinms/                 CEINMS execution (Python version) + ceinms_*.png
+ * and per iteration: 3_iterations/<it>/ceinms_calibration/ (calibrated model, calibration.json). */
+const STEP_ORDER = ["scale", "ik", "id", "ma", "rra", "so", "ceinms_cal", "ceinms"];
+const SUB = { ik: "external_biomechanics", id: "external_biomechanics", ma: "muscle_analysis", so: "static_optimisation", ceinms: "ceinms" };
+function folderOf(tool, name) {
+  if (/^(jra_|jrf_)/.test(name)) return "joint_contact_forces";
+  if (name === "body_positions.sto" || /^(ik_|_ik_|inverse_dynamics|kinematics_moments|residuals)/.test(name)) return "external_biomechanics";
+  if (/^ceinms_|^CEINMS/.test(name)) return "ceinms";
+  if (/^muscle_(groups|moments)/.test(name) || /^SO_/.test(name)) return "static_optimisation";
+  if (/^_MuscleAnalysis/.test(name)) return "muscle_analysis";
+  return SUB[tool] || "external_biomechanics";
+}
+export const pickedTrials = () => S.trials.filter((t) => t !== S.cfg.top.static_trial && (!S.pick || S.pick.has(t)));
+const trialDir = (it, t, sub) => sp(`3_iterations/${it}/${t}${sub ? "/" + sub : ""}`);
+async function fileIn(path) { return readFile(S.root, path); }
+async function textIn(path) { const f = await readFile(S.root, path); return f ? f.text() : null; }
+/** The inputs a later step needs, from the folders, when the step that makes them is skipped. */
+const STALE = ["id:ik_mot", "so:ik_mot", "ma:ik_mot", "ceinms_cal:ik_mot", "ceinms:ik_mot", "so:id_sto", "ceinms_cal:id_sto", "ceinms:id_sto",
+  "ma:so_force", "so:bodies", "ceinms_cal:emg_mot", "ceinms:emg_mot", "id:grf_xml", "so:grf_mot", "so:grf_xml"];
+
+/** The ticked steps for every ticked trial of the iteration, written into the bioscout layout. */
 export async function runAll(ctx, hooks) {
-  const { client, job } = ctx, id = job.id;
-  const trials = S.trials.filter((t) => t !== S.cfg.top.static_trial);
+  const { client, job } = ctx, id = job.id, it = S.iteration;
+  const have = new Set((ctx.health && ctx.health.tools) || STEP_ORDER);
   S.busy = true; S.runLog = [];
   const log = (s) => { S.runLog.push(s); hooks.repaint(); };
-  const wait = async (tool) => {
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const st = await client.status(id); const sp = st.tools[tool];
-      if (sp.state === "done" || sp.state === "error") return sp;
+  const wait = async (tool) => { for (;;) { await new Promise((r) => setTimeout(r, 1000)); const st = (await client.status(id)).tools[tool]; if (st.state === "done" || st.state === "error") return st; } };
+  const run = async (tool, label) => {
+    log(`${label}: ${tool} …`);
+    await client.toolRun(id, tool);
+    const st = await wait(tool);
+    if (st.state === "error") { log(`${label}: ${tool} failed — ${st.error}`); return false; }
+    log(`${label}: ${tool} done in ${st.seconds} s`); return true;
+  };
+  const store = async (tool, trial) => {                 // every output into its bioscout folder
+    for (const o of await hooks.outputs(tool)) {
+      const path = tool === "ceinms_cal" ? sp(`3_iterations/${it}/ceinms_calibration/${o.path}`) : `${trialDir(it, trial, folderOf(tool, o.path))}/${o.path}`;
+      await writeFile(S.root, path, new Blob([o.data]));
     }
   };
   try {
-    for (const t of trials) {
-      S.trial = t; await applySelection(hooks); await new Promise((r) => setTimeout(r, 300));
-      for (const tool of ["ik", "id"]) {
-        log(`${t}: ${tool} …`);
-        await client.toolRun(id, tool);
-        const sp = await wait(tool);
-        if (sp.state === "error") { log(`${t}: ${tool} failed — ${sp.error}`); break; }
-        await hooks.save(tool);
-        log(`${t}: ${tool} done in ${sp.seconds} s`);
+    if (!it) throw new Error(T("ss_noIteration"));
+    // 0. c3d export (only the trials not exported yet)
+    if (!S.exportSkip && S.c3ds.length) await exportC3d(log);
+    const trials = pickedTrials();
+    if (!trials.length) throw new Error(T("ss_noTrials"));
+    // 1. scale, once for the iteration
+    await applySelection(hooks); await new Promise((r) => setTimeout(r, 300));
+    if (!S.skip.has("scale")) { if (await run("scale", it)) await hooks.save("scale"); else throw new Error("scale failed"); }
+    else log(`${it}: scale ${T("sq_skipped")} — ${T("ss_usingScaled")}`);
+    let calibrated = false;
+    for (const trial of trials) {
+      S.trial = trial;
+      for (const k of STALE) { const [tl, slot] = k.split(":"); hooks.clear(tl, slot); }
+      await applySelection(hooks); await new Promise((r) => setTimeout(r, 300));
+      const eb = trialDir(it, trial, "external_biomechanics"), exp = sp(`2_experimental/${trial}`);
+      // inputs every later step can use
+      const emg = await fileIn(`${exp}/emg.mot`); if (emg) { hooks.send("ceinms_cal:emg_mot", emg); hooks.send("ceinms:emg_mot", emg); }
+      const bp = await fileIn(`${eb}/body_positions.sto`); if (bp) hooks.send("so:bodies", bp);
+      let ok = true;
+      for (const tool of STEP_ORDER.slice(1)) {
+        if (S.skip.has(tool)) {
+          // a skipped step's results already in the trial folder stand in for it
+          if (tool === "ik") { const f = await fileIn(`${eb}/ik.mot`) || await fileIn(`${eb}/joint_angles.mot`); if (f) { for (const k of ["id", "so", "ma", "ceinms_cal", "ceinms"]) hooks.send(`${k}:ik_mot`, f); } else { log(`${trial}: no ik.mot in ${eb} — trial skipped`); ok = false; break; } }
+          if (tool === "id") { const f = await fileIn(`${eb}/inverse_dynamics.sto`); if (f) for (const k of ["so", "ceinms_cal", "ceinms"]) hooks.send(`${k}:id_sto`, f); }
+          if (tool === "so") { const f = await fileIn(`${trialDir(it, trial, "static_optimisation")}/SO_StaticOptimization_force.sto`); if (f) hooks.send("ma:so_force", f); }
+          if (tool === "ceinms_cal" && !calibrated) {
+            const cd = sp(`3_iterations/${it}/ceinms_calibration`), cj = await fileIn(`${cd}/calibration.json`);
+            if (cj) { hooks.send("ceinms:calibration", cj); try { for await (const [n, h] of (await dirAt(S.root, cd)).entries()) if (/_calibrated\.osim$/i.test(n)) hooks.send("ceinms:model", await h.getFile()); } catch { /* none */ } }
+          }
+          continue;
+        }
+        if (!have.has(tool)) { log(`${trial}: ${tool} ${T("sq_needsEngine")}`); continue; }
+        if (tool === "ceinms_cal" && calibrated) continue;   // one calibration per iteration (the first trial)
+        const done = await run(tool, trial);
+        if (!done) { if (tool === "ik") { ok = false; break; } continue; }
+        await store(tool, trial);
+        if (tool === "ceinms_cal") calibrated = true;
       }
+      if (ok) log(`${trial}: ✓ → ${trialDir(it, trial)}`);
     }
     log(T("ss_allDone"));
-  } finally { S.busy = false; hooks.repaint(); }
+  } catch (e) { log("✗ " + e.message); }
+  finally { S.busy = false; hooks.repaint(); }
+}
+
+/** Every figure of the ticked trials again from their folders; nothing re-run. */
+export async function redoFiguresAll(ctx, hooks) {
+  const it = S.iteration; S.busy = true; S.runLog = [];
+  const log = (s) => { S.runLog.push(s); hooks.repaint(); };
+  try {
+    if (!it) throw new Error(T("ss_noIteration"));
+    if (!ctx.client.figuresOnly) throw new Error("figures need the in-browser engine");
+    const cfg = (S.cfg.iterations || {})[it] || {}, scaled = itPath(it, "model_scaled", cfg.model_scaled);
+    const model = scaled ? await fileIn(scaled) : null;
+    for (const trial of pickedTrials()) {
+      const f = {};
+      for (const sub of ["external_biomechanics", "muscle_analysis", "static_optimisation", "joint_contact_forces", "ceinms"]) {
+        let d; try { d = await dirAt(S.root, trialDir(it, trial, sub)); } catch { continue; }
+        for await (const [n, h] of d.entries()) if (h.kind === "file" && /\.(sto|mot)$/i.test(n) && !/^_MuscleAnalysis/.test(n)) f[n] = await (await h.getFile()).text();
+      }
+      if (!f["ik.mot"] && f["joint_angles.mot"]) f["ik.mot"] = f["joint_angles.mot"];
+      for (const n of ["grf.mot", "GRF.xml"]) { const x = await textIn(sp(`2_experimental/${trial}/${n}`)); if (x) f[n] = x; }
+      if (!f["ik.mot"]) { log(`${trial}: no ik.mot — skipped`); continue; }
+      log(`${trial}:`);
+      const figs = await ctx.client.figuresOnly(f, model, log);
+      for (const [n, v] of Object.entries(figs)) await writeFile(S.root, `${trialDir(it, trial, folderOf(/^ceinms_|^jrf_ceinms/.test(n) ? "ceinms" : "so", n))}/${n}`, v instanceof Blob ? v : new Blob([v]));
+    }
+    log(T("ss_allDone"));
+  } catch (e) { log("✗ " + e.message); }
+  finally { S.busy = false; hooks.repaint(); }
 }
 
 // ------------------------------------------------------------------ the panel
@@ -364,8 +457,13 @@ export function sessionHTML(ctx) {
       <label class="simOpt">${t("ss_trial")} <select data-ss-trial>${opt(S.trials, S.trial, t("ss_none"))}</select></label>
     </div>
     ${itForm}
+    <div style="margin-top:8px"><span class="sub">${t("ss_runTrials")}</span>
+      <div style="display:flex;gap:4px 14px;flex-wrap:wrap;margin-top:4px">${S.trials.filter((x) => x !== top.static_trial).map((x) => `<label class="simOpt" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-ss-tick="${esc(x)}"${!S.pick || S.pick.has(x) ? " checked" : ""}> ${esc(x)}</label>`).join("") || `<span class="sub">—</span>`}</div>
+      <label class="simOpt" style="display:inline-flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" data-ss-exportskip${S.exportSkip ? " checked" : ""}> ${t("ss_exportSkip")}</label>
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center">
       <button type="button" data-ss-runall${S.busy || !S.iteration ? " disabled" : ""}>${t("ss_runAll")}</button>
+      <button type="button" class="ghost" data-ss-figs${S.busy || !S.iteration ? " disabled" : ""}>${t("sq_figs")}</button>
       ${S.msg ? `<span class="sub">${esc(S.msg)}</span>` : ""}
     </div>
     ${S.runLog.length ? `<div class="osimLog" style="margin-top:8px">${S.runLog.map(esc).join("\n")}</div>` : ""}` : ""}
@@ -406,4 +504,12 @@ export function sessionWire(box, ctx, hooks) {
   if (c3) { on("[data-ss-addc3d]", "onclick", () => c3.click()); c3.onchange = () => { const files = [...c3.files]; if (files.length) busy(async (log) => { await addC3d(files, log); await exportC3d(log); }); }; }
   on("[data-ss-export]", "onclick", () => busy((log) => exportC3d(log)));
   on("[data-ss-runall]", "onclick", () => runAll(ctx, hooks));
+  on("[data-ss-figs]", "onclick", () => redoFiguresAll(ctx, hooks));
+  on("[data-ss-exportskip]", "onchange", (e) => { S.exportSkip = e.target.checked; });
+  box.querySelectorAll("[data-ss-tick]").forEach((cb) => {
+    cb.onchange = () => {
+      if (!S.pick) S.pick = new Set(S.trials.filter((x) => x !== S.cfg.top.static_trial));
+      cb.checked ? S.pick.add(cb.dataset.ssTick) : S.pick.delete(cb.dataset.ssTick);
+    };
+  });
 }
