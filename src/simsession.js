@@ -21,7 +21,7 @@ let T = (k) => k;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 export const S = {           // the one open project + session
-  root: null, name: "", simDir: "simulations", subjects: [], subject: "", sessions: [], session: "", ses: "",   // ses = simDir/subject/session
+  root: null, name: "", simDir: "simulations", hasProject: false, newSub: false, subjects: [], subject: "", sessions: [], session: "", ses: "",   // ses = simDir/subject/session
   yaml: "", cfg: null, trials: [], iterations: [], iteration: "", trial: "",
   c3dDir: "1_c3dfiles", c3ds: [], msg: "", busy: false, runLog: [], newIt: null, weight: null,
   skip: new Set(["rra", "ceinms_cal", "ceinms"]),   // the steps' skip ticks, as in Quick run
@@ -121,6 +121,7 @@ export function addIterationYaml(text, name, fields) {
 async function firstDir(root, names) { for (const d of names) { try { await dirAt(root, d); return d; } catch { /* next */ } } return null; }
 export async function openProject(root) {
   S.root = root; S.name = root.name; S.msg = "";
+  S.hasProject = !!(await readFile(root, "project.yaml"));
   S.simDir = await firstDir(root, ["simulations", "Simulations"]) || "simulations";
   S.subjects = await listDirs(root, S.simDir);
   if (!S.subjects.includes(S.subject)) S.subject = S.subjects[0] || "";
@@ -154,6 +155,36 @@ export async function openSession() {
   if (!S.trials.includes(S.trial)) S.trial = "";
 }
 async function refresh() { if (S.root) await openSession(); }
+
+const SETUP_TEMPLATES = ["setup_scale.xml", "markers_pyCGM.xml", "IK_task_set.xml", "setup_IK.xml", "setup_ID.xml", "setup_MA.xml",
+  "setup_SO.xml", "actuators_so.xml", "setup_JRA.xml", "externalloads.xml"];
+/** `bioscout init` in the browser: the standard folders, the bundled setup templates (never
+ *  overwriting) and a starter project.yaml -- the marker the Python bioscout looks for. */
+export async function initProject(log) {
+  if (!S.root) return;
+  const setupDir = await firstDir(S.root, ["setupFiles", "setup_files"]) || "setup_files";
+  for (const d of [S.simDir || "simulations", "models", "models/generic", "models/personalised", setupDir, "logs", "results"]) { await dirAt(S.root, d, true); }
+  log(`folders: ${S.simDir}/ models/ ${setupDir}/ logs/ results/`);
+  let n = 0;
+  for (const f of SETUP_TEMPLATES) { const pth = `${setupDir}/${f}`; if (!(await readFile(S.root, pth))) { await ensureFile(pth, new URL("../data/opensim/setup_files/" + f, import.meta.url)); n++; } }
+  log(`${setupDir}/: ${n} template(s) added (existing files kept)`);
+  if (!(await readFile(S.root, "project.yaml"))) {
+    await writeFile(S.root, "project.yaml", "# project.yaml — lab facts that differ from bioscout's bundled\n# defaults. No code, no run selection. Add `batch:` / `ceinms:`\n# entries only for what actually differs — everything else is\n# inherited. Written by BioScout Web (Batch mode > Initiate project).\n" +
+      `schema: 1\nname: ${S.root.name}\n`);
+    log("project.yaml written");
+  }
+  await openProject(S.root);
+}
+/** simulations/<subject>/<session>/1_c3dfiles + its session.yaml (scaffolded by openSession). */
+export async function newSubjectSession(subject, session, log) {
+  subject = subject.trim().replace(/[^\w.-]+/g, "_"); session = (session || "session1").trim().replace(/[^\w.-]+/g, "_");
+  if (!subject) return;
+  await dirAt(S.root, `${S.simDir}/${subject}/${session}/1_c3dfiles`, true);
+  S.subjects = await listDirs(S.root, S.simDir); S.subject = subject; S.session = session;
+  S.sessions = await listDirs(S.root, `${S.simDir}/${subject}`);
+  await openSession();
+  log(`${S.simDir}/${subject}/${session}/ created — put the .c3d files in 1_c3dfiles (or use Add C3D files…)`);
+}
 
 /** Create 3_iterations/<name>, its yaml block, and copy the marker set in. */
 /** The iteration keys of bioscout.session.config.IterationKeys this page lets you set, with defaults
@@ -432,6 +463,14 @@ export function sessionHTML(ctx) {
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>${t("ss_title")}</b>
       <button type="button" class="ghost" data-ss-pick style="margin:0;width:auto;padding:6px 12px">${S.root ? esc(S.name) : t("ss_pick")}</button></div>
     <p class="note" style="margin:4px 0 8px">${t("ss_intro")}</p>
+    ${S.root && !S.hasProject ? `<div class="card" style="padding:10px;margin:6px 0"><b>${t("ss_noProject")}</b>
+      <p class="note" style="margin:4px 0 8px">${t("ss_noProjectNote", { name: esc(S.name) })}</p>
+      <button type="button" data-ss-init${S.busy ? " disabled" : ""}>${t("ss_init")}</button></div>` : ""}
+    ${S.root ? `<div class="simOpts" style="margin-top:4px">${S.newSub
+      ? `<label class="simOpt">${t("ss_subjectSel")} <input type="text" data-ss-nsub placeholder="P001" style="width:110px"></label>
+         <label class="simOpt">${t("ss_session")} <input type="text" data-ss-nses value="session1" style="width:110px"></label>
+         <button type="button" data-ss-nsave>${t("ss_create")}</button><button type="button" class="ghost" data-ss-ncancel>Cancel</button>`
+      : `<button type="button" class="ghost" data-ss-newsub>${t("ss_newSubject")}</button>${S.subjects.length ? "" : ` <span class="sub">${t("ss_noSubjects", { dir: esc(S.simDir) })}</span>`}`}</div>` : ""}
     ${S.root ? `
     <div class="simOpts">
       <label class="simOpt">${t("ss_subjectSel")} <select data-ss-subjsel>${opt(S.subjects, S.subject, t("ss_none"))}</select></label>
@@ -504,6 +543,10 @@ export function sessionWire(box, ctx, hooks) {
   if (c3) { on("[data-ss-addc3d]", "onclick", () => c3.click()); c3.onchange = () => { const files = [...c3.files]; if (files.length) busy(async (log) => { await addC3d(files, log); await exportC3d(log); }); }; }
   on("[data-ss-export]", "onclick", () => busy((log) => exportC3d(log)));
   on("[data-ss-runall]", "onclick", () => runAll(ctx, hooks));
+  on("[data-ss-init]", "onclick", () => busy(async (log) => { await initProject(log); await applySelection(hooks); }));
+  on("[data-ss-newsub]", "onclick", () => { S.newSub = true; hooks.repaint(); });
+  on("[data-ss-ncancel]", "onclick", () => { S.newSub = false; hooks.repaint(); });
+  on("[data-ss-nsave]", "onclick", () => { const a = q("[data-ss-nsub]").value, b = q("[data-ss-nses]").value; S.newSub = false; busy(async (log) => { await newSubjectSession(a, b, log); await applySelection(hooks); }); });
   on("[data-ss-figs]", "onclick", () => redoFiguresAll(ctx, hooks));
   on("[data-ss-exportskip]", "onchange", (e) => { S.exportSkip = e.target.checked; });
   box.querySelectorAll("[data-ss-tick]").forEach((cb) => {
