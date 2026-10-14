@@ -86,13 +86,25 @@ async function pickSetupFiles(dir, names, log) {
 async function pickC3dFolder() {
   if (!window.showDirectoryPicker) return false;
   let d; try { d = await window.showDirectoryPicker({ mode: "readwrite", id: "bioscout-c3d" }); } catch { return false; }
-  Q.root = d; await rememberDir(d);
+  Q.root = d; await rememberDir(d); try { const db = await idb(); db.transaction(STORE, "readwrite").objectStore(STORE).put(d, "lastc3d"); } catch { /* not kept */ }
+  await listC3ds(d);
+  return true;
+}
+/** The last c3d folder, if the browser still grants it (no dialog). */
+async function restoreC3dFolder() {
+  if (Q.root || Q.restored) return false; Q.restored = true;
+  try {
+    const db = await idb(); const d = await new Promise((res) => { const r = db.transaction(STORE).objectStore(STORE).get("lastc3d"); r.onsuccess = () => res(r.result || null); r.onerror = () => res(null); });
+    if (!d || (await d.queryPermission({ mode: "readwrite" })) !== "granted") return false;
+    Q.root = d; await listC3ds(d); return true;
+  } catch { return false; }
+}
+async function listC3ds(d) {
   Q.c3ds = []; for await (const [n, h] of d.entries()) if (h.kind === "file" && /\.c3d$/i.test(n)) Q.c3ds.push(n);
   Q.c3ds.sort();
   const motion = Q.c3ds.filter((n) => !/^static/i.test(n)), st = Q.c3ds.find((n) => /^static/i.test(n));
   if (!Q.file || !Q.c3ds.includes(Q.trial)) await chooseTrial(motion[0] || Q.c3ds[0] || "");
   if (st && !Q.staticFile) Q.staticFile = { handle: null, file: await (await d.getFileHandle(st)).getFile() };
-  return true;
 }
 async function chooseTrial(name) { Q.file = name ? { handle: null, file: await (await Q.root.getFileHandle(name)).getFile() } : null; Q.log = []; }
 
@@ -268,8 +280,8 @@ export function quickHTML(ctx) {
     <div class="simPick">${Q.c3ds.length && Q.root
       ? `<select data-sq-trialsel>${Q.c3ds.map((n) => `<option value="${esc(n)}"${n === Q.trial ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>`
       : `<input type="text" readonly placeholder="${esc(t("sq_pickFile"))}" value="${esc(Q.trial)}">`}
-      <button type="button" class="ghost" data-sq-pickdir title="${esc(t("sq_pickDir"))}">📁</button>
-      <button type="button" class="ghost" data-sq-pick title="${esc(t("sq_pickFile"))}">🔍</button></div>
+      ${window.showDirectoryPicker ? `<button type="button" class="ghost" data-sq-pickdir title="${esc(t("sq_pickDir"))}">📁</button>`
+        : `<button type="button" class="ghost" data-sq-pick title="${esc(t("sq_pickFile"))}">🔍</button>`}</div>
     <div class="simOpts" style="margin-top:6px">
       <label class="simOpt">${t("sq_static")} <span class="simPick" style="display:inline-flex"><input type="text" readonly style="width:180px" placeholder="${esc(t("sq_staticNone"))}" value="${esc(Q.staticFile ? Q.staticFile.file.name : "")}">
         ${Q.c3ds.length && Q.root ? `<select data-sq-staticsel style="width:auto"><option value="">—</option>${Q.c3ds.map((n) => `<option value="${esc(n)}"${Q.staticFile && n === Q.staticFile.file.name ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>` : ""}
@@ -279,7 +291,7 @@ export function quickHTML(ctx) {
     <div class="simOpts" style="margin-top:6px"><label class="simOpt">${t("sq_setup")} <span class="simPick" style="display:inline-flex"><input type="text" readonly style="width:180px" placeholder="${esc(t("sq_setupNone"))}" value="${esc(Q.setupDir ? Q.setupDir.name : "")}">
       <button type="button" class="ghost" data-sq-setup title="${esc(t("sq_setupPick"))}">📁</button>${Q.setupDir ? `<button type="button" class="ghost" data-sq-setupclear>${t("pr_remove")}</button>` : ""}</span></label></div>
     <p class="note" style="margin:6px 0 0">${Q.file ? (Q.root ? t("sq_where", { dir: Q.root.name + "/" + Q.trial.replace(/\.c3d$/i, "") + "_simulation" }) : t("sq_noFolder", { dir: Q.trial.replace(/\.c3d$/i, "") + "_simulation" })) : t("sq_intro")}</p>
-    ${Q.file && !Q.root ? `<button type="button" class="ghost" data-sq-folder style="margin-top:6px">${t("sq_confirmFolder")}</button>` : ""}
+
   </div>
   <details class="simTool${Q.export ? "" : " skipped"}" data-tool="c3d">
     <summary><b>0 · ${t("sq_exportTitle")}</b> <label class="simSkip" onclick="event.stopPropagation()"><input type="checkbox" data-sq-export${Q.export ? "" : " checked"}> ${esc(t("sq_skip"))}</label></summary>
@@ -313,6 +325,7 @@ export function quickWire(box, ctx, hooks) {
   on("[data-sq-export]", "onchange", (e) => { Q.export = !e.target.checked; hooks.repaint(); });
   on("[data-sq-sec]", "onchange", (e) => { const v = parseFloat(e.target.value); if (v > 0) Q.staticSeconds = v; });
   if (!Q.setupLoaded) loadSetupDir().then(() => Q.setupDir && hooks.repaint());
+  if (!Q.restored) restoreC3dFolder().then((ok) => ok && hooks.repaint());
   on("[data-sq-setup]", "onclick", async () => { try { Q.setupDir = await window.showDirectoryPicker({ mode: "read" }); await saveSetupDir(Q.setupDir); hooks.repaint(); } catch { /* cancelled */ } });
   on("[data-sq-setupclear]", "onclick", async () => { Q.setupDir = null; await saveSetupDir(null); hooks.repaint(); });
   on("[data-sq-run]", "onclick", () => runQuick(ctx, hooks));
