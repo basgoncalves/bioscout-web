@@ -18,7 +18,7 @@ import { makeZip } from "./zip.js";
 let T = (k) => k;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms", "rra", "ma"]) };
+export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms", "rra", "ma"]), export: true };
 Object.defineProperty(Q, "trial", { get: () => (Q.file && Q.file.file ? Q.file.file.name : "") });
 
 async function writeText(dir, name, data) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); }
@@ -36,11 +36,34 @@ function pickC3d() {
     i.click();
   });
 }
+// ---- folders granted before, kept in IndexedDB (handles survive reloads; Chrome keeps the
+// permission when "Allow on every visit" was chosen, else one click re-grants it)
+const IDB = "bioscout-quick", STORE = "dirs";
+const idb = () => new Promise((res, rej) => { const r = indexedDB.open(IDB, 1); r.onupgradeneeded = () => r.result.createObjectStore(STORE); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+async function savedDirs() { try { const db = await idb(); return await new Promise((res) => { const out = []; const c = db.transaction(STORE).objectStore(STORE).openCursor(); c.onsuccess = () => { const k = c.result; if (!k) return res(out); out.push(k.value); k.continue(); }; c.onerror = () => res(out); }); } catch { return []; } }
+async function rememberDir(h) { try { const db = await idb(); const all = await savedDirs(); for (const d of all) if (await d.isSameEntry(h)) return; db.transaction(STORE, "readwrite").objectStore(STORE).put(h, Date.now()); } catch { /* not kept */ } }
+/** A granted folder that holds this very file (same name and size), without any dialog. */
+async function knownFolderFor(file) {
+  for (const d of (await savedDirs()).reverse()) {
+    try {
+      const perm = await d.queryPermission({ mode: "readwrite" });
+      if (perm === "denied") continue;
+      const f = await (await d.getFileHandle(file.name)).getFile();
+      if (f.size !== file.size || f.lastModified !== file.lastModified) continue;
+      if (perm !== "granted" && (await d.requestPermission({ mode: "readwrite" })) !== "granted") continue;   // a one-click re-grant, no folder browsing
+      return d;
+    } catch { /* not this one */ }
+  }
+  return null;
+}
+
 /** The folder the results go to: asked once, opening in the c3d's own folder so it is one click. null -> a .zip instead. */
 async function resultsFolder() {
   if (Q.root) return Q.root;
   if (!window.showDirectoryPicker) return null;
-  try { Q.root = await window.showDirectoryPicker({ mode: "readwrite" }); return Q.root; } catch { return null; }
+  Q.root = await knownFolderFor(Q.file.file);
+  if (Q.root) return Q.root;
+  try { Q.root = await window.showDirectoryPicker({ mode: "readwrite" }); await rememberDir(Q.root); return Q.root; } catch { return null; }
 }
 
 /** The first `seconds` of a .trc as a static trial (the subject usually stands still before moving). */
@@ -82,12 +105,21 @@ export async function runQuick(ctx, hooks) {
         }
       }
     };
-    // 1. the c3d -> OpenSim files
-    log(`${Q.trial}: export`);
+    // 1. the c3d -> OpenSim files (or, with export unticked, the ones already in the folder)
     const f = Q.file.file;
-    const ex = c3dToOpenSim(await f.arrayBuffer(), f.name);
-    for (const [n, text] of Object.entries(ex)) await put(n, text);
-    log(`  → ${Object.keys(ex).join(", ")}`);
+    let ex = null;
+    if (!Q.export && dir) {
+      ex = {};
+      for (const n of ["marker_experimental.trc", "grf.mot", "emg.mot"]) { try { ex[n] = await (await (await dir.getFileHandle(n)).getFile()).text(); } catch { /* absent */ } }
+      if (ex["marker_experimental.trc"]) log(`export: skipped — using ${Object.keys(ex).join(", ")} from the folder`);
+      else { log("export: nothing in the folder yet — exporting"); ex = null; }
+    }
+    if (!ex) {
+      log(`${Q.trial}: export`);
+      ex = c3dToOpenSim(await f.arrayBuffer(), f.name);
+      for (const [n, text] of Object.entries(ex)) await put(n, text);
+      log(`  → ${Object.keys(ex).join(", ")}`);
+    }
     if (!ex["marker_experimental.trc"]) throw new Error("no markers in the c3d");
     // 2. the static trial: its own c3d, or the first seconds of this one
     let staticTrc;
@@ -147,6 +179,7 @@ export function quickHTML(ctx) {
         <button type="button" class="ghost" data-sq-static>🔍</button>${Q.staticFile ? `<button type="button" class="ghost" data-sq-staticclear>${t("pr_remove")}</button>` : ""}</span></label>
       ${Q.staticFile ? "" : `<label class="simOpt">${t("sq_staticSeconds")} <input type="text" data-sq-sec value="${Q.staticSeconds}" style="width:70px"></label>`}
     </div>
+    <label class="simOpt" style="margin-top:6px;display:flex;gap:6px;align-items:center"><input type="checkbox" data-sq-export${Q.export ? " checked" : ""}> ${t("sq_export")}</label>
     <p class="note" style="margin:6px 0 0">${Q.file ? (Q.root ? t("sq_where", { dir: Q.root.name + "/" + Q.trial.replace(/\.c3d$/i, "") + "_simulation" }) : t("sq_noFolder", { dir: Q.trial.replace(/\.c3d$/i, "") + "_simulation" })) : t("sq_intro")}</p>
     ${Q.file && !Q.root ? `<button type="button" class="ghost" data-sq-folder style="margin-top:6px">${t("sq_confirmFolder")}</button>` : ""}
   </div>`;
@@ -165,12 +198,13 @@ export function quickWire(box, ctx, hooks) {
   on("[data-sq-pick]", "onclick", async () => {
     const r = await pickC3d(); if (!r) return;
     Q.file = r; Q.root = null; Q.log = []; hooks.repaint();
-    // the folder right away, so Simulate itself needs no dialog: the browser can only write where you confirmed once
+    // a folder granted before is found by itself; only a new folder needs the one-time confirmation
     await resultsFolder(); hooks.repaint();
   });
   on("[data-sq-static]", "onclick", async () => { const r = await pickC3d(); if (!r) return; Q.staticFile = r; hooks.repaint(); });
   on("[data-sq-staticclear]", "onclick", () => { Q.staticFile = null; hooks.repaint(); });
   on("[data-sq-folder]", "onclick", async () => { await resultsFolder(); hooks.repaint(); });
+  on("[data-sq-export]", "onchange", (e) => { Q.export = e.target.checked; });
   on("[data-sq-sec]", "onchange", (e) => { const v = parseFloat(e.target.value); if (v > 0) Q.staticSeconds = v; });
   on("[data-sq-run]", "onclick", () => runQuick(ctx, hooks));
 }
