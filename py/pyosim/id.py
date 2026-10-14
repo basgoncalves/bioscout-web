@@ -14,7 +14,7 @@ import re
 import xml.etree.ElementTree as ET
 import numpy as np
 from scipy.signal import butter, filtfilt
-from .model import Model, _vec
+from .model import Model, _vec, Kinematics
 from .io import read_sto, write_mot
 
 DQ = 1e-6
@@ -98,37 +98,34 @@ def _skew_vec(S):
     return np.array([S[2, 1] - S[1, 2], S[0, 2] - S[2, 0], S[1, 0] - S[0, 1]]) / 2
 
 
-def _body_state(model, Q, t):
-    """COM positions (n, nb, 3), rotations (n, nb, 3, 3) for all bodies."""
+def _body_state(model, Q, t, kin=None):
+    """COM positions (n, nb, 3), rotations (n, nb, 3, 3) for all bodies, all frames at once."""
+    kin = kin or Kinematics(model, [])
     names = list(model.bodies)
-    n, nb = len(t), len(names)
-    C = np.zeros((n, nb, 3)); R = np.zeros((n, nb, 3, 3))
-    for i in range(n):
-        T = _transforms(model, dict(zip(model.coord_order, Q[i])))
-        for b, bn in enumerate(names):
-            Rb, pb = T[bn]
-            R[i, b] = Rb; C[i, b] = pb + Rb @ model.bodies[bn]["com"]
+    T = kin.bodies(Q)
+    R = np.stack([np.broadcast_to(T[b][0], (len(Q), 3, 3)) for b in names], axis=1)
+    C = np.stack([T[b][1] + T[b][0] @ model.bodies[b]["com"] for b in names], axis=1)
     return names, C, R
 
 
-def _jacobians(model, q, names):
-    """d(COM)/dq_k and d(rotation)/dq_k (as angular-velocity axes) per body: (nc, nb, 3) each."""
-    nc, nb = len(model.coord_order), len(names)
-    Jv = np.zeros((nc, nb, 3)); Jw = np.zeros((nc, nb, 3))
-    base = dict(zip(model.coord_order, q))
-    T0 = _transforms(model, base)
-    for k, cn in enumerate(model.coord_order):
-        qp = dict(base); qp[cn] = qp[cn] + DQ
-        # a dependent (coupled) coordinate follows its driver, as the kinematics do
-        for dn, c in model.coords.items():
-            if c.coupled and c.coupled[0] == cn:
-                qp[dn] = c.coupled[1](qp[cn])
-        T1 = _transforms(model, qp)
-        for b, bn in enumerate(names):
-            R0, p0 = T0[bn]; R1, p1 = T1[bn]
-            com = model.bodies[bn]["com"]
-            Jv[k, b] = ((p1 + R1 @ com) - (p0 + R0 @ com)) / DQ
-            Jw[k, b] = _skew_vec(R1 @ R0.T - np.eye(3)) / DQ
+def _jacobians_all(model, Q, names, kin):
+    """Body COM / angular Jacobians for every frame: (n, nc, nb, 3) each, by forward
+    differences in batches -- a perturbed independent coordinate drags its couplers along."""
+    n, nc = Q.shape
+    com = np.array([model.bodies[b]["com"] for b in names])
+    Jv = np.zeros((n, nc, len(names), 3)); Jw = np.zeros((n, nc, len(names), 3))
+    step = max(1, 4000 // (nc + 1))
+    for a in range(0, n, step):
+        Qs = Q[a:a + step]; m = len(Qs)
+        P = np.repeat(Qs[:, None, :], nc + 1, axis=1)               # (m, nc+1, nc)
+        P[:, 1:, :] += DQ * np.eye(nc)[None]
+        P = kin.couple(P.reshape(-1, nc))
+        T = kin.bodies(P)
+        Rb = np.stack([np.broadcast_to(T[b][0], (len(P), 3, 3)) for b in names], 1).reshape(m, nc + 1, len(names), 3, 3)
+        Cb = np.stack([T[b][1] + T[b][0] @ com[k] for k, b in enumerate(names)], 1).reshape(m, nc + 1, len(names), 3)
+        Jv[a:a + m] = (Cb[:, 1:] - Cb[:, :1]) / DQ
+        dR = np.einsum("mqbij,mbkj->mqbik", Rb[:, 1:], Rb[:, 0])    # R1 R0^T
+        Jw[a:a + m] = np.stack([dR[..., 2, 1] - dR[..., 1, 2], dR[..., 0, 2] - dR[..., 2, 0], dR[..., 1, 0] - dR[..., 0, 1]], -1) / (2 * DQ)
     return Jv, Jw
 
 
@@ -159,7 +156,8 @@ def run(model_path, coords_mot, loads_xml, out_sto, loads_mot=None, t_range=None
             loads.append((f, _xyz(cols, data, f["fid"], ts, t), _xyz(cols, data, f["pid"], ts, t), _xyz(cols, data, f["tid"], ts, t)))
         log(f"[id] {len(loads)} external force(s) from {os.path.basename(datafile)}: " + ", ".join(f['name'] + '->' + f['body'] for f, *_ in loads))
 
-    names, C, R = _body_state(model, Q, t)
+    kin = Kinematics(model, [])
+    names, C, R = _body_state(model, Q, t, kin)
     mass = np.array([model.bodies[b]["mass"] for b in names])
     Iloc = []
     for b in names:
@@ -170,13 +168,12 @@ def run(model_path, coords_mot, loads_xml, out_sto, loads_mot=None, t_range=None
     # body kinematics by central differences
     V = np.gradient(C, t, axis=0); A = np.gradient(V, t, axis=0)
     Rd = np.gradient(R, t, axis=0)
-    W = np.zeros((len(t), len(names), 3))
-    for i in range(len(t)):
-        for b in range(len(names)):
-            W[i, b] = _skew_vec(Rd[i, b] @ R[i, b].T)
+    S = np.einsum("nbij,nbkj->nbik", Rd, R)                       # dR/dt R^T
+    W = np.stack([S[..., 2, 1] - S[..., 1, 2], S[..., 0, 2] - S[..., 2, 0], S[..., 1, 0] - S[..., 0, 1]], -1) / 2
     AL = np.gradient(W, t, axis=0)
 
     bidx = {b: k for k, b in enumerate(names)}
+    JV, JW = _jacobians_all(model, Q, names, kin)
     out = np.zeros((len(t), len(model.coord_order)))
     for i in range(len(t)):
         Fs = mass[:, None] * (A[i] - g[None, :])                       # m(a - g)
@@ -195,7 +192,7 @@ def run(model_path, coords_mot, loads_xml, out_sto, loads_mot=None, t_range=None
                 Pg = pb + Rb @ P[i]
             Fs[b] -= Fg
             Ms[b] -= np.cross(Pg - C[i, b], Fg) + Tg
-        Jv, Jw = _jacobians(model, Q[i], names)
+        Jv, Jw = JV[i], JW[i]
         out[i] = np.einsum("kbj,bj->k", Jv, Fs) + np.einsum("kbj,bj->k", Jw, Ms)
         if i % 50 == 0:
             log(f"[id] frame {i + 1}/{len(t)}")

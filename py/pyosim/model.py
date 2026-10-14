@@ -195,6 +195,7 @@ class Model:
         root = ET.parse(path).getroot()
         m = root.find("Model")
         self.name = m.get("name")
+        self.path = path
         self.gravity = _vec(m.findtext("gravity") or "0 -9.80665 0")
         self.coords = {}
         self.bodies = {}
@@ -365,9 +366,21 @@ class Kinematics:
         self._p = plan
         return plan
 
+    def couple(self, Q):
+        """Full coordinate rows with the coupled (dependent) coordinates recomputed."""
+        Q = np.array(Q, float)
+        for d, i, f in self.couplers:
+            Q[:, d] = _feval(f, Q[:, i])
+        return Q
+
     def markers(self, X):
         """X: (B, n_free) -> (B, n_markers, 3)."""
-        Q = self.full(np.atleast_2d(X)); B = len(Q); m = self.m
+        T = self.bodies(self.full(np.atleast_2d(X)))
+        return np.stack([T[b][1] + T[b][0] @ loc for b, loc in self.mk], axis=1)
+
+    def bodies(self, Q):
+        """Q: (B, n_coords) full coordinates -> {body: (R (B,3,3), origin (B,3))}."""
+        B = len(Q); m = self.m
         I3 = np.eye(3)
         T = {"ground": (np.broadcast_to(I3, (B, 3, 3)), np.zeros((B, 3)))}
         for j, pbody, cbody, steps in self._plan():
@@ -397,4 +410,4 @@ class Kinematics:
             pm = pf if p is None else (pf + (np.einsum("bij,bj->bi", Rf, p) if np.ndim(p) == 2 else Rf @ p))
             Rbody = Rm @ j.child.R.T
             T[cbody] = (np.broadcast_to(Rbody, (B, 3, 3)) if Rbody.ndim == 2 else Rbody, pm - Rbody @ j.child.p)
-        return np.stack([T[b][1] + T[b][0] @ loc for b, loc in self.mk], axis=1)
+        return T

@@ -3,7 +3,7 @@
  * -> {id, log:[...]} while running, then {id, done:true, outputs:{name: text}} or {id, error}. */
 /* global importScripts, loadPyodide */
 const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
-const PY_FILES = ["__init__.py", "model.py", "io.py", "ik.py", "scale.py", "id.py"];
+const PY_FILES = ["__init__.py", "model.py", "io.py", "ik.py", "scale.py", "id.py", "muscles.py", "so.py"];
 let ready = null;
 
 function boot(base) {
@@ -83,6 +83,20 @@ idtool.run(model, "/job/" + a["ik"], loads, "/job/inverse_dynamics.sto", loads_m
       const outputs = {};
       for (const f of ["setup_id.xml", "inverse_dynamics.sto", "GRF.xml"]) {
         try { outputs[f] = py.FS.readFile("/job/" + f, { encoding: "utf8" }); } catch { /* optional */ }
+      }
+      self.postMessage({ id, done: true, outputs });
+    } else if (cmd === "so") {
+      py.runPython(`
+from pyosim import so
+from pyosim.model import Model
+a = dict(args)
+tr = (float(a["t0"]), float(a["t1"])) if a.get("t0") not in (None, "") and a.get("t1") not in (None, "") else None
+so.run(Model("/job/" + a["model"]), "/job/" + a["ik"], "/job/" + a["id"], "/job/so", actuators=("/job/" + a["actuators"]) if a.get("actuators") else None,
+       t_range=tr, log=js_log)
+`);
+      const outputs = {};
+      for (const f of ["SO_StaticOptimization_force.sto", "SO_StaticOptimization_activation.sto"]) {
+        try { outputs[f] = py.FS.readFile("/job/so/" + f, { encoding: "utf8" }); } catch { /* optional */ }
       }
       self.postMessage({ id, done: true, outputs });
     } else throw new Error("unknown command " + cmd);
