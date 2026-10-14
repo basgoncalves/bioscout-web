@@ -159,7 +159,26 @@ async function saveOutputs(ctx, tool) {
 }
 
 /** Wire the drawn page. */
+/* The page is redrawn on every status poll while a step runs, which put every log box back at
+ * its top and closed the log <details>. Keep each one where the reader left it: a log that was
+ * scrolled to the bottom (or never touched) follows the newest line; one scrolled up stays put. */
+const logView = {};
+function keepLogs(box) {
+  box.querySelectorAll(".osimLog").forEach((el, i) => {
+    const holder = el.closest("[data-tool]"), key = (holder ? holder.dataset.tool : el.closest("#simSession") ? "batch" : el.closest("#simQuick, .simQuickFoot") ? "quick" : "page") + ":" + i;
+    const v = logView[key];
+    if (!v || v.bottom) el.scrollTop = el.scrollHeight; else el.scrollTop = v.top;
+    el.onscroll = () => { logView[key] = { top: el.scrollTop, bottom: el.scrollTop + el.clientHeight >= el.scrollHeight - 4 }; };
+    const det = el.closest("details:not(.simTool)");
+    if (det) {
+      if (logView[key + ":open"]) det.open = true;
+      det.ontoggle = () => { logView[key + ":open"] = det.open; if (det.open) el.scrollTop = el.scrollHeight; };
+    }
+  });
+}
+
 export function simWire(box, ctx) {
+  keepLogs(box);
   const { client, job } = ctx, id = job.id;
   const osimOutputsRefresh = ctx.refreshOutputs || null;
   const sel = box.querySelector("#simModel");
