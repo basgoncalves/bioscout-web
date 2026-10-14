@@ -32,6 +32,12 @@ export function makeLocalClient(spec) {
   /** Muscle figures + joint reactions (JRA) for a set of muscle forces. tag: "so" | "ceinms". */
   async function forcesFollowUp(sp, out, tag, model, ikf, forcesName, extra) {
     const { grf, xml, hdr } = await header();
+    if (!hdr.bodiesText) {                     // ID skipped: the skeleton row from the model and ik.mot
+      try {
+        const r = await runWorker("bodies", { [model.name]: await model.arrayBuffer(), "ik.mot": await ikf.arrayBuffer() }, { model: model.name, ik: "ik.mot" }, () => {});
+        hdr.bodiesText = r["body_positions.sto"]; out["body_positions.sto"] = hdr.bodiesText;
+      } catch (e) { sp.log.push("skeleton poses: " + e.message); }
+    }
     const ikTxt = await ikf.text(), idf = idFile(tag === "so" ? "so" : "ceinms"), idTxt = idf ? await idf.text() : null;
     const figs = { "muscle_groups.png": () => muscleGroupsFigure({ forceText: out[forcesName], actText: out[extra.act], emgText: extra.emg && out[extra.emg], hdr }) };
     if (idTxt) for (const sd of ["r", "l"]) figs[`muscle_moments_${sd}.png`] = () => muscleMomentsFigure({ side: sd, idText: idTxt, ikText: ikTxt, forceText: tag === "so" ? out[forcesName] : null, musclesText: extra.moments && out[extra.moments], hdr });

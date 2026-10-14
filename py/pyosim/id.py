@@ -215,6 +215,20 @@ def run(model_path, coords_mot, loads_xml, out_sto, loads_mot=None, t_range=None
     return t, cols, out
 
 
+def write_body_positions(model_path, coords_mot, out_path, cutoff=6.0):
+    """body_positions.sto (body origins in ground) from the joint angles alone -- the skeleton row of the figures."""
+    model = model_path if isinstance(model_path, Model) else Model(model_path)
+    t, Q = read_coords(model, coords_mot)
+    Q = _lowpass(Q, t, cutoff)
+    TB = Kinematics(model, []).bodies(Q); cols, data = ["time"], [t]
+    for b in model.bodies:
+        o = np.broadcast_to(TB[b][1], (len(t), 3))
+        for a, ax in enumerate("xyz"):
+            cols.append(f"{b}_{ax}"); data.append(o[:, a])
+    write_mot(out_path, cols, np.column_stack(data), name="Body origins in ground (m)", degrees=False)
+    return out_path
+
+
 def write_setup(path, model_path, coords_mot, loads_xml, out_sto, tr, cutoff):
     b = lambda p: os.path.basename(p) if isinstance(p, str) else "scaled.osim"
     with open(path, "w", newline="\n") as f:

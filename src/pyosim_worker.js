@@ -109,6 +109,13 @@ ma.run(Model("/job/" + a["model"]), "/job/" + a["ik"], "/job/ma", forces_sto=("/
       const outputs = {};
       for (const f of py.FS.readdir("/job/ma")) if (f.endsWith(".sto")) outputs[f] = py.FS.readFile("/job/ma/" + f, { encoding: "utf8" });
       self.postMessage({ id, done: true, outputs });
+    } else if (cmd === "bodies") {
+      py.runPython(`
+from pyosim import id as idtool
+a = dict(args)
+idtool.write_body_positions("/job/" + a["model"], "/job/" + a["ik"], "/job/body_positions.sto")
+`);
+      self.postMessage({ id, done: true, outputs: { "body_positions.sto": py.FS.readFile("/job/body_positions.sto", { encoding: "utf8" }) } });
     } else if (cmd === "jra") {
       py.runPython(`
 from pyosim import jra
