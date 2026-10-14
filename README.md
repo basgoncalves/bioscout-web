@@ -1,21 +1,47 @@
-# BioScout Web
+<p align="center">
+  <img src="assets/icons/logo.png" width="140" alt="BioScout logo"/>
+</p>
 
-**[Open the app → basgoncalves.github.io/bioscout-web](https://basgoncalves.github.io/bioscout-web/)**
+<h1 align="center">BioScout Web</h1>
 
-A physics-informed movement tracker that runs entirely in the browser. A phone
-camera feeds on-device pose estimation, the joint angles go through inverse
-dynamics, and the result sits in a log of everything around it: training,
-meals, weight, sleep, vitals, mood and cycle. No app store, no build step, and
-the video never leaves the device.
+<p align="center">V2 &nbsp;·&nbsp; <em>runs entirely in your browser — nothing to install, no server</em></p>
 
-It is the browser front end of [BioScout](https://github.com/basgoncalves/bioscout).
-The two repositories are kept apart on purpose. This one deploys as a static
-site on every push, and the Python package goes to PyPI without 45 MB of pose
-engine attached. They share the analysis core, and a test enforces that (see
-[Verification](#verification)).
+<p align="center"><strong>Movement tracking and musculoskeletal modelling in a web page.</strong></p>
+
+<p align="center">
+<a href="https://basgoncalves.github.io/bioscout-web/"><b>Open the app → basgoncalves.github.io/bioscout-web</b></a><br>
+The browser front end of <a href="https://pypi.org/project/bioscout/">BioScout</a> (Python) · see <a href="LICENSE">License</a>
+</p>
+
+---
+
+## Why BioScout Web
+
+Two things usually need a lab PC: filming a movement and turning it into joint
+angles and loads, and taking a motion-capture trial all the way through OpenSim
+to muscle and joint contact forces. BioScout Web does both in the browser.
+
+- **Record.** A phone camera feeds on-device pose estimation; the joint angles go
+  through inverse dynamics, and the result sits in a log of everything around it
+  (training, meals, weight, sleep, vitals, mood, cycle). The video never leaves
+  the device.
+- **Process.** Open lab files (force plates, EMG, motion capture, OpenSim results),
+  filter, plot and analyse them.
+- **Simulate.** Take a `.c3d` from marker and force-plate data through Scale,
+  inverse kinematics, inverse dynamics, muscle analysis, static optimisation,
+  joint reaction loads and a Python version of CEINMS — **in the browser, with no
+  OpenSim install and no lab-engine server.** The tools are pure-Python rewrites
+  (`py/pyosim`) running in [Pyodide](https://pyodide.org) (Python compiled to
+  WebAssembly), checked against OpenSim on the same data. Results and figures are
+  written straight into your folders, in the layout the Python BioScout reads.
+
+No app store, no build step. The two repositories are kept apart on purpose:
+this one deploys as a static site on every push, and the Python package goes to
+PyPI without 45 MB of pose engine attached. They share the analysis core, and a
+test enforces that (see [Verification](#verification)).
 
 **Contents:** [Quick start](#quick-start) · [How the app works](#how-the-app-works) ·
-[Module reference](#module-reference) · [Outputs](#outputs) ·
+[Simulate in the browser](#simulate-in-the-browser) · [Module reference](#module-reference) · [Outputs](#outputs) ·
 [What it measures](#what-it-measures-and-what-it-does-not) ·
 [Privacy](#privacy) · [Optional helpers](#optional-local-helpers) ·
 [Verification](#verification) · [Layout](#repository-layout)
@@ -54,6 +80,49 @@ npm test                     # every tests/test_*.mjs, nothing to install
 - Set your height first, because every output in metres scales with it.
 - For squats, stand still for a moment at the start. For pull-ups, start from
   a full dead hang.
+
+---
+
+## Simulate in the browser
+
+Simulate used to need the *lab engine*, a Python + OpenSim server on a lab PC.
+It does not any more: every step below runs in a Web Worker on your own computer,
+and files are read from and written to your folders through the browser's
+File System Access API (Chrome / Edge; other browsers get a `.zip`).
+
+| Step | What runs | Checked against OpenSim |
+|---|---|---|
+| C3D export | `c3dexport.js`: markers → `.trc`, force plates → `grf.mot`, analogs → `emg.mot` | — |
+| Scale | `pyosim/scale.py`: marker-pair scaling + marker placement, body mass from the static trial | — |
+| Inverse kinematics | `pyosim/ik.py`: weighted least squares per frame, couplers honoured; also writes `body_positions.sto` | joint angles within 0.015° |
+| Inverse dynamics | `pyosim/id.py`: batched Newton–Euler with the external loads | moments, 0.4 s for a trial |
+| Muscle analysis | `pyosim/muscles.py`, `ma.py`: paths with via points and cylinder / sphere wrapping, moment arms | lengths ~0.5 mm, moment arms ~1 mm (median) |
+| Static optimisation | `pyosim/so.py`: min Σ a², rigid-tendon Hill curves, reserve actuators | soleus 1607 vs 1603 N |
+| Joint reactions | `pyosim/jra.py`: subtree Newton–Euler with the muscle forces, in the child frame | vertical hip/knee within ~10 %, ankle ~2 % |
+| CEINMS (Python version) | `pyosim/ceinms.py`: calibration (strengths + EMG shape) and execution (α·moments + β·effort + γ·EMG; execution / loop / optimise) | **not CEINMS.exe** — same idea, simpler muscle model |
+
+Each step writes the figures the Python BioScout writes (marker errors, joint
+angles and moments with the skeleton and GRF at the events, residuals, muscle
+groups, muscle moments, joint reaction forces and their polar coverage plots).
+Residual reduction analysis is the one step still left to the lab engine, which
+can be connected for it.
+
+Three ways to run it, as tabs on the Simulate page:
+
+- **Step-by-step** — one section per tool, each with its own Run button, file
+  slots, setup `.xml` and output folder.
+- **Quick run** — pick a `.c3d` folder and a trial; every ticked step runs and the
+  results go to `<trial>_simulation/` next to the c3d. A *setup files* folder
+  (e.g. a project's `setupFiles/`) supplies the marker set, IK task set and scale
+  setup that match the lab's marker names. *Redo figures only* redraws every
+  figure from the files already there.
+- **Batch mode** — a BioScout project (`session.yaml`, `1_c3dfiles/`,
+  `2_experimental/`, `3_iterations/<iteration>/<trial>/…`): ticked steps for ticked
+  trials, one scaled model and one CEINMS calibration per iteration, outputs in
+  `external_biomechanics/`, `muscle_analysis/`, `static_optimisation/`,
+  `joint_contact_forces/` and `ceinms/` — the folders the Python BioScout opens.
+
+The first Simulate run downloads Pyodide with numpy and scipy (~20 s, then cached).
 
 ---
 
@@ -255,10 +324,17 @@ Writes a set in the Python bioscout session layout, so a phone trial and a
 Vicon trial of the same movement go through the same pipeline.
 
 <a id="osimlab"></a>
-#### `osimlab.js` · `process.js` · `proc_io.js` · `proc_dsp.js` · `simtools.js`
-The lab demo. It reads marker and force-plate files, then runs scaling, IK, ID,
-static optimisation and joint reaction on the Process page. The Simulate page
-has one OpenSim/CEINMS tool per section.
+#### `process.js` · `proc_io.js` · `proc_dsp.js`
+The Process page: reads marker, force-plate, EMG and OpenSim files, filters and plots them.
+
+<a id="simtools"></a>
+#### `simtools.js` · `simquick.js` · `simsession.js` · `localengine.js` · `pyosim_worker.js` · `py/pyosim/`
+The Simulate page and its three modes (see [Simulate in the browser](#simulate-in-the-browser)).
+`localengine.js` gives the page the same client API the lab engine had, but runs
+the tools in `pyosim_worker.js` (Pyodide) on the pure-Python OpenSim rewrites in
+`py/pyosim/`. `simfigs.js` and `simstack.js` draw the figures; `c3dexport.js`
+turns a `.c3d` into OpenSim files. `osimlab.js` still talks to a lab engine when
+one is connected (residual reduction analysis).
 
 ### Accounts, sharing, help
 
@@ -388,7 +464,8 @@ index.html  sw.js  manifest.webmanifest     the app, offline cache, PWA manifest
 privacy.html  limitations.html  formats.html   public notes linked from the app
 src/        ES modules, loaded directly (see Module reference)
 tests/      node tests/test_*.mjs  (npm test runs all)
-data/       force model, norms, muscle tables, reference fixture, OpenSim models
+data/       force model, norms, muscle tables, reference fixture, OpenSim models + setup files
+py/pyosim/  pure-Python OpenSim tools (scale, IK, ID, MA, SO, JRA, CEINMS version) run in Pyodide
 assets/     vendored MediaPipe, pose model, overlay meshes, icons (generated)
 supabase/   schema.sql and edge functions for accounts
 tools/      scripts you run: helpers, fixture tools, model/mesh/icon exporters
