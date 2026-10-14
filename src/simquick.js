@@ -18,7 +18,7 @@ import { makeZip } from "./zip.js";
 let T = (k) => k;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms_cal", "ceinms", "rra"]), export: true, setupDir: null, setupLoaded: false };
+export const Q = { file: null, staticFile: null, root: null, staticSeconds: 1.0, busy: false, log: [], done: null, skip: new Set(["ceinms_cal", "ceinms", "rra"]), export: true, setupDir: null, setupLoaded: false, c3ds: [] };
 Object.defineProperty(Q, "trial", { get: () => (Q.file && Q.file.file ? Q.file.file.name : "") });
 
 async function writeText(dir, name, data) { const w = await (await dir.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); }
@@ -81,6 +81,20 @@ async function pickSetupFiles(dir, names, log) {
   for (const [k, v] of Object.entries(best)) log(`setup files: ${v.file.name} as the ${k === "taskset" ? "IK task set" : k === "scale_setup" ? "scale setup" : "marker set"} (${v.hit} of ${v.of} names in the trial)`);
   return best;
 }
+
+/** The c3d's folder chosen first: one permission covers reading the trials and writing the results next to them. */
+async function pickC3dFolder() {
+  if (!window.showDirectoryPicker) return false;
+  let d; try { d = await window.showDirectoryPicker({ mode: "readwrite", id: "bioscout-c3d" }); } catch { return false; }
+  Q.root = d; await rememberDir(d);
+  Q.c3ds = []; for await (const [n, h] of d.entries()) if (h.kind === "file" && /\.c3d$/i.test(n)) Q.c3ds.push(n);
+  Q.c3ds.sort();
+  const motion = Q.c3ds.filter((n) => !/^static/i.test(n)), st = Q.c3ds.find((n) => /^static/i.test(n));
+  if (!Q.file || !Q.c3ds.includes(Q.trial)) await chooseTrial(motion[0] || Q.c3ds[0] || "");
+  if (st && !Q.staticFile) Q.staticFile = { handle: null, file: await (await d.getFileHandle(st)).getFile() };
+  return true;
+}
+async function chooseTrial(name) { Q.file = name ? { handle: null, file: await (await Q.root.getFileHandle(name)).getFile() } : null; Q.log = []; }
 
 /** The folder the results go to: asked once, opening in the c3d's own folder so it is one click. null -> a .zip instead. */
 async function resultsFolder() {
@@ -241,10 +255,14 @@ export function quickHTML(ctx) {
   T = ctx.t; const t = ctx.t;
   return `<div class="simModel" id="simQuick">
     <label>${t("sq_title")}</label>
-    <div class="simPick"><input type="text" readonly placeholder="${esc(t("sq_pickFile"))}" value="${esc(Q.trial)}">
+    <div class="simPick">${Q.c3ds.length && Q.root
+      ? `<select data-sq-trialsel>${Q.c3ds.map((n) => `<option value="${esc(n)}"${n === Q.trial ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>`
+      : `<input type="text" readonly placeholder="${esc(t("sq_pickFile"))}" value="${esc(Q.trial)}">`}
+      <button type="button" class="ghost" data-sq-pickdir title="${esc(t("sq_pickDir"))}">📁</button>
       <button type="button" class="ghost" data-sq-pick title="${esc(t("sq_pickFile"))}">🔍</button></div>
     <div class="simOpts" style="margin-top:6px">
       <label class="simOpt">${t("sq_static")} <span class="simPick" style="display:inline-flex"><input type="text" readonly style="width:180px" placeholder="${esc(t("sq_staticNone"))}" value="${esc(Q.staticFile ? Q.staticFile.file.name : "")}">
+        ${Q.c3ds.length && Q.root ? `<select data-sq-staticsel style="width:auto"><option value="">—</option>${Q.c3ds.map((n) => `<option value="${esc(n)}"${Q.staticFile && n === Q.staticFile.file.name ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>` : ""}
         <button type="button" class="ghost" data-sq-static>🔍</button>${Q.staticFile ? `<button type="button" class="ghost" data-sq-staticclear>${t("pr_remove")}</button>` : ""}</span></label>
       ${Q.staticFile ? "" : `<label class="simOpt">${t("sq_staticSeconds")} <input type="text" data-sq-sec value="${Q.staticSeconds}" style="width:70px"></label>`}
     </div>
@@ -272,10 +290,13 @@ export function quickWire(box, ctx, hooks) {
   const q = (s) => box.querySelector(s), on = (sel, ev, fn) => { const el = q(sel); if (el) el[ev] = fn; };
   on("[data-sq-pick]", "onclick", async () => {
     const r = await pickC3d(); if (!r) return;
-    Q.file = r; Q.root = null; Q.log = []; hooks.repaint();
+    Q.file = r; Q.root = null; Q.c3ds = []; Q.log = []; hooks.repaint();
     // a folder granted before is found by itself; only a new folder needs the one-time confirmation
     await resultsFolder(); hooks.repaint();
   });
+  on("[data-sq-pickdir]", "onclick", async () => { if (await pickC3dFolder()) hooks.repaint(); });
+  on("[data-sq-trialsel]", "onchange", async (e) => { await chooseTrial(e.target.value); hooks.repaint(); });
+  on("[data-sq-staticsel]", "onchange", async (e) => { Q.staticFile = e.target.value ? { handle: null, file: await (await Q.root.getFileHandle(e.target.value)).getFile() } : null; hooks.repaint(); });
   on("[data-sq-static]", "onclick", async () => { const r = await pickC3d(); if (!r) return; Q.staticFile = r; hooks.repaint(); });
   on("[data-sq-staticclear]", "onclick", () => { Q.staticFile = null; hooks.repaint(); });
   on("[data-sq-folder]", "onclick", async () => { await resultsFolder(); hooks.repaint(); });
