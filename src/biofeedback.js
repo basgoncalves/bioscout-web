@@ -16,6 +16,7 @@
 import { bodyMapHTML, REGIONS } from "./bodymap.js";
 import { loadForceModel, predictForces } from "./forces.js";
 import { makeZip } from "./zip.js";
+import { jointLoadSVG } from "./jointload.js";
 
 const L = { sh: [11, 12], el: [13, 14], wr: [15, 16], hip: [23, 24], kn: [25, 26], an: [27, 28] };
 const side = (s) => (s === "R" ? 1 : 0);
@@ -150,18 +151,22 @@ export const LOAD_KEYS = ["hipJCF", "kneeJCF", "ankleJCF", "quadsF", "glutesF", 
 /* Movement presets: which metrics make sense and a starting threshold. */
 export const MOVES = {
   squat:  { label: "bfb_mv_squat",  bar: "shoulders", metrics: ["kneeFlex", "valgus", "hipFlex", "ankleDF", "trunkLean", "barY", "barX", "barVel", "barPow", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 70, dir: "above" },
-  lunge:  { label: "bfb_mv_lunge",  metrics: ["kneeFlex", "valgus", "hipFlex", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 80, dir: "above" },
+  deadlift:{ label: "bfb_mv_deadlift", bar: "hands", metrics: ["trunkLean", "hipFlex", "kneeFlex", "barY", "barX", "barVel", "barPow", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "trunkLean", thr: 60, dir: "above" },
+  pullup: { label: "bfb_mv_pullup", metrics: ["elbowFlex", "shAbd"], def: "elbowFlex", thr: 100, dir: "above" },
+  slsquat:{ label: "bfb_mv_slsquat", metrics: ["kneeFlex", "valgus", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 60, dir: "above" },
+  sj:     { label: "bfb_mv_sj",     metrics: ["jumpHeight", "flightTime", "cmKnee", "cmHip", "cmAnkle", "landKnee", "kneeFlex", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 90, dir: "above" },
   cmj:    { label: "bfb_mv_cmj",    metrics: ["jumpHeight", "flightTime", "cmKnee", "cmHip", "cmAnkle", "landKnee", "kneeFlex", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 90, dir: "above" },
   shot:   { label: "bfb_mv_shot",   metrics: ["shotElbow", "shotShoulder", "shotKnee", "shotTrunk", "shotJump", "elbowFlex", "shAbd", "kneeFlex", "trunkLean"], def: "elbowFlex", thr: 20, dir: "below" },
-  curl:   { label: "bfb_mv_curl",   metrics: ["elbowFlex"], def: "elbowFlex", thr: 110, dir: "above" },
-  raise:  { label: "bfb_mv_raise",  metrics: ["shAbd"], def: "shAbd", thr: 90, dir: "above" },
+  kick:   { label: "bfb_mv_kick",   metrics: ["hipFlex", "kneeFlex", "trunkLean", "ankleDF", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "hipFlex", thr: 60, dir: "above" },
+  stroke: { label: "bfb_mv_stroke", metrics: ["shAbd", "elbowFlex", "trunkLean", "kneeFlex", "hipFlex"], def: "shAbd", thr: 90, dir: "above" },
+  lunge:  { label: "bfb_mv_lunge",  metrics: ["kneeFlex", "valgus", "hipFlex", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 80, dir: "above" },
   hinge:  { label: "bfb_mv_hinge",  metrics: ["trunkLean", "hipFlex", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "trunkLean", thr: 45, dir: "above" },
   pushup: { label: "bfb_mv_pushup", metrics: ["elbowFlex", "hipFlex"], def: "elbowFlex", thr: 90, dir: "above" },
   dip:    { label: "bfb_mv_dip",    metrics: ["elbowFlex", "trunkLean"], def: "elbowFlex", thr: 90, dir: "above" },
   ohpress:{ label: "bfb_mv_ohpress",metrics: ["shAbd", "elbowFlex", "trunkLean"], def: "shAbd", thr: 160, dir: "above" },
-  pullup: { label: "bfb_mv_pullup", metrics: ["elbowFlex", "shAbd"], def: "elbowFlex", thr: 100, dir: "above" },
+  curl:   { label: "bfb_mv_curl",   metrics: ["elbowFlex"], def: "elbowFlex", thr: 110, dir: "above" },
   row:    { label: "bfb_mv_row",    metrics: ["elbowFlex", "trunkLean", "hipFlex"], def: "elbowFlex", thr: 90, dir: "above" },
-  deadlift:{ label: "bfb_mv_deadlift", bar: "hands", metrics: ["trunkLean", "hipFlex", "kneeFlex", "barY", "barX", "barVel", "barPow", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "trunkLean", thr: 60, dir: "above" },
+  raise:  { label: "bfb_mv_raise",  metrics: ["shAbd"], def: "shAbd", thr: 90, dir: "above" },
   bridge: { label: "bfb_mv_bridge", metrics: ["hipFlex", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "hipFlex", thr: 15, dir: "below" },
   plank:  { label: "bfb_mv_plank",  metrics: ["hipFlex", "neckFlex"], def: "hipFlex", thr: 15, dir: "above" },
   heelraise:{ label: "bfb_mv_heelraise", metrics: ["ankleDF", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "ankleDF", thr: -15, dir: "below" },
@@ -176,7 +181,7 @@ export const MOVES = {
 }
 /* Movements scored per event (jump / shot): their table rows come from the
  * event detectors only, not from the cycle finder as well. */
-const EVENT_MOVES = new Set(["cmj", "shot"]);
+const EVENT_MOVES = new Set(["cmj", "sj", "shot"]);
 /* Hysteresis default per unit: 3 deg is sensible, 3 body weights is not. */
 const HYST = { "°": 3, BW: 0.3, cm: 2, ms: 30, "m/s": 0.05, W: 50 };
 
@@ -222,16 +227,16 @@ const PULSE_MS = 1500;
  * glutes, shoulders and triceps), so tapping calves offers it too. */
 export const REGION_MOVES = {
   neck: ["neck"],
-  shoulders: ["ohpress", "raise", "pushup", "dip", "shot"],
+  shoulders: ["ohpress", "raise", "pushup", "dip", "shot", "stroke"],
   chest: ["pushup", "dip"],
-  back: ["row", "pullup", "deadlift", "hinge"],
+  back: ["deadlift", "pullup", "row", "hinge", "stroke"],
   biceps: ["curl", "pullup", "row"],
   triceps: ["pushup", "dip", "ohpress", "shot"],
-  core: ["plank", "deadlift", "bridge", "hinge"],
-  glutes: ["squat", "lunge", "bridge", "deadlift", "hinge", "cmj", "shot"],
-  quads: ["squat", "lunge", "cmj", "shot"],
-  hamstrings: ["deadlift", "hinge", "bridge", "cmj"],
-  calves: ["heelraise", "cmj", "shot"],
+  core: ["plank", "deadlift", "bridge", "hinge", "stroke", "kick"],
+  glutes: ["squat", "deadlift", "slsquat", "sj", "cmj", "shot", "kick", "lunge", "bridge", "hinge"],
+  quads: ["squat", "slsquat", "sj", "cmj", "shot", "kick", "lunge"],
+  hamstrings: ["deadlift", "hinge", "bridge", "cmj", "sj", "kick"],
+  calves: ["heelraise", "sj", "cmj", "shot"],
 };
 export const regionsOfMove = (mv) => REGIONS.filter((r) => (REGION_MOVES[r] || []).includes(mv));
 
@@ -405,7 +410,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const mn = m.unit === DEG ? -90 : 0;
     $("bfbThr").max = mx; $("bfbThrN").max = mx; $("bfbThr").min = mn; $("bfbThrN").min = mn;
     $("bfbUnit").textContent = m.unit;
-    $("bfbHint").textContent = [cfg.move === "shot" ? tr("bfb_hintShot") : cfg.move === "cmj" ? tr("bfb_hintJump") : "",
+    $("bfbHint").textContent = [cfg.move === "shot" ? tr("bfb_hintShot") : cfg.move === "cmj" || cfg.move === "sj" ? tr("bfb_hintJump") : "",
       m.load ? tr("bfb_hintLoad") : ""].filter(Boolean).join(" ");
     $("bfbHystUnit").textContent = m.unit;
     $("bfbHyst").step = m.unit === "BW" ? "0.1" : "1";
@@ -814,7 +819,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       } else $("bfbCamNote").textContent = tr("bfb_barScale");
     }
     const val = (k) => METRICS[k].f(w, img, head, ld, bb) - ((cfg.zero && cfg.zero[k]) || 0);
-    const o = recordFrame(ts, val, mv) || {};
+    const o = recordFrame(ts, val, mv, w) || {};
     if (m.ev) return;                       // event metrics update on their own
     const sm = (prev, x) => (Number.isFinite(x) ? (Number.isFinite(prev) ? prev + 0.35 * (x - prev) : x) : NaN);
     let shown;
@@ -917,11 +922,13 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     }
     return o;
   }
-  function recordFrame(ts, val, mv) {
+  function recordFrame(ts, val, mv, w) {
     if (rec.t0 == null) rec.t0 = ts;
     const keys = liveKeys(mv); if (!keys.length) return {};
     const o = readAll(val, keys);
-    if (rec.samples.length < 200000) rec.samples.push({ t: (ts - rec.t0) / 1000, move: cfg.move, ...o });
+    // _c: the frame's model coordinates (liveCoords), for the rep report's
+    // stick figures and contact-force dials. Not exported as columns.
+    if (rec.samples.length < 200000) rec.samples.push({ t: (ts - rec.t0) / 1000, move: cfg.move, ...o, _c: w ? liveCoords(w) : null });
     // main signal: the side further from rest (either side counts)
     const mk = mainKey(mv), mm = METRICS[mk]; if (!mm || mm.ev || EVENT_MOVES.has(cfg.move)) return o;
     const xs = mm.pair ? [o[mk + "_L"], o[mk + "_R"]].filter(Number.isFinite) : [o[mk]].filter(Number.isFinite);
@@ -985,65 +992,136 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   /* Rep report: everything recorded for one row, in a window, while the
    * session keeps recording underneath. Cycle rows have their sample range;
    * a jump / shot shows the 2.5 s before and 1 s after it. */
-  function openRep(move, idx) {
+  /* Rep report, in the recorder's format: the joint-load figure (stick
+   * figures at the rep's key instants, vertical GRF, polar contact-force
+   * dials; jointload.js, sagittal / frontal, left / right), then one line
+   * plot with a menu of every variable, over 0-100 % of the rep. Above it,
+   * the rep's values with left and right side by side; a pair whose sides
+   * differ by more than 15 % is marked orange. Recording carries on. */
+  const SIDE_L = "#2f9e5f", SIDE_R = "#d1493f", ASYM = 0.15;
+  const RECORDER_ACT = { squat: "squat", slsquat: "slsquat", cmj: "cmj", sj: "sj", shot: "jumpshot" };
+  async function openRep(move, idx) {
     const row = rec.rows[move][idx]; if (!row) return;
-    const smp = row.i0 != null ? rec.samples.slice(row.i0, row.i1 + 1)
-      : rec.samples.filter((x) => x.t > row.t - 2.5 && x.t < row.t + 1 && x.move === move);
-    const cols = columns(move);
-    const u = (k) => METRICS[k].unit;
-    const vals = cols.map((k) => `<tr><td>${esc(short(k))}</td><td>${METRICS[k].pair
-      ? `L ${cell(row[k + "_L"], u(k))} · R ${cell(row[k + "_R"], u(k))}` : cell(row[k], u(k))} ${esc(u(k))}</td></tr>`).join("");
-    const keys = [...new Set(Object.keys(smp[0] || {}).filter((c) => c !== "t" && c !== "move").map((c) => c.replace(/_[LR]$/, "")))];
-    const repVals = Object.keys(REPCOLS).filter((k) => k in row).map((k) => `<tr><td>${esc(tr(REPCOLS[k][0]))}</td><td>${repCell(k, row[k])} ${REPCOLS[k][1]}</td></tr>`).join("");
-    const hasPath = smp.some((x) => Number.isFinite(x.barY));
+    const smp = (row.i0 != null ? rec.samples.slice(row.i0, row.i1 + 1)
+      : rec.samples.filter((x) => x.t > row.t - 2.5 && x.t < row.t + 1 && x.move === move)).filter((x) => x._c);
+    const cols = columns(move), u = (k) => METRICS[k].unit;
+    const asym = (l, r) => Number.isFinite(l) && Number.isFinite(r) && Math.max(Math.abs(l), Math.abs(r)) > 1e-6
+      && Math.abs(l - r) / Math.max(Math.abs(l), Math.abs(r)) > ASYM;
+    const valRows = cols.map((k) => {
+      const m = METRICS[k];
+      if (!m.pair) return `<tr><td>${esc(short(k))}</td><td colspan="3" class="num">${cell(row[k], u(k))} ${esc(u(k))}</td></tr>`;
+      const l = row[k + "_L"], r = row[k + "_R"], bad = asym(l, r);
+      const d = Number.isFinite(l) && Number.isFinite(r) && Math.max(Math.abs(l), Math.abs(r)) > 1e-6
+        ? ((l - r) / Math.max(Math.abs(l), Math.abs(r)) * 100).toFixed(0) + " %" : "–";
+      return `<tr class="${bad ? "asym" : ""}"><td>${esc(short(k))} <small>(${esc(u(k))})</small></td>
+        <td class="num">${cell(l, u(k))}</td><td class="num">${cell(r, u(k))}</td><td class="num">${d}</td></tr>`;
+    }).join("");
+    const repVals = Object.keys(REPCOLS).filter((k) => k in row).map((k) =>
+      `<tr><td>${esc(tr(REPCOLS[k][0]))} <small>(${REPCOLS[k][1]})</small></td><td colspan="3" class="num">${repCell(k, row[k])}</td></tr>`).join("");
+    const evVals = Object.keys(row).filter((k) => METRICS[k] && METRICS[k].ev).map((k) =>
+      `<tr><td>${esc(short(k))} <small>(${esc(u(k))})</small></td><td colspan="3" class="num">${cell(row[k], u(k))}</td></tr>`).join("");
+    // every variable recorded in this rep, for the line plot's menu
+    const vars = [...new Set(Object.keys(smp[0] || {}).filter((c) => !["t", "move", "_c"].includes(c)).map((c) => c.replace(/_[LR]$/, "")))]
+      .filter((k) => METRICS[k]);
     const dlg = document.createElement("dialog"); dlg.className = "bfbRep";
     dlg.innerHTML = `<div class="lmHead"><b>${esc(tr(MOVES[move].label))} · ${esc(tr("bfb_rep"))} ${idx + 1}</b>
         <button type="button" class="ghost lmX" aria-label="Close">✕</button></div>
       <p class="note">t = ${row.t.toFixed(1)} s${row.dur != null ? ` · ${esc(tr("bfb_dur"))} ${row.dur.toFixed(1)}` : ""}${row.hit ? " · ✓" : ""}</p>
-      <table class="bfbRepVals"><tbody>${repVals}${vals}</tbody></table>
-      ${hasPath ? `<div class="note">${esc(tr("bfb_barPath"))}</div><canvas class="bfbPath" width="300" height="300"></canvas>` : ""}
-      <div class="bfbRepPlots">${keys.map((k) => `<div><div class="note">${esc(short(k))} (${esc(u(k))})</div><canvas data-k="${k}" height="110"></canvas></div>`).join("")}</div>`;
+      <table class="bfbRepVals"><thead><tr><th></th><th class="num"><i class="swatch" style="background:${SIDE_L}"></i>${esc(tr("leftShort"))}</th>
+        <th class="num"><i class="swatch" style="background:${SIDE_R}"></i>${esc(tr("rightShort"))}</th><th class="num">L−R</th></tr></thead>
+        <tbody>${repVals}${evVals}${valRows}</tbody></table>
+      <p class="note">${esc(tr("bfb_asymNote"))}</p>
+      <div class="bfbJL"></div>
+      ${smp.some((x) => Number.isFinite(x.barY)) ? `<div class="note">${esc(tr("bfb_barPath"))}</div><canvas class="bfbPath" width="300" height="300"></canvas>` : ""}
+      <div class="row bfbRow"><label><span data-i18n="bfb_repVar">${esc(tr("bfb_repVar"))}</span><select class="bfbRepSel">${vars.map((k) =>
+        `<option value="${k}"${k === (vars.includes(cfg.metric) ? cfg.metric : vars[0]) ? " selected" : ""}>${esc(short(k))} (${esc(u(k))})</option>`).join("")}</select></label></div>
+      <canvas class="bfbRepPlot" height="220"></canvas>`;
     document.body.appendChild(dlg);
-    dlg.querySelector(".lmX").onclick = () => { dlg.close(); dlg.remove(); };
+    dlg.querySelector(".lmX").onclick = () => dlg.close();
     dlg.addEventListener("close", () => dlg.remove());
     dlg.showModal();
     const css = getComputedStyle(document.documentElement);
-    const ink = css.getPropertyValue("--muted").trim() || "#999", acc = css.getPropertyValue("--accent").trim() || "#4fb3a0";
-    /* Bar path: side view, x = ahead of mid-foot, y = height; equal scales. */
-    const pc = dlg.querySelector("canvas.bfbPath");
-    if (pc) {
-      const pts = smp.filter((x) => Number.isFinite(x.barY) && Number.isFinite(x.barX)), c = pc.getContext("2d");
-      const ys = pts.map((p) => p.barY), xs = pts.map((p) => p.barX);
-      const span = Math.max(20, Math.max(...ys) - Math.min(...ys), 2 * Math.max(10, ...xs.map(Math.abs))) * 1.15;
-      const cy = (Math.max(...ys) + Math.min(...ys)) / 2, S = 280 / span;
-      const X = (x) => 150 + x * S, Y = (y) => 150 - (y - cy) * S;
-      c.strokeStyle = ink; c.setLineDash([4, 3]); c.beginPath(); c.moveTo(150, 4); c.lineTo(150, 296); c.stroke(); c.setLineDash([]);
-      c.fillStyle = ink; c.font = "10px system-ui, sans-serif"; c.fillText(tr("bfb_midfoot"), 154, 292);
-      c.strokeStyle = "#ffd54a"; c.lineWidth = 3; c.beginPath();
-      pts.forEach((p, i) => (i ? c.lineTo(X(p.barX), Y(p.barY)) : c.moveTo(X(p.barX), Y(p.barY)))); c.stroke();
-      if (pts.length) { c.fillStyle = acc; c.beginPath(); c.arc(X(pts[0].barX), Y(pts[0].barY), 5, 0, 7); c.fill(); }
-    }
-    for (const cv of dlg.querySelectorAll("canvas[data-k]")) {
-      const k = cv.dataset.k, W = cv.clientWidth || 400, H = 110, dpr = window.devicePixelRatio || 1;
+    const ink = css.getPropertyValue("--muted").trim() || "#999";
+
+    /* line plot, % of the rep */
+    const drawLine = () => {
+      const k = dlg.querySelector(".bfbRepSel").value, cv = dlg.querySelector(".bfbRepPlot");
+      const W = cv.clientWidth || 600, H = 220, dpr = window.devicePixelRatio || 1;
       cv.width = W * dpr; cv.height = H * dpr; const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const ser = METRICS[k].pair ? [[k + "_L", acc], [k + "_R", "#e8823a"]] : [[k, acc]];
+      const ser = METRICS[k].pair ? [[k + "_L", SIDE_L, tr("leftShort")], [k + "_R", SIDE_R, tr("rightShort")]] : [[k, SIDE_R, ""]];
       const all = smp.flatMap((x) => ser.map(([col]) => x[col])).filter(Number.isFinite);
-      if (!all.length || smp.length < 2) continue;
+      if (!all.length || smp.length < 2) return;
       let lo = Math.min(...all), hi = Math.max(...all);
       if (k === cfg.metric) { lo = Math.min(lo, cfg.thr); hi = Math.max(hi, cfg.thr); }
       const pd = (hi - lo) * 0.1 || 1; lo -= pd; hi += pd;
-      const t0 = smp[0].t, t1 = smp[smp.length - 1].t || t0 + 1;
-      const X = (t) => 30 + ((t - t0) / (t1 - t0 || 1)) * (W - 36), Y = (v) => 6 + (1 - (v - lo) / (hi - lo)) * (H - 20);
-      c.font = "10px system-ui, sans-serif"; c.fillStyle = ink;
-      c.fillText(hi.toFixed(0), 2, 12); c.fillText(lo.toFixed(0), 2, H - 14); c.fillText((t1 - t0).toFixed(1) + " s", W - 34, H - 2);
-      if (k === cfg.metric) { c.setLineDash([5, 3]); c.strokeStyle = "#ffd54a"; c.beginPath(); c.moveTo(30, Y(cfg.thr)); c.lineTo(W - 6, Y(cfg.thr)); c.stroke(); c.setLineDash([]); }
+      const t0 = smp[0].t, t1 = smp[smp.length - 1].t;
+      const X = (t) => 40 + ((t - t0) / (t1 - t0 || 1)) * (W - 50), Y = (v) => 10 + (1 - (v - lo) / (hi - lo)) * (H - 34);
+      c.font = "11px system-ui, sans-serif"; c.fillStyle = ink; c.strokeStyle = ink; c.globalAlpha = 0.3;
+      for (const f of [0, 0.25, 0.5, 0.75, 1]) { const y = 10 + f * (H - 34); c.beginPath(); c.moveTo(40, y); c.lineTo(W - 10, y); c.stroke(); }
+      c.globalAlpha = 1;
+      for (const f of [0, 0.5, 1]) { const v = hi - f * (hi - lo); c.fillText(v.toFixed(u(k) === "BW" || u(k) === "m/s" ? 1 : 0), 2, 14 + f * (H - 34)); }
+      for (const p of [0, 25, 50, 75, 100]) c.fillText(p + " %", 40 + (p / 100) * (W - 50) - (p === 100 ? 26 : 0), H - 4);
+      if (k === cfg.metric) { c.setLineDash([6, 4]); c.strokeStyle = "#ffd54a"; c.beginPath(); c.moveTo(40, Y(cfg.thr)); c.lineTo(W - 10, Y(cfg.thr)); c.stroke(); c.setLineDash([]); }
       for (const [col, color] of ser) {
-        c.strokeStyle = color; c.lineWidth = 2; c.beginPath(); let pen = false;
+        c.strokeStyle = color; c.lineWidth = 2.2; c.beginPath(); let pen = false;
         for (const x of smp) { const v = x[col]; if (!Number.isFinite(v)) { pen = false; continue; } pen ? c.lineTo(X(x.t), Y(v)) : c.moveTo(X(x.t), Y(v)); pen = true; }
         c.stroke();
       }
-      if (row.ev) { c.strokeStyle = ink; c.beginPath(); c.moveTo(X(row.t), 4); c.lineTo(X(row.t), H - 14); c.stroke(); }
+      c.textAlign = "right"; let lx = W - 10;
+      for (const [, color, name] of ser.slice().reverse()) if (name) { c.fillStyle = color; c.fillText(name, lx, 12); lx -= c.measureText(name).width + 10; }
+      c.textAlign = "left";
+    };
+    dlg.querySelector(".bfbRepSel").onchange = drawLine;
+    drawLine();
+
+    /* bar path */
+    const pc = dlg.querySelector("canvas.bfbPath");
+    if (pc) {
+      const pts = smp.filter((x) => Number.isFinite(x.barY) && Number.isFinite(x.barX)), c = pc.getContext("2d");
+      if (pts.length) {
+        const ys = pts.map((q) => q.barY), xs = pts.map((q) => q.barX);
+        const span = Math.max(20, Math.max(...ys) - Math.min(...ys), 2 * Math.max(10, ...xs.map(Math.abs))) * 1.15;
+        const cy = (Math.max(...ys) + Math.min(...ys)) / 2, S = 280 / span, X = (x) => 150 + x * S, Y = (y) => 150 - (y - cy) * S;
+        c.strokeStyle = ink; c.setLineDash([4, 3]); c.beginPath(); c.moveTo(150, 4); c.lineTo(150, 296); c.stroke(); c.setLineDash([]);
+        c.fillStyle = ink; c.font = "10px system-ui, sans-serif"; c.fillText(tr("bfb_midfoot"), 154, 292);
+        c.strokeStyle = "#ffd54a"; c.lineWidth = 3; c.beginPath();
+        pts.forEach((q, i) => (i ? c.lineTo(X(q.barX), Y(q.barY)) : c.moveTo(X(q.barX), Y(q.barY)))); c.stroke();
+        c.fillStyle = SIDE_L; c.beginPath(); c.arc(X(pts[0].barX), Y(pts[0].barY), 5, 0, 7); c.fill();
+      }
     }
+
+    /* joint-load figure: the surrogate re-run over the whole rep (loads,
+     * vectors and magnitudes), drawn by the recorder's jointLoadSVG. */
+    const box = dlg.querySelector(".bfbJL");
+    if (smp.length < 6) { box.innerHTML = ""; return; }
+    box.innerHTML = `<p class="note">${esc(tr("bfb_loadLoading"))}</p>`;
+    let model;
+    try { model = await loadEst.load(); } catch { box.innerHTML = `<p class="note">${esc(tr("bfb_loadFail"))}</p>`; return; }
+    const coords = {}; for (const key of Object.keys(smp[0]._c)) coords[key] = smp.map((x) => x._c[key]);
+    const times = smp.map((x) => x.t - smp[0].t);
+    const body = cfg.mass || 75, ext = MOVES[move] && MOVES[move].bar ? cfg.load || 0 : 0;
+    const out = predictForces(model, coords, smp.length, { massKg: body + ext, heightM: cfg.height || 1.75, times });
+    const repObj = { coords, times, loads: out.loads, loadNames: out.loadNames, jrf: out.jrf, jrfNames: out.jrfNames };
+    let plane = "sagittal", side = "r";
+    const act = RECORDER_ACT[move] || "squat";
+    const paint = () => {
+      const fig = repObj.loads ? jointLoadSVG(repObj, { plane, side, activity: act,
+        spec: move === "cmj" || move === "sj" ? { jump: true } : move === "shot" ? { shot: true } : {},
+        massKg: body, externalKg: ext, heightM: cfg.height || 1.75, colors: { l: SIDE_L, r: SIDE_R }, tr }) : null;
+      if (!fig) { box.innerHTML = ""; return; }
+      const b = (grp, v, label, col) => `<label class="${(grp === "plane" ? plane : side) === v ? "on" : ""}"><input type="radio" name="bjl_${grp}" value="${v}"${
+        (grp === "plane" ? plane : side) === v ? " checked" : ""}>${col ? `<i class="swatch" style="background:${col};margin:0"></i>` : ""}${esc(label)}</label>`;
+      const pk = Object.entries(fig.peaks).map(([j, v]) => `${tr("jl_" + j)} ${v.toFixed(1)}`).join(" · ");
+      box.innerHTML = `<h3 style="margin:10px 0 4px">${esc(tr("jlTitle"))}</h3>
+        <div class="jmpick">${b("plane", "sagittal", tr("jlViewSagittal"))}${b("plane", "frontal", tr("jlViewFrontal"))}
+          <span style="flex:0 0 8px"></span>${b("side", "l", tr("leftShort"), SIDE_L)}${b("side", "r", tr("rightShort"), SIDE_R)}</div>
+        ${fig.svg}<p class="jmpeaks">${esc(tr("jlPeaks", { peaks: pk }))}</p>
+        <p class="note">${esc(tr("jlNote"))} ${esc(tr("jlNoteGrfModel"))}${plane === "frontal" ? " " + esc(tr("jlNoteFrontal")) : ""}${ext ? " " + esc(tr("bfb_loadNote")) : ""}</p>`;
+      for (const inp of box.querySelectorAll("input[type=radio]")) inp.onchange = () => {
+        if (inp.name === "bjl_plane") plane = inp.value; else side = inp.value; paint();
+      };
+    };
+    paint();
   }
   $("bfbTables").addEventListener("click", (e) => {
     const tr_ = e.target.closest("tr[data-row]"); if (!tr_) return;
@@ -1097,7 +1175,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       files.push({ name: `summary_${move}.csv`, data: csv(rows, cols) });
     }
     if (rec.samples.length) {
-      const cols = ["t", "move", ...[...new Set(rec.samples.flatMap((r) => Object.keys(r)))].filter((c) => c !== "t" && c !== "move")];
+      const cols = ["t", "move", ...[...new Set(rec.samples.flatMap((r) => Object.keys(r)))].filter((c) => c !== "t" && c !== "move" && c !== "_c")];
       files.push({ name: "timeseries.csv", data: csv(rec.samples, cols) });
     }
     files.push({ name: "settings.json", data: JSON.stringify({ saved: new Date().toISOString(), source: cfg.src, movement: cfg.move,

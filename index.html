@@ -618,7 +618,11 @@ try {
   dialog.bfbRep { width:min(900px, 96vw); max-width:96vw; max-height:90vh; overflow:auto; padding:12px; border-radius:12px; border:1px solid var(--line, #333); background:var(--card); color:var(--ink); }
   dialog.bfbRep .lmHead { display:flex; justify-content:space-between; align-items:center; }
   dialog.bfbRep .lmX { width:auto; margin:0; padding:4px 10px; }
-  .bfbRepVals { font-size:13px; margin:6px 0; }
+  .bfbRepVals { font-size:13px; margin:6px 0; width:100%; }
+  .bfbRepVals td.num, .bfbRepVals th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .bfbRepVals tr.asym td { color:#e8823a; font-weight:600; }
+  dialog.bfbRep .bfbRepPlot { width:100%; height:220px; display:block; border:1px solid var(--line, #333); border-radius:6px; }
+  dialog.bfbRep .bfbJL svg { width:100%; height:auto; }
   dialog.bfbRep canvas.bfbPath { width:300px; height:300px; max-width:100%; display:block; margin:4px 0 10px; border:1px solid var(--line, #333); border-radius:6px; }
   .bfbRepPlots { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px; }
   .bfbRepPlots canvas { width:100%; height:110px; display:block; background:var(--bg, transparent); border:1px solid var(--line, #333); border-radius:6px; }
@@ -1510,28 +1514,28 @@ try {
         <label for="activity" data-i18n="movement">Movement</label>
         <select id="activity">
           <option value="auto" data-i18n="auto">Detect automatically</option>
-          <option value="pullup" data-i18n="pullup">Pull-up</option>
-          <option value="dip" data-i18n="dip">Dip</option>
-          <option value="pushup" data-i18n="pushup">Push-up</option>
-          <option value="jumpshot" data-i18n="jumpshot">Basketball jump shot</option>
-          <option value="stroke" data-i18n="stroke">Tennis / padel strokes</option>
-          <option value="kick" data-i18n="kick">Football kick</option>
           <option value="squat" data-i18n="squat">Squat</option>
-          <option value="cmj" data-i18n="cmj">Countermovement jump</option>
-          <option value="sj" data-i18n="sj">Squat jump</option>
-          <option value="slsquat" data-i18n="slsquat">Single-leg squat</option>
-          <option value="heelraise" data-i18n="heelraise">Heel raises (tip-toe)</option>
-          <option value="kickback" data-i18n="kickback">Glute kick back</option>
           <option value="deadlift" data-i18n="deadlift">Deadlift / RDL</option>
+          <option value="pullup" data-i18n="pullup">Pull-up</option>
+          <option value="slsquat" data-i18n="slsquat">Single-leg squat</option>
+          <option value="sj" data-i18n="sj">Squat jump</option>
+          <option value="cmj" data-i18n="cmj">Countermovement jump</option>
+          <option value="jumpshot" data-i18n="jumpshot">Basketball jump shot</option>
+          <option value="kick" data-i18n="kick">Football kick</option>
+          <option value="stroke" data-i18n="stroke">Tennis / padel strokes</option>
           <option value="lunge" data-i18n="lunge">Lunge / split squat</option>
-          <option value="bridge" data-i18n="bridge">Glute bridge / hip thrust</option>
-          <option value="wallsit" data-i18n="wallsit">Wall sit</option>
-          <option value="plank" data-i18n="plank">Plank</option>
-          <option value="sideplank" data-i18n="sideplank">Side plank</option>
+          <option value="pushup" data-i18n="pushup">Push-up</option>
+          <option value="dip" data-i18n="dip">Dip</option>
           <option value="ohpress" data-i18n="ohpress">Overhead press</option>
           <option value="curl" data-i18n="curl">Biceps curl</option>
           <option value="row" data-i18n="row">Bent-over row</option>
           <option value="raise" data-i18n="raise">Lateral / front raise</option>
+          <option value="heelraise" data-i18n="heelraise">Heel raises (tip-toe)</option>
+          <option value="kickback" data-i18n="kickback">Glute kick back</option>
+          <option value="bridge" data-i18n="bridge">Glute bridge / hip thrust</option>
+          <option value="wallsit" data-i18n="wallsit">Wall sit</option>
+          <option value="plank" data-i18n="plank">Plank</option>
+          <option value="sideplank" data-i18n="sideplank">Side plank</option>
           <option value="walk" data-i18n="walk">Walking</option>
           <option value="run" data-i18n="run">Running</option>
           <option value="sidestep" data-i18n="sidestep">Side step</option>
@@ -1795,8 +1799,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 43;
-window.BUILD_AT = "2026-10-15 19:17";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 44;
+window.BUILD_AT = "2026-10-15 19:22";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
