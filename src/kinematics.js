@@ -2556,6 +2556,7 @@ export const DEFAULT_SHOT_CFG = {
 export function buildShotFeatures(poses, cfg = DEFAULT_SHOT_CFG) {
   const F = buildJumpFeatures(poses);
   const shotFacing = facingSign(poses);
+  F._facing = shotFacing;
   const frames = Object.keys(poses).map(Number).sort((a, b) => a - b);
   const n = F._n, lo = F._lo;
   for (const k of ["wrist_y_l", "wrist_y_r", "wrist_x_l", "wrist_x_r",
@@ -2793,7 +2794,21 @@ export function shotMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_SHOT_CFG) {
     }
     if (P.length) { pPeak = Math.max(...P); pMean = P.reduce((x, y) => x + y, 0) / P.length; }
   }
+  /* The shot path: the shooting wrist from the dip to just past release, as
+   * height above the floor against horizontal distance from the release point,
+   * positive in the direction the athlete faces (toward the basket). Metres. */
+  const path = { x: [], y: [], rel: 0 };
+  if (pxPerM > 0) {
+    const fc = F._facing || 1, stop = Math.min(F._n - 1, rel + Math.round(0.1 * fps));
+    for (let i = dip; i <= stop; i++) {
+      if (!isNum(wx[i]) || !isNum(wristY[i])) continue;
+      if (i === rel) path.rel = path.x.length;
+      path.x.push(+(fc * (wx[i] - wx[rel]) / pxPerM).toFixed(3));
+      path.y.push(+((F._floorY - wristY[i]) / pxPerM).toFixed(3));
+    }
+  }
   const extras = {
+    shot_path: path.x.length > 2 ? path : null,
     release_speed_ms: isNum(vRel) ? +vRel.toFixed(2) : null,
     release_angle_deg: isNum(angRel) ? +angRel.toFixed(1) : null,
     peak_power_wkg: isNum(pPeak) ? +pPeak.toFixed(1) : null,

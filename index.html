@@ -1652,8 +1652,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 13;
-window.BUILD_AT = "2026-10-15 08:55";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 14;
+window.BUILD_AT = "2026-10-15 09:40";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -10284,6 +10284,35 @@ function strokePanel(res) {
     <p class="note" style="margin-top:10px">${how} ${tr("strokeNoteHand")}</p>`;
 }
 
+/* The shot path: the shooting hand from the dip to release, one small panel per
+ * shot on shared axes (height vs horizontal distance from release, toward the
+ * basket to the right), release as a red dot -- the profile-view windup plot. */
+function shotPathPanel(res) {
+  const shots = res.reps.filter((r) => !r.removed && r.shot_path);
+  if (!shots.length) return "";
+  const all = shots.flatMap((r) => r.shot_path.x.map((x, i) => [x, r.shot_path.y[i]]));
+  const xs = all.map((p) => p[0]), ys = all.map((p) => p[1]);
+  const xr = Math.max(0.6, ...xs.map(Math.abs)) * 1.1, y0 = Math.max(0, Math.min(...ys) - 0.1), y1 = Math.max(...ys) + 0.15;
+  const W = 120, H = 170, P = 22;
+  const X = (x) => P + ((x + xr) / (2 * xr)) * (W - P - 6), Y = (y) => 8 + (1 - (y - y0) / (y1 - y0)) * (H - 30);
+  const grid = (() => {
+    let g = "";
+    for (let v = Math.ceil(y0 * 2) / 2; v <= y1; v += 0.5) g += `<line x1="${P}" x2="${W - 6}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)" stroke-width=".6"/><text x="${P - 3}" y="${(Y(v) + 3).toFixed(1)}" font-size="8" text-anchor="end" fill="var(--muted)">${v.toFixed(1)}</text>`;
+    for (const v of [-0.5, 0, 0.5]) if (Math.abs(v) <= xr) g += `<line y1="8" y2="${H - 22}" x1="${X(v).toFixed(1)}" x2="${X(v).toFixed(1)}" stroke="var(--line)" stroke-width=".6"/><text y="${H - 12}" x="${X(v).toFixed(1)}" font-size="8" text-anchor="middle" fill="var(--muted)">${v}</text>`;
+    return g;
+  })();
+  const panels = shots.map((r) => {
+    const p = r.shot_path, rel = p.rel;
+    const dots = p.x.map((x, i) => `<circle cx="${X(x).toFixed(1)}" cy="${Y(p.y[i]).toFixed(1)}" r="2.2" fill="var(--muted)" fill-opacity=".7"/>`).join("");
+    return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(tr("shotN"))} ${r.rep}">
+      ${grid}<rect x="${P}" y="8" width="${W - P - 6}" height="${H - 30}" fill="none" stroke="var(--line)"/>
+      ${dots}<circle cx="${X(p.x[rel]).toFixed(1)}" cy="${Y(p.y[rel]).toFixed(1)}" r="4.5" fill="#d1493f" stroke="#fff" stroke-width="1"/>
+      <text x="${W / 2}" y="${H - 1}" font-size="9" text-anchor="middle" fill="var(--ink)">${tr("shotN")} ${r.rep}</text></svg>`;
+  }).join("");
+  return `<h1 style="font-size:15px;margin:14px 0 2px">${tr("shotPathTitle")}</h1>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${panels}</div>
+    <p class="note">${tr("shotPathNote")}</p>`;
+}
 /* The kick's own panel: the best and mean ball speed, how it was got, and the
  * mechanics behind it per leg. */
 function kickPanel(res) {
@@ -11502,6 +11531,7 @@ function render(res, fps) {
     ${removedLine(res)}
     ${qualitySummary(qCounts)}
     <div id="shotSummaryBox">${isShot ? shotSummary(res) : ""}</div>
+    ${isShot ? shotPathPanel(res) : ""}
     ${isStroke ? strokePanel(res) : ""}
     ${isFoot ? kickPanel(res) : ""}
     ${runPanel}
