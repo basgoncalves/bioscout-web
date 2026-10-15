@@ -619,6 +619,7 @@ try {
   dialog.bfbRep .lmHead { display:flex; justify-content:space-between; align-items:center; }
   dialog.bfbRep .lmX { width:auto; margin:0; padding:4px 10px; }
   .bfbRepVals { font-size:13px; margin:6px 0; }
+  dialog.bfbRep canvas.bfbPath { width:300px; height:300px; max-width:100%; display:block; margin:4px 0 10px; border:1px solid var(--line, #333); border-radius:6px; }
   .bfbRepPlots { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:10px; }
   .bfbRepPlots canvas { width:100%; height:110px; display:block; background:var(--bg, transparent); border:1px solid var(--line, #333); border-radius:6px; }
   .bfbBody { margin:4px 0 10px; }
@@ -1409,10 +1410,15 @@ try {
           <select id="bfbDir"><option value="above" data-i18n="bfb_above">above threshold</option><option value="below" data-i18n="bfb_below">below threshold</option></select></label>
       </div>
       <div class="row bfbRow">
+        <label><span data-i18n="bfb_mass">Body mass (kg)</span><input type="number" id="bfbMass" min="20" max="250" step="0.5" style="width:6em"></label>
+        <label><span data-i18n="bfb_height">Height (m)</span><input type="number" id="bfbHeight" min="1" max="2.4" step="0.01" style="width:6em"></label>
+        <label id="bfbLoadWrap"><span data-i18n="bfb_load">Bar load (kg)</span><input type="number" id="bfbLoad" min="0" max="500" step="2.5" style="width:6em"></label>
+      </div>
+      <div class="row bfbRow">
         <label style="flex:1"><span><span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>)</span>
           <input type="range" id="bfbThr" min="0" max="180" step="1"></label>
         <input type="number" id="bfbThrN" min="0" max="180" step="1" style="width:5em" aria-label="Threshold">
-        <label><span data-i18n="bfb_hyst">Hysteresis (°)</span><input type="number" id="bfbHyst" min="0" max="20" step="1" style="width:4em"></label>
+        <label><span><span data-i18n="bfb_hyst">Hysteresis</span> (<span id="bfbHystUnit">°</span>)</span><input type="number" id="bfbHyst" min="0" max="20" step="1" style="width:4.5em"></label>
         <label><span data-i18n="bfb_sound">Sound</span><select id="bfbSound"><option value="off" data-i18n="bfb_soundOff">Off</option><option value="beep" data-i18n="bfb_soundBeep">Beep when crossed</option><option value="repeat" data-i18n="bfb_soundRepeat">Beep while over</option></select></label>
       </div>
 
@@ -1789,8 +1795,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 42;
-window.BUILD_AT = "2026-10-15 19:07";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 43;
+window.BUILD_AT = "2026-10-15 19:17";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
