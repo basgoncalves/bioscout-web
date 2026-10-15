@@ -309,7 +309,13 @@ export async function writeTrial(trial, files) {
 /** Mean vertical GRF of the static trial -> body mass (kg). */
 export async function weightFromStatic() {
   const st = S.cfg.top.static_trial; if (!st) throw new Error(T("ss_noStatic"));
-  const f = await readFile(S.root, sp(`2_experimental/${st}/grf.mot`)); if (!f) throw new Error(`2_experimental/${st}/grf.mot`);
+  let f = await readFile(S.root, sp(`2_experimental/${st}/grf.mot`));
+  if (!f) {   // not exported yet: export just the static trial from the c3d folder
+    const c = S.c3ds.find((n) => n.replace(/\.c3d$/i, "") === st), raw = c && S.c3dAbs && await readFile(S.root, `${S.c3dAbs}/${c}`);
+    if (raw) { const out = c3dToOpenSim(await raw.arrayBuffer(), raw.name); for (const [fn, text] of Object.entries(out)) await writeFile(S.root, sp(`2_experimental/${st}/${fn}`), text); }
+    f = await readFile(S.root, sp(`2_experimental/${st}/grf.mot`));
+    if (!f) throw new Error(T("ss_noGrf", { trial: st }));
+  }
   const L = (await f.text()).split(/\r?\n/), h = L.findIndex((l) => l.trim().toLowerCase() === "endheader");
   const cols = L[h + 1].trim().split(/[\t ]+/), rows = L.slice(h + 2).filter((l) => l.trim()).map((l) => l.trim().split(/[\t ]+/).map(Number));
   const vy = cols.map((c, i) => (/force.*vy$/i.test(c) ? i : -1)).filter((i) => i >= 0);
@@ -500,6 +506,12 @@ export function sessionHTML(ctx) {
       <div class="simOpts"><label class="simOpt">${t("sim_opt_mass")} <input type="text" data-ss-kg value="${S.weight.kg.toFixed(2)}"></label>
         <button type="button" data-ss-kgsave>${t("ss_weightApply")}</button><button type="button" class="ghost" data-ss-kgcancel>Cancel</button></div>
     </div>` : "";
+  const editor = S.edit ? `<div class="card" style="margin-top:8px;padding:10px">
+      <b>${esc(S.edit.path.split("/").pop())}</b> <span class="sub">${esc(S.edit.path)}</span>
+      ${S.edit.note ? `<p class="note" style="margin:4px 0 6px">${t(S.edit.note)}</p>` : ""}
+      <textarea data-ss-yamltext spellcheck="false" style="width:100%;min-height:320px;font-family:ui-monospace,Consolas,monospace;font-size:13px;box-sizing:border-box">${esc(S.edit.text)}</textarea>
+      <div style="display:flex;gap:8px;margin-top:8px"><button type="button" data-ss-yamlsave>${t("ss_saveYaml")}</button><button type="button" class="ghost" data-ss-yamlcancel>Cancel</button></div>
+    </div>` : "";
   return `<div class="card" id="simSession" style="margin-bottom:12px">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>${t("ss_title")}</b>
       <button type="button" class="ghost" data-ss-pick style="margin:0;width:auto;padding:6px 12px">${S.root ? esc(S.name) : t("ss_pick")}</button></div>
@@ -511,7 +523,8 @@ export function sessionHTML(ctx) {
       ? `<label class="simOpt">${t("ss_subjectSel")} <input type="text" data-ss-nsub placeholder="P001" style="width:110px"></label>
          <label class="simOpt">${t("ss_session")} <input type="text" data-ss-nses value="session1" style="width:110px"></label>
          <button type="button" data-ss-nsave>${t("ss_create")}</button><button type="button" class="ghost" data-ss-ncancel>Cancel</button>`
-      : `<button type="button" class="ghost" data-ss-newsub>${t("ss_newSubject")}</button>${S.subjects.length ? "" : ` <span class="sub">${t("ss_noSubjects", { dir: esc(S.simDir) })}</span>`}`}</div>` : ""}
+      : `<button type="button" class="ghost" data-ss-newsub>${t("ss_newSubject")}</button>${S.hasProject ? `<button type="button" class="ghost" data-ss-editproj>${t("ss_editProject")}</button>` : ""}${S.subjects.length ? "" : ` <span class="sub">${t("ss_noSubjects", { dir: esc(S.simDir) })}</span>`}`}</div>` : ""}
+    ${S.root && !S.session ? editor : ""}
     ${S.root ? `
     <div class="simOpts">
       <label class="simOpt">${t("ss_subjectSel")} <select data-ss-subjsel>${opt(S.subjects, S.subject, t("ss_none"))}</select></label>
@@ -523,25 +536,19 @@ export function sessionHTML(ctx) {
       <button type="button" class="ghost" data-ss-reload>${t("ss_reloadYaml")}</button>
       <button type="button" class="ghost" data-ss-edit>${t("ss_editYaml")}</button>
     </div>
-    ${S.editYaml != null ? `<div class="card" style="margin-top:8px;padding:10px">
-      <b>session.yaml</b> <span class="sub">${esc(S.ses)}/session.yaml</span>
-      <p class="note" style="margin:4px 0 6px">${t("ss_editNote")}</p>
-      <textarea data-ss-yamltext spellcheck="false" style="width:100%;min-height:320px;font-family:ui-monospace,Consolas,monospace;font-size:13px;box-sizing:border-box">${esc(S.editYaml)}</textarea>
-      <div style="display:flex;gap:8px;margin-top:8px"><button type="button" data-ss-yamlsave>${t("ss_saveYaml")}</button><button type="button" class="ghost" data-ss-yamlcancel>Cancel</button></div>
-    </div>` : ""}
+    ${editor}
+    <div class="simOpts" style="margin-top:6px;align-items:center">
+      <span class="sub">c3d_dir ${esc(S.c3dDir)}: ${S.c3ds.length} .c3d · 2_experimental: ${(S.exported || []).length}</span>
+      ${S.c3dWarn ? `<span class="sub" style="color:var(--bad,#e66)">${esc(S.c3dWarn)}</span>` : ""}
+      <button type="button" class="ghost" data-ss-addc3d style="width:auto;margin:0;padding:4px 10px;font-size:12px">${t("ss_addC3d")}</button><input type="file" ${/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "") ? "" : 'accept=".c3d"'} multiple data-ss-c3dfile hidden>
+      <button type="button" class="ghost" data-ss-export${S.busy ? " disabled" : ""}>${t("ss_exportC3d", { dir: S.c3dDir })}</button>
+    </div>
     <div class="simOpts">
-      <label class="simOpt">${t("ss_subject")} <input type="text" data-ss-subject value="${esc(top.subject || "")}"></label>
       <label class="simOpt">${t("ss_static")} <select data-ss-static>${opt(S.trials, top.static_trial || "", t("ss_none"))}</select></label>
       <label class="simOpt">${t("sim_opt_mass")} <input type="text" data-ss-mass value="${esc(top.body_mass || "")}" style="width:90px"></label>
       <button type="button" class="ghost" data-ss-weight>${t("ss_weightBtn")}</button>
     </div>
     ${weight}
-    <div class="simOpts" style="margin-top:6px">
-      <span class="sub">c3d_dir ${esc(S.c3dDir)}: ${S.c3ds.length} .c3d · 2_experimental: ${(S.exported || []).length}</span>
-      ${S.c3dWarn ? `<span class="sub" style="color:var(--bad,#e66)">${esc(S.c3dWarn)}</span>` : ""}
-      <button type="button" class="ghost" data-ss-addc3d>${t("ss_addC3d")}</button><input type="file" ${/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "") ? "" : 'accept=".c3d"'} multiple data-ss-c3dfile hidden>
-      <button type="button" class="ghost" data-ss-export${S.busy ? " disabled" : ""}>${t("ss_exportC3d", { dir: S.c3dDir })}</button>
-    </div>
     <div class="simOpts" style="margin-top:6px">
       <label class="simOpt">${t("ss_iteration")} <select data-ss-iteration>${opt(S.iterations, S.iteration, t("ss_none"))}</select></label>
       <button type="button" class="ghost" data-ss-itnew>${t("ss_newIteration")}…</button>
@@ -573,7 +580,6 @@ export function sessionWire(box, ctx, hooks) {
   const on = (sel, ev, fn) => { const el = q(sel); if (el) el[ev] = fn; };
   on("[data-ss-subjsel]", "onchange", async (e) => { S.subject = e.target.value; S.session = ""; await openSubject(); await applySelection(hooks); hooks.repaint(); });
   on("[data-ss-sessel]", "onchange", async (e) => { S.session = e.target.value; await openSession(); await applySelection(hooks); hooks.repaint(); });
-  on("[data-ss-subject]", "onchange", async (e) => { await setSubject(e.target.value.trim()); });
   on("[data-ss-static]", "onchange", async (e) => { await setStaticTrial(e.target.value); await applySelection(hooks); hooks.repaint(); });
   on("[data-ss-mass]", "onchange", async (e) => { const v = parseFloat(e.target.value); if (v > 0) { await setBodyMass(v); hooks.setOption("scale", "mass", String(v)); } });
   on("[data-ss-weight]", "onclick", async () => { try { S.weight = await weightFromStatic(); } catch (e) { S.msg = "✗ " + e.message; } hooks.repaint(); });
@@ -601,12 +607,15 @@ export function sessionWire(box, ctx, hooks) {
   on("[data-ss-nsave]", "onclick", () => { const a = q("[data-ss-nsub]").value, b = q("[data-ss-nses]").value; S.newSub = false; busy(async (log) => { await newSubjectSession(a, b, log); await applySelection(hooks); }); });
   on("[data-ss-figs]", "onclick", () => redoFiguresAll(ctx, hooks));
   on("[data-ss-reload]", "onclick", async () => { await openSession(); S.msg = T("ss_reloaded"); await applySelection(hooks); hooks.repaint(); });
-  on("[data-ss-edit]", "onclick", () => { S.editYaml = S.yaml; hooks.repaint(); });
-  on("[data-ss-yamlcancel]", "onclick", () => { S.editYaml = null; hooks.repaint(); });
+  on("[data-ss-edit]", "onclick", () => { S.edit = { path: sp("session.yaml"), text: S.yaml, note: "ss_editNote" }; hooks.repaint(); });
+  on("[data-ss-editproj]", "onclick", async () => { const f = await readFile(S.root, "project.yaml"); S.edit = { path: "project.yaml", text: f ? await f.text() : "" }; hooks.repaint(); });
+  on("[data-ss-yamlcancel]", "onclick", () => { S.edit = null; hooks.repaint(); });
   on("[data-ss-yamlsave]", "onclick", async () => {
-    const text = q("[data-ss-yamltext]").value;
-    await writeFile(S.root, sp("session.yaml"), text.replace(/\s*$/, "\n"));
-    S.editYaml = null; await openSession(); S.msg = T("ss_yamlSaved"); await applySelection(hooks); hooks.repaint();
+    const text = q("[data-ss-yamltext]").value, path = S.edit.path;
+    await writeFile(S.root, path, text.replace(/\s*$/, "\n"));
+    S.edit = null;
+    if (path === "project.yaml") await openProject(S.root); else await openSession();
+    S.msg = T("ss_yamlSaved", { file: path.split("/").pop() }); await applySelection(hooks); hooks.repaint();
   });
   on("[data-ss-exportskip]", "onchange", (e) => { S.exportSkip = e.target.checked; });
   box.querySelectorAll("[data-ss-tick]").forEach((cb) => {
