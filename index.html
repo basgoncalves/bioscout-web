@@ -1433,6 +1433,7 @@ try {
     </div>
     <div class="status" id="status" style="margin:0 2px 10px" data-i18n="statusStarting">Starting…</div>
     <div class="sbar" id="statusBar" hidden><span id="statusBarFill"></span></div>
+    <button type="button" class="ghost" id="cancelAnalysis" hidden style="width:auto;margin:0 2px 10px;padding:6px 14px" data-i18n="cancelAnalysis">Cancel analysis</button>
     <p class="note hidden" id="convertHint" style="margin:0 2px 10px"></p>
   <!-- Directly above the picture: this is the number the athlete is watching
        while they work, and it was sitting up in the banner with the setup
@@ -1652,8 +1653,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 18;
-window.BUILD_AT = "2026-10-15 12:10";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 19;
+window.BUILD_AT = "2026-10-15 13:36";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1921,9 +1922,20 @@ const showConvertHint = (show = true) => {
     \u2014 ${esc(tr("convertOnlineWarn"))}`;
 };
 
+/* The video analysis in progress, so Cancel can stop it: { v, pw, aborted, wake }. */
+let vidAbort = null;
+function cancelVideoAnalysis() {
+  const a = vidAbort; if (!a || a.aborted) return;
+  a.aborted = true;
+  try { a.v.pause(); a.v.dispatchEvent(new Event("ended")); } catch { /* gone */ }
+  if (a.wake) a.wake();
+}
+class AnalysisCancelled extends Error {}
 const bar = (frac) => {
   const el = $("statusBar"), fill = $("statusBarFill");
   if (!el || !fill) return;
+  const cb = $("cancelAnalysis");
+  if (cb) cb.hidden = frac == null || !vidAbort;
   if (frac == null) { el.hidden = true; el.classList.remove("indet"); return; }
   el.hidden = false;
   if (frac < 0) { el.classList.add("indet"); fill.style.width = ""; return; }
@@ -1931,6 +1943,7 @@ const bar = (frac) => {
   fill.style.width = `${Math.max(0, Math.min(1, frac)) * 100}%`;
 };
 
+document.addEventListener("click", (e) => { if (e.target && e.target.id === "cancelAnalysis") cancelVideoAnalysis(); });
 let landmarker = null, stream = null, running = false, recording = false;
 let muscleJoints = null;   // { muscleJoints: {name:[joints]}, byJoint: {joint:[names]} }
 let avatar = null, avatarBusy = false;
@@ -8273,9 +8286,12 @@ async function analyseVideoBlob(file, opts = {}) {
   try {
     await analyseVideoFile(file, opts);
   } catch (err) {
+    if (err instanceof AnalysisCancelled) { say(tr("sayAnalysisCancelled")); bar(null); return; }
     console.error("video analysis failed:", err);
     say(tr("sayAnalysisFailed", { err: err && err.message ? err.message : String(err) }), true);
     bar(null);
+  } finally {
+    if (vidAbort) { const a = vidAbort; vidAbort = null; bar(null); try { if (a.pw) a.pw.terminate(); URL.revokeObjectURL(a.v.src); } catch { /* gone */ } }
   }
 }
 
@@ -8286,6 +8302,8 @@ async function analyseVideoFile(file, { trim = true } = {}) {
   takeNo++; shareSrc = null; shareFile = file; videoBlob = null;
   const v = document.createElement("video");
   v.src = URL.createObjectURL(file); v.muted = true; v.playsInline = true;
+  vidAbort = { v, pw: null, aborted: false, wake: null };
+  const checkAbort = () => { if (vidAbort && vidAbort.aborted) { bar(null); throw new AnalysisCancelled("cancelled"); } };
   /* A file the browser cannot decode never fires loadedmetadata.
    *
    * It fires `error` instead -- or, for some containers, neither -- so waiting
@@ -8364,7 +8382,10 @@ async function analyseVideoFile(file, { trim = true } = {}) {
   const needsPage = $("activity").value === "stroke" || $("activity").value === "kick";
   const pw = !needsPage && v.requestVideoFrameCallback && window.createImageBitmap && window.__bsNoWorker !== true
     ? await startPoseWorker() : null;
+  vidAbort.pw = pw;
+  checkAbort();
   let off = pw ? null : await makeLandmarker();
+  checkAbort();
   const seekTo = (t) => new Promise((resolve) => {
     let settled = false;
     const done = () => { if (!settled) { settled = true; resolve(); } };
@@ -8566,12 +8587,12 @@ async function analyseVideoFile(file, { trim = true } = {}) {
       v.play().catch(end);
     });
     playEnded = true;
-    if (inflight > 0) await results;
+    if (inflight > 0 && !vidAbort.aborted) await Promise.race([results, new Promise((r) => { vidAbort.wake = r; })]);
     stats.mode = "worker";
     frames.sort((a, b) => a.i - b.i);
     i = n;
   }
-  while (i < n) {
+  while (i < n && !vidAbort.aborted) {
     if (usePlay && i > 0) {
       i = await playFrom(i);
       if (i >= n) break;
@@ -8590,6 +8611,7 @@ async function analyseVideoFile(file, { trim = true } = {}) {
       }
     }
   }
+  if (vidAbort.aborted) { if (off) off.close(); checkAbort(); }
   // Slots no frame was presented for are holes, not seeks: the model only
   // accepts timestamps that go forward, and a seek back to fill one crashed it.
   stats.missed = missed.length;
@@ -8606,6 +8628,7 @@ async function analyseVideoFile(file, { trim = true } = {}) {
   if (off) off.close();
   if (pw) pw.terminate();
   try { v.pause(); URL.revokeObjectURL(v.src); } catch { /* already gone */ }
+  vidAbort = null; bar(null);
   finish();
 }
 
