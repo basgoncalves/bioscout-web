@@ -143,7 +143,10 @@ export function addIterationYaml(text, name, fields) {
 async function firstDir(root, names) { for (const d of names) { try { await dirAt(root, d); return d; } catch { /* next */ } } return null; }
 export async function openProject(root) {
   S.root = root; S.name = root.name; S.msg = "";
-  S.hasProject = !!(await readFile(root, "project.yaml"));
+  S.hasYaml = !!(await readFile(root, "project.yaml"));
+  // a project is the layout, not the yaml: simulations/ next to models/ or setupFiles/ (older projects
+  // such as ones set up with settings.py have no project.yaml and are still bioscout projects)
+  S.hasProject = S.hasYaml || (!!(await firstDir(root, ["simulations", "Simulations"])) && !!(await firstDir(root, ["models", "setupFiles", "setup_files"])));
   S.simDir = await firstDir(root, ["simulations", "Simulations"]) || "simulations";
   S.subjects = await listDirs(root, S.simDir);
   if (!S.subjects.includes(S.subject)) S.subject = S.subjects[0] || "";
@@ -516,6 +519,7 @@ export function sessionHTML(ctx) {
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b>${t("ss_title")}</b>
       <button type="button" class="ghost" data-ss-pick style="margin:0;width:auto;padding:6px 12px">${S.root ? esc(S.name) : t("ss_pick")}</button></div>
     <p class="note" style="margin:4px 0 8px">${t("ss_intro")}</p>
+    ${S.root && S.hasProject && !S.hasYaml ? `<p class="note" style="margin:4px 0">${t("ss_noYamlLayout")}</p>` : ""}
     ${S.root && !S.hasProject ? `<div class="card" style="padding:10px;margin:6px 0"><b>${t("ss_noProject")}</b>
       <p class="note" style="margin:4px 0 8px">${t("ss_noProjectNote", { name: esc(S.name) })}</p>
       <button type="button" data-ss-init${S.busy ? " disabled" : ""}>${t("ss_init")}</button></div>` : ""}
