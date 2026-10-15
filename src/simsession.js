@@ -29,6 +29,26 @@ export const S = {           // the one open project + session
   pick: null,                                        // ticked trials (Set); null = every non-static trial
 };
 const sp = (rel) => `${S.ses}/${rel}`;                       // session-relative -> project-relative
+/** session.yaml `c3d_dir` (relative to the session folder, {subject}/{session} filled in) ->
+ *  project-relative path; null when it points outside the project folder (or is absolute). */
+export function resolveC3dDir(ses, value, subject, session) {
+  const v = String(value || "").replace(/\{subject\}/g, subject || "").replace(/\{session\}/g, session || "").replace(/\\/g, "/").trim();
+  if (!v || /^([A-Za-z]:|\/)/.test(v)) return null;
+  const out = [];
+  for (const p of `${ses}/${v}`.split("/")) {
+    if (!p || p === ".") continue;
+    if (p === "..") { if (!out.length) return null; out.pop(); } else out.push(p);
+  }
+  return out.join("/");
+}
+/** Trial names: session.yaml trials + the .c3d stems + 2_experimental folders, in that order, once each. */
+export function mergeTrials(yamlTrials, c3ds, exported) {
+  const seen = new Set(), out = [];
+  for (const t of [...yamlTrials, ...c3ds.map((n) => n.replace(/\.c3d$/i, "")), ...exported]) if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+  return out;
+}
+/** A static trial by its name: static / statisch / statique / estatico / "cal", anywhere in the name. */
+export const guessStatic = (names) => names.find((t) => /stat(ic|isch|ique)|est[aá]tic|(^|[_\W])(cal|neutral)([_\W\d]|$)/i.test(t)) || "";
 const hasRoot = (key) => (["model_generic", "model_scaled"].includes(key) ? S.cfg.top.models_dir : S.cfg.top.setup_dir) || "";
 /** An iteration file key -> project-relative path (models_dir / setup_dir when set, else the iteration folder). */
 export function itPath(it, key, val) {
@@ -83,8 +103,10 @@ export function parseYaml(text) {
 }
 /** As bioscout.session.config.scaffold_session_yaml: trials from the c3d names, no guessed
  *  trial type, body_mass only when known, project_dir relative (<project>/simulations/<subject>/<session>). */
-export function scaffoldYaml({ subject, session, bodyMass, staticTrial, trials, modelsDir = "", setupDir = "" }) {
+export function scaffoldYaml({ subject, session, bodyMass, staticTrial, trials, modelsDir = "", setupDir = "", c3dDir = "1_c3dfiles" }) {
   const lines = [`subject: ${subject || "subject"}`, `session: '${session}'`, `project_dir: ../../..`];
+  // where the .c3d files are, relative to this session folder; {subject} / {session} are filled in
+  if (c3dDir) lines.push(`c3d_dir: ${c3dDir}`);
   if (modelsDir) lines.push(`models_dir: ${modelsDir}`);
   if (setupDir) lines.push(`setup_dir: ${setupDir}`);
   if (bodyMass) lines.push(`body_mass: ${bodyMass}`);
@@ -139,18 +161,36 @@ export async function openSession() {
   const root = S.root;
   const f = await readFile(root, sp("session.yaml"));
   S.yaml = f ? await f.text() : "";
-  S.trials = await listDirs(root, sp("2_experimental"));
+  const exported = await listDirs(root, sp("2_experimental"));
   S.iterations = await listDirs(root, sp("3_iterations"));
-  S.c3dDir = await firstDir(root, C3D_DIRS.map(sp)) ? (await firstDir(root, C3D_DIRS.map(sp))).slice(S.ses.length + 1) : C3D_DIRS[0];
-  S.c3ds = await listFiles(root, sp(S.c3dDir), /\.c3d$/i);
+  S.cfg = parseYaml(S.yaml);
+  // the c3d folder: session.yaml `c3d_dir` when set, else 1_c3dfiles / c3dfiles in the session
+  S.c3dWarn = "";
+  if (S.cfg.top.c3d_dir) {
+    S.c3dDir = S.cfg.top.c3d_dir;
+    S.c3dAbs = resolveC3dDir(S.ses, S.c3dDir, S.subject, S.session);
+    if (!S.c3dAbs) S.c3dWarn = T("ss_c3dOutside", { dir: S.c3dDir });
+  } else {
+    const d = await firstDir(root, C3D_DIRS.map(sp));
+    S.c3dDir = d ? d.slice(S.ses.length + 1) : C3D_DIRS[0];
+    S.c3dAbs = sp(S.c3dDir);
+  }
+  S.c3ds = S.c3dAbs ? await listFiles(root, S.c3dAbs, /\.c3d$/i) : [];
   if (!S.yaml) {
-    const names = S.c3ds.length ? S.c3ds.map((n) => n.replace(/\.c3d$/i, "")) : S.trials;
-    S.yaml = scaffoldYaml({ subject: S.subject, session: S.session, staticTrial: names.find((t) => /^static/i.test(t)) || "", trials: names,
+    const names = mergeTrials([], S.c3ds, exported);
+    S.yaml = scaffoldYaml({ subject: S.subject, session: S.session, staticTrial: guessStatic(names), trials: names, c3dDir: S.c3dDir,
       modelsDir: await firstDir(root, ["models"]) || "", setupDir: await firstDir(root, ["setupFiles", "setup_files"]) || "" });
     await writeFile(root, sp("session.yaml"), S.yaml);
     S.msg = T("ss_scaffolded");
+    S.cfg = parseYaml(S.yaml);
   }
-  S.cfg = parseYaml(S.yaml);
+  S.trials = mergeTrials(Object.keys(S.cfg.trials || {}), S.c3ds, exported);
+  S.exported = exported;
+  // no static_trial in the yaml: take the one whose name says static (statisch, ...) and write it down
+  if (!S.cfg.top.static_trial) {
+    const g = guessStatic(S.trials);
+    if (g) { S.yaml = setTopKey(S.yaml, "static_trial", g); await writeFile(root, sp("session.yaml"), S.yaml); S.cfg = parseYaml(S.yaml); S.msg = T("ss_staticGuess", { trial: g }); }
+  }
   if (!S.iterations.includes(S.iteration)) S.iteration = S.iterations[0] || "";
   if (!S.trials.includes(S.trial)) S.trial = "";
 }
@@ -198,8 +238,8 @@ export function iterationDefaults(name, genericName) {
     markerset: sd ? "./markers_pyCGM.xml" : "markers.xml",
     scale_tool: sd ? "./setup_scale.xml" : "",
     so_actuators: sd ? "./actuators_so.xml" : "",
-    linear_scaling: "true", marker_placer: "true", preserve_mass_distribution: "true", muscle_opt: "false", mvic_factor: "1.0",
-    fmax_scaling: "", label: "", color: "black", group: "generic",
+    linear_scaling: "true", marker_placer: "true", preserve_mass_distribution: "true", muscle_opt: "false", mvic_scaling: "1.0",
+    label: "", color: "black", group: "generic",
   };
 }
 /** Write a bundled app file (model / setup template) to a project path when it is not there yet. */
@@ -228,7 +268,8 @@ export async function createIteration(name, fields, { genericFile, markersetFile
 
 /** Picked C3D files are copied into 1_c3dfiles/ first (the session's raw captures), then exported. */
 export async function addC3d(files, log) {
-  for (const f of files) { await writeFile(S.root, sp(`${S.c3dDir}/${f.name}`), f); log(`${f.name} → ${S.c3dDir}/`); }
+  if (!S.c3dAbs) throw new Error(S.c3dWarn);
+  for (const f of files) { await writeFile(S.root, `${S.c3dAbs}/${f.name}`, f); log(`${f.name} → ${S.c3dDir}/`); }
   await refresh();
 }
 /** 1_c3dfiles/*.c3d -> 2_experimental/<stem>/ (marker_experimental.trc, grf.mot, emg.mot), as bioscout's export. */
@@ -237,7 +278,7 @@ export async function exportC3d(log, { onlyMissing = true } = {}) {
   for (const name of S.c3ds) {
     const stem = name.replace(/\.c3d$/i, "");
     if (onlyMissing && await readFile(S.root, sp(`2_experimental/${stem}/marker_experimental.trc`))) { log(`${stem}: already exported`); continue; }
-    const f = await readFile(S.root, sp(`${S.c3dDir}/${name}`)); if (!f) continue;
+    const f = await readFile(S.root, `${S.c3dAbs}/${name}`); if (!f) continue;
     log(`${stem}: reading ${(f.size / 1e6).toFixed(1)} MB`);
     const out = c3dToOpenSim(await f.arrayBuffer(), f.name);
     for (const [fn, text] of Object.entries(out)) await writeFile(S.root, sp(`2_experimental/${stem}/${fn}`), text);
@@ -245,7 +286,7 @@ export async function exportC3d(log, { onlyMissing = true } = {}) {
     // a trial exported for the first time gets its yaml entry
     if (!(S.cfg.trials || {})[stem]) { S.yaml = addTrialYaml(S.yaml, stem); await writeFile(S.root, sp("session.yaml"), S.yaml); S.cfg = parseYaml(S.yaml); }
   }
-  if (!S.c3ds.length) log(T("ss_noC3d", { dir: S.c3dDir }));
+  if (!S.c3ds.length) log(S.c3dWarn || T("ss_noC3d", { dir: S.c3dDir }));
   await refresh();
   return n;
 }
@@ -449,7 +490,7 @@ export function sessionHTML(ctx) {
       <b>${t("ss_newIteration")}</b> <span class="sub">${t("ss_itNote")}</span>
       <div class="simOpts" style="margin-top:6px">
         <label class="simOpt">name <input type="text" data-it="name" value="${esc(S.newIt.name || "")}" placeholder="gpk"></label>
-        ${Object.entries(S.newIt.fields).map(([k, v]) => `<label class="simOpt">${esc(k)} <input type="text" data-it="${esc(k)}" value="${esc(v)}"></label>`).join("")}
+        ${Object.entries(S.newIt.fields).map(([k, v]) => `<label class="simOpt">${esc(k)} <input type="text" data-it="${esc(k)}" value="${esc(v)}"></label>${k === "mvic_scaling" ? `<p class="note" style="margin:0 0 4px;flex-basis:100%">${t("ss_mvicNote")}</p>` : ""}`).join("")}
       </div>
       <div style="display:flex;gap:8px;margin-top:8px"><button type="button" data-ss-itsave>${t("ss_create")}</button><button type="button" class="ghost" data-ss-itcancel>${t("pr_remove").replace(/^Remove$/, "Cancel")}</button></div>
     </div>` : "";
@@ -479,6 +520,16 @@ export function sessionHTML(ctx) {
     </div>` : ""}
     ${S.root && S.session ? `
     <div class="simOpts">
+      <button type="button" class="ghost" data-ss-reload>${t("ss_reloadYaml")}</button>
+      <button type="button" class="ghost" data-ss-edit>${t("ss_editYaml")}</button>
+    </div>
+    ${S.editYaml != null ? `<div class="card" style="margin-top:8px;padding:10px">
+      <b>session.yaml</b> <span class="sub">${esc(S.ses)}/session.yaml</span>
+      <p class="note" style="margin:4px 0 6px">${t("ss_editNote")}</p>
+      <textarea data-ss-yamltext spellcheck="false" style="width:100%;min-height:320px;font-family:ui-monospace,Consolas,monospace;font-size:13px;box-sizing:border-box">${esc(S.editYaml)}</textarea>
+      <div style="display:flex;gap:8px;margin-top:8px"><button type="button" data-ss-yamlsave>${t("ss_saveYaml")}</button><button type="button" class="ghost" data-ss-yamlcancel>Cancel</button></div>
+    </div>` : ""}
+    <div class="simOpts">
       <label class="simOpt">${t("ss_subject")} <input type="text" data-ss-subject value="${esc(top.subject || "")}"></label>
       <label class="simOpt">${t("ss_static")} <select data-ss-static>${opt(S.trials, top.static_trial || "", t("ss_none"))}</select></label>
       <label class="simOpt">${t("sim_opt_mass")} <input type="text" data-ss-mass value="${esc(top.body_mass || "")}" style="width:90px"></label>
@@ -486,7 +537,8 @@ export function sessionHTML(ctx) {
     </div>
     ${weight}
     <div class="simOpts" style="margin-top:6px">
-      <span class="sub">${esc(S.c3dDir)}: ${S.c3ds.length} .c3d · 2_experimental: ${S.trials.length}</span>
+      <span class="sub">c3d_dir ${esc(S.c3dDir)}: ${S.c3ds.length} .c3d · 2_experimental: ${(S.exported || []).length}</span>
+      ${S.c3dWarn ? `<span class="sub" style="color:var(--bad,#e66)">${esc(S.c3dWarn)}</span>` : ""}
       <button type="button" class="ghost" data-ss-addc3d>${t("ss_addC3d")}</button><input type="file" ${/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "") ? "" : 'accept=".c3d"'} multiple data-ss-c3dfile hidden>
       <button type="button" class="ghost" data-ss-export${S.busy ? " disabled" : ""}>${t("ss_exportC3d", { dir: S.c3dDir })}</button>
     </div>
@@ -548,6 +600,14 @@ export function sessionWire(box, ctx, hooks) {
   on("[data-ss-ncancel]", "onclick", () => { S.newSub = false; hooks.repaint(); });
   on("[data-ss-nsave]", "onclick", () => { const a = q("[data-ss-nsub]").value, b = q("[data-ss-nses]").value; S.newSub = false; busy(async (log) => { await newSubjectSession(a, b, log); await applySelection(hooks); }); });
   on("[data-ss-figs]", "onclick", () => redoFiguresAll(ctx, hooks));
+  on("[data-ss-reload]", "onclick", async () => { await openSession(); S.msg = T("ss_reloaded"); await applySelection(hooks); hooks.repaint(); });
+  on("[data-ss-edit]", "onclick", () => { S.editYaml = S.yaml; hooks.repaint(); });
+  on("[data-ss-yamlcancel]", "onclick", () => { S.editYaml = null; hooks.repaint(); });
+  on("[data-ss-yamlsave]", "onclick", async () => {
+    const text = q("[data-ss-yamltext]").value;
+    await writeFile(S.root, sp("session.yaml"), text.replace(/\s*$/, "\n"));
+    S.editYaml = null; await openSession(); S.msg = T("ss_yamlSaved"); await applySelection(hooks); hooks.repaint();
+  });
   on("[data-ss-exportskip]", "onchange", (e) => { S.exportSkip = e.target.checked; });
   box.querySelectorAll("[data-ss-tick]").forEach((cb) => {
     cb.onchange = () => {
