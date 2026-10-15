@@ -1654,8 +1654,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 22;
-window.BUILD_AT = "2026-10-15 14:02";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 23;
+window.BUILD_AT = "2026-10-15 14:09";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -8349,6 +8349,20 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   say(tr("sayReadingVideo"));
   bar(-1);
 
+  /* A recording made in the browser (MediaRecorder: the screen recorder, some
+   * phone apps) is a WebM with no duration in its header -- v.duration is
+   * Infinity until the browser has walked the whole file. Seeking far past the
+   * end makes it do exactly that and report the real duration. */
+  if (!Number.isFinite(v.duration) || !(v.duration > 0)) {
+    await new Promise((resolve) => {
+      const done = () => { v.removeEventListener("durationchange", chk); resolve(); };
+      const chk = () => { if (Number.isFinite(v.duration) && v.duration > 0) done(); };
+      v.addEventListener("durationchange", chk);
+      setTimeout(done, METADATA_TIMEOUT_MS);
+      try { v.currentTime = 1e7; } catch { done(); }
+    });
+    await new Promise((resolve) => { const t = setTimeout(resolve, 2000); v.addEventListener("seeked", () => { clearTimeout(t); resolve(); }, { once: true }); v.currentTime = 0; });
+  }
   let dt = await probeFrameRate(v);
   const assumed = !dt;
   const probedDt = dt;

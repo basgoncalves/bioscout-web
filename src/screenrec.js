@@ -45,7 +45,7 @@ function fmt(ms) {
 export async function openScreenRecorder({ t, onClip }) {
   let stream;
   try {
-    stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 } }, audio: false });
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 60 } }, audio: false });
   } catch { return; }                       // the person closed the share picker
   if (!cssAdded) {
     const st = document.createElement("style"); st.textContent = CSS; document.head.appendChild(st); cssAdded = true;
