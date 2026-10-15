@@ -383,7 +383,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     port: null, writer: null, reader: null, lm: null, stream: null, raf: 0,
     active: false, lit: null, value: NaN, lastTs: -1,
   };
-  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, sound: "beep", src: "camera", extra: [], mass: 75, height: 1.75, load: 0 };
+  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, sound: "beep", src: "camera", facing: "user", extra: [], mass: 75, height: 1.75, load: 0 };
   try { cfg = { ...cfg, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch { /* private */ }
   const save = () => { try { localStorage.setItem(SKEY, JSON.stringify(cfg)); } catch { /* full */ } };
 
@@ -572,17 +572,32 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     try {
       st.stream = isScreen()
         ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 } }, audio: false })
-        : await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        : await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: cfg.facing || "user" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
       const v = $("bfbVideo"); v.srcObject = st.stream; await v.play();
       // Sharing stopped from the browser's own bar: stop here too.
       st.stream.getVideoTracks()[0].addEventListener("ended", () => { stopCam(); $("bfbCamBtn").textContent = camLabel(); });
-      $("bfbStage").classList.toggle("noMirror", isScreen());
+      // Mirror only the selfie camera (it is what people expect); a screen or
+      // the back camera is shown as it is.
+      $("bfbStage").classList.toggle("noMirror", isScreen() || cfg.facing === "environment");
       st.crop = null; st.picking = false; renderSrc();
       return true;
     } catch (e) { $("bfbCamNote").textContent = tr("bfb_camFail", { err: e.message }); return false; }
   }
   const camLabel = () => tr(st.stream ? (isScreen() ? "bfb_scrStop" : "bfb_camStop") : (isScreen() ? "bfb_scrStart" : "bfb_camStart"));
+  /* Phones and tablets have no screen capture at all (no getDisplayMedia):
+   * the Screen source is not offered there instead of failing on press. */
+  const canScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+  if (!canScreen) {
+    const o = $("bfbSrc").querySelector('option[value="screen"]'); if (o) o.remove();
+    if (cfg.src === "screen") cfg.src = "camera";
+  }
+  $("bfbFlip").onclick = async () => {
+    cfg.facing = cfg.facing === "environment" ? "user" : "environment"; save();
+    if (st.stream && !isScreen()) { stopCam(); if (await startCam()) frame(); }
+    renderSrc();
+  };
   function renderSrc() {
+    $("bfbFlip").classList.toggle("hidden", isScreen());
     $("bfbSrc").value = cfg.src;
     $("bfbArea").classList.toggle("hidden", !isScreen() || !st.stream);
     $("bfbAreaClear").classList.toggle("hidden", !isScreen() || !st.stream || !st.crop);

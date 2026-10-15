@@ -71,7 +71,7 @@ const CSS = `
 let cssAdded = false;
 
 /** t(key) translates (HTML-escaped); onClip(file, crop|null) analyses the recording. */
-export async function openYouTubeClip({ t, onClip, url = "" }) {
+export async function openYouTubeClip({ t, onClip, onFile = null, url = "" }) {
   if (!cssAdded) { const st = document.createElement("style"); st.textContent = CSS; document.head.appendChild(st); cssAdded = true; }
   const wrap = document.createElement("div");
   wrap.className = "ytWrap";
@@ -88,6 +88,7 @@ export async function openYouTubeClip({ t, onClip, url = "" }) {
       <button type="button" class="ghost" data-setend>${t("ytSetEnd")}</button>
       <button type="button" class="ghost" data-preview>${t("ytPreview")}</button>
     </div>
+    <p class="note ytNoCap" data-nocap style="display:none;margin:8px 0 0;color:var(--warn,#e8a33a)"></p>
     <div class="ytRow">
       <button type="button" data-rec>${t("ytRecord")}</button>
       <span class="ytRec" data-recon><span class="dot"></span><span data-clock>REC</span></span>
@@ -160,8 +161,17 @@ export async function openYouTubeClip({ t, onClip, url = "" }) {
   $("[data-preview]").onclick = async () => { const r = range(); if (!r || !player || busy) return; busy = true; await playRange(...r); stopRec = null; busy = false; };
 
   // phones and tablets: no recording a tab -- play and cut here, record with the phone's own screen recorder
-  if (!ytSupported()) { $("[data-rec]").disabled = true; $("[data-rec]").title = t("ytNoCapture"); $("[data-msg]").textContent = t("ytNoCapture"); }
+  /* Phones: a browser cannot record another frame there, so the button
+   * becomes "Analyse my screen recording" and the steps stay on screen (a
+   * status line was cleared by Load and never seen). */
+  const phone = !ytSupported();
+  if (phone) {
+    const n = $("[data-nocap]"); n.innerHTML = t("ytNoCapture"); n.style.display = "block";
+    $("[data-rec]").textContent = t("ytUseFile");
+    $("[data-rec]").disabled = !onFile;
+  }
   $("[data-rec]").onclick = async () => {
+    if (phone) { if (onFile) { close(); onFile(); } return; }
     if (!player || busy) { if (!player) msg(t("ytBadLink")); return; }
     const r = range(); if (!r) return;
     busy = true; msg(t("ytShareTab"));
