@@ -406,7 +406,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbMetric").value = cfg.metric;
   }
   function syncInputs() {
-    const m = METRICS[cfg.metric] || METRICS.kneeFlexL, mx = m.max || 180;
+    const m = METRICS[cfg.metric] || METRICS.kneeFlexL, mx = m.unit === "BW" ? 1000 : m.max || 180;   // threshold limit; the bars keep m.max
     const mn = m.unit === DEG ? -90 : 0;
     $("bfbThr").max = mx; $("bfbThrN").max = mx; $("bfbThr").min = mn; $("bfbThrN").min = mn;
     $("bfbUnit").textContent = m.unit;
