@@ -573,6 +573,17 @@ try {
   .labDoor .doorLinks { display:block; margin-top:4px; font-size:13px; }
   .labDoor .doorLinks a { color:var(--accent); }
   .devBox { margin:22px 4px 0; text-align:center; }
+  .lmPreview { margin:0 2px 10px; }
+  .lmPreview canvas { width:100%; max-width:480px; height:auto; display:block; border-radius:8px; background:#000; }
+  dialog.lmReview { width:min(960px, 96vw); max-width:96vw; padding:12px; border-radius:12px; border:1px solid var(--line, #333); background:var(--card); color:var(--ink); }
+  dialog.lmReview canvas { width:100%; height:auto; display:block; background:#000; border-radius:8px; }
+  dialog.lmReview .lmHead { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  dialog.lmReview .lmX { width:auto; margin:0; padding:4px 10px; }
+  dialog.lmReview .lmSlider { width:100%; margin:8px 0; }
+  dialog.lmReview .lmCtl { display:flex; gap:8px; align-items:center; justify-content:space-between; }
+  dialog.lmReview .lmCtl button { flex:1; margin:0; }
+  dialog.lmReview .lmLabel { flex:1; text-align:center; font-variant-numeric:tabular-nums; }
+  .lmReviewRow { margin-bottom:8px; }
   .glossLink { margin:12px 0 0; font-size:13px; }
   .glossLink a { color:var(--muted, inherit); }
   .bfbRow { gap:10px; align-items:end; flex-wrap:wrap; margin:6px 0; }
@@ -1752,8 +1763,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 37;
-window.BUILD_AT = "2026-10-15 18:08";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 38;
+window.BUILD_AT = "2026-10-15 18:27";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1880,6 +1891,7 @@ import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 // called the array.
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
 import { initBiofeedback } from "./src/biofeedback.js";
+import { createPreview, openReview } from "./src/lmreview.js";
 import { ensembleRep, mergeSides } from "./src/ensemble.js";
 import { neckLoadHTML } from "./src/neckload.js";
 import { normLoadDir, isHorizontal, netVerticalKg, loadText, neckPush } from "./src/loaddir.js";
@@ -2059,6 +2071,8 @@ let recorder = null, videoChunks = [], videoBlob = null;
  * any video; `shareSrc` is everything the share dialog needs about the take
  * just analysed. Memory only -- the next take replaces both. */
 const stills = stillKeeper();
+/* The clip behind the last file analysis, for the frame-by-frame landmark review. */
+let reviewSrc = null;
 let shareSrc = null, takeNo = 0, recT0 = 0, recKept = false, shareFile = null;
 let selectRep = null;   // set by render(), so the export can page through reps
 let shownItems = [];    // reps currently on screen, plus the mean if there is one
@@ -8416,6 +8430,7 @@ async function analyseVideoBlob(file, opts = {}) {
     bar(null);
   } finally {
     if (vidAbort) { const a = vidAbort; vidAbort = null; bar(null); try { if (a.pw) a.pw.terminate(); URL.revokeObjectURL(a.v.src); } catch { /* gone */ } }
+    const pv = document.querySelector(".lmPreview"); if (pv) pv.classList.add("hidden");
   }
 }
 
@@ -8554,6 +8569,10 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   let cropCv = null, cropCx = null;
   if (cr) { cropCv = document.createElement("canvas"); cropCv.width = fw; cropCv.height = fh; cropCx = cropCv.getContext("2d"); }
   const srcNow = () => { if (!cr) return v; cropCx.drawImage(v, cr.x, cr.y, cr.w, cr.h, 0, 0, fw, fh); return cropCv; };
+  // A few frames of the tracking, with their skeleton, so it can be watched (lmreview.js).
+  const preview = createPreview($("status"), tr);
+  preview.show();
+  reviewSrc = null;
   /** Track grid slot i on whatever frame the element is showing now. */
   const track = (i) => {
     const t = tOf(i);
@@ -8567,6 +8586,7 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
     const named = res.landmarks && res.landmarks.length
       ? toNamed(res.landmarks[0], fw, fh) : null;
     ballGrab(src, t * 1000, named);
+    if (named) preview.draw(src, named, fw, fh);
     if (named) {
       // `i` is the GRID index, and it is what the analysis keys off. A frame
       // the model found no body in is then a hole at its own place in time
@@ -8688,7 +8708,11 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
       pw.onmessage = (e) => {
         const { k, lms } = e.data;
         inflight--; done++;
-        if (lms) frames.push({ i: k, t: tOf(k) * 1000, lm: toNamed(lms, vw, vh) });
+        if (lms) {
+          const lmN = toNamed(lms, vw, vh);
+          frames.push({ i: k, t: tOf(k) * 1000, lm: lmN });
+          preview.draw(v, lmN, v.videoWidth, v.videoHeight, cr);
+        }
         bar(Math.min(1, done / Math.max(1, stats.played)));
         if (done % 5 === 0) say(tr("sayTrackingProgress", { t: (tOf(k) - from).toFixed(1), dur: span.toFixed(1), frames: frames.length }));
         if (held && inflight < 6) { held = false; v.play().catch(() => {}); }
@@ -8776,6 +8800,8 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   if (pw) pw.terminate();
   try { v.pause(); URL.revokeObjectURL(v.src); } catch { /* already gone */ }
   vidAbort = null; bar(null);
+  preview.hide();
+  reviewSrc = { file, fw, fh, crop: cr };
   finish();
 }
 
@@ -8990,6 +9016,7 @@ async function finish() {
       kept: live ? recKept : !!shareFile,
     } : null;
     render(lastResult, fps);
+    if (fromFile && reviewSrc) addReviewButton(lastResult);
     if (LAB) labTrialReady(lastResult, fps);
     say(tr("sayAnalysed", { frames: frames.length, fps: fps.toFixed(1) }) +
         (lastResult.trackStats ? " " + trackStatsText(lastResult.trackStats) : ""));
@@ -9000,6 +9027,33 @@ async function finish() {
     // read is a step that happened, and the clock did not stop for it.
     if (proto && !proto.summary) protoAfterSet();
   }
+}
+
+/* "Check the landmarks": step through the tracked frames of a file analysis
+ * and keep or discard the trial. Discarding moves every rep of the logged
+ * set to removed (setRepRemoved), so it is out of the totals and reversible
+ * from the set's own rep list, like removing a single rep. */
+function addReviewButton(res) {
+  const src = reviewSrc, fr = frames.slice();
+  const box = $("results"); if (!box || !src) return;
+  const row = document.createElement("div");
+  row.className = "row lmReviewRow";
+  row.innerHTML = `<button type="button" class="ghost" id="lmReviewBtn">${tr("lmReviewBtn")}</button>`;
+  box.prepend(row);
+  row.querySelector("button").onclick = () => openReview({
+    file: src.file, frames: fr, fw: src.fw, fh: src.fh, crop: src.crop, tr,
+    onKeep: () => say(tr("lmKept")),
+    onDiscard: () => {
+      const sess = getSession();
+      if (res.setIndex != null && sess) {
+        const set = sess.sets.find((x) => x.index === res.setIndex);
+        for (const r of (set && set.perRep ? set.perRep.map((x) => x.rep) : [])) setRepRemoved(sess.started, res.setIndex, r, true);
+        try { renderTraining(); scheduleSync(); } catch { /* not on this screen */ }
+      }
+      box.classList.add("hidden"); shareSrc = null;
+      say(tr("lmDiscarded"));
+    },
+  });
 }
 
 const COLORS = ["#2f6fe4", "#e8871a", "#1d7a45"];

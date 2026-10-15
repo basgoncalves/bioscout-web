@@ -330,7 +330,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const g = e.target.closest("[data-region]"); if (g) { region = g.dataset.region === region ? null : g.dataset.region; renderBody(); }
   });
   $("bfbBody").addEventListener("keydown", (e) => {
-    if ((e.key === "Enter" || e.key === " ") && e.target.closest("[data-region]")) { e.preventDefault(); e.target.closest("[data-region]").dispatchEvent(new MouseEvent("click", { bubbles: true })); }
+    if ((e.key === "Enter" || e.key === " ") && e.target.closest("[data-region]")) { e.preventDefault(); e.target.closest("[data-region]").dispatchEvent(new window.MouseEvent("click", { bubbles: true })); }
   });
 
   /* ---------- serial ---------- */
@@ -418,7 +418,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     } catch (e) { $("bfbCamNote").textContent = tr("bfb_camFail", { err: e.message }); return false; }
   }
   function stopCam() {
-    cancelAnimationFrame(st.raf); st.raf = 0;
+    window.cancelAnimationFrame(st.raf); st.raf = 0;
     if (st.stream) st.stream.getTracks().forEach((t) => t.stop());
     st.stream = null;
   }
