@@ -573,6 +573,22 @@ try {
   .labDoor .doorLinks { display:block; margin-top:4px; font-size:13px; }
   .labDoor .doorLinks a { color:var(--accent); }
   .devBox { margin:22px 4px 0; text-align:center; }
+  .glossLink { margin:12px 0 0; font-size:13px; }
+  .glossLink a { color:var(--muted, inherit); }
+  .bfbRow { gap:10px; align-items:end; flex-wrap:wrap; margin:6px 0; }
+  .bfbRow label { display:flex; flex-direction:column; gap:4px; font-size:13px; }
+  .bfbStage { position:relative; background:#000; border-radius:12px; overflow:hidden; aspect-ratio:16/9; margin-top:6px; }
+  .bfbStage video, .bfbStage canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; transform:scaleX(-1); }
+  .bfbHud { position:absolute; top:10px; left:12px; right:12px; display:flex; justify-content:space-between; align-items:center; pointer-events:none; }
+  #bfbValue { font:700 42px/1 system-ui, sans-serif; color:#fff; text-shadow:0 2px 6px #000; }
+  #bfbValue.hit { color:#ffd54a; }
+  .bfbLamp { width:38px; height:38px; border-radius:50%; background:#333; border:2px solid #666; }
+  .bfbLamp.on { background:#ffd54a; border-color:#fff3b0; box-shadow:0 0 24px 8px rgba(255,213,74,.7); }
+  .bfbBar { position:relative; height:10px; background:var(--line, #333); border-radius:5px; margin:10px 0 4px; }
+  #bfbBarFill { height:100%; width:0; background:var(--accent); border-radius:5px; }
+  #bfbBarThr { position:absolute; top:-4px; width:2px; height:18px; background:#ffd54a; }
+  .bfbLog { max-height:160px; overflow:auto; font-size:12px; }
+  #bfbPortStatus.bad, #bfbNoSerial { color:#e66; }
   .labDoor b { display:block; font-size:17px; margin-bottom:2px; }
   .labDoor span { color:var(--muted); font-size:13px; line-height:1.4; }
   .labHead { display:flex; justify-content:space-between; align-items:center; gap:8px; }
@@ -1308,7 +1324,7 @@ try {
       <button type="button" class="labDoor" id="doorRecord"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/><circle cx="9.5" cy="12" r="2.5"/></svg><div><b data-i18n="doorRecord">Record</b><span data-i18n="doorRecordNote">Film a movement with this device and read its joint angles, moments and estimated loads.</span></div></button>
       <button type="button" class="labDoor" id="doorProcess"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 20h18"/><path d="M4 16l4-6 4 3 4-8 4 5"/><circle cx="8" cy="10" r="1"/><circle cx="16" cy="5" r="1"/></svg><div><b data-i18n="doorProcess">Process</b><span data-i18n="doorProcessNote">Open lab files (force plates, EMG, motion capture, OpenSim results), filter, plot and analyse them.</span></div></button>
       <div class="labDoor" id="doorSimulate" role="button" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="4" r="2"/><path d="M12 6v7M8 9h8M12 13l-3 8M12 13l3 8"/><path d="M5 12c-1 2-1 4 0 6M19 12c1 2 1 4 0 6"/></svg><div><b data-i18n="doorSimulate">Simulate</b><span data-i18n="doorSimulateNote">Run OpenSim and CEINMS on a marker and force-plate trial: scaling, IK, ID, static optimisation, muscle and joint contact forces.</span><span class="doorLinks"><a href="https://opensim.stanford.edu/" target="_blank" rel="noopener">OpenSim ↗</a> · <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4655131/" target="_blank" rel="noopener">CEINMS ↗</a></span></div></div>
-      <a class="labDoor" id="doorGlossary" href="./glossary/" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 4h11a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M18 20h2V6"/><path d="M8 8h6M8 12h6"/></svg><div><b data-i18n="doorGlossary">Glossary</b><span data-i18n="doorGlossaryNote">Every variable, metric and term in BioScout, A-Z or by topic, with where it comes from.</span></div></a>
+      <button type="button" class="labDoor" id="doorBiofeedback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><div><b data-i18n="doorBiofeedback">BioFeedback (testing)</b><span data-i18n="doorBiofeedbackNote">Watch one joint angle with the camera and switch a lamp on a connected Arduino when it crosses a threshold.</span></div></button>
     </div>
     <div class="devBox">
       <button type="button" class="ghost" id="devModeBtn" data-i18n="devModeBtn">Developer mode</button>
@@ -1318,9 +1334,62 @@ try {
         <button type="submit" id="devEnterBtn" data-i18n="devEnter">Enter</button>
       </form>
       <p class="note hidden" id="devWrong" style="margin:6px 0 0" data-i18n="devPwWrong">Wrong password.</p>
+      <p class="glossLink"><a href="./glossary/" target="_blank" rel="noopener" data-i18n="doorGlossary">Glossary</a></p>
     </div>
   </section>
 
+  <!-- BioFeedback (testing): camera joint angle -> threshold -> Arduino lamp
+       over Web Serial. Logic in src/biofeedback.js, sketch in assets/arduino/. -->
+  <section id="viewBiofeedback" class="hidden">
+    <div class="card">
+      <b style="font-size:16px" data-i18n="doorBiofeedback">BioFeedback (testing)</b>
+      <p class="note hidden bad" id="bfbNoSerial" data-i18n="bfb_noSerial">This browser cannot talk to USB devices. Use Chrome or Edge on a computer; the lamp is still shown on screen.</p>
+
+      <h4 data-i18n="bfb_step1">1. Arduino</h4>
+      <div class="row bfbRow">
+        <button type="button" id="bfbChoosePort" data-i18n="bfb_choosePort">Choose port…</button>
+        <select id="bfbPortSel" aria-label="Port"></select>
+        <label><span data-i18n="bfb_baud">Baud</span>
+          <select id="bfbBaud"><option>9600</option><option>19200</option><option>57600</option><option>115200</option></select></label>
+        <button type="button" class="ghost" id="bfbDisconnect" data-i18n="bfb_disconnect">Disconnect</button>
+      </div>
+      <p class="note" id="bfbPortStatus"></p>
+      <div class="row bfbRow">
+        <button type="button" class="ghost" id="bfbTestOn" data-i18n="bfb_testOn">Test lamp on</button>
+        <button type="button" class="ghost" id="bfbTestOff" data-i18n="bfb_testOff">Test lamp off</button>
+        <a href="./assets/arduino/biofeedback_lamp.ino" download data-i18n="bfb_sketch">Arduino sketch (.ino)</a>
+      </div>
+
+      <h4 data-i18n="bfb_step2">2. Movement and metric</h4>
+      <div class="row bfbRow">
+        <label><span data-i18n="bfb_movement">Movement</span><select id="bfbMove"></select></label>
+        <label><span data-i18n="bfb_metric">Metric</span><select id="bfbMetric"></select></label>
+        <label><span data-i18n="bfb_when">Light when</span>
+          <select id="bfbDir"><option value="above" data-i18n="bfb_above">above threshold</option><option value="below" data-i18n="bfb_below">below threshold</option></select></label>
+      </div>
+      <div class="row bfbRow">
+        <label style="flex:1"><span data-i18n="bfb_threshold">Threshold (°)</span>
+          <input type="range" id="bfbThr" min="0" max="180" step="1"></label>
+        <input type="number" id="bfbThrN" min="0" max="180" step="1" style="width:5em" aria-label="Threshold">
+        <label><span data-i18n="bfb_hyst">Hysteresis (°)</span><input type="number" id="bfbHyst" min="0" max="20" step="1" style="width:4em"></label>
+      </div>
+
+      <h4 data-i18n="bfb_step3">3. Camera and go</h4>
+      <div class="bfbStage">
+        <video id="bfbVideo" playsinline muted></video>
+        <canvas id="bfbCanvas"></canvas>
+        <div class="bfbHud"><span id="bfbValue">–</span><span id="bfbLamp" class="bfbLamp" title="Lamp"></span></div>
+      </div>
+      <div class="bfbBar"><div id="bfbBarFill"></div><div id="bfbBarThr"></div></div>
+      <p class="note" id="bfbCamNote"></p>
+      <div class="row bfbRow">
+        <button type="button" class="ghost" id="bfbCamBtn" data-i18n="bfb_camStart">Start camera</button>
+        <button type="button" id="bfbActivate" data-i18n="bfb_activate">Activate</button>
+      </div>
+      <p class="note" data-i18n="bfb_disclaimer">Camera-estimated angles, smoothed; not motion capture. Testing feature.</p>
+      <details><summary data-i18n="bfb_logTitle">Serial log</summary><pre id="bfbLog" class="bfbLog"></pre></details>
+    </div>
+  </section>
   <section id="viewProcess" class="hidden">
     <div id="processRoot"><p class="note" data-i18n="loading">Loading…</p></div>
   </section>
@@ -1424,8 +1493,8 @@ try {
     </label>
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
-    <button class="ghost trainOnly hidden" id="ytBtn" data-i18n="ytButton">A YouTube clip (paste link, cut, analyse)</button>
-    <button class="ghost trainOnly hidden" id="screenRecBtn" data-i18n="srRecordScreen">Record the screen (YouTube, an app…)</button>
+    <button class="ghost trainOnly hidden" id="ytBtn" data-i18n="ytButton">From URL</button>
+    <button class="ghost trainOnly hidden" id="screenRecBtn" data-i18n="srRecordScreen">Record the screen</button>
     <button class="ghost trainOnly" id="manualBtn" data-i18n="manualSet">Count reps by hand (no camera)</button>
     <div id="linkRow" class="hidden" style="margin-top:11px">
       <label for="linkUrl" data-i18n="videoLink">Video link</label>
@@ -1662,8 +1731,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 28;
-window.BUILD_AT = "2026-10-15 16:18";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 29;
+window.BUILD_AT = "2026-10-15 16:33";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1789,6 +1858,7 @@ import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 // array of times, and a translated string inside either of them would have
 // called the array.
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
+import { initBiofeedback } from "./src/biofeedback.js";
 import { ensembleRep, mergeSides } from "./src/ensemble.js";
 import { neckLoadHTML } from "./src/neckload.js";
 import { normLoadDir, isHorizontal, netVerticalKg, loadText, neckPush } from "./src/loaddir.js";
@@ -1868,6 +1938,9 @@ async function startPoseWorker() {
 }
 
 const $ = (id) => document.getElementById(id);
+/* BioFeedback (testing): its own landmarker, so its timestamps never clash with the recorder's. */
+let biofeedback = null;
+queueMicrotask(() => { biofeedback = initBiofeedback({ $, tr, getLandmarker: async () => ((await loadMediaPipe()) ? makeLandmarker() : null) }); });
 const statusEl = $("status");
 const say = (t, warn) => {
   // Drop the data-i18n binding: applyStaticI18n rewrites every element that
@@ -5122,9 +5195,9 @@ $("mealShotFile").onchange = (e) => {
  * there is still exactly one source of truth for the athlete.
  */
 const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat", "viewSummary",
-               "viewHome", "viewProcess", "viewSimulate"];
+               "viewHome", "viewProcess", "viewSimulate", "viewBiofeedback"];
 /* The lab demo's screens: a home with three doors, and what they open. */
-const LAB_VIEWS = ["viewHome", "viewRecord", "viewProcess", "viewSimulate"];
+const LAB_VIEWS = ["viewHome", "viewRecord", "viewProcess", "viewSimulate", "viewBiofeedback"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -5152,6 +5225,7 @@ function showView(id, push = true) {
   if (LAB && !LAB_VIEWS.includes(id)) id = "viewHome";   // the lab demo: home + its three doors
   document.documentElement.classList.remove("booting");
   if (id !== "viewRecord") leaveRecorder();
+  if (id !== "viewBiofeedback" && biofeedback) biofeedback.leave();
   if (id !== "viewRecord" && assessStep) exitAssessMode();
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
   $("navBar").classList.toggle("hidden", id === "viewLogin" || id === "viewDash");
@@ -5173,6 +5247,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewChat") chat.open();
   if (id === "viewProcess") openProcess();
   if (id === "viewSimulate") openSimulate();
+  if (id === "viewBiofeedback") biofeedback.open();
 });
 
 $("navBack").onclick = () => history.back();
@@ -7472,6 +7547,7 @@ function enterLab() {
   });
   $("doorRecord").onclick = () => showView("viewRecord");
   $("doorProcess").onclick = () => { showView("viewProcess"); openProcess(); };
+  $("doorBiofeedback").onclick = () => { showView("viewBiofeedback"); biofeedback.open(); };
   $("doorSimulate").onclick = (e) => { if (e.target.closest("a")) return; showView("viewSimulate"); openSimulate(); };
   $("doorSimulate").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("doorSimulate").click(); } };
   $("devModeBtn").onclick = () => { $("devForm").classList.toggle("hidden"); $("devPw").focus(); };
@@ -8092,7 +8168,7 @@ $("fileBtn").onclick = () => $("fileInput").click();
 /* A clip from a video that cannot be exported: record that part of the screen
  * (desktop browsers; phones have no screen capture for web pages). */
 if (screenRecSupported()) $("screenRecBtn").classList.remove("hidden");
-if (ytSupported()) $("ytBtn").classList.remove("hidden");
+$("ytBtn").classList.remove("hidden");   // a video URL works everywhere; YouTube recording needs a desktop browser
 $("ytBtn").onclick = () => openYouTubeClip({
   t: (k, v) => esc(tr(k, v)),
   onClip: (file, crop) => analyseVideoBlob(file, { crop }),

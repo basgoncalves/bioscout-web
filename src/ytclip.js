@@ -103,7 +103,22 @@ export async function openYouTubeClip({ t, onClip, url = "" }) {
 
   const load = async () => {
     const id = youtubeId($("[data-url]").value);
-    if (!id) { msg(t("ytBadLink")); return; }
+    if (!id) {
+      // not YouTube: a direct link to a video file is fetched and analysed as it is
+      const u = $("[data-url]").value.trim();
+      if (!/^https?:\/\//i.test(u)) { msg(t("ytBadLink")); return; }
+      msg(t("urlFetching"));
+      try {
+        const r = await fetch(u);
+        if (!r.ok) throw new Error(r.status);
+        const type = r.headers.get("content-type") || "";
+        if (!/^video\//i.test(type) && !/\.(mp4|webm|mov|m4v)(\?|$)/i.test(u)) throw new Error(type || "not a video");
+        const blob = await r.blob();
+        const file = new File([blob], decodeURIComponent(u.split("/").pop().split("?")[0] || "video.mp4"), { type: blob.type || "video/mp4" });
+        close(); onClip(file, null);
+      } catch (e) { msg(t("urlFetchFailed", { err: String(e.message || e) })); }
+      return;
+    }
     msg("");
     let YT;
     try { YT = await loadApi(); } catch (e) { msg(e.message); return; }
@@ -144,6 +159,8 @@ export async function openYouTubeClip({ t, onClip, url = "" }) {
   });
   $("[data-preview]").onclick = async () => { const r = range(); if (!r || !player || busy) return; busy = true; await playRange(...r); stopRec = null; busy = false; };
 
+  // phones and tablets: no recording a tab -- play and cut here, record with the phone's own screen recorder
+  if (!ytSupported()) { $("[data-rec]").disabled = true; $("[data-rec]").title = t("ytNoCapture"); $("[data-msg]").textContent = t("ytNoCapture"); }
   $("[data-rec]").onclick = async () => {
     if (!player || busy) { if (!player) msg(t("ytBadLink")); return; }
     const r = range(); if (!r) return;
