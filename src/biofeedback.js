@@ -313,7 +313,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     port: null, writer: null, reader: null, lm: null, stream: null, raf: 0,
     active: false, lit: null, value: NaN, lastTs: -1,
   };
-  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, sound: "beep" };
+  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, sound: "beep", src: "camera" };
   try { cfg = { ...cfg, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch { /* private */ }
   const save = () => { try { localStorage.setItem(SKEY, JSON.stringify(cfg)); } catch { /* full */ } };
 
@@ -346,7 +346,13 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbDir").value = cfg.dir; $("bfbSound").value = cfg.sound || "beep"; $("bfbHyst").value = cfg.hyst; $("bfbBaud").value = String(cfg.baud);
   }
   $("bfbMove").onchange = () => pickMove($("bfbMove").value);
-  $("bfbMetric").onchange = () => { cfg.metric = $("bfbMetric").value; syncInputs(); save(); };
+  $("bfbMetric").onchange = () => {
+    const before = METRICS[cfg.metric] && METRICS[cfg.metric].unit;
+    cfg.metric = $("bfbMetric").value;
+    const u = METRICS[cfg.metric].unit;   // a 30 deg threshold means nothing in body weights
+    if (u !== before) cfg.thr = { BW: 3, cm: 30, ms: 500 }[u] ?? 30;
+    syncInputs(); save();
+  };
   $("bfbThr").oninput = () => { cfg.thr = +$("bfbThr").value; $("bfbThrN").value = cfg.thr; save(); };
   $("bfbThrN").onchange = () => { cfg.thr = Math.max(+$("bfbThr").min || 0, Math.min(+$("bfbThr").max || 180, +$("bfbThrN").value || 0)); $("bfbThr").value = cfg.thr; save(); };
   $("bfbDir").onchange = () => { cfg.dir = $("bfbDir").value; save(); };
@@ -474,13 +480,71 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
 
   /* ---------- camera + pose ---------- */
+  /* Source: the camera, or a shared screen / window / tab (getDisplayMedia)
+   * -- a YouTube video or a Zoom call. On a screen, "Select area" drags a
+   * rectangle around the person; only that crop goes to the model, which
+   * both speeds it up and stops it locking on to someone else on screen. */
+  const isScreen = () => cfg.src === "screen";
   async function startCam() {
     if (st.stream) return true;
     try {
-      st.stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      st.stream = isScreen()
+        ? await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 } }, audio: false })
+        : await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
       const v = $("bfbVideo"); v.srcObject = st.stream; await v.play();
+      // Sharing stopped from the browser's own bar: stop here too.
+      st.stream.getVideoTracks()[0].addEventListener("ended", () => { stopCam(); $("bfbCamBtn").textContent = camLabel(); });
+      $("bfbStage").classList.toggle("noMirror", isScreen());
+      st.crop = null; st.picking = false; renderSrc();
       return true;
     } catch (e) { $("bfbCamNote").textContent = tr("bfb_camFail", { err: e.message }); return false; }
+  }
+  const camLabel = () => tr(st.stream ? (isScreen() ? "bfb_scrStop" : "bfb_camStop") : (isScreen() ? "bfb_scrStart" : "bfb_camStart"));
+  function renderSrc() {
+    $("bfbSrc").value = cfg.src;
+    $("bfbArea").classList.toggle("hidden", !isScreen() || !st.stream);
+    $("bfbAreaClear").classList.toggle("hidden", !isScreen() || !st.stream || !st.crop);
+    $("bfbArea").textContent = tr(st.picking ? "bfb_areaDone" : "bfb_area");
+    $("bfbCamBtn").textContent = camLabel();
+    $("bfbSrcCv").classList.toggle("hidden", !(st.crop && !st.picking));
+    $("bfbVideo").style.visibility = st.crop && !st.picking ? "hidden" : "";
+  }
+  $("bfbSrc").onchange = () => {
+    if (st.stream) stopCam();
+    cfg.src = $("bfbSrc").value; save(); renderSrc();
+  };
+  /* Area picking: drag on the stage; coordinates mapped from the element to
+   * video pixels through object-fit: contain (screen is never mirrored). */
+  function stagePt(e) {
+    const v = $("bfbVideo"), r = $("bfbStage").getBoundingClientRect();
+    const k = Math.min(r.width / v.videoWidth, r.height / v.videoHeight);
+    const ox = (r.width - v.videoWidth * k) / 2, oy = (r.height - v.videoHeight * k) / 2;
+    return [Math.max(0, Math.min(v.videoWidth, (e.clientX - r.left - ox) / k)),
+            Math.max(0, Math.min(v.videoHeight, (e.clientY - r.top - oy) / k))];
+  }
+  let drag = null;
+  $("bfbStage").addEventListener("pointerdown", (e) => {
+    if (!st.picking) return; e.preventDefault();
+    drag = { a: stagePt(e), b: stagePt(e) }; $("bfbStage").setPointerCapture(e.pointerId);
+  });
+  $("bfbStage").addEventListener("pointermove", (e) => { if (drag) drag.b = stagePt(e); });
+  $("bfbStage").addEventListener("pointerup", () => {
+    if (!drag) return;
+    const [x0, y0] = drag.a, [x1, y1] = drag.b; drag = null;
+    if (Math.abs(x1 - x0) > 40 && Math.abs(y1 - y0) > 40) {
+      st.crop = { x: Math.min(x0, x1), y: Math.min(y0, y1), w: Math.abs(x1 - x0), h: Math.abs(y1 - y0) };
+      st.picking = false; ema = emaL = emaR = NaN; renderSrc();
+    }
+  });
+  $("bfbArea").onclick = () => { st.picking = !st.picking; renderSrc(); };
+  $("bfbAreaClear").onclick = () => { st.crop = null; st.picking = false; ema = emaL = emaR = NaN; renderSrc(); };
+  /** What the model looks at this frame: the crop (drawn, and shown) or the video. */
+  function source(v) {
+    if (!st.crop || st.picking) return { el: v, w: v.videoWidth, h: v.videoHeight };
+    const c = st.crop, cv = $("bfbSrcCv");
+    if (cv.width !== Math.round(c.w) || cv.height !== Math.round(c.h)) { cv.width = Math.round(c.w); cv.height = Math.round(c.h); }
+    cv.getContext("2d").drawImage(v, c.x, c.y, c.w, c.h, 0, 0, cv.width, cv.height);
+    return { el: cv, w: cv.width, h: cv.height };
   }
   function stopCam() {
     window.cancelAnimationFrame(st.raf); st.raf = 0;
@@ -564,9 +628,20 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     st.raf = requestAnimationFrame(frame);
     const v = $("bfbVideo"); if (!st.lm || v.readyState < 2) return;
     let ts = performance.now(); if (ts <= st.lastTs) ts = st.lastTs + 1; st.lastTs = ts;
-    const r = st.lm.detectForVideo(v, ts);
     const cv = $("bfbCanvas"), ctx = cv.getContext("2d");
-    cv.width = v.videoWidth; cv.height = v.videoHeight;
+    if (st.picking) {               // choosing the area: show the drag rectangle, no tracking
+      cv.width = v.videoWidth; cv.height = v.videoHeight; ctx.clearRect(0, 0, cv.width, cv.height);
+      if (drag) {
+        const [x0, y0] = drag.a, [x1, y1] = drag.b;
+        ctx.fillStyle = "rgba(0,0,0,.45)"; ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.clearRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+        ctx.strokeStyle = "#ffd54a"; ctx.lineWidth = 4; ctx.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+      }
+      return;
+    }
+    const S = source(v);
+    const r = st.lm.detectForVideo(S.el, ts);
+    cv.width = S.w; cv.height = S.h;
     ctx.clearRect(0, 0, cv.width, cv.height);
     const img = r.landmarks && r.landmarks[0], w = r.worldLandmarks && r.worldLandmarks[0];
     const m = METRICS[cfg.metric];
@@ -593,7 +668,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
           .catch(() => { $("bfbCamNote").textContent = tr("bfb_faceFail"); });
       }
       if (st.face) {
-        const fr = st.face.detectForVideo(v, ts);
+        const fr = st.face.detectForVideo(S.el, ts);
         const fm = fr.facialTransformationMatrixes && fr.facialTransformationMatrixes[0];
         const fl = fr.faceLandmarks && fr.faceLandmarks[0];
         if (fm) head = headPose(fm.data);
@@ -606,7 +681,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     }
     detect(ts, img, w);
     if (m.ev) return;                       // event metrics update on their own
-    ASPECT = (v.videoWidth / v.videoHeight) || ASPECT;
+    ASPECT = (S.w / S.h) || ASPECT;
     // "Zero" removes camera tilt / posture offset, per side for paired metrics.
     let ld = null;
     if (m.load) {
@@ -652,12 +727,12 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }, 500);
   $("bfbCamBtn").onclick = async () => {
     try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch { /* no audio */ }
-    if (st.stream) { stopCam(); $("bfbCamBtn").textContent = tr("bfb_camStart"); return; }
+    if (st.stream) { stopCam(); renderSrc(); return; }
     $("bfbCamNote").textContent = tr("bfb_loadingModel");
     if (!st.lm) { st.lm = await getLandmarker(); if (!st.lm) { $("bfbCamNote").textContent = tr("bfb_modelFail"); return; } }
     if (!(await startCam())) return;
-    $("bfbCamNote").textContent = "";
-    $("bfbCamBtn").textContent = tr("bfb_camStop");
+    $("bfbCamNote").textContent = isScreen() ? tr("bfb_scrHint") : "";
+    renderSrc();
     frame();
   };
   /* Zero: the current reading becomes 0 for this metric. The camera's own
@@ -689,12 +764,12 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function open() {
     $("bfbNoSerial").classList.toggle("hidden", hasSerial);
     if (!MOVES[cfg.move]) cfg.move = "squat";
-    fillMoves(); fillMetrics(); syncInputs(); renderConn(); listPorts(); renderBody();
+    fillMoves(); fillMetrics(); syncInputs(); renderConn(); listPorts(); renderBody(); renderSrc();
     if (!st.port) status("bfb_portNone");
   }
   async function leave() {
     if (st.active) $("bfbActivate").click();
-    stopCam(); $("bfbCamBtn").textContent = tr("bfb_camStart");
+    stopCam(); renderSrc();
   }
   return { open, leave, relabel: () => { fillMoves(); fillMetrics(); } };
 }
