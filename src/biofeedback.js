@@ -15,6 +15,7 @@
 
 import { bodyMapHTML, REGIONS } from "./bodymap.js";
 import { loadForceModel, predictForces } from "./forces.js";
+import { makeZip } from "./zip.js";
 
 const L = { sh: [11, 12], el: [13, 14], wr: [15, 16], hip: [23, 24], kn: [25, 26], an: [27, 28] };
 const side = (s) => (s === "R" ? 1 : 0);
@@ -608,6 +609,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   /* An event (one jump / one shot) arrived: show it, log it, flash the lamp. */
   const detect = makeDetectors((vals) => {
+    recordEvent(vals);
     const m = METRICS[cfg.metric]; if (!m.ev || !(cfg.metric in vals)) return;
     const v = vals[cfg.metric]; if (!Number.isFinite(v)) return;
     const ok = meets(v);
@@ -661,7 +663,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     for (const p of [shM, neckM, earM, img[0], img[7], img[8]]) { const [x, y] = P(p); ctx.beginPath(); ctx.arc(x, y, 5, 0, 2 * Math.PI); ctx.fill(); }
     // Head pose from the face model, only while a head metric is chosen.
     let head = null;
-    if (m.face) {
+    if (m.face || cfg.move === "neck") {
       if (!st.face && !st.faceLoading) {
         st.faceLoading = true; $("bfbCamNote").textContent = tr("bfb_faceLoading");
         makeFace().then((f) => { st.face = f; $("bfbCamNote").textContent = ""; })
@@ -680,17 +682,19 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       }
     }
     detect(ts, img, w);
-    if (m.ev) return;                       // event metrics update on their own
     ASPECT = (S.w / S.h) || ASPECT;
     // "Zero" removes camera tilt / posture offset, per side for paired metrics.
     let ld = null;
-    if (m.load) {
+    const mv = MOVES[cfg.move] || MOVES.free;
+    if (m.load || (cfg.move !== "free" && mv.metrics.some((k) => METRICS[k].load))) {
       if (!loadEst.ready()) loadEst.load().then(() => { $("bfbCamNote").textContent = ""; })
         .catch(() => { $("bfbCamNote").textContent = tr("bfb_loadFail"); });
       ld = loadEst.push(ts, w);
       if (!ld) $("bfbCamNote").textContent = tr("bfb_loadLoading");
     }
     const val = (k) => METRICS[k].f(w, img, head, ld) - ((cfg.zero && cfg.zero[k]) || 0);
+    recordFrame(ts, val, mv);
+    if (m.ev) return;                       // event metrics update on their own
     const sm = (prev, x) => (Number.isFinite(x) ? (Number.isFinite(prev) ? prev + 0.35 * (x - prev) : x) : NaN);
     let shown;
     if (m.pair) {
@@ -760,11 +764,136 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (!st.active) send(false, true);
   };
 
+  /* ---------- session: cycles, tables, export ----------
+   * Every frame the live metrics of the chosen movement are recorded
+   * (rec.samples). A CYCLE is found on the movement's main metric: it starts
+   * when the value leaves its resting baseline by more than `exc` and ends
+   * when it is back within 30% of the excursion; each cycle adds one row to
+   * that movement's table with the peak of every metric (left / right).
+   * Jumps and shots add one row per event from the event detectors. One table
+   * per movement, rows keep adding, like the recorder's session. */
+  const rec = { t0: null, samples: [], rows: {}, cyc: null };
+  const EXC = { "°": 15, BW: 0.5, cm: 5, ms: 100 };
+  const mainKey = (mv) => (cfg.move === "free" ? cfg.metric : mv.def);
+  const liveKeys = (mv) => (cfg.move === "free" ? [cfg.metric] : mv.metrics).filter((k) => !METRICS[k].ev);
+  function readAll(val, keys) {
+    const o = {};
+    for (const k of keys) {
+      const mm = METRICS[k];
+      if (mm.pair) { o[k + "_L"] = val(mm.pair[0]); o[k + "_R"] = val(mm.pair[1]); } else o[k] = val(k);
+    }
+    return o;
+  }
+  function recordFrame(ts, val, mv) {
+    if (rec.t0 == null) rec.t0 = ts;
+    const keys = liveKeys(mv); if (!keys.length) return;
+    const o = readAll(val, keys);
+    if (rec.samples.length < 200000) rec.samples.push({ t: (ts - rec.t0) / 1000, move: cfg.move, ...o });
+    // main signal: the side further from rest (either side counts)
+    const mk = mainKey(mv), mm = METRICS[mk]; if (!mm || mm.ev) return;
+    const xs = mm.pair ? [o[mk + "_L"], o[mk + "_R"]].filter(Number.isFinite) : [o[mk]].filter(Number.isFinite);
+    if (!xs.length) return;
+    let c = rec.cyc;
+    if (!c || c.move !== cfg.move || c.key !== mk) c = rec.cyc = { move: cfg.move, key: mk, b: NaN, inC: false, frames: [], quiet: 0 };
+    const x = Number.isFinite(c.b) ? xs.reduce((a, v) => (Math.abs(v - c.b) > Math.abs(a - c.b) ? v : a), xs[0]) : xs[0];
+    const E = EXC[mm.unit] ?? 15;
+    if (!c.inC) {
+      c.b = Number.isFinite(c.b) ? c.b + 0.05 * (x - c.b) : x;
+      if (Math.abs(x - c.b) > E) { c.inC = true; c.start = ts; c.peak = 0; c.frames = []; }
+    }
+    if (c.inC) {
+      c.frames.push(o); c.peak = Math.max(c.peak, Math.abs(x - c.b));
+      if (Math.abs(x - c.b) < 0.3 * c.peak) c.quiet++; else c.quiet = 0;
+      if (c.quiet >= 3 || ts - c.start > 15000) {
+        const dur = (ts - c.start) / 1000; c.inC = false;
+        if (dur > 0.4 && dur < 15) addCycleRow(mv, c, dur, (c.start - rec.t0) / 1000);
+      }
+    }
+  }
+  /* Extreme of a column over the cycle: whichever of max/min lies further from the first frame. */
+  function extreme(frames, col) {
+    const v = frames.map((f) => f[col]).filter(Number.isFinite); if (!v.length) return NaN;
+    const a = Math.max(...v), b = Math.min(...v);
+    return Math.abs(a - v[0]) >= Math.abs(b - v[0]) ? a : b;
+  }
+  function addCycleRow(mv, c, dur, t) {
+    const row = { t, dur };
+    for (const k of liveKeys(mv)) {
+      const mm = METRICS[k];
+      if (mm.pair) { row[k + "_L"] = extreme(c.frames, k + "_L"); row[k + "_R"] = extreme(c.frames, k + "_R"); }
+      else row[k] = extreme(c.frames, k);
+    }
+    const p = METRICS[c.key];
+    const main = p.pair ? [row[c.key + "_L"], row[c.key + "_R"]].filter(Number.isFinite) : [row[c.key]];
+    row.hit = main.some((v) => meets(v));
+    pushRow(cfg.move, row);
+  }
+  function recordEvent(vals) {
+    const mv = MOVES[cfg.move]; if (!mv) return;
+    const keys = mv.metrics.filter((k) => METRICS[k].ev && k in vals); if (!keys.length) return;
+    const row = { t: rec.t0 == null ? 0 : (performance.now() - rec.t0) / 1000 };
+    for (const k of keys) row[k] = vals[k];
+    const mk = mainKey(mv); row.hit = mk in vals ? meets(vals[mk]) : null;
+    pushRow(cfg.move, row);
+  }
+  function pushRow(move, row) { (rec.rows[move] ||= []).push(row); renderTables(); }
+  /* Short column titles: the metric label without its qualifiers. */
+  const short = (k) => tr(METRICS[k].label).replace(/\s*\((?:per |peak|por |pro |Spitze|pico|model|modelo|Modell)[^)]*\)/gi, "").replace(/, (model|modelo|Modell)\b/i, "");
+  const cell = (v, u) => (Number.isFinite(v) ? (u === "BW" || u === "cm" ? v.toFixed(1) : v.toFixed(0)) : "–");
+  function columns(move) {
+    const mv = MOVES[move]; const cols = [];
+    const keys = move === "free" ? Object.keys(Object.assign({}, ...rec.rows[move])).filter((k) => METRICS[k.replace(/_[LR]$/, "")]) : mv.metrics;
+    const seen = new Set();
+    for (const kk of keys) {
+      const k = kk.replace(/_[LR]$/, ""); if (seen.has(k)) continue; seen.add(k);
+      if (!rec.rows[move].some((r) => (k in r) || ((k + "_L") in r))) continue;
+      cols.push(k);
+    }
+    return cols;
+  }
+  function renderTables() {
+    const host = $("bfbTables"); if (!host) return;
+    host.innerHTML = Object.keys(rec.rows).map((move) => {
+      const rows = rec.rows[move], cols = columns(move);
+      const head = `<tr><th>#</th><th>t (s)</th>${rows[0].dur != null ? `<th>${esc(tr("bfb_dur"))}</th>` : ""}${cols.map((k) =>
+        `<th>${esc(short(k))}${METRICS[k].pair ? " <small>L / R</small>" : ""} <small>(${esc(METRICS[k].unit)})</small></th>`).join("")}<th>✓</th></tr>`;
+      const body = rows.map((r, i) => `<tr${r.hit ? ' class="hit"' : ""}><td>${i + 1}</td><td>${r.t.toFixed(1)}</td>${r.dur != null ? `<td>${r.dur.toFixed(1)}</td>` : ""}${cols.map((k) => {
+        const u = METRICS[k].unit;
+        return `<td>${METRICS[k].pair ? `${cell(r[k + "_L"], u)} / ${cell(r[k + "_R"], u)}` : cell(r[k], u)}</td>`;
+      }).join("")}<td>${r.hit ? "✓" : r.hit === false ? "✗" : ""}</td></tr>`).join("");
+      return `<div class="bfbTbl"><b>${esc(tr(MOVES[move].label))}</b> <span class="note">${esc(tr("bfb_nCycles", { n: rows.length }))}</span>
+        <div class="tableScroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div></div>`;
+    }).join("");
+    $("bfbSave").disabled = !rec.samples.length && !Object.keys(rec.rows).length;
+  }
+  const csv = (rows, cols) => [cols.join(","), ...rows.map((r) => cols.map((c) => {
+    const v = r[c]; return v == null ? "" : typeof v === "number" ? (Number.isFinite(v) ? +v.toFixed(4) : "") : String(v).includes(",") ? `"${v}"` : v;
+  }).join(","))].join("\n");
+  $("bfbSave").onclick = () => {
+    const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
+    const files = [];
+    for (const [move, rows] of Object.entries(rec.rows)) {
+      const cols = ["t", ...(rows[0].dur != null ? ["dur"] : []), ...[...new Set(rows.flatMap((r) => Object.keys(r)))].filter((c) => !["t", "dur", "hit"].includes(c)), "hit"];
+      files.push({ name: `summary_${move}.csv`, data: csv(rows, cols) });
+    }
+    if (rec.samples.length) {
+      const cols = ["t", "move", ...[...new Set(rec.samples.flatMap((r) => Object.keys(r)))].filter((c) => c !== "t" && c !== "move")];
+      files.push({ name: "timeseries.csv", data: csv(rec.samples, cols) });
+    }
+    files.push({ name: "settings.json", data: JSON.stringify({ saved: new Date().toISOString(), source: cfg.src, movement: cfg.move,
+      metric: cfg.metric, threshold: cfg.thr, unit: METRICS[cfg.metric].unit, lightWhen: cfg.dir, hysteresis: cfg.hyst, zero: cfg.zero }, null, 2) });
+    files.push({ name: "README.txt", data: tr("bfb_readme") });
+    const blob = makeZip(files), url = URL.createObjectURL(blob), a = document.createElement("a");
+    a.href = url; a.download = `bioscout_biofeedback_${stamp}.zip`; document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
+  };
+  $("bfbClear").onclick = () => { rec.t0 = null; rec.samples = []; rec.rows = {}; rec.cyc = null; renderTables(); };
+
   /* ---------- open / leave ---------- */
   function open() {
     $("bfbNoSerial").classList.toggle("hidden", hasSerial);
     if (!MOVES[cfg.move]) cfg.move = "squat";
-    fillMoves(); fillMetrics(); syncInputs(); renderConn(); listPorts(); renderBody(); renderSrc();
+    fillMoves(); fillMetrics(); syncInputs(); renderConn(); listPorts(); renderBody(); renderSrc(); renderTables();
     if (!st.port) status("bfb_portNone");
   }
   async function leave() {
