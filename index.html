@@ -1662,8 +1662,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 27;
-window.BUILD_AT = "2026-10-15 16:02";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 28;
+window.BUILD_AT = "2026-10-15 16:18";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -10912,10 +10912,37 @@ function setSwitcher(res) {
     </div>`;
 }
 
+/* A stored set keeps angles and moments but not the muscle forces (80 traces a
+ * frame). The joint-load figure (stick figures, GRF, contact-force dials) only
+ * needs the angles to run the force surrogate again, so a restored set gets
+ * them back here instead of losing the figure. */
+async function restoreLoads(res) {
+  const act = res.activity, spec = ACTIVITIES[act] || {};
+  if (!res.reps || ["neck", "pushup", "pullup", "dip"].includes(act)) return;
+  try {
+    const fm = await loadForceModel();
+    if (!forceSelfTest(fm).plausible) return;
+    const massKg = res.massKg || parseFloat($("mass").value) || 75;
+    const heightM = parseFloat($("height").value) || 1.75;
+    for (const r of [...res.reps, ...(res.whole ? [res.whole] : [])]) {
+      if (r.loads || !r.coords || !r.times || !r.coords.knee_angle_r) continue;
+      const mc = { ...r.coords };
+      if ((act === "squat" || spec.jump) && KNEE_SIGN[res.osimModel] < 0) {
+        mc.knee_angle_r = r.coords.knee_angle_r.map((v) => -v);
+        mc.knee_angle_l = (r.coords.knee_angle_l || r.coords.knee_angle_r).map((v) => -v);
+      }
+      mc.pelvis_tx = r.coords.pelvis_tz; mc.pelvis_tz = r.coords.pelvis_tx;   // as enrich()
+      const out = predictForces(fm, mc, r.times.length, { massKg, heightM, times: r.times });
+      Object.assign(r, { forces: out.forces, forceNames: out.muscleNames, jrf: out.jrf, jrfNames: out.jrfNames,
+        loads: out.loads, loadNames: out.loadNames, forceMissing: out.missing, forceModel: fm,
+        forceImplausible: implausibleFraction(out.forces) });
+    }
+  } catch (err) { console.warn("restored set: forces not rebuilt", err); }
+}
 function wireSetSwitcher() {
   const sel = $("setSel");
   if (!sel) return;
-  sel.onchange = () => {
+  sel.onchange = async () => {
     const want = +sel.value;
     let hit = pageSets.find((x) => x.index === want);
     if (!hit) {
@@ -10927,6 +10954,7 @@ function wireSetSwitcher() {
       if (!c) return;
       hit = { index: want, fps: c.fps || 30,
               res: { ...c, restored: true, sessionStarted: sess.started } };
+      await restoreLoads(hit.res);
     }
     viewingSet = hit.index;
     render(hit.res, hit.fps);
