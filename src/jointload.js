@@ -133,6 +133,7 @@ export function kneeSignOf(rep) {
 export function eventFamily(activity, spec = {}) {
   if (spec.gait || activity === "run" || activity === "walk" || activity === "sidestep") return "gait";
   if (spec.jump || spec.shot || activity === "jumpshot") return "jump";
+  if (spec.stroke || activity === "stroke") return "stroke";
   return "squat";
 }
 
@@ -201,6 +202,14 @@ export function loadEvents(rep, activity, spec, side, grf, kneeSign = 1) {
       const dt = (t[n - 1] - t[0]) / Math.max(1, n - 1);
       push("jlEvLand250", Math.min(n - 1, land + Math.round(0.25 / (dt || 0.033))));
     }
+  } else if (fam === "stroke") {
+    /* A stroke: the backswing (the start of the swing), the push of the legs
+     * (peak vertical GRF before contact), ball contact, and the follow-through. */
+    const c = isNum(rep.contact_frac) ? Math.round(rep.contact_frac * (n - 1)) : -1;
+    push("jlEvBackswing", 0);
+    if (c > 2) push("jlEvLegDrive", argmax(grf, 0, c - 1));
+    if (c > 0) push("jlEvContact", c);
+    push("jlEvFollow", n - 1);
   } else if (fam === "jump") {
     const total = grf;
     const apex = tyOk ? argmax(ty) : argmin(smooth(total, 5), Math.floor(n * 0.2), Math.floor(n * 0.9));
@@ -552,6 +561,7 @@ export function jointLoadSVG(rep, opts) {
 /** Every i18n key this module can ask for -- tests/test_jointload.mjs checks them. */
 export const JL_KEYS = ["jlTitle", "jlSup", "jlInf", "jlAnt", "jlPos", "jlLat", "jlMed",
   "jl_hip", "jl_knee", "jl_ankle", "jlGrfAxis", "jlCyclePct", "jlTimeS", "jlFullCycle",
+  "jlEvBackswing", "jlEvLegDrive", "jlEvContact", "jlEvFollow",
   "jlEvMidSwing", "jlEvImpact", "jlEvPeakLoad", "jlEvPushOff", "jlEvBottom", "jlEvPeakPush",
   "jlEvApex", "jlEvLanding", "jlEvStart", "jlEvPeakDescent", "jlEvPeakLoadUp", "jlEvPeakAscent",
   "jlViewSagittal", "jlViewFrontal", "jlNote", "jlNoteFrontal", "jlNoteGrfNewton",

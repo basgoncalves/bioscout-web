@@ -36,7 +36,7 @@
  * and the heavy version moves only when a vendored asset actually changes,
  * which is rarely. A shell bump can no longer cost anybody a 20 MB download.
  */
-const SHELL_CACHE = "bioscout-shell-v222";
+const SHELL_CACHE = "bioscout-shell-v223";
 const HEAVY_CACHE = "bioscout-heavy-v1";
 const PIN_CACHE = "bioscout-pin";        // which old build the person chose (one entry), and its files
 const KEEP = [SHELL_CACHE, HEAVY_CACHE, PIN_CACHE];
@@ -53,7 +53,7 @@ async function pinned() {
 }
 
 const SHELL = ["./", "./index.html", "./builds.json", "./formats.html", "./privacy.html", "./limitations.html", "./glossary/", "./glossary/index.html", "./src/kinematics.js", "./src/dynamics.js",
-               "./src/forces.js", "./src/overlay.js", "./src/zip.js", "./src/detect.js", "./src/profiles.js", "./src/ensemble.js", "./src/dashboard.js", "./src/fetcher.js", "./src/diary.js", "./src/media.js", "./src/weight.js", "./src/bodyfat.js", "./src/cycle.js", "./src/foods.js", "./src/energy.js", "./src/share.js", "./src/trainsummary.js", "./src/athsummary.js", "./src/plans.js", "./src/resttimer.js", "./src/protocol.js", "./src/sharepost.js", "./src/sleep.js", "./src/vitals.js", "./src/water.js", "./src/reaction.js", "./src/friends.js", "./src/cardio.js", "./src/strava.js", "./src/neckload.js", "./src/neck_gload.js", "./src/assess.js", "./src/framing.js", "./src/gesture.js", "./src/muscle_groups.js", "./src/armmuscles.js", "./src/tiptoe_ref.js", "./src/neck_load.js", "./src/loaddir.js", "./src/neckmuscles.js", "./data/neck_muscles.json", "./src/health.js", "./src/i18n.js", "./src/jointmetrics.js", "./src/grf.js", "./src/jointload.js", "./src/repquality.js", "./src/sports.js", "./src/balltrack.js", "./src/screenrec.js", "./src/ballmodel.js", "./src/ytclip.js", "./src/osimlab.js", "./src/simtools.js", "./src/simsetup.js", "./src/simfigs.js", "./src/simstack.js", "./src/simsession.js", "./src/labtrial.js", "./src/simquick.js", "./src/c3dexport.js", "./src/trcview.js", "./src/localengine.js", "./src/pyosim_worker.js", "./src/pose_worker.js", "./src/biofeedback.js", "./src/lmreview.js", "./data/opensim/tools.json", "./data/opensim/engine.json", "./src/process.js", "./src/proc_io.js", "./src/proc_dsp.js", "./src/osimexport.js", "./src/rtp.js", "./src/bodymap.js", "./src/achievements.js", "./src/syncmeta.js", "./src/cloud.js", "./src/cloud_config.js", "./src/help.js", "./src/chat.js", "./data/norms.json", "./data/muscle_joints.json", "./manifest.webmanifest",
+               "./src/forces.js", "./src/overlay.js", "./src/zip.js", "./src/detect.js", "./src/profiles.js", "./src/ensemble.js", "./src/dashboard.js", "./src/fetcher.js", "./src/diary.js", "./src/media.js", "./src/weight.js", "./src/bodyfat.js", "./src/cycle.js", "./src/foods.js", "./src/energy.js", "./src/share.js", "./src/trainsummary.js", "./src/athsummary.js", "./src/plans.js", "./src/resttimer.js", "./src/protocol.js", "./src/sharepost.js", "./src/sleep.js", "./src/vitals.js", "./src/water.js", "./src/reaction.js", "./src/friends.js", "./src/cardio.js", "./src/strava.js", "./src/neckload.js", "./src/neck_gload.js", "./src/assess.js", "./src/framing.js", "./src/gesture.js", "./src/muscle_groups.js", "./src/armmuscles.js", "./src/tiptoe_ref.js", "./src/neck_load.js", "./src/loaddir.js", "./src/neckmuscles.js", "./data/neck_muscles.json", "./src/health.js", "./src/i18n.js", "./src/jointmetrics.js", "./src/grf.js", "./src/jointload.js", "./src/repquality.js", "./src/sports.js", "./src/balltrack.js", "./src/screenrec.js", "./src/ballmodel.js", "./src/ytclip.js", "./src/osimlab.js", "./src/simtools.js", "./src/simsetup.js", "./src/simfigs.js", "./src/simstack.js", "./src/simsession.js", "./src/labtrial.js", "./src/simquick.js", "./src/c3dexport.js", "./src/trcview.js", "./src/localengine.js", "./src/pyosim_worker.js", "./src/pose_worker.js", "./src/biofeedback.js", "./src/lmreview.js", "./src/jcfcontrib.js", "./data/opensim/tools.json", "./data/opensim/engine.json", "./src/process.js", "./src/proc_io.js", "./src/proc_dsp.js", "./src/osimexport.js", "./src/rtp.js", "./src/bodymap.js", "./src/achievements.js", "./src/syncmeta.js", "./src/cloud.js", "./src/cloud_config.js", "./src/help.js", "./src/chat.js", "./data/norms.json", "./data/muscle_joints.json", "./manifest.webmanifest",
                "./assets/icons/logo.png", "./assets/icons/icon-192.png",
                "./assets/icons/icon-512.png", "./assets/icons/icon-maskable-512.png",
                "./assets/icons/apple-touch-icon.png", "./assets/icons/favicon.ico"];
@@ -87,6 +87,7 @@ const isHeavy = (url) =>
   url.pathname.includes("/vendor/") ||
   url.pathname.includes("/meshes/") ||
   url.pathname.endsWith(".task") ||
+  url.pathname.includes("/media/") ||
   url.pathname.endsWith("/force_model_v2.json");
 
 // Individually, not addAll: one 404 must not fail the whole install -- but not
@@ -133,6 +134,9 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
 
+  // video: straight to the network. A cached whole-file answer to a Range request
+  // leaves the <video> black, and the browser's own media cache does this better.
+  if (url.pathname.includes("/media/")) return;
   const rel = url.pathname.slice(new URL(self.registration.scope).pathname.length);
   // these always come from the network: the build list, and the worker itself
   if (rel === "builds.json" || rel === "sw.js" || url.searchParams.has("check")) { e.respondWith(fetch(req, { cache: "no-store" }).catch(() => caches.match(req))); return; }
