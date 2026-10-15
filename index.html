@@ -1417,6 +1417,7 @@ try {
     </label>
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
+    <button class="ghost trainOnly hidden" id="screenRecBtn" data-i18n="srRecordScreen">Record the screen (YouTube, an app…)</button>
     <button class="ghost trainOnly" id="manualBtn" data-i18n="manualSet">Count reps by hand (no camera)</button>
     <div id="linkRow" class="hidden" style="margin-top:11px">
       <label for="linkUrl" data-i18n="videoLink">Video link</label>
@@ -1653,8 +1654,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 19;
-window.BUILD_AT = "2026-10-15 13:36";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 20;
+window.BUILD_AT = "2026-10-15 13:39";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1699,6 +1700,7 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          jointPositionsM } from "./src/kinematics.js";
 import { inverseDynamics } from "./src/dynamics.js";
 import { gradeReps } from "./src/repquality.js";
+import { screenRecSupported, openScreenRecorder } from "./src/screenrec.js";
 import { athleteSummary, taskStats, curveSummary, curveSVG, generalHTML, taskTableHTML,
          ASM_WINDOWS, ASM_METRICS, stats as asmStats, mr as asmMR } from "./src/athsummary.js";
 import { isUpperBody, defaultJoint, jointOrder, clipAngles, clipVelocities,
@@ -2007,7 +2009,7 @@ const ballView = { canvas: null, ctx: null, vw: 0, vh: 0 };
 function ballGrab(src, t, lm) {
   const act = $("activity").value;
   if (act !== "stroke" && act !== "kick") return;
-  const vw = src.videoWidth, vh = src.videoHeight;
+  const vw = src.videoWidth || src.width, vh = src.videoHeight || src.height;
   if (!vw || !vh) return;
   const k = 480 / Math.max(vw, vh);
   const w = Math.max(2, Math.round(vw * k)), h = Math.max(2, Math.round(vh * k));
@@ -8075,6 +8077,13 @@ $("recBtn").onclick = () => {
 
 // --- video file ------------------------------------------------------------
 $("fileBtn").onclick = () => $("fileInput").click();
+/* A clip from a video that cannot be exported: record that part of the screen
+ * (desktop browsers; phones have no screen capture for web pages). */
+if (screenRecSupported()) $("screenRecBtn").classList.remove("hidden");
+$("screenRecBtn").onclick = () => openScreenRecorder({
+  t: (k) => esc(tr(k)),
+  onClip: (file, crop) => analyseVideoBlob(file, { crop }),
+});
 
 /* Counting a set by hand.
  *
@@ -8295,7 +8304,7 @@ async function analyseVideoBlob(file, opts = {}) {
   }
 }
 
-async function analyseVideoFile(file, { trim = true } = {}) {
+async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   say(tr("sayReadingVideo"));
   showConvertHint(false);
   bar(-1);
@@ -8409,6 +8418,13 @@ async function analyseVideoFile(file, { trim = true } = {}) {
   const seekOf = (i) => Math.min(tOf(i) + half, Math.max(0, duration - 1e-3));
   const stats = { frames: n, seeks: 0, seekMs: 0, detectMs: 0, played: 0, mode: "seek" };
   const t0 = performance.now();
+  /* A screen recording may carry a crop (the area the person drew): the model
+   * sees only that rectangle, and the landmarks are in its pixels. */
+  const cr = crop && crop.w > 8 && crop.h > 8 ? crop : null;
+  const fw = cr ? Math.round(cr.w) : v.videoWidth, fh = cr ? Math.round(cr.h) : v.videoHeight;
+  let cropCv = null, cropCx = null;
+  if (cr) { cropCv = document.createElement("canvas"); cropCv.width = fw; cropCv.height = fh; cropCx = cropCv.getContext("2d"); }
+  const srcNow = () => { if (!cr) return v; cropCx.drawImage(v, cr.x, cr.y, cr.w, cr.h, 0, 0, fw, fh); return cropCv; };
   /** Track grid slot i on whatever frame the element is showing now. */
   const track = (i) => {
     const t = tOf(i);
@@ -8416,11 +8432,12 @@ async function analyseVideoFile(file, { trim = true } = {}) {
     // The timestamp handed to the model is the GRID time, not v.currentTime:
     // a seek lands on the nearest keyframe-decoded frame, and feeding the model
     // a timestamp that goes backwards makes it drop the frame outright.
-    const res = off.detectForVideo(v, Math.round(t * 1000));
+    const src = srcNow();
+    const res = off.detectForVideo(src, Math.round(t * 1000));
     stats.detectMs += performance.now() - d0;
     const named = res.landmarks && res.landmarks.length
-      ? toNamed(res.landmarks[0], v.videoWidth, v.videoHeight) : null;
-    ballGrab(v, t * 1000, named);
+      ? toNamed(res.landmarks[0], fw, fh) : null;
+    ballGrab(src, t * 1000, named);
     if (named) {
       // `i` is the GRID index, and it is what the analysis keys off. A frame
       // the model found no body in is then a hole at its own place in time
@@ -8535,7 +8552,7 @@ async function analyseVideoFile(file, { trim = true } = {}) {
    * The video is paused only if the model falls far behind, so the bitmaps
    * waiting for it never pile up. */
   if (pw) {
-    const vw = v.videoWidth, vh = v.videoHeight, sc = Math.min(1, 480 / Math.max(vw, vh));
+    const vw = fw, vh = fh, sc = Math.min(1, 480 / Math.max(vw, vh));
     const rw = Math.max(2, Math.round(vw * sc)), rh = Math.max(2, Math.round(vh * sc));
     let inflight = 0, done = 0, held = false, last = -1;
     const results = new Promise((resolveAll) => {
@@ -8570,7 +8587,8 @@ async function analyseVideoFile(file, { trim = true } = {}) {
         if (k > last && k >= 0) {
           last = k; nudges = 0;
           try {
-            const bmp = await createImageBitmap(v, { resizeWidth: rw, resizeHeight: rh, resizeQuality: "low" });
+            const opt = { resizeWidth: rw, resizeHeight: rh, resizeQuality: "low" };
+            const bmp = cr ? await createImageBitmap(v, cr.x, cr.y, cr.w, cr.h, opt) : await createImageBitmap(v, opt);
             inflight++; stats.played++;
             pw.postMessage({ cmd: "detect", k, ts: Math.round(tOf(k) * 1000), bmp }, [bmp]);
             if (inflight > 24 && !held) { held = true; v.pause(); }
