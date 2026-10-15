@@ -256,7 +256,7 @@ export function makeLocalClient(spec) {
 
   return {
     local: true,
-    health: async () => ({ name: "bioscout-lab-engine", authed: true, local: true, models: ["GPK_v4_016.osim"], tools: [...LOCAL_TOOLS] }),
+    health: async () => ({ name: "bioscout-lab-engine", authed: true, local: true, models: ["GPK_v4_016.osim", "Rajagopal2015.osim", "Digital_Athlete.osim"], tools: [...LOCAL_TOOLS] }),
     newJob: async () => snap(),
     status: async () => snap(),
     setModel: async (_id, name) => { job.model = name; return snap(); },
