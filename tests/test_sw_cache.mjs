@@ -70,7 +70,7 @@ const HEAVY = arrayNamed("HEAVY");
     check(shellCache[1] !== heavyCache[1],
           "the shell and heavy caches must not be the same cache");
   }
-  check(/KEEP\s*=\s*\[\s*SHELL_CACHE\s*,\s*HEAVY_CACHE\s*\]/.test(sw),
+  check(/KEEP\s*=\s*\[\s*SHELL_CACHE\s*,\s*HEAVY_CACHE\s*(,\s*PIN_CACHE\s*)?\]/.test(sw),
         "activate must keep both caches, not just one");
   check(/skipExisting/.test(sw),
         "install must not re-add heavy assets that are already cached");

@@ -85,6 +85,11 @@ try {
                   cursor:pointer; border-radius:8px; -webkit-tap-highlight-color:transparent; }
   a.brandReload:hover h1 { color:var(--accent); }
   a.brandReload:active { opacity:.6; }
+  .buildPick { background:none; border:0; padding:0 4px; margin:0; width:auto; color:var(--muted); opacity:.6;
+               font-size:11px; cursor:pointer; min-height:0; }
+  .buildPick:hover { opacity:1; }
+  .updateLink { font-size:12px; margin-left:6px; color:var(--muted); }
+  .updateLink.ready { color:var(--accent); font-weight:600; }
   .brand a { margin:0; text-decoration:none; font-size:12.5px; }
   .brand a:hover { color:var(--accent); }
   .sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
@@ -893,7 +898,9 @@ try {
     <select id="lang" style="width:auto;padding:5px 8px;font-size:12.5px;margin:0"></select>
   </div>
   <p class="sub"><span data-i18n="tagline">A physics-informed, AI-powered bio tracker.</span>
-    <span class="note" id="build" style="opacity:.6"></span></p>
+    <span class="note" id="build" style="opacity:.6"></span><button type="button" id="buildPick" class="buildPick" aria-label="Choose a build" title="Use an older build">&#9662;</button>
+    <a href="#" id="updateLink" class="updateLink" data-i18n="updateLink">Update</a>
+    <select id="buildSel" class="hidden" style="width:auto;padding:3px 6px;font-size:12px;margin:4px 0 0"></select></p>
 
   <dialog id="termsDlg">
     <h2 style="font-size:16px;margin:0 0 10px" data-i18n="termsTitle">Terms &amp; privacy</h2>
@@ -1654,8 +1661,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 23;
-window.BUILD_AT = "2026-10-15 14:09";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 24;
+window.BUILD_AT = "2026-10-15 14:15";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -11828,36 +11835,77 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
    * deployed, verifiably present on the server, and still not be what the page
    * is running. That is exactly how a broken login screen survived being
    * fixed. */
+  /* Updates happen at START only. A new build that was downloaded on an
+   * earlier visit is switched to as the page opens; one found while the app
+   * runs waits, and the Update link next to the build says so. Nothing
+   * reloads by itself mid-take. */
+  const T0 = performance.now();
+  let mayReload = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (mayReload) { mayReload = false; location.reload(); }
+  });
+  const ready = (on, build) => {
+    const a = $("updateLink"); if (!a) return;
+    a.classList.toggle("ready", !!on);
+    a.textContent = on ? tr("updateReady", { build: build || "" }).trim() : tr("updateLink");
+  };
+  const applyWaiting = (reg) => { if (reg && reg.waiting) { mayReload = true; reg.waiting.postMessage({ cmd: "skipWaiting" }); return true; } return false; };
   navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then((reg) => {
-    reg.update();
-    // A waiting worker means a newer version is already downloaded. Reload once
-    // so the user gets it now rather than several visits later.
-    let reloaded = false;
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (!reloaded) { reloaded = true; location.reload(); }
-    });
+    if (performance.now() - T0 < 5000 && !pinnedBuild() && applyWaiting(reg)) return;   // at start: take it now
+    const watch = (w) => w && w.addEventListener("statechange", () => { if (w.state === "installed" && navigator.serviceWorker.controller) ready(true); });
+    if (reg.waiting) ready(true);
+    watch(reg.installing);
+    reg.addEventListener("updatefound", () => watch(reg.installing));
+    reg.update().catch(() => {});
+    window.__bsReg = reg;
   }).catch(() => {});
-
-  /* Belt and braces: ask the network what the current build is, and if the
-   * page running is not it, reload once.
-   *
-   * The worker dance above is the mechanism; this is the check that it worked.
-   * It is one conditional request against a file already being fetched, it
-   * only ever fires when the served build genuinely differs from the running
-   * one, and the sessionStorage guard means a page that somehow cannot update
-   * reloads once and then stops rather than looping. */
+  // the served build, to name it on the link (no reload)
   window.addEventListener("load", () => setTimeout(async () => {
     try {
-      const html = await (await fetch("index.html", { cache: "no-store" })).text();
+      const u = new URL("index.html", location.href); u.searchParams.set("check", Date.now());   // the worker sends ?check to the network
+      const html = await (await fetch(u, { cache: "no-store" })).text();
       const served = +(html.match(/window\.BUILD = (\d+)/) || [])[1];
-      if (!served || served === window.BUILD) return;
-      if (sessionStorage.getItem("bioscout.staleReload") === String(served)) return;
-      sessionStorage.setItem("bioscout.staleReload", String(served));
-      const cs = await caches.keys();
-      await Promise.all(cs.filter((k) => k.includes("shell")).map((k) => caches.delete(k)));
+      if (served && served !== window.BUILD && !pinnedBuild()) ready(true, served);
+    } catch { /* offline */ }
+  }, 2500));
+  $("updateLink").onclick = async (e) => {
+    e.preventDefault();
+    const reg = window.__bsReg || await navigator.serviceWorker.getRegistration();
+    try { if (reg) await Promise.race([reg.update(), new Promise((r) => setTimeout(r, 2500))]); } catch { /* offline */ }
+    if (pinnedBuild()) await setPin(null);
+    if (applyWaiting(reg)) return;                    // reloads on controllerchange
+    location.reload();
+  };
+  /* Older builds: the small arrow after the build. builds.json lists them
+   * (build -> commit); the worker serves the chosen one's files from the
+   * repository at that commit, under this site, so saved data still shows. */
+  function pinnedBuild() { try { return JSON.parse(localStorage.getItem("bioscout.pinBuild") || "null"); } catch { return null; } }
+  async function setPin(pin) {
+    try { localStorage.setItem("bioscout.pinBuild", JSON.stringify(pin)); } catch { /* private mode */ }
+    const sw = navigator.serviceWorker.controller || (await navigator.serviceWorker.ready).active;
+    await new Promise((res) => {
+      const done = (ev) => { if (ev.data && ev.data.cmd === "pinned") { navigator.serviceWorker.removeEventListener("message", done); res(); } };
+      navigator.serviceWorker.addEventListener("message", done);
+      sw.postMessage({ cmd: "pin", pin });
+      setTimeout(res, 2000);
+    });
+  }
+  if (pinnedBuild()) { const p = pinnedBuild(); $("build").textContent += " \u00b7 " + tr("buildPinned", { build: p.build }); }
+  $("buildPick").onclick = async () => {
+    const sel = $("buildSel");
+    if (!sel.classList.contains("hidden")) { sel.classList.add("hidden"); return; }
+    let list = [];
+    try { list = await (await fetch("builds.json", { cache: "no-store" })).json(); } catch { /* offline */ }
+    const cur = pinnedBuild();
+    sel.innerHTML = `<option value="">${esc(tr("buildLatest"))}</option>` + list.slice().reverse()
+      .map((b) => `<option value="${esc(b.commit)}"${cur && cur.commit === b.commit ? " selected" : ""}>${esc(`${b.release} · build ${b.build}${b.at ? " · " + b.at : ""}`)}</option>`).join("");
+    sel.classList.remove("hidden");
+    sel.onchange = async () => {
+      const b = list.find((x) => x.commit === sel.value) || null;
+      await setPin(b ? { commit: b.commit, build: b.build, release: b.release } : null);
       location.reload();
-    } catch { /* offline, or no caches API: keep running what we have */ }
-  }, 1500));
+    };
+  };
 }
 </script>
   <div id="achToast" class="achToast" role="status" hidden></div>

@@ -1,0 +1,140 @@
+[
+ {
+  "release": "V2",
+  "build": 1,
+  "commit": "edbeca1",
+  "at": "2026-10-14 12:03"
+ },
+ {
+  "release": "V2",
+  "build": 2,
+  "commit": "609c3a3",
+  "at": "2026-10-14 12:08"
+ },
+ {
+  "release": "V2",
+  "build": 3,
+  "commit": "24fd7d0",
+  "at": "2026-10-14 12:16"
+ },
+ {
+  "release": "V2",
+  "build": 4,
+  "commit": "878149c",
+  "at": "2026-10-14 12:24"
+ },
+ {
+  "release": "V2",
+  "build": 5,
+  "commit": "d801b6c",
+  "at": "2026-10-14 15:19"
+ },
+ {
+  "release": "V2",
+  "build": 6,
+  "commit": "8cc7a1f",
+  "at": "2026-10-14 20:23"
+ },
+ {
+  "release": "V2",
+  "build": 7,
+  "commit": "8d4eb65",
+  "at": "2026-10-14 20:49"
+ },
+ {
+  "release": "V2",
+  "build": 8,
+  "commit": "299fce9",
+  "at": "2026-10-14 21:37"
+ },
+ {
+  "release": "V2",
+  "build": 9,
+  "commit": "b4b7590",
+  "at": "2026-10-15 06:44"
+ },
+ {
+  "release": "V2",
+  "build": 10,
+  "commit": "d7d4b4f",
+  "at": "2026-10-15 07:00"
+ },
+ {
+  "release": "V2",
+  "build": 11,
+  "commit": "79ad082",
+  "at": "2026-10-15 08:06"
+ },
+ {
+  "release": "V2",
+  "build": 12,
+  "commit": "955d949",
+  "at": "2026-10-15 08:40"
+ },
+ {
+  "release": "V2",
+  "build": 13,
+  "commit": "2cb1520",
+  "at": "2026-10-15 08:55"
+ },
+ {
+  "release": "V2",
+  "build": 14,
+  "commit": "e1bf664",
+  "at": "2026-10-15 09:40"
+ },
+ {
+  "release": "V2",
+  "build": 15,
+  "commit": "c058d7f",
+  "at": "2026-10-15 09:57"
+ },
+ {
+  "release": "V2",
+  "build": 16,
+  "commit": "768ace5",
+  "at": "2026-10-15 10:58"
+ },
+ {
+  "release": "V2",
+  "build": 17,
+  "commit": "6b5a83d",
+  "at": "2026-10-15 11:18"
+ },
+ {
+  "release": "V2",
+  "build": 18,
+  "commit": "1b438b9",
+  "at": "2026-10-15 12:10"
+ },
+ {
+  "release": "V2",
+  "build": 19,
+  "commit": "f51c832",
+  "at": "2026-10-15 13:36"
+ },
+ {
+  "release": "V2",
+  "build": 20,
+  "commit": "55c877e",
+  "at": "2026-10-15 13:39"
+ },
+ {
+  "release": "V2",
+  "build": 21,
+  "commit": "918eabc",
+  "at": "2026-10-15 13:53"
+ },
+ {
+  "release": "V2",
+  "build": 22,
+  "commit": "2242e09",
+  "at": "2026-10-15 14:02"
+ },
+ {
+  "release": "V2",
+  "build": 23,
+  "commit": "a40b305",
+  "at": "2026-10-15 14:09"
+ }
+]

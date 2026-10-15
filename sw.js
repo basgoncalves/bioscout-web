@@ -36,11 +36,23 @@
  * and the heavy version moves only when a vendored asset actually changes,
  * which is rarely. A shell bump can no longer cost anybody a 20 MB download.
  */
-const SHELL_CACHE = "bioscout-shell-v198";
+const SHELL_CACHE = "bioscout-shell-v199";
 const HEAVY_CACHE = "bioscout-heavy-v1";
-const KEEP = [SHELL_CACHE, HEAVY_CACHE];
+const PIN_CACHE = "bioscout-pin";        // which old build the person chose (one entry), and its files
+const KEEP = [SHELL_CACHE, HEAVY_CACHE, PIN_CACHE];
+/* Old builds come from the repository at that build's commit (raw files, CORS
+ * open), served here under this origin -- so an old build still sees this
+ * browser's saved data. builds.json lists build -> commit. */
+const RAW = "https://raw.githubusercontent.com/basgoncalves/bioscout-web/";
+const TYPES = { html: "text/html", js: "text/javascript", mjs: "text/javascript", json: "application/json", css: "text/css",
+  webmanifest: "application/manifest+json", svg: "image/svg+xml", png: "image/png", ico: "image/x-icon", wasm: "application/wasm",
+  osim: "text/xml", xml: "text/xml", txt: "text/plain", md: "text/plain", task: "application/octet-stream" };
+const PIN_KEY = "./__pinned_build";
+async function pinned() {
+  try { const r = await (await caches.open(PIN_CACHE)).match(PIN_KEY); return r ? await r.json() : null; } catch { return null; }
+}
 
-const SHELL = ["./", "./index.html", "./formats.html", "./privacy.html", "./limitations.html", "./glossary/", "./glossary/index.html", "./src/kinematics.js", "./src/dynamics.js",
+const SHELL = ["./", "./index.html", "./builds.json", "./formats.html", "./privacy.html", "./limitations.html", "./glossary/", "./glossary/index.html", "./src/kinematics.js", "./src/dynamics.js",
                "./src/forces.js", "./src/overlay.js", "./src/zip.js", "./src/detect.js", "./src/profiles.js", "./src/ensemble.js", "./src/dashboard.js", "./src/fetcher.js", "./src/diary.js", "./src/media.js", "./src/weight.js", "./src/bodyfat.js", "./src/cycle.js", "./src/foods.js", "./src/energy.js", "./src/share.js", "./src/trainsummary.js", "./src/athsummary.js", "./src/plans.js", "./src/resttimer.js", "./src/protocol.js", "./src/sharepost.js", "./src/sleep.js", "./src/vitals.js", "./src/water.js", "./src/reaction.js", "./src/friends.js", "./src/cardio.js", "./src/strava.js", "./src/neckload.js", "./src/neck_gload.js", "./src/assess.js", "./src/framing.js", "./src/gesture.js", "./src/muscle_groups.js", "./src/armmuscles.js", "./src/tiptoe_ref.js", "./src/neck_load.js", "./src/loaddir.js", "./src/neckmuscles.js", "./data/neck_muscles.json", "./src/health.js", "./src/i18n.js", "./src/jointmetrics.js", "./src/grf.js", "./src/jointload.js", "./src/repquality.js", "./src/sports.js", "./src/balltrack.js", "./src/screenrec.js", "./src/ballmodel.js", "./src/osimlab.js", "./src/simtools.js", "./src/simsetup.js", "./src/simfigs.js", "./src/simstack.js", "./src/simsession.js", "./src/labtrial.js", "./src/simquick.js", "./src/c3dexport.js", "./src/trcview.js", "./src/localengine.js", "./src/pyosim_worker.js", "./src/pose_worker.js", "./data/opensim/tools.json", "./data/opensim/engine.json", "./src/process.js", "./src/proc_io.js", "./src/proc_dsp.js", "./src/osimexport.js", "./src/rtp.js", "./src/bodymap.js", "./src/achievements.js", "./src/syncmeta.js", "./src/cloud.js", "./src/cloud_config.js", "./src/help.js", "./src/chat.js", "./data/norms.json", "./data/muscle_joints.json", "./manifest.webmanifest",
                "./assets/icons/logo.png", "./assets/icons/icon-192.png",
                "./assets/icons/icon-512.png", "./assets/icons/icon-maskable-512.png",
@@ -85,14 +97,28 @@ const precache = (cache, urls, { skipExisting = false } = {}) =>
     // The heavy assets are re-added on every install otherwise, which is the
     // download this split exists to avoid.
     if (skipExisting && await c.match(u)) return;
-    return c.add(u).catch((err) => console.warn("[sw] precache failed:", u, err));
+    // "reload": straight from the network, not a copy the HTTP cache kept from the last build
+    return c.add(new Request(u, { cache: "reload" })).catch((err) => console.warn("[sw] precache failed:", u, err));
   })));
 
 self.addEventListener("install", (e) => {
   e.waitUntil(Promise.all([
     precache(SHELL_CACHE, SHELL),
     precache(HEAVY_CACHE, HEAVY, { skipExisting: true }),
-  ]).then(() => self.skipWaiting()));
+  ]));
+  /* No skipWaiting here. A new build waits until the page says so -- at start,
+   * or when the person presses Update -- so it never swaps under someone who is
+   * mid-recording. */
+});
+
+self.addEventListener("message", (e) => {
+  const d = e.data || {};
+  if (d.cmd === "skipWaiting") self.skipWaiting();
+  if (d.cmd === "pin") e.waitUntil(caches.open(PIN_CACHE).then(async (c) => {
+    for (const k of await c.keys()) await c.delete(k);           // the old build's files go with the old choice
+    if (d.pin) await c.put(PIN_KEY, new Response(JSON.stringify(d.pin), { headers: { "content-type": "application/json" } }));
+    if (e.source) e.source.postMessage({ cmd: "pinned", pin: d.pin || null });
+  }));
 });
 
 self.addEventListener("activate", (e) => {
@@ -107,6 +133,34 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(req.url);
   if (url.origin !== location.origin) return;
 
+  const rel = url.pathname.slice(new URL(self.registration.scope).pathname.length);
+  // these always come from the network: the build list, and the worker itself
+  if (rel === "builds.json" || rel === "sw.js" || url.searchParams.has("check")) { e.respondWith(fetch(req, { cache: "no-store" }).catch(() => caches.match(req))); return; }
+
+  if (!isHeavy(url)) {                                 // an old build chosen? serve its files
+    e.respondWith(pinned().then(async (pin) => {
+      if (!pin || !pin.commit) return shell(req);
+      const path = rel === "" || rel.endsWith("/") ? rel + "index.html" : rel;
+      const c = await caches.open(PIN_CACHE), key = "./__b/" + pin.commit + "/" + path;
+      const hit = await c.match(key); if (hit) return hit;
+      const r = await fetch(RAW + pin.commit + "/" + path);
+      if (!r.ok) return shell(req);                    // not in that commit: today's copy
+      const ext = (path.split(".").pop() || "").toLowerCase();
+      let body = await r.arrayBuffer();
+      if (ext === "html") {
+        // an old page does not know about old builds: give it a way back to the latest
+        const bar = `<div style="position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#333;color:#eee;font:13px system-ui;padding:6px 10px;text-align:center">`
+          + `Older BioScout build ${pin.build} &middot; <a href="#" style="color:#7fd" onclick="try{localStorage.setItem('bioscout.pinBuild','null')}catch(e){};`
+          + `navigator.serviceWorker.controller.postMessage({cmd:'pin',pin:null});setTimeout(function(){location.reload()},400);return false">back to the latest build</a></div>`;
+        body = new TextEncoder().encode(new TextDecoder().decode(body).replace(/<\/body>/i, bar + "</body>"));
+      }
+      const res = new Response(body, { headers: { "content-type": TYPES[ext] || "application/octet-stream" } });
+      c.put(key, res.clone()).catch(() => {});
+      return res;
+    }).catch(() => shell(req)));
+    return;
+  }
+
   if (isHeavy(url)) {                                  // cache-first
     e.respondWith(caches.open(HEAVY_CACHE).then((c) => c.match(req).then((hit) =>
       hit || fetch(req).then((res) => {
@@ -116,18 +170,26 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // cache: "reload" bypasses the HTTP cache on the way out. Without it
-  // "network-first" is only first past the BROWSER cache, and GitHub Pages
-  // serves the shell with max-age=600 -- so a pushed fix could sit invisible
-  // for ten minutes behind a service worker that believed it had gone to the
-  // network. Falls back to a plain fetch where the option is unsupported.
-  const fresh = (r) => fetch(r, { cache: "reload" }).catch(() => fetch(r));
-
-  e.respondWith(                                        // network-first
-    fresh(req).then((res) => {
-      const copy = res.clone();
-      caches.open(SHELL_CACHE).then((c) => c.put(req, copy)).catch(() => {});
-      return res;
-    }).catch(() => caches.match(req).then((hit) => hit ||
-        (req.mode === "navigate" ? caches.match("./index.html") : undefined))));
 });
+
+/* The shell: CACHE-first from this worker's own build.
+ *
+ * It was network-first, so a push reached a page that was already running --
+ * a module loaded late (Simulate, the share dialog) came from the new build
+ * and the rest from the old, and the worker swap reloaded the page mid-take.
+ * Now every file of the running build comes from the cache this worker
+ * filled at install, and a new build arrives as a new worker that waits. A
+ * file the precache list missed is fetched once and kept with this build. */
+async function shell(req) {
+  const c = await caches.open(SHELL_CACHE);
+  const hit = await c.match(req, { ignoreSearch: true });
+  if (hit) return hit;
+  try {
+    const res = await fetch(req, { cache: "reload" }).catch(() => fetch(req));
+    if (res.ok) c.put(req, res.clone()).catch(() => {});
+    return res;
+  } catch {
+    const f = req.mode === "navigate" ? await c.match("./index.html") : null;
+    return f || Response.error();
+  }
+}

@@ -1,4 +1,5 @@
 #!/bin/sh
 # Every commit that changes the app gets its own build number.
 # Enable once per clone:  git config core.hooksPath .githooks
+node tools/builds_json.mjs >/dev/null && git add builds.json
 exec node tools/bump_build.mjs
