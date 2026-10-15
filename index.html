@@ -1348,7 +1348,8 @@ try {
        over Web Serial. Logic in src/biofeedback.js, sketch in assets/arduino/. -->
   <section id="viewBiofeedback" class="hidden">
     <div class="card">
-      <b style="font-size:16px" data-i18n="doorBiofeedback">BioFeedback (testing)</b>
+      <div class="labHead"><b style="font-size:16px" data-i18n="doorBiofeedback">BioFeedback (testing)</b>
+        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
       <p class="note hidden bad" id="bfbNoSerial" data-i18n="bfb_noSerial">This browser cannot talk to USB devices. Use Chrome or Edge on a computer; the lamp is still shown on screen.</p>
 
       <h4 data-i18n="bfb_step1">1. Arduino</h4>
@@ -1744,8 +1745,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 34;
-window.BUILD_AT = "2026-10-15 17:33";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 35;
+window.BUILD_AT = "2026-10-15 17:36";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -7575,6 +7576,7 @@ function enterLab() {
   history.replaceState({ view: land }, "", "#" + land);
   showView(land, false);
   if (land === "viewProcess") openProcess();
+  if (land === "viewBiofeedback") queueMicrotask(() => biofeedback && biofeedback.open());
 }
 
 if (LAB) {

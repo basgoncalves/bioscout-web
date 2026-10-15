@@ -181,7 +181,7 @@ export function makeDetectors(emit) {
   };
 }
 
-const SKEL = [[7, 0], [0, 8], [7, 11], [8, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
+const SKEL = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
 const SKEY = "bioscout.biofeedback.v1";
 
 /** Wire up #viewBiofeedback. deps: { $, tr, getLandmarker } */
@@ -403,6 +403,12 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (!img || !w) { if (!m.ev) { $("bfbValue").textContent = "–"; if (st.active) send(false); } return; }
     ctx.lineWidth = 4; ctx.strokeStyle = "rgba(80,200,170,.9)";
     for (const [a, b] of SKEL) { ctx.beginPath(); ctx.moveTo(img[a].x * cv.width, img[a].y * cv.height); ctx.lineTo(img[b].x * cv.width, img[b].y * cv.height); ctx.stroke(); }
+    // Neck = shoulder centre -> ear centre (the line the neck metrics use), head = circle on the ears.
+    const P = (p) => [p.x * cv.width, p.y * cv.height];
+    const [sx, sy] = P(midp(img[11], img[12])), [ex, ey] = P(midp(img[7], img[8]));
+    const hr = Math.hypot((img[7].x - img[8].x) * cv.width, (img[7].y - img[8].y) * cv.height) * 0.75;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.beginPath(); ctx.arc(ex, ey, Math.max(10, hr), 0, 2 * Math.PI); ctx.stroke();
     detect(ts, img, w);
     if (m.ev) return;                       // event metrics update on their own
     const raw = m.f(w) - (cfg.zero[cfg.metric] || 0);   // "Zero" removes camera tilt / posture offset
