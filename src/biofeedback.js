@@ -54,9 +54,19 @@ export const METRICS = {
   shAbdL:    { label: "bfb_m_shAbdL",    unit: DEG, f: (w) => shEl(w, 0) },
   shAbdR:    { label: "bfb_m_shAbdR",    unit: DEG, f: (w) => shEl(w, 1) },
   trunkLean: { label: "bfb_m_trunkLean", unit: DEG, f: (w) => trunk(w) },
-  neckFlex:  { label: "bfb_m_neckFlex",  unit: DEG, f: (w) => {      // head (ears) vs trunk line
-    const sh = midp(w[11], w[12]), hp = midp(w[23], w[24]), ear = midp(w[7], w[8]);
-    return ang(hp, sh, ear) > 0 ? 180 - ang(hp, sh, ear) : NaN;
+  /* Neck: from the shoulders up only, so it works seated at a desk with the
+   * hips out of view. Forward head = ears ahead of / below the shoulder line,
+   * as the angle of shoulder-centre -> ear-centre from vertical (press Zero
+   * in your neutral posture; the camera's tilt adds to it). */
+  neckFlex:  { label: "bfb_m_neckFlex",  unit: DEG, f: (w) => {
+    const sh = midp(w[11], w[12]), ear = midp(w[7], w[8]);
+    const v = sub(ear, sh), m = Math.hypot(...v);
+    return m < 1e-9 ? NaN : (Math.acos(Math.max(-1, Math.min(1, -v[1] / m))) * 180) / Math.PI;
+  } },
+  neckTilt:  { label: "bfb_m_neckTilt",  unit: DEG, f: (w) => {   // ear-to-ear line vs shoulder line
+    const e = sub(w[8], w[7]), s2 = sub(w[12], w[11]);
+    const a = (Math.atan2(e[1], Math.hypot(e[0], e[2])) - Math.atan2(s2[1], Math.hypot(s2[0], s2[2]))) * 180 / Math.PI;
+    return Math.abs(a);
   } },
   // countermovement jump -- one value per jump
   jumpHeight:{ label: "bfb_m_jumpHeight",unit: "cm", ev: true, max: 80 },
@@ -91,7 +101,7 @@ export const MOVES = {
   bridge: { label: "bfb_mv_bridge", metrics: ["hipFlexL", "hipFlexR", "kneeFlexL", "kneeFlexR"], def: "hipFlexL", thr: 15, dir: "below" },
   plank:  { label: "bfb_mv_plank",  metrics: ["hipFlexL", "hipFlexR", "neckFlex"], def: "hipFlexL", thr: 15, dir: "above" },
   heelraise:{ label: "bfb_mv_heelraise", metrics: ["ankleDFL", "ankleDFR", "kneeFlexL", "kneeFlexR"], def: "ankleDFL", thr: -15, dir: "below" },
-  neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
+  neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "neckTilt", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
   free:   { label: "bfb_mv_free",   metrics: Object.keys(METRICS), def: "kneeFlexL", thr: 70, dir: "above" },
 };
 
@@ -171,7 +181,7 @@ export function makeDetectors(emit) {
   };
 }
 
-const SKEL = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
+const SKEL = [[7, 0], [0, 8], [7, 11], [8, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
 const SKEY = "bioscout.biofeedback.v1";
 
 /** Wire up #viewBiofeedback. deps: { $, tr, getLandmarker } */
@@ -180,7 +190,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     port: null, writer: null, reader: null, lm: null, stream: null, raf: 0,
     active: false, lit: null, value: NaN, lastTs: -1,
   };
-  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {} };
+  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, sound: "beep" };
   try { cfg = { ...cfg, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch { /* private */ }
   const save = () => { try { localStorage.setItem(SKEY, JSON.stringify(cfg)); } catch { /* full */ } };
 
@@ -210,7 +220,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbZeroNote").textContent = z ? tr("bfb_zeroed", { v: z.toFixed(0) }) : "";
     $("bfbValue").textContent = "–"; $("bfbResults").innerHTML = ""; showBar(0);
     $("bfbThr").value = cfg.thr; $("bfbThrN").value = cfg.thr;
-    $("bfbDir").value = cfg.dir; $("bfbHyst").value = cfg.hyst; $("bfbBaud").value = String(cfg.baud);
+    $("bfbDir").value = cfg.dir; $("bfbSound").value = cfg.sound || "beep"; $("bfbHyst").value = cfg.hyst; $("bfbBaud").value = String(cfg.baud);
   }
   $("bfbMove").onchange = () => pickMove($("bfbMove").value);
   $("bfbMetric").onchange = () => { cfg.metric = $("bfbMetric").value; ema = NaN; syncInputs(); save(); };
@@ -219,6 +229,26 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   $("bfbDir").onchange = () => { cfg.dir = $("bfbDir").value; save(); };
   $("bfbHyst").onchange = () => { cfg.hyst = Math.max(0, +$("bfbHyst").value || 0); save(); };
   $("bfbBaud").onchange = async () => { cfg.baud = +$("bfbBaud").value; save(); if (st.port) await openPort(st.port); };
+
+  /* ---------- sound (Web Audio, no Arduino needed) ----------
+   * off | beep: one beep when the threshold is crossed | repeat: beeps every
+   * 0.4 s while over it. Events (jump/shot) get a high double beep on a hit
+   * and a low one on a miss. Created on the Activate click: browsers only
+   * allow audio after a user gesture. */
+  let actx = null, overSince = false;
+  function tone(f = 880, ms = 120, when = 0) {
+    if (cfg.sound === "off") return;
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const t = actx.currentTime + when, o = actx.createOscillator(), g = actx.createGain();
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + ms / 1000);
+      o.connect(g).connect(actx.destination); o.start(t); o.stop(t + ms / 1000 + 0.02);
+    } catch { /* no audio */ }
+  }
+  setInterval(() => { if (st.active && overSince && cfg.sound === "repeat") tone(880, 90); }, 400);
+  $("bfbSound").onchange = () => { cfg.sound = $("bfbSound").value; save(); tone(880, 120); };
 
   /* ---------- body map ---------- */
   let region = null;
@@ -352,6 +382,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const li = document.createElement("li"); li.textContent = (ok ? "✓ " : "✗ ") + fmt(v);
     li.className = ok ? "ok" : ""; $("bfbResults").prepend(li);
     while ($("bfbResults").children.length > 8) $("bfbResults").lastChild.remove();
+    if (st.active) { if (ok) { tone(988, 110); tone(1319, 160, 0.13); } else tone(330, 220); }
     if (ok) {
       $("bfbLamp").classList.add("on");
       if (st.active) send(true, true);
@@ -386,6 +417,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     else on = on ? ema < cfg.thr + h : ema < cfg.thr;
     $("bfbValue").classList.toggle("hit", on);
     $("bfbLamp").classList.toggle("on", on);
+    if (st.active && on && !overSince && cfg.sound !== "off") tone(880, 140);
+    overSince = on;
     if (st.active) send(on);
   }
   /* Belt and braces: while active, re-send the lamp state every 500 ms, so a
@@ -416,6 +449,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   };
   $("bfbActivate").onclick = () => {
     st.active = !st.active;
+    if (st.active) { try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch { /* no audio */ } overSince = false; }
     if (st.active && !METRICS[cfg.metric].ev) send(on, true);   // tell the board the state right now
     $("bfbActivate").textContent = tr(st.active ? "bfb_deactivate" : "bfb_activate");
     $("bfbActivate").classList.toggle("danger", st.active);

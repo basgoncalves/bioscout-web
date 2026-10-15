@@ -1379,6 +1379,7 @@ try {
           <input type="range" id="bfbThr" min="0" max="180" step="1"></label>
         <input type="number" id="bfbThrN" min="0" max="180" step="1" style="width:5em" aria-label="Threshold">
         <label><span data-i18n="bfb_hyst">Hysteresis (°)</span><input type="number" id="bfbHyst" min="0" max="20" step="1" style="width:4em"></label>
+        <label><span data-i18n="bfb_sound">Sound</span><select id="bfbSound"><option value="off" data-i18n="bfb_soundOff">Off</option><option value="beep" data-i18n="bfb_soundBeep">Beep when crossed</option><option value="repeat" data-i18n="bfb_soundRepeat">Beep while over</option></select></label>
       </div>
 
       <h4 data-i18n="bfb_step3">3. Camera and go</h4>
@@ -1743,8 +1744,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 33;
-window.BUILD_AT = "2026-10-15 17:13";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 34;
+window.BUILD_AT = "2026-10-15 17:33";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
