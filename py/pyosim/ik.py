@@ -34,6 +34,11 @@ def solve(model, times, markers, marker_w, coord_tasks=None, t_range=None, log=p
             f"tracking all {len(common)} (task-set weights where named, 1 elsewhere)")
         marker_w = {n: marker_w.get(n, 1.0) for n in common}
         names = common
+    elif len(common) > len(names):   # markers the placer added from the c3d: track them too, weight 1
+        extra = [n for n in common if n not in marker_w]
+        log(f"[ik] also tracking {len(extra)} markers not in the task set (weight 1): {' '.join(extra[:15])}")
+        marker_w = {**marker_w, **{n: 1.0 for n in extra}}
+        names = names + extra
     missing = [n for n in marker_w if n not in markers or n not in model.markers]
     if len(names) < 6:
         raise ValueError(f"only {len(names)} task markers are both in the model and the .trc "

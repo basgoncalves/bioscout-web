@@ -180,6 +180,14 @@ def write_scaled(generic_path, out_path, factors, mass=None, preserve_mass=False
             if mk.get("name") in markers:
                 body, loc = markers[mk.get("name")]
                 mk.find("location").text = " ".join(f"{x:.10g}" for x in loc)
+        have = {mk.get("name") for mk in ms}
+        for n, (body, loc) in markers.items():   # extra c3d markers attached by the placer
+            if n in have:
+                continue
+            e = ET.SubElement(ms, "Marker", name=n)
+            ET.SubElement(e, "socket_parent_frame").text = f"/bodyset/{body}"
+            ET.SubElement(e, "location").text = " ".join(f"{x:.10g}" for x in loc)
+            ET.SubElement(e, "fixed").text = "false"
     if defaults:             # static pose becomes the model's default pose
         for c in m.iter("Coordinate"):
             if c.get("name") in defaults and c.find("default_value") is not None:
@@ -188,8 +196,41 @@ def write_scaled(generic_path, out_path, factors, mass=None, preserve_mass=False
     return out_path
 
 
+def _attach_extra(model, T, exp, max_d=0.2):
+    """Every static-trial marker the model lacks -> {name: (nearest body, local location)}.
+    A body is the segment from its origin to each child's origin (or to its centre of mass
+    for an end body); the marker goes on the body whose segment is closest, if within max_d."""
+    segs = []
+    kids = {}
+    for j in model.joints:
+        kids.setdefault(model._body_of(j.parent), []).append(model._body_of(j.child))
+    for b in model.bodies:
+        if b not in T:
+            continue
+        R, p = T[b]
+        ends = [T[c][1] for c in kids.get(b, []) if c in T]
+        if not ends:
+            ends = [p + R @ (2 * np.asarray(model.bodies[b].get("com", np.zeros(3))))]
+        segs += [(b, p, e) for e in ends]
+    out = {}
+    for n, x in exp.items():
+        if n in model.markers or not np.isfinite(x).all():
+            continue
+        best = None
+        for b, a, e in segs:
+            d = e - a; L = float(d @ d)
+            u = 0.0 if L < 1e-12 else min(1.0, max(0.0, float((x - a) @ d) / L))
+            dist = float(np.linalg.norm(x - (a + u * d)))
+            if best is None or dist < best[0]:
+                best = (dist, b)
+        if best and best[0] <= max_d:
+            R, p = T[best[1]]
+            out[n] = (best[1], R.T @ (x - p))
+    return out
+
+
 def run(generic_path, static_trc, out_osim, setup_path=None, mass=None, markerset=None,
-        aliases=None, t_range=None, placer=None, log=print, out_dir=None):
+        aliases=None, t_range=None, placer=None, log=print, out_dir=None, all_markers=True):
     cfg = read_setup(setup_path) if setup_path else {"measurements": [], "manual": {}, "mass": None,
                                                      "time_range": None, "preserve_mass": False, "placer": True}
     mass = mass or cfg["mass"]
@@ -235,6 +276,12 @@ def run(generic_path, static_trc, out_osim, setup_path=None, mass=None, markerse
             b, _loc = sm.markers[n]
             R, p = T[b]
             placed[n] = (b, R.T @ (exp[n] - p))
+        if all_markers:
+            extra = _attach_extra(sm, T, exp)
+            if extra:
+                placed.update(extra)
+                log(f"[scale] {len(extra)} static-trial markers not in the marker set attached to the nearest body: "
+                    + " ".join(f"{n}({b})" for n, (b, _) in sorted(extra.items())))
         defaults = {n: v for n, v in q.items()}
         _wm(os.path.join(os.path.dirname(os.path.abspath(out_osim)), "static_pose.mot"),
                       ["time"] + sm.coord_order,
