@@ -133,7 +133,10 @@ if not loads:
 jra.run("/job/" + a["model"], "/job/" + a["ik"], "/job/" + a["forces"], loads, "/job/" + a["out"],
         loads_mot=("/job/" + a["grf"]) if a.get("grf") else None, log=js_log)
 `);
-      self.postMessage({ id, done: true, outputs: { [args.out]: py.FS.readFile("/job/" + args.out, { encoding: "utf8" }) } });
+      const outputs = { [args.out]: py.FS.readFile("/job/" + args.out, { encoding: "utf8" }) };
+      const cn = args.out.replace(/\.sto$/, "_contrib.sto");
+      try { outputs[cn] = py.FS.readFile("/job/" + cn, { encoding: "utf8" }); } catch { /* optional */ }
+      self.postMessage({ id, done: true, outputs });
     } else if (cmd === "ceinms_cal" || cmd === "ceinms") {
       py.runPython(`
 from pyosim import ceinms

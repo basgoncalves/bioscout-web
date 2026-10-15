@@ -332,7 +332,7 @@ export async function applySelection(hooks) {
 const STEP_ORDER = ["scale", "ik", "id", "ma", "rra", "so", "ceinms_cal", "ceinms"];
 const SUB = { ik: "external_biomechanics", id: "external_biomechanics", ma: "muscle_analysis", so: "static_optimisation", ceinms: "ceinms" };
 function folderOf(tool, name) {
-  if (/^(jra_|jrf_)/.test(name)) return "joint_contact_forces";
+  if (/^(jra_|jrf_|jcf_)/.test(name)) return "joint_contact_forces";
   if (name === "body_positions.sto" || /^(ik_|_ik_|inverse_dynamics|kinematics_moments|residuals)/.test(name)) return "external_biomechanics";
   if (/^ceinms_|^CEINMS/.test(name)) return "ceinms";
   if (/^muscle_(groups|moments)/.test(name) || /^SO_/.test(name)) return "static_optimisation";

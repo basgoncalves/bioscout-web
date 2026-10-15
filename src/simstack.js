@@ -296,3 +296,75 @@ export async function jrfCoverageFigure({ jraText, bw, plane, label = "SO", titl
   g.fillText("arrow = reaction force at the event (|F| in BW below); full trial: the path of the vector tip, × = its peak. Hip shown as the load on the acetabulum.", 20, H - 20);
   return png(c);
 }
+
+// ------------------------------------------------------------------ contributions to the contact force
+const GROUP_COL = { "Intersegmental": "#b8a07a", "Adductors": "#2bb3c0", "Gluteus maximus": "#a46bb8",
+  "Gluteus med+min": "#5b8db8", "Hamstrings": "#5e2d6e", "Iliopsoas": "#e07a3a", "Rectus femoris": "#2e6b45",
+  "Triceps surae": "#a51f24", "Vasti": "#6abf69", "Other muscles": "#cfcfcf", "Other leg (lumped)": "#c8d6c2" };
+const GROUP_ORDER = Object.keys(GROUP_COL);
+/** Stacked contributions of each muscle group to the hip / knee / ankle contact force,
+ *  one row per leg, as bioscout's jcf_stack figure. contribText: jra_<tag>_contrib.sto (N). */
+export async function jrfStackFigure({ contribText, bw, label = "SO", title = "" }) {
+  const C = readSto(contribText), t = C.t, n = t.length;
+  const series = {};                                  // "hip_r" -> {group: values/BW}
+  for (const c of C.cols) {
+    if (c === "time") continue;
+    const [jk, g] = c.split("|"); (series[jk] = series[jk] || {})[g.replace(/_/g, " ")] = C.col(c).map((v) => v / bw);
+  }
+  const joints = ["hip", "knee", "ankle"], sides = ["r", "l"].filter((sd) => joints.some((j) => series[`${j}_${sd}`]));
+  if (!sides.length) throw new Error("no contributions in the file");
+  const W = 1500, X0 = 70, colW = (W - X0 - 20) / 3, PW = colW - 50, rowH = 230, Y0 = 90, H = Y0 + sides.length * rowH + 140;
+  const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, W, H);
+  g.fillStyle = "#000"; g.font = "bold 18px sans-serif"; g.textAlign = "center";
+  g.fillText(`${title ? title + " — " : ""}${label} contributions to the joint contact force`, W / 2, 30);
+  const used = new Set();
+  sides.forEach((sd, r) => {
+    joints.forEach((j, k) => {
+      const S = series[`${j}_${sd}`]; if (!S) return;
+      const x0 = X0 + k * colW, y0 = Y0 + r * rowH, h = rowH - 60;
+      if (r === 0) { g.font = "bold 15px sans-serif"; g.fillStyle = "#000"; g.textAlign = "center"; g.fillText(`${j} contact force (BW)`, x0 + PW / 2, Y0 - 20); }
+      const groups = GROUP_ORDER.filter((gr) => S[gr]);
+      const tot = t.map((_, i) => groups.reduce((a, gr) => a + S[gr][i], 0));
+      let hi = Math.max(0.5, ...tot), lo = 0;
+      const neg = t.map((_, i) => groups.reduce((a, gr) => a + Math.min(0, S[gr][i]), 0));
+      lo = Math.min(0, ...neg); hi *= 1.08; lo *= 1.08;
+      const X = (i) => x0 + (i / (n - 1)) * PW, Y = (v) => y0 + h - ((v - lo) / (hi - lo || 1)) * h;
+      const posB = new Array(n).fill(0), negB = new Array(n).fill(0);
+      for (const gr of groups) {
+        const v = S[gr]; if (Math.max(...v.map(Math.abs)) < 0.01) continue;
+        used.add(gr);
+        for (const sign of [1, -1]) {
+          const base = sign > 0 ? posB : negB, top = base.map((b, i) => b + (sign > 0 ? Math.max(0, v[i]) : Math.min(0, v[i])));
+          g.beginPath(); for (let i = 0; i < n; i++) g.lineTo(X(i), Y(top[i])); for (let i = n - 1; i >= 0; i--) g.lineTo(X(i), Y(base[i]));
+          g.closePath(); g.fillStyle = GROUP_COL[gr] || "#999"; g.globalAlpha = sign > 0 ? 1 : 0.6; g.fill(); g.globalAlpha = 1;
+          for (let i = 0; i < n; i++) base[i] = top[i];
+        }
+      }
+      g.strokeStyle = "#000"; g.lineWidth = 1.8; g.beginPath(); tot.forEach((v, i) => (i ? g.lineTo(X(i), Y(v)) : g.moveTo(X(i), Y(v)))); g.stroke();
+      g.lineWidth = 1; g.strokeStyle = "#000"; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x0, y0 + h); g.lineTo(x0 + PW, y0 + h); g.stroke();
+      g.strokeStyle = "#999"; g.beginPath(); g.moveTo(x0, Y(0)); g.lineTo(x0 + PW, Y(0)); g.stroke();
+      g.fillStyle = "#000"; g.font = "11px sans-serif"; g.textAlign = "right"; g.textBaseline = "middle";
+      for (const v of nice(lo, hi)) if (v >= lo && v <= hi) g.fillText(fmt(v), x0 - 5, Y(v));
+      g.textAlign = "center"; g.textBaseline = "top";
+      for (const p of [0, 20, 40, 60, 80, 100]) g.fillText(String(p), x0 + p / 100 * PW, y0 + h + 5);
+      if (r === sides.length - 1) { g.font = "13px sans-serif"; g.fillText("% trial", x0 + PW / 2, y0 + h + 22); }
+      if (k === 0) { g.save(); g.translate(22, y0 + h / 2); g.rotate(-Math.PI / 2); g.font = "bold 14px sans-serif"; g.fillStyle = sideCol(sd); g.fillText(sd === "r" ? "right" : "left", 0, 0); g.restore(); }
+      g.textBaseline = "alphabetic";
+    });
+  });
+  // legend
+  const items = GROUP_ORDER.filter((gr) => used.has(gr));
+  g.font = "13px sans-serif"; g.textAlign = "left"; g.fillStyle = "#000";
+  const ly = Y0 + sides.length * rowH + 10;
+  g.textAlign = "center"; g.fillText("contribution = projection on the total joint contact force (sums to |JCF|); below 0 = pulls against it", W / 2, ly);
+  g.textAlign = "left";
+  const per = 4, cw = 260, lx0 = W / 2 - (per * cw) / 2;
+  [...items, "|JCF|"].forEach((gr, k) => {
+    const x = lx0 + (k % per) * cw, y = ly + 20 + Math.floor(k / per) * 22;
+    if (gr === "|JCF|") { g.strokeStyle = "#000"; g.lineWidth = 2; g.beginPath(); g.moveTo(x, y + 6); g.lineTo(x + 30, y + 6); g.stroke(); }
+    else { g.fillStyle = GROUP_COL[gr]; g.fillRect(x, y, 30, 12); }
+    g.fillStyle = "#000"; g.fillText(gr, x + 38, y + 11);
+  });
+  return png(cv);
+}

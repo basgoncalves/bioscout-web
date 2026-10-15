@@ -80,6 +80,7 @@ def run(model_path, coords_mot, forces_sto, loads_xml, out_sto, loads_mot=None, 
             apply(bidx[f["body"]], F, P, T)
 
     TB = kin.bodies(Q)
+    mforce = {}                                   # muscle -> [(body, force on it (n,3))], for the contributions
     gpt = lambda b, loc: TB[b][1] + (TB[b][0] @ loc)
     for mu in mus:
         Fmag = np.interp(t, tf, fd[:, fc.index(mu["name"])])
@@ -91,6 +92,7 @@ def run(model_path, coords_mot, forces_sto, loads_xml, out_sto, loads_mot=None, 
                 continue
             d = (U[i] if i < len(U) else 0) - (U[i - 1] if i > 0 else 0)       # tension pulls toward both neighbours
             apply(bidx[b], Fmag[:, None] * d, X[i])
+            mforce.setdefault(mu["name"], []).append((bidx[b], Fmag[:, None] * d))
 
     # subtree sums, leaves first
     Fs, Ms = Fm.copy(), Mm.copy()
@@ -115,5 +117,62 @@ def run(model_path, coords_mot, forces_sto, loads_xml, out_sto, loads_mot=None, 
         for a, ax in enumerate("xyz"):
             cols.append(f"{base}_p{ax}"); out.append(np.full(n, loc[a]))
     write_mot(out_sto, cols, np.column_stack(out), name="Joint Reaction Loads", degrees=False)
+    try:
+        _contributions(model, bidx, Fs, mforce, t, out_sto.replace(".sto", "_contrib.sto"), log)
+    except Exception as e:                                   # the figure is optional
+        log(f"[jra] contributions not written: {e}")
     log(f"[jra] wrote {os.path.basename(out_sto)}")
     return t, cols
+
+
+# ------------------------------------------------------------------ contributions
+GROUPS = [("Gluteus maximus", ("glmax", "glut_max")), ("Gluteus med+min", ("glmed", "glmin", "glut_med", "glut_min")),
+          ("Adductors", ("add", "grac")), ("Hamstrings", ("bf", "semimem", "semiten", "bifem")),
+          ("Iliopsoas", ("iliacus", "psoas")), ("Rectus femoris", ("recfem", "rect_fem")),
+          ("Vasti", ("vas",)), ("Triceps surae", ("gas", "soleus", "med_gas", "lat_gas"))]
+
+
+def _group(name, side):
+    m = name.rsplit("_", 1)
+    sd = m[1][:1] if len(m) == 2 and m[1][:1] in "rl" else None
+    if sd and sd != side:
+        return "Other leg (lumped)"
+    stem = m[0] if sd else name
+    for g, pre in GROUPS:
+        if any(stem.startswith(p) for p in pre):
+            return g
+    return "Other muscles"
+
+
+def _contributions(model, bidx, Fs, mforce, t, path, log):
+    """Each muscle group's share of the hip / knee / ankle contact force: its force on the
+    joint's distal subtree, projected on the total joint force (so the shares sum to |F|);
+    what is left is 'Intersegmental' (inertia, gravity and the ground). Newtons."""
+    children = {}
+    for j in model.joints:
+        children.setdefault(model._body_of(j.parent), []).append(model._body_of(j.child))
+    def subtree(b):
+        out, st = set(), [b]
+        while st:
+            x = st.pop(); out.add(x); st += children.get(x, [])
+        return {bidx[x] for x in out if x in bidx}
+    cols, data = ["time"], [t]
+    for jn, body in (("hip", "femur"), ("knee", "tibia"), ("ankle", "talus")):
+        for sd in ("r", "l"):
+            b = f"{body}_{sd}"
+            if b not in bidx:
+                continue
+            S = subtree(b); F = Fs[:, bidx[b]]
+            u = F / np.maximum(np.linalg.norm(F, axis=1, keepdims=True), 1e-9)
+            share = {}
+            for mname, pts in mforce.items():
+                v = sum((f for k, f in pts if k in S), np.zeros_like(F))
+                if not np.any(v):
+                    continue
+                g = _group(mname, sd)
+                share[g] = share.get(g, 0) + (-(v * u).sum(1))          # the joint pushes against the muscle's pull
+            share["Intersegmental"] = np.linalg.norm(F, axis=1) - sum(share.values(), np.zeros(len(t)))
+            for g, v in share.items():
+                cols.append(f"{jn}_{sd}|{g.replace(' ', '_')}"); data.append(v)
+    write_mot(path, cols, np.column_stack(data), name="Joint contact force contributions (N, projected on |F|)", degrees=False)
+    log(f"[jra] wrote {os.path.basename(path)}")

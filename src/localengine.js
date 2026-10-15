@@ -5,7 +5,7 @@
  * Scale, IK, ID, MA, SO + JRA and a Python version of CEINMS; RRA says it needs the engine.
  */
 import { markerErrorsFigure, kinematicsMomentsFigure, inverseDynamicsFigure, residualsFigure, taskFigure } from "./simfigs.js";
-import { muscleGroupsFigure, muscleMomentsFigure, jrfFigure, jrfCoverageFigure, bodyWeight } from "./simstack.js";
+import { muscleGroupsFigure, muscleMomentsFigure, jrfFigure, jrfCoverageFigure, jrfStackFigure, bodyWeight } from "./simstack.js";
 const LOCAL_TOOLS = new Set(["scale", "ik", "id", "so", "ma", "ceinms_cal", "ceinms"]);
 const BASE = new URL("../", import.meta.url).href;
 
@@ -56,7 +56,8 @@ export function makeLocalClient(spec) {
       const bw = bodyWeight(await model.text()), label = tag === "so" ? "SO" : "CEINMS", jraText = r[args.out];
       const jf = { [`jrf_${tag}.png`]: () => jrfFigure({ jraText, bw, label, hdr }),
         [`jrf_${tag}_coverage_frontal.png`]: () => jrfCoverageFigure({ jraText, bw, plane: "frontal", label, hdr }),
-        [`jrf_${tag}_coverage_sagittal.png`]: () => jrfCoverageFigure({ jraText, bw, plane: "sagittal", label, hdr }) };
+        [`jrf_${tag}_coverage_sagittal.png`]: () => jrfCoverageFigure({ jraText, bw, plane: "sagittal", label, hdr }),
+        ...(r[`jra_${tag}_contrib.sto`] ? { [`jcf_stack_${tag}.png`]: () => jrfStackFigure({ contribText: r[`jra_${tag}_contrib.sto`], bw, label }) } : {}) };
       for (const [n, f] of Object.entries(jf)) { try { out[n] = await f(); } catch (e) { sp.log.push(`${n}: ${e.message}`); } }
     } catch (e) { sp.log.push("joint reactions failed: " + e.message); }
   }
@@ -300,6 +301,8 @@ export function makeLocalClient(spec) {
         if (jr && bw) {
           await fig(`jrf_${tag}.png`, () => jrfFigure({ jraText: jr, bw, label, hdr }));
           for (const plane of ["frontal", "sagittal"]) await fig(`jrf_${tag}_coverage_${plane}.png`, () => jrfCoverageFigure({ jraText: jr, bw, plane, label, hdr }));
+          const ct = f[`jra_${tag}_contrib.sto`];
+          if (ct) await fig(`jcf_stack_${tag}.png`, () => jrfStackFigure({ contribText: ct, bw, label }));
         }
       }
       return out;
