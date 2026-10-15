@@ -1424,6 +1424,7 @@ try {
     </label>
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
+    <button class="ghost trainOnly hidden" id="ytBtn" data-i18n="ytButton">A YouTube clip (paste link, cut, analyse)</button>
     <button class="ghost trainOnly hidden" id="screenRecBtn" data-i18n="srRecordScreen">Record the screen (YouTube, an app…)</button>
     <button class="ghost trainOnly" id="manualBtn" data-i18n="manualSet">Count reps by hand (no camera)</button>
     <div id="linkRow" class="hidden" style="margin-top:11px">
@@ -1661,8 +1662,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 25;
-window.BUILD_AT = "2026-10-15 15:38";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 26;
+window.BUILD_AT = "2026-10-15 15:51";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1708,6 +1709,7 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
 import { inverseDynamics } from "./src/dynamics.js";
 import { gradeReps } from "./src/repquality.js";
 import { screenRecSupported, openScreenRecorder } from "./src/screenrec.js";
+import { ytSupported, openYouTubeClip } from "./src/ytclip.js";
 import { athleteSummary, taskStats, curveSummary, curveSVG, generalHTML, taskTableHTML,
          ASM_WINDOWS, ASM_METRICS, stats as asmStats, mr as asmMR } from "./src/athsummary.js";
 import { isUpperBody, defaultJoint, jointOrder, clipAngles, clipVelocities,
@@ -8090,6 +8092,11 @@ $("fileBtn").onclick = () => $("fileInput").click();
 /* A clip from a video that cannot be exported: record that part of the screen
  * (desktop browsers; phones have no screen capture for web pages). */
 if (screenRecSupported()) $("screenRecBtn").classList.remove("hidden");
+if (ytSupported()) $("ytBtn").classList.remove("hidden");
+$("ytBtn").onclick = () => openYouTubeClip({
+  t: (k, v) => esc(tr(k, v)),
+  onClip: (file, crop) => analyseVideoBlob(file, { crop }),
+});
 $("screenRecBtn").onclick = () => openScreenRecorder({
   t: (k) => esc(tr(k)),
   onClip: (file, crop) => analyseVideoBlob(file, { crop }),
