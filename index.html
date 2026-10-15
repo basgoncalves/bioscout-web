@@ -1338,56 +1338,14 @@ try {
     </div>
   </section>
 
-  <!-- BioFeedback (testing): camera joint angle -> threshold -> Arduino lamp
-       over Web Serial. Logic in src/biofeedback.js, sketch in assets/arduino/. -->
+  <!-- BioFeedback: being built on the "biofeedback" branch (camera joint angle ->
+       threshold -> Arduino lamp over Web Serial). On main, a work-in-progress page. -->
   <section id="viewBiofeedback" class="hidden">
-    <div class="card">
+    <div class="card" style="text-align:center">
       <b style="font-size:16px" data-i18n="doorBiofeedback">BioFeedback (testing)</b>
-      <p class="note hidden bad" id="bfbNoSerial" data-i18n="bfb_noSerial">This browser cannot talk to USB devices. Use Chrome or Edge on a computer; the lamp is still shown on screen.</p>
-
-      <h4 data-i18n="bfb_step1">1. Arduino</h4>
-      <div class="row bfbRow">
-        <button type="button" id="bfbChoosePort" data-i18n="bfb_choosePort">Choose port…</button>
-        <select id="bfbPortSel" aria-label="Port"></select>
-        <label><span data-i18n="bfb_baud">Baud</span>
-          <select id="bfbBaud"><option>9600</option><option>19200</option><option>57600</option><option>115200</option></select></label>
-        <button type="button" class="ghost" id="bfbDisconnect" data-i18n="bfb_disconnect">Disconnect</button>
-      </div>
-      <p class="note" id="bfbPortStatus"></p>
-      <div class="row bfbRow">
-        <button type="button" class="ghost" id="bfbTestOn" data-i18n="bfb_testOn">Test lamp on</button>
-        <button type="button" class="ghost" id="bfbTestOff" data-i18n="bfb_testOff">Test lamp off</button>
-        <a href="./assets/arduino/biofeedback_lamp.ino" download data-i18n="bfb_sketch">Arduino sketch (.ino)</a>
-      </div>
-
-      <h4 data-i18n="bfb_step2">2. Movement and metric</h4>
-      <div class="row bfbRow">
-        <label><span data-i18n="bfb_movement">Movement</span><select id="bfbMove"></select></label>
-        <label><span data-i18n="bfb_metric">Metric</span><select id="bfbMetric"></select></label>
-        <label><span data-i18n="bfb_when">Light when</span>
-          <select id="bfbDir"><option value="above" data-i18n="bfb_above">above threshold</option><option value="below" data-i18n="bfb_below">below threshold</option></select></label>
-      </div>
-      <div class="row bfbRow">
-        <label style="flex:1"><span data-i18n="bfb_threshold">Threshold (°)</span>
-          <input type="range" id="bfbThr" min="0" max="180" step="1"></label>
-        <input type="number" id="bfbThrN" min="0" max="180" step="1" style="width:5em" aria-label="Threshold">
-        <label><span data-i18n="bfb_hyst">Hysteresis (°)</span><input type="number" id="bfbHyst" min="0" max="20" step="1" style="width:4em"></label>
-      </div>
-
-      <h4 data-i18n="bfb_step3">3. Camera and go</h4>
-      <div class="bfbStage">
-        <video id="bfbVideo" playsinline muted></video>
-        <canvas id="bfbCanvas"></canvas>
-        <div class="bfbHud"><span id="bfbValue">–</span><span id="bfbLamp" class="bfbLamp" title="Lamp"></span></div>
-      </div>
-      <div class="bfbBar"><div id="bfbBarFill"></div><div id="bfbBarThr"></div></div>
-      <p class="note" id="bfbCamNote"></p>
-      <div class="row bfbRow">
-        <button type="button" class="ghost" id="bfbCamBtn" data-i18n="bfb_camStart">Start camera</button>
-        <button type="button" id="bfbActivate" data-i18n="bfb_activate">Activate</button>
-      </div>
-      <p class="note" data-i18n="bfb_disclaimer">Camera-estimated angles, smoothed; not motion capture. Testing feature.</p>
-      <details><summary data-i18n="bfb_logTitle">Serial log</summary><pre id="bfbLog" class="bfbLog"></pre></details>
+      <p class="note" style="margin:6px 0 12px" data-i18n="bfb_wip">Work in progress: live feedback from the camera to a lamp or buzzer on a connected Arduino, coming soon.</p>
+      <video id="bfbPromo" src="./assets/media/bioscout_promo.mp4" muted loop playsinline preload="none"
+             style="width:100%;max-width:360px;max-height:70vh;border-radius:12px;background:#000"></video>
     </div>
   </section>
   <section id="viewProcess" class="hidden">
@@ -1731,8 +1689,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 29;
-window.BUILD_AT = "2026-10-15 16:33";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 30;
+window.BUILD_AT = "2026-10-15 16:54";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1858,7 +1816,6 @@ import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 // array of times, and a translated string inside either of them would have
 // called the array.
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
-import { initBiofeedback } from "./src/biofeedback.js";
 import { ensembleRep, mergeSides } from "./src/ensemble.js";
 import { neckLoadHTML } from "./src/neckload.js";
 import { normLoadDir, isHorizontal, netVerticalKg, loadText, neckPush } from "./src/loaddir.js";
@@ -1940,7 +1897,6 @@ async function startPoseWorker() {
 const $ = (id) => document.getElementById(id);
 /* BioFeedback (testing): its own landmarker, so its timestamps never clash with the recorder's. */
 let biofeedback = null;
-queueMicrotask(() => { biofeedback = initBiofeedback({ $, tr, getLandmarker: async () => ((await loadMediaPipe()) ? makeLandmarker() : null) }); });
 const statusEl = $("status");
 const say = (t, warn) => {
   // Drop the data-i18n binding: applyStaticI18n rewrites every element that
@@ -5225,7 +5181,7 @@ function showView(id, push = true) {
   if (LAB && !LAB_VIEWS.includes(id)) id = "viewHome";   // the lab demo: home + its three doors
   document.documentElement.classList.remove("booting");
   if (id !== "viewRecord") leaveRecorder();
-  if (id !== "viewBiofeedback" && biofeedback) biofeedback.leave();
+  if (id !== "viewBiofeedback") { const v = $("bfbPromo"); if (v) v.pause(); }
   if (id !== "viewRecord" && assessStep) exitAssessMode();
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
   $("navBar").classList.toggle("hidden", id === "viewLogin" || id === "viewDash");
@@ -5247,7 +5203,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewChat") chat.open();
   if (id === "viewProcess") openProcess();
   if (id === "viewSimulate") openSimulate();
-  if (id === "viewBiofeedback") biofeedback.open();
+  if (id === "viewBiofeedback") { const v = $("bfbPromo"); if (v) v.play().catch(() => {}); }
 });
 
 $("navBack").onclick = () => history.back();
@@ -7547,7 +7503,7 @@ function enterLab() {
   });
   $("doorRecord").onclick = () => showView("viewRecord");
   $("doorProcess").onclick = () => { showView("viewProcess"); openProcess(); };
-  $("doorBiofeedback").onclick = () => { showView("viewBiofeedback"); biofeedback.open(); };
+  $("doorBiofeedback").onclick = () => showView("viewBiofeedback");
   $("doorSimulate").onclick = (e) => { if (e.target.closest("a")) return; showView("viewSimulate"); openSimulate(); };
   $("doorSimulate").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("doorSimulate").click(); } };
   $("devModeBtn").onclick = () => { $("devForm").classList.toggle("hidden"); $("devPw").focus(); };
