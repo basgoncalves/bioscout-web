@@ -1652,8 +1652,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 8;
-window.BUILD_AT = "2026-10-14 21:37";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 9;
+window.BUILD_AT = "2026-10-15 06:44";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -8417,8 +8417,17 @@ async function analyseVideoFile(file, { trim = true } = {}) {
    * every slot was missed and seeked, which is the slow path again. */
   let rate = nativeDt ? Math.min(1, Math.max(0.0625, 30 * nativeDt)) : 1;
   const recent = [];
+  /* Played WITHOUT pausing (Bas, 2026-10-15: a 4 s jump-shot clip took 108 s,
+   * of which the pose model was 15 s and seeking 14 -- the rest was pausing
+   * and resuming the video for every one of its 265 frames, which a phone's
+   * decoder pays for each time). Each presented frame is tracked inside its
+   * own frame callback while the video keeps running; the playback rate is
+   * set from how long a frame actually takes to track, so the decoder never
+   * gets far ahead of the model. A slot whose frame went by while the model
+   * was busy is written down and seeked at the end -- a handful, not all. */
+  const missed = [];
   const playFrom = (i0) => new Promise((resolve) => {
-    let i = i0, id = 0, timer = 0, over = false;
+    let i = i0, id = 0, timer = 0, over = false, tracked = 0, cost = 0;
     const end = () => {
       if (over) return;
       over = true;
@@ -8428,19 +8437,24 @@ async function analyseVideoFile(file, { trim = true } = {}) {
       v.pause();
       resolve(i);
     };
-    const arm = () => { clearTimeout(timer); timer = setTimeout(end, PLAY_STALL_MS); };
+    const arm = () => { clearTimeout(timer); timer = setTimeout(end, PLAY_STALL_MS / Math.max(rate, 0.0625)); };
     const onFrame = (_, meta) => {
       id = 0;
       if (over) return;
       const m = meta.mediaTime;
-      // The frame covering slot i went by unseen: stop, and let it be seeked.
-      if (tOf(i) < m - half - EPS) return end();
-      if (tOf(i) < m + half) {
-        v.pause();
-        while (i < n && tOf(i) < m + half) { track(i); stats.played++; i++; }
-        if (i >= n) return end();
-        v.play().catch(end);
+      while (i < n && tOf(i) < m - half - EPS) { missed.push(i); i++; }   // went by unseen
+      if (i < n && tOf(i) < m + half) {
+        const c0 = performance.now();
+        while (i < n && tOf(i) < m + half) { track(i); stats.played++; tracked++; i++; }
+        cost += performance.now() - c0;
+        // Media seconds the decoder may advance per wall second: one grid step
+        // per tracked frame's cost, with a little headroom.
+        if (tracked >= 3) {
+          const want = Math.min(1, Math.max(0.0625, (dt / (cost / tracked / 1000)) * 0.85));
+          if (Math.abs(want - rate) / rate > 0.15) { rate = want; try { v.playbackRate = rate; } catch { /* ignore */ } }
+        }
       }
+      if (i >= n) return end();
       arm();
       id = v.requestVideoFrameCallback(onFrame);
     };
@@ -8456,12 +8470,8 @@ async function analyseVideoFile(file, { trim = true } = {}) {
   let i = 0;
   while (i < n) {
     if (usePlay && i > 0) {
-      const before = i;
       i = await playFrom(i);
       if (i >= n) break;
-      // Stopped early: a dropped frame, or the end of the stream a hair before
-      // the last slot. Slow down if playback is outrunning the decoder.
-      if (i - before < 30) rate = Math.max(0.0625, rate / 2);
     }
     const s0 = performance.now();
     await seekTo(seekOf(i));
@@ -8477,6 +8487,15 @@ async function analyseVideoFile(file, { trim = true } = {}) {
       }
     }
   }
+  // The few slots playback went past while the model was busy: one seek each.
+  for (const k of missed) {
+    const s0 = performance.now();
+    await seekTo(seekOf(k));
+    stats.seeks++; stats.seekMs += performance.now() - s0;
+    track(k);
+  }
+  if (missed.length) frames.sort((a, b) => a.i - b.i);
+  stats.missed = missed.length;
   try { v.playbackRate = 1; } catch { /* gone */ }
   stats.mode = stats.played ? "play" : "seek";
   stats.totalMs = performance.now() - t0;
