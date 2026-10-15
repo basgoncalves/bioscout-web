@@ -24,33 +24,118 @@ function ang(a, b, c) {           // angle at b, degrees, 3D
 }
 const midp = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 });
 
-/* Each metric: key, i18n label key, compute(world landmarks). Flexion is
- * 180 - included angle so standing straight reads ~0. */
+/* Each metric: i18n label key, unit, and either
+ *   f(world, img)  -> a LIVE value every frame (angles), or
+ *   ev: true       -> an EVENT value, produced once per jump / shot by the
+ *                     detectors below; the lamp then flashes for PULSE_MS.
+ * Flexion is 180 - included angle so standing straight reads ~0. */
+const knee = (w, s) => 180 - ang(w[L.hip[s]], w[L.kn[s]], w[L.an[s]]);
+const hipF = (w, s) => 180 - ang(w[L.sh[s]], w[L.hip[s]], w[L.kn[s]]);
+const elbF = (w, s) => 180 - ang(w[L.sh[s]], w[L.el[s]], w[L.wr[s]]);
+const shEl = (w, s) => ang(w[L.hip[s]], w[L.sh[s]], w[L.el[s]]);
+const ankD = (w, s) => 90 - ang(w[L.kn[s]], w[L.an[s]], w[31 + s]);   // knee-ankle-toe; ~0 standing
+function trunk(w) {               // vs vertical; world y points down
+  const s = midp(w[11], w[12]), h = midp(w[23], w[24]);
+  const v = sub(s, h), m = Math.hypot(...v);
+  return m < 1e-9 ? NaN : (Math.acos(Math.max(-1, Math.min(1, -v[1] / m))) * 180) / Math.PI;
+}
+const DEG = "°";
 export const METRICS = {
-  kneeFlexL: { label: "bfb_m_kneeFlexL", f: (w) => 180 - ang(w[L.hip[0]], w[L.kn[0]], w[L.an[0]]) },
-  kneeFlexR: { label: "bfb_m_kneeFlexR", f: (w) => 180 - ang(w[L.hip[1]], w[L.kn[1]], w[L.an[1]]) },
-  hipFlexL:  { label: "bfb_m_hipFlexL",  f: (w) => 180 - ang(w[L.sh[0]], w[L.hip[0]], w[L.kn[0]]) },
-  hipFlexR:  { label: "bfb_m_hipFlexR",  f: (w) => 180 - ang(w[L.sh[1]], w[L.hip[1]], w[L.kn[1]]) },
-  elbowFlexL:{ label: "bfb_m_elbowFlexL",f: (w) => 180 - ang(w[L.sh[0]], w[L.el[0]], w[L.wr[0]]) },
-  elbowFlexR:{ label: "bfb_m_elbowFlexR",f: (w) => 180 - ang(w[L.sh[1]], w[L.el[1]], w[L.wr[1]]) },
-  shAbdL:    { label: "bfb_m_shAbdL",    f: (w) => ang(w[L.hip[0]], w[L.sh[0]], w[L.el[0]]) },
-  shAbdR:    { label: "bfb_m_shAbdR",    f: (w) => ang(w[L.hip[1]], w[L.sh[1]], w[L.el[1]]) },
-  trunkLean: { label: "bfb_m_trunkLean", f: (w) => {   // vs vertical; world y points down
-    const s = midp(w[11], w[12]), h = midp(w[23], w[24]);
-    const v = sub(s, h), m = Math.hypot(...v);
-    return m < 1e-9 ? NaN : (Math.acos(Math.max(-1, Math.min(1, -v[1] / m))) * 180) / Math.PI;
-  } },
+  kneeFlexL: { label: "bfb_m_kneeFlexL", unit: DEG, f: (w) => knee(w, 0) },
+  kneeFlexR: { label: "bfb_m_kneeFlexR", unit: DEG, f: (w) => knee(w, 1) },
+  hipFlexL:  { label: "bfb_m_hipFlexL",  unit: DEG, f: (w) => hipF(w, 0) },
+  hipFlexR:  { label: "bfb_m_hipFlexR",  unit: DEG, f: (w) => hipF(w, 1) },
+  ankleDFL:  { label: "bfb_m_ankleDFL",  unit: DEG, f: (w) => ankD(w, 0) },
+  ankleDFR:  { label: "bfb_m_ankleDFR",  unit: DEG, f: (w) => ankD(w, 1) },
+  elbowFlexL:{ label: "bfb_m_elbowFlexL",unit: DEG, f: (w) => elbF(w, 0) },
+  elbowFlexR:{ label: "bfb_m_elbowFlexR",unit: DEG, f: (w) => elbF(w, 1) },
+  shAbdL:    { label: "bfb_m_shAbdL",    unit: DEG, f: (w) => shEl(w, 0) },
+  shAbdR:    { label: "bfb_m_shAbdR",    unit: DEG, f: (w) => shEl(w, 1) },
+  trunkLean: { label: "bfb_m_trunkLean", unit: DEG, f: (w) => trunk(w) },
+  // countermovement jump -- one value per jump
+  jumpHeight:{ label: "bfb_m_jumpHeight",unit: "cm", ev: true, max: 80 },
+  flightTime:{ label: "bfb_m_flightTime",unit: "ms", ev: true, max: 1000 },
+  cmKnee:    { label: "bfb_m_cmKnee",    unit: DEG, ev: true },
+  cmHip:     { label: "bfb_m_cmHip",     unit: DEG, ev: true },
+  cmAnkle:   { label: "bfb_m_cmAnkle",   unit: DEG, ev: true },
+  landKnee:  { label: "bfb_m_landKnee",  unit: DEG, ev: true },
+  // jump shot -- one value per shot, taken at release (shooting hand highest)
+  shotElbow: { label: "bfb_m_shotElbow", unit: DEG, ev: true },
+  shotShoulder:{ label: "bfb_m_shotShoulder", unit: DEG, ev: true },
+  shotKnee:  { label: "bfb_m_shotKnee",  unit: DEG, ev: true },
+  shotTrunk: { label: "bfb_m_shotTrunk", unit: DEG, ev: true },
+  shotJump:  { label: "bfb_m_shotJump",  unit: "cm", ev: true, max: 80 },
 };
 
 /* Movement presets: which metrics make sense and a starting threshold. */
 export const MOVES = {
-  squat:  { label: "bfb_mv_squat",  metrics: ["kneeFlexL", "kneeFlexR", "hipFlexL", "hipFlexR", "trunkLean"], def: "kneeFlexL", thr: 70, dir: "above" },
+  squat:  { label: "bfb_mv_squat",  metrics: ["kneeFlexL", "kneeFlexR", "hipFlexL", "hipFlexR", "ankleDFL", "ankleDFR", "trunkLean"], def: "kneeFlexL", thr: 70, dir: "above" },
   lunge:  { label: "bfb_mv_lunge",  metrics: ["kneeFlexL", "kneeFlexR", "hipFlexL", "hipFlexR", "trunkLean"], def: "kneeFlexL", thr: 80, dir: "above" },
+  cmj:    { label: "bfb_mv_cmj",    metrics: ["jumpHeight", "flightTime", "cmKnee", "cmHip", "cmAnkle", "landKnee", "kneeFlexL", "kneeFlexR", "trunkLean"], def: "jumpHeight", thr: 30, dir: "above" },
+  shot:   { label: "bfb_mv_shot",   metrics: ["shotElbow", "shotShoulder", "shotKnee", "shotTrunk", "shotJump", "elbowFlexR", "elbowFlexL"], def: "shotElbow", thr: 20, dir: "below" },
   curl:   { label: "bfb_mv_curl",   metrics: ["elbowFlexL", "elbowFlexR"], def: "elbowFlexR", thr: 110, dir: "above" },
   raise:  { label: "bfb_mv_raise",  metrics: ["shAbdL", "shAbdR"], def: "shAbdR", thr: 90, dir: "above" },
   hinge:  { label: "bfb_mv_hinge",  metrics: ["trunkLean", "hipFlexL", "hipFlexR", "kneeFlexL", "kneeFlexR"], def: "trunkLean", thr: 45, dir: "above" },
   free:   { label: "bfb_mv_free",   metrics: Object.keys(METRICS), def: "kneeFlexL", thr: 70, dir: "above" },
 };
+
+const PULSE_MS = 1500;
+
+/* Jump + shot detectors on the IMAGE landmarks (normalised, y down).
+ * Take-off = ankles rise more than 7% of leg length above the learnt floor
+ * for 2 frames; landing = back within 3%. Height from flight time,
+ * h = g t^2 / 8 -- the same flight-time estimate the recorder's jump table
+ * uses, and with the same caveat: it overestimates if the knees tuck.
+ * Shot release = shooting wrist at its highest while above the nose. */
+export function makeDetectors(emit) {
+  const buf = [];                       // {ts, knee, hip, ank}
+  const jumps = [];                     // finished jumps {t0, t1, h}
+  const pend = [];                      // {at, fn} finalisers due later
+  let gnd = NaN, Lg = NaN, air = false, up = 0, t0 = 0, best = null;
+  const avg = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? (a + b) / 2 : Number.isFinite(a) ? a : b);
+  const peak = (k, a, b) => buf.reduce((m, f) => (f.ts >= a && f.ts <= b && f[k] > m ? f[k] : m), -Infinity);
+  return function step(ts, img, w) {
+    const kn = avg(knee(w, 0), knee(w, 1)), hp = avg(hipF(w, 0), hipF(w, 1)), ak = avg(ankD(w, 0), ankD(w, 1));
+    buf.push({ ts, knee: kn, hip: hp, ank: ak });
+    while (buf.length && buf[0].ts < ts - 4000) buf.shift();
+    const ay = (img[27].y + img[28].y) / 2, hy = (img[23].y + img[24].y) / 2;
+    // ---- jump ----
+    if (!air) {
+      const leg = Math.abs(ay - hy);
+      Lg = Number.isFinite(Lg) ? Lg + 0.05 * (leg - Lg) : leg;
+      if (!Number.isFinite(gnd) || ay > gnd) gnd = ay;                    // floor can only be lower...
+      else if (Math.abs(ay - gnd) < 0.03 * Lg) gnd += 0.05 * (ay - gnd);  // ...or drift slowly
+      if (ay < gnd - 0.07 * Lg) { if (++up === 1) t0 = ts; if (up >= 2) air = true; } else up = 0;
+    } else if (ay > gnd - 0.03 * Lg || ts - t0 > 1500) {
+      air = false; up = 0;
+      const t1 = ts, fl = (t1 - t0) / 1000;
+      if (fl > 0.12 && fl < 1.0) {
+        const h = (9.81 * fl * fl / 8) * 100;
+        jumps.push({ t0, t1, h }); if (jumps.length > 10) jumps.shift();
+        const j0 = t0;
+        pend.push({ at: t1 + 500, fn: () => emit({
+          jumpHeight: h, flightTime: fl * 1000,
+          cmKnee: peak("knee", j0 - 1500, j0), cmHip: peak("hip", j0 - 1500, j0),
+          cmAnkle: peak("ank", j0 - 1500, j0), landKnee: peak("knee", t1, t1 + 500),
+        }) });
+      }
+    }
+    // ---- shot ----
+    const s = img[15].y < img[16].y ? 0 : 1, wy = img[15 + s].y;
+    if (wy < img[0].y) {
+      if (!best || wy < best.y) best = { y: wy, ts, elb: elbF(w, s), sh: shEl(w, s), tr: trunk(w) };
+    }
+    if (best && (wy > best.y + 0.08 * Lg || wy > img[0].y)) {
+      const r = best; best = null;
+      pend.push({ at: r.ts + 700, fn: () => {
+        const j = jumps.filter((x) => x.t0 > r.ts - 1000 && x.t0 < r.ts + 300).pop();
+        emit({ shotElbow: r.elb, shotShoulder: r.sh, shotTrunk: r.tr,
+               shotKnee: peak("knee", r.ts - 1500, r.ts), shotJump: j ? j.h : 0 });
+      } });
+    }
+    for (let i = pend.length - 1; i >= 0; i--) if (ts >= pend[i].at) { pend[i].fn(); pend.splice(i, 1); }
+  };
+}
 
 const SKEL = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
 const SKEY = "bioscout.biofeedback.v1";
@@ -61,7 +146,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     port: null, writer: null, reader: null, lm: null, stream: null, raf: 0,
     active: false, lit: null, value: NaN, lastTs: -1,
   };
-  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false };
+  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {} };
   try { cfg = { ...cfg, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch { /* private */ }
   const save = () => { try { localStorage.setItem(SKEY, JSON.stringify(cfg)); } catch { /* full */ } };
 
@@ -81,6 +166,14 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbMetric").value = cfg.metric;
   }
   function syncInputs() {
+    const m = METRICS[cfg.metric] || METRICS.kneeFlexL, mx = m.max || 180;
+    $("bfbThr").max = mx; $("bfbThrN").max = mx;
+    $("bfbUnit").textContent = m.unit;
+    $("bfbHint").textContent = m.ev ? tr(cfg.metric.startsWith("shot") ? "bfb_hintShot" : "bfb_hintJump") : "";
+    $("bfbHyst").disabled = !!m.ev; $("bfbZero").disabled = !!m.ev;
+    const z = cfg.zero && cfg.zero[cfg.metric];
+    $("bfbZeroNote").textContent = z ? tr("bfb_zeroed", { v: z.toFixed(0) }) : "";
+    $("bfbValue").textContent = "–"; $("bfbResults").innerHTML = ""; showBar(0);
     $("bfbThr").value = cfg.thr; $("bfbThrN").value = cfg.thr;
     $("bfbDir").value = cfg.dir; $("bfbHyst").value = cfg.hyst; $("bfbBaud").value = String(cfg.baud);
   }
@@ -89,9 +182,9 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     cfg.metric = mv.def; cfg.thr = mv.thr; cfg.dir = mv.dir;
     fillMetrics(); syncInputs(); save();
   };
-  $("bfbMetric").onchange = () => { cfg.metric = $("bfbMetric").value; save(); };
+  $("bfbMetric").onchange = () => { cfg.metric = $("bfbMetric").value; ema = NaN; syncInputs(); save(); };
   $("bfbThr").oninput = () => { cfg.thr = +$("bfbThr").value; $("bfbThrN").value = cfg.thr; save(); };
-  $("bfbThrN").onchange = () => { cfg.thr = Math.max(0, Math.min(180, +$("bfbThrN").value || 0)); $("bfbThr").value = cfg.thr; save(); };
+  $("bfbThrN").onchange = () => { cfg.thr = Math.max(0, Math.min(+$("bfbThr").max || 180, +$("bfbThrN").value || 0)); $("bfbThr").value = cfg.thr; save(); };
   $("bfbDir").onchange = () => { cfg.dir = $("bfbDir").value; save(); };
   $("bfbHyst").onchange = () => { cfg.hyst = Math.max(0, +$("bfbHyst").value || 0); save(); };
   $("bfbBaud").onchange = async () => { cfg.baud = +$("bfbBaud").value; save(); if (st.port) await openPort(st.port); };
@@ -185,7 +278,31 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (st.stream) st.stream.getTracks().forEach((t) => t.stop());
     st.stream = null;
   }
-  let ema = NaN, on = false;
+  let ema = NaN, on = false, pulseTo = 0;
+  const unit = () => METRICS[cfg.metric].unit;
+  const fmt = (v) => (unit() === "cm" ? v.toFixed(1) : v.toFixed(0)) + (unit() === DEG ? "°" : " " + unit());
+  const meets = (v) => (cfg.dir === "above" ? v > cfg.thr : v < cfg.thr);
+  const barMax = () => METRICS[cfg.metric].max || 180;
+  function showBar(v) {
+    $("bfbBarFill").style.width = Math.max(0, Math.min(100, (v / barMax()) * 100)) + "%";
+    $("bfbBarThr").style.left = Math.min(100, (cfg.thr / barMax()) * 100) + "%";
+  }
+  /* An event (one jump / one shot) arrived: show it, log it, flash the lamp. */
+  const detect = makeDetectors((vals) => {
+    const m = METRICS[cfg.metric]; if (!m.ev || !(cfg.metric in vals)) return;
+    const v = vals[cfg.metric]; if (!Number.isFinite(v)) return;
+    const ok = meets(v);
+    $("bfbValue").textContent = fmt(v); $("bfbValue").classList.toggle("hit", ok); showBar(v);
+    const li = document.createElement("li"); li.textContent = (ok ? "✓ " : "✗ ") + fmt(v);
+    li.className = ok ? "ok" : ""; $("bfbResults").prepend(li);
+    while ($("bfbResults").children.length > 8) $("bfbResults").lastChild.remove();
+    if (ok) {
+      $("bfbLamp").classList.add("on");
+      if (st.active) send(true, true);
+      clearTimeout(pulseTo);
+      pulseTo = setTimeout(() => { $("bfbLamp").classList.remove("on"); if (st.active) send(false, true); }, PULSE_MS);
+    }
+  });
   function frame() {
     st.raf = requestAnimationFrame(frame);
     const v = $("bfbVideo"); if (!st.lm || v.readyState < 2) return;
@@ -195,21 +312,24 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     cv.width = v.videoWidth; cv.height = v.videoHeight;
     ctx.clearRect(0, 0, cv.width, cv.height);
     const img = r.landmarks && r.landmarks[0], w = r.worldLandmarks && r.worldLandmarks[0];
-    if (!img || !w) { $("bfbValue").textContent = "–"; if (st.active) send(false); return; }
+    const m = METRICS[cfg.metric];
+    if (!img || !w) { if (!m.ev) { $("bfbValue").textContent = "–"; if (st.active) send(false); } return; }
     ctx.lineWidth = 4; ctx.strokeStyle = "rgba(80,200,170,.9)";
     for (const [a, b] of SKEL) { ctx.beginPath(); ctx.moveTo(img[a].x * cv.width, img[a].y * cv.height); ctx.lineTo(img[b].x * cv.width, img[b].y * cv.height); ctx.stroke(); }
-    const raw = METRICS[cfg.metric].f(w);
+    detect(ts, img, w);
+    if (m.ev) return;                       // event metrics update on their own
+    const raw = m.f(w) - (cfg.zero[cfg.metric] || 0);   // "Zero" removes camera tilt / posture offset
     if (!Number.isFinite(raw)) return;
     ema = Number.isFinite(ema) ? ema + 0.35 * (raw - ema) : raw;     // light smoothing against jitter
     st.value = ema;
-    $("bfbValue").textContent = ema.toFixed(0) + "°";
-    $("bfbBarFill").style.width = Math.max(0, Math.min(100, (ema / 180) * 100)) + "%";
-    $("bfbBarThr").style.left = (cfg.thr / 180) * 100 + "%";
-    // Hysteresis: switch on past thr, off only once back by `hyst` degrees.
+    $("bfbValue").textContent = fmt(ema);
+    showBar(ema);
+    // Hysteresis: switch on past thr, off only once back by `hyst`.
     const h = cfg.hyst;
     if (cfg.dir === "above") on = on ? ema > cfg.thr - h : ema > cfg.thr;
     else on = on ? ema < cfg.thr + h : ema < cfg.thr;
     $("bfbValue").classList.toggle("hit", on);
+    $("bfbLamp").classList.toggle("on", on);
     if (st.active) send(on);
   }
   $("bfbCamBtn").onclick = async () => {
@@ -221,8 +341,20 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbCamBtn").textContent = tr("bfb_camStop");
     frame();
   };
+  /* Zero: the current reading becomes 0 for this metric. The camera's own
+   * tilt shows up directly in trunk lean (a webcam on a monitor looks down
+   * ~10-20 deg), so stand in your neutral posture and press it once. */
+  $("bfbZero").onclick = () => {
+    const m = METRICS[cfg.metric]; if (m.ev || !Number.isFinite(st.value)) return;
+    cfg.zero = { ...(cfg.zero || {}), [cfg.metric]: (cfg.zero[cfg.metric] || 0) + st.value };
+    ema = NaN; save(); $("bfbZeroNote").textContent = tr("bfb_zeroed", { v: cfg.zero[cfg.metric].toFixed(0) });
+  };
+  $("bfbZeroReset").onclick = () => {
+    if (cfg.zero) delete cfg.zero[cfg.metric]; ema = NaN; save(); $("bfbZeroNote").textContent = "";
+  };
   $("bfbActivate").onclick = () => {
     st.active = !st.active;
+    if (st.active && !METRICS[cfg.metric].ev) send(on, true);   // tell the board the state right now
     $("bfbActivate").textContent = tr(st.active ? "bfb_deactivate" : "bfb_activate");
     $("bfbActivate").classList.toggle("danger", st.active);
     if (!st.active) send(false, true);

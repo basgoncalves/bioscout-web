@@ -588,6 +588,9 @@ try {
   #bfbBarFill { height:100%; width:0; background:var(--accent); border-radius:5px; }
   #bfbBarThr { position:absolute; top:-4px; width:2px; height:18px; background:#ffd54a; }
   .bfbLog { max-height:160px; overflow:auto; font-size:12px; }
+  .bfbResults { list-style:none; padding:0; margin:4px 0; display:flex; flex-wrap:wrap; gap:6px; font-size:13px; }
+  .bfbResults li { padding:3px 8px; border-radius:6px; background:var(--line, #333); }
+  .bfbResults li.ok { background:#ffd54a; color:#222; }
   #bfbPortStatus.bad, #bfbNoSerial { color:#e66; }
   .labDoor b { display:block; font-size:17px; margin-bottom:2px; }
   .labDoor span { color:var(--muted); font-size:13px; line-height:1.4; }
@@ -1357,7 +1360,7 @@ try {
       <div class="row bfbRow">
         <button type="button" class="ghost" id="bfbTestOn" data-i18n="bfb_testOn">Test lamp on</button>
         <button type="button" class="ghost" id="bfbTestOff" data-i18n="bfb_testOff">Test lamp off</button>
-        <a href="./assets/arduino/biofeedback_lamp.ino" download data-i18n="bfb_sketch">Arduino sketch (.ino)</a>
+        <a href="./assets/arduino/biofeedback_lamp/biofeedback_lamp.ino" download data-i18n="bfb_sketch">Arduino sketch (.ino)</a>
       </div>
 
       <h4 data-i18n="bfb_step2">2. Movement and metric</h4>
@@ -1368,7 +1371,7 @@ try {
           <select id="bfbDir"><option value="above" data-i18n="bfb_above">above threshold</option><option value="below" data-i18n="bfb_below">below threshold</option></select></label>
       </div>
       <div class="row bfbRow">
-        <label style="flex:1"><span data-i18n="bfb_threshold">Threshold (°)</span>
+        <label style="flex:1"><span><span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>)</span>
           <input type="range" id="bfbThr" min="0" max="180" step="1"></label>
         <input type="number" id="bfbThrN" min="0" max="180" step="1" style="width:5em" aria-label="Threshold">
         <label><span data-i18n="bfb_hyst">Hysteresis (°)</span><input type="number" id="bfbHyst" min="0" max="20" step="1" style="width:4em"></label>
@@ -1381,11 +1384,16 @@ try {
         <div class="bfbHud"><span id="bfbValue">–</span><span id="bfbLamp" class="bfbLamp" title="Lamp"></span></div>
       </div>
       <div class="bfbBar"><div id="bfbBarFill"></div><div id="bfbBarThr"></div></div>
+      <p class="note" id="bfbHint"></p>
       <p class="note" id="bfbCamNote"></p>
+      <ol id="bfbResults" class="bfbResults"></ol>
       <div class="row bfbRow">
         <button type="button" class="ghost" id="bfbCamBtn" data-i18n="bfb_camStart">Start camera</button>
+        <button type="button" class="ghost" id="bfbZero" data-i18n="bfb_zero">Zero (neutral posture)</button>
+        <button type="button" class="ghost" id="bfbZeroReset" data-i18n="bfb_zeroReset">Clear zero</button>
         <button type="button" id="bfbActivate" data-i18n="bfb_activate">Activate</button>
       </div>
+      <p class="note" id="bfbZeroNote"></p>
       <p class="note" data-i18n="bfb_disclaimer">Camera-estimated angles, smoothed; not motion capture. Testing feature.</p>
       <details><summary data-i18n="bfb_logTitle">Serial log</summary><pre id="bfbLog" class="bfbLog"></pre></details>
     </div>
@@ -1731,8 +1739,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 30;
-window.BUILD_AT = "2026-10-15 16:45";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 31;
+window.BUILD_AT = "2026-10-15 17:00";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
