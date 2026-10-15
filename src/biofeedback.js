@@ -227,7 +227,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       for (;;) {
         const { value, done } = await st.reader.read(); if (done) break;
         buf += dec.decode(value); let i;
-        while ((i = buf.indexOf("\n")) >= 0) { const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (ln) log("← " + ln); }
+        while ((i = buf.indexOf("\n")) >= 0) { const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (ln && ln !== st.lastRx) { st.lastRx = ln; log("← " + ln); } }
       }
     } catch { /* port closed or unplugged */ }
   }
@@ -332,6 +332,12 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbLamp").classList.toggle("on", on);
     if (st.active) send(on);
   }
+  /* Belt and braces: while active, re-send the lamp state every 500 ms, so a
+   * byte lost to a board reset or a busy port corrects itself. Not logged. */
+  setInterval(() => {
+    if (!st.active || !st.writer || st.lit == null) return;
+    st.writer.write(new TextEncoder().encode(st.lit ? "1\n" : "0\n")).catch(() => {});
+  }, 500);
   $("bfbCamBtn").onclick = async () => {
     if (st.stream) { stopCam(); $("bfbCamBtn").textContent = tr("bfb_camStart"); return; }
     $("bfbCamNote").textContent = tr("bfb_loadingModel");
