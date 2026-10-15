@@ -34,6 +34,11 @@ const sizeText = (n) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1,
  * ctx: { t, esc, client, health, job, outputs: {tool: files|null}, open: Set, err,
  *        act(fn) -> runs an engine request and repaints, openInProcess(file) }
  */
+/* Android and iOS pickers grey out every file whose MIME type they do not know,
+ * and .trc / .mot / .sto / .osim / .c3d are unknown to them -- the slots could
+ * not be filled from a phone (Bas, 2026-10-15). On a phone, no filter at all. */
+const PHONE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+const acceptAttr = (exts) => (PHONE ? "" : `accept="${exts}"`);
 export function simHTML(ctx) {
   const { t, esc, health, job } = ctx;
   T = t;
@@ -52,7 +57,7 @@ export function simHTML(ctx) {
     const slots = tl.slots.filter((sl) => sl.id !== "model").map((sl) => {
       const got = have[sl.id], fname = dropNames[`${tl.id}:${sl.id}`];
       return `<label class="simDrop${got ? " has" : ""}" data-drop="${tl.id}:${sl.id}">
-        <input type="file" accept="${sl.ext.join(",")}" data-file="${tl.id}:${sl.id}" hidden>
+        <input type="file" ${acceptAttr(sl.ext.join(","))} data-file="${tl.id}:${sl.id}" hidden>
         <span class="simSlot">${esc(slotLabel(tl.id, sl))}${sl.required ? " *" : ""}</span>
         <span class="sub">${got ? `✓ ${fname ? `<b class="simFname">${esc(fname)}</b>` : t("sim_dropped")} (${sizeText(got)}) <a href="#" data-clear="${tl.id}:${sl.id}">${t("pr_remove")}</a>`
           : `${t("sim_dropHere")} ${sl.ext.join(" ")}${sl.template ? ` · ${t("sim_default")}: <a href="${TPL}${esc(sl.template)}" download>${esc(sl.template)}</a>` : ""}`}</span>
@@ -99,7 +104,7 @@ export function simHTML(ctx) {
       <div class="simPick"><input id="simScaled" type="text" readonly placeholder="${esc(t("sim_scaled_none"))}" value="${esc(scaledName || "")}">
         <button type="button" class="ghost" data-scaledpick title="${esc(t("sim_scaled_pick"))}">🔍</button>
         ${scaledName ? `<button type="button" class="ghost" data-scaledclear>${t("pr_remove")}</button>` : ""}
-        <input type="file" accept=".osim" data-scaledfile hidden></div>
+        <input type="file" ${acceptAttr(".osim")} data-scaledfile hidden></div>
       <p class="note" style="margin:6px 0 0">${t("sim_scaled_note")}</p></div>`;
   if (!ctx.quick) sections.splice(si + 1, 0, scaledHTML);
   const sectionsHTML = sections.join("");
@@ -109,7 +114,7 @@ export function simHTML(ctx) {
         ? `<div class="simPick"><input type="text" readonly value="${esc(genericName)}"><button type="button" class="ghost" data-genericclear>${t("pr_remove")}</button></div>`
         : `<div class="simPick"><select id="simModel"><option value="">${t("sim_chooseModel")}</option>${models.map((m) => `<option value="${esc(m)}"${m === job.model ? " selected" : ""}>${esc(m)}</option>`).join("")}</select>
         <button type="button" class="ghost" data-genericpick title="${esc(t("sim_generic_pick"))}">🔍</button></div>`}
-      <input type="file" accept=".osim" data-genericfile hidden>
+      <input type="file" ${acceptAttr(".osim")} data-genericfile hidden>
       <p class="note" style="margin:6px 0 0">${t("sim_modelNote")} ${t("sim_generic_own")}</p>
     </div>
     ${ctx.quick ? quickHTML(ctx) : ""}
@@ -118,7 +123,7 @@ export function simHTML(ctx) {
     ${ctx.quick ? quickFooterHTML(ctx) : ""}
     <p class="note" style="margin:10px 0 0">${t("sim_templatesNote")}</p>
     ${ctx.quick ? "" : `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
-      <button type="button" class="ghost" data-c3d>${t("sim_c3d_btn")}</button><input type="file" accept=".c3d" multiple data-c3dfile hidden>
+      <button type="button" class="ghost" data-c3d>${t("sim_c3d_btn")}</button><input type="file" ${acceptAttr(".c3d")} multiple data-c3dfile hidden>
       <span class="sub">${t("sim_c3d_note")}</span>${c3dMsg ? `<span class="sub">${esc(c3dMsg)}</span>` : ""}</div>`}`;
 }
 

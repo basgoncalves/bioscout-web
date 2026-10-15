@@ -27,7 +27,7 @@ async function writeText(dir, name, data) { const w = await (await dir.getFileHa
  *  browsers (the Claude pane, automation), so it is not used. -> { handle: null, file } or null. */
 function pickC3d() {
   return new Promise((res) => {
-    const i = document.createElement("input"); i.type = "file"; i.accept = ".c3d,.C3D"; i.style.display = "none";
+    const i = document.createElement("input"); i.type = "file"; if (!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "")) i.accept = ".c3d,.C3D"; i.style.display = "none";
     document.body.appendChild(i);
     let done = false; const finish = (v) => { if (done) return; done = true; i.remove(); res(v); };
     i.onchange = () => finish(i.files && i.files[0] ? { handle: null, file: i.files[0] } : null);

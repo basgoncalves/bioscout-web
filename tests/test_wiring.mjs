@@ -321,10 +321,15 @@ for (const [label, raw] of files) {
      * each frame the GRID needs, that frame is picked by its presentation time
      * against the grid, and a slot playback went past is seeked. Free-running
      * playback that tracks whatever was presented is still the bug. */
+    /* Updated 2026-10-15: playback no longer pauses per frame (minutes on a
+     * phone). What keeps the answer deterministic now: every presented frame
+     * goes to the grid slot nearest its PRESENTATION time (mediaTime), and
+     * slots only move forward. Free-running tracking keyed off anything else
+     * (wall clock, a frame counter) is still the bug. */
     if (/\.play\(\)/.test(body)) {
-      const playPath = body.slice(body.indexOf("const playFrom"), body.indexOf("say(tr(\"sayTrackingProgress\", { t: \"0.0\""));
-      if (!/requestVideoFrameCallback/.test(playPath) || !/v\.pause\(\);\s*while \(i < n && tOf\(i\) < m \+ half\)/.test(playPath)
-          || !/tOf\(i\) < m - half - EPS\) return end\(\)/.test(playPath)) {
+      const keyed = /Math\.round\(\((?:meta\.mediaTime|m) - from\) \/ dt\)/.test(body);
+      const forward = /k > last/.test(body) && /k >= i/.test(body);
+      if (!/requestVideoFrameCallback/.test(body) || !keyed || !forward) {
         fail("analyseVideoBlob plays the video without pausing on grid frames; it must "
              + "step the grid so the same file gives the same answer");
       }

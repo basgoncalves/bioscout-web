@@ -1652,8 +1652,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 11;
-window.BUILD_AT = "2026-10-15 08:06";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 12;
+window.BUILD_AT = "2026-10-15 08:45";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1835,6 +1835,23 @@ async function makeLandmarker() {
     console.warn("pose model on GPU failed, falling back to CPU:", err);
     return PoseLandmarker.createFromOptions(fileset, opts("CPU"));
   }
+}
+
+/** The pose model in a module worker (src/pose_worker.js), or null where the
+ *  browser cannot run it there -- the page's own model is used then. */
+async function startPoseWorker() {
+  try {
+    const w = new Worker(new URL("./src/pose_worker.js", import.meta.url), { type: "module" });
+    const ok = await new Promise((res) => {
+      const to = setTimeout(() => res(false), 60000);
+      w.onmessage = (e) => { clearTimeout(to); res(!!e.data.ready); };
+      w.onerror = () => { clearTimeout(to); res(false); };
+      w.postMessage({ cmd: "init" });
+    });
+    if (ok) return w;
+    w.terminate();
+  } catch (err) { console.warn("pose worker unavailable:", err); }
+  return null;
 }
 
 const $ = (id) => document.getElementById(id);
@@ -8168,7 +8185,11 @@ async function probeFrameRate(v) {
     if (d > 1e-4) gaps.push(d);
   }
   if (gaps.length < 3) return null;
-  const dt = Math.min(...gaps);
+  /* The TYPICAL gap, not the shortest: a variable-rate clip has a few short
+   * gaps (a 28.6 fps phone clip had some at 1/60 s), and the shortest made a
+   * grid twice as fine as the clip, half of it slots no frame ever lands in. */
+  gaps.sort((a, b) => a - b);
+  const dt = gaps[Math.floor(gaps.length / 2)];
   // Anything outside 5-240 Hz is the probe misreading, not a real video.
   return dt >= 1 / 240 && dt <= 1 / 5 ? dt : null;
 }
@@ -8334,7 +8355,12 @@ async function analyseVideoFile(file, { trim = true } = {}) {
    * nothing at all (Bas, 2026-09-19). */
   say(tr("sayLoadingEngine"));
   bar(-1);
-  const off = await makeLandmarker();
+  /* The pose model in a worker when the browser can run it there; the page's
+   * own model only for the paths that need it (seeks, ball tracking). */
+  const needsPage = $("activity").value === "stroke" || $("activity").value === "kick";
+  const pw = !needsPage && v.requestVideoFrameCallback && window.createImageBitmap && window.__bsNoWorker !== true
+    ? await startPoseWorker() : null;
+  let off = pw ? null : await makeLandmarker();
   const seekTo = (t) => new Promise((resolve) => {
     let settled = false;
     const done = () => { if (!settled) { settled = true; resolve(); } };
@@ -8445,10 +8471,18 @@ async function analyseVideoFile(file, { trim = true } = {}) {
       id = 0;
       if (over) return;
       const m = meta.mediaTime;
-      while (i < n && tOf(i) < m - half - EPS) { missed.push(i); i++; }   // went by unseen
-      if (i < n && tOf(i) < m + half) {
+      /* Each presented frame fills the grid slot nearest its own time, and the
+       * slots between frames stay holes (interpolated later). A clip with a
+       * VARIABLE frame rate -- most phone and messenger clips -- has gaps
+       * shorter than its typical one, and insisting on every slot sent the
+       * misses back to be seeked one by one, at a keyframe every 10 s
+       * (Bas's basketball_jump_shot.mp4, 2026-10-15: minutes). Slots only ever
+       * go forward, so the model never sees a timestamp go back. */
+      const k = Math.round((m - from) / dt);
+      if (k >= i && k < n) {
         const c0 = performance.now();
-        while (i < n && tOf(i) < m + half) { track(i); stats.played++; tracked++; i++; }
+        missed.push(...Array.from({ length: k - i }, (_, q) => i + q));
+        track(k); stats.played++; tracked++; i = k + 1;
         cost += performance.now() - c0;
         // Media seconds the decoder may advance per wall second: one grid step
         // per tracked frame's cost, with a little headroom.
@@ -8471,6 +8505,68 @@ async function analyseVideoFile(file, { trim = true } = {}) {
   say(tr("sayTrackingProgress", { t: "0.0", dur: span.toFixed(1), frames: 0 }));
   bar(0);
   let i = 0;
+  /* With the worker: play the clip once at its own speed, hand every presented
+   * frame (as a small bitmap) to the model, and wait for the model to finish.
+   * The video is paused only if the model falls far behind, so the bitmaps
+   * waiting for it never pile up. */
+  if (pw) {
+    const vw = v.videoWidth, vh = v.videoHeight, sc = Math.min(1, 480 / Math.max(vw, vh));
+    const rw = Math.max(2, Math.round(vw * sc)), rh = Math.max(2, Math.round(vh * sc));
+    let inflight = 0, done = 0, held = false, last = -1;
+    const results = new Promise((resolveAll) => {
+      pw.onmessage = (e) => {
+        const { k, lms } = e.data;
+        inflight--; done++;
+        if (lms) frames.push({ i: k, t: tOf(k) * 1000, lm: toNamed(lms, vw, vh) });
+        bar(Math.min(1, done / Math.max(1, stats.played)));
+        if (done % 5 === 0) say(tr("sayTrackingProgress", { t: (tOf(k) - from).toFixed(1), dur: span.toFixed(1), frames: frames.length }));
+        if (held && inflight < 6) { held = false; v.play().catch(() => {}); }
+        if (playEnded && inflight === 0) resolveAll();
+      };
+    });
+    let playEnded = false;
+    await new Promise((resolve) => {
+      let id = 0, timer = 0;
+      const end = () => { clearTimeout(timer); if (id) v.cancelVideoFrameCallback(id); v.removeEventListener("ended", end); v.pause(); resolve(); };
+      /* No frame for a while: fine while the model catches up (held, or frames
+       * still out), and a nudge to play when not; only a clip that really ended
+       * or will not play any more stops the pass. */
+      let nudges = 0;
+      const arm = () => { clearTimeout(timer); timer = setTimeout(() => {
+        if (v.ended || last >= n - 1) return end();
+        if (held || inflight > 0) return arm();
+        if (nudges++ < 3) { v.play().catch(() => {}); return arm(); }
+        end();
+      }, PLAY_STALL_MS); };
+      const onFrame = async (_, meta) => {
+        id = 0;
+        const k = Math.round((meta.mediaTime - from) / dt);
+        if (k >= n) return end();
+        if (k > last && k >= 0) {
+          last = k; nudges = 0;
+          try {
+            const bmp = await createImageBitmap(v, { resizeWidth: rw, resizeHeight: rh, resizeQuality: "low" });
+            inflight++; stats.played++;
+            pw.postMessage({ cmd: "detect", k, ts: Math.round(tOf(k) * 1000), bmp }, [bmp]);
+            if (inflight > 24 && !held) { held = true; v.pause(); }
+          } catch { /* a frame that could not be copied is a hole */ }
+        }
+        arm();
+        id = v.requestVideoFrameCallback(onFrame);
+      };
+      v.addEventListener("ended", end);
+      v.playbackRate = 1;
+      arm();
+      id = v.requestVideoFrameCallback(onFrame);
+      v.currentTime = from;
+      v.play().catch(end);
+    });
+    playEnded = true;
+    if (inflight > 0) await results;
+    stats.mode = "worker";
+    frames.sort((a, b) => a.i - b.i);
+    i = n;
+  }
   while (i < n) {
     if (usePlay && i > 0) {
       i = await playFrom(i);
@@ -8490,17 +8586,11 @@ async function analyseVideoFile(file, { trim = true } = {}) {
       }
     }
   }
-  // The few slots playback went past while the model was busy: one seek each.
-  for (const k of missed) {
-    const s0 = performance.now();
-    await seekTo(seekOf(k));
-    stats.seeks++; stats.seekMs += performance.now() - s0;
-    track(k);
-  }
-  if (missed.length) frames.sort((a, b) => a.i - b.i);
+  // Slots no frame was presented for are holes, not seeks: the model only
+  // accepts timestamps that go forward, and a seek back to fill one crashed it.
   stats.missed = missed.length;
   try { v.playbackRate = 1; } catch { /* gone */ }
-  stats.mode = stats.played ? "play" : "seek";
+  if (stats.mode !== "worker") stats.mode = stats.played ? "play" : "seek";
   stats.totalMs = performance.now() - t0;
   lastTrackStats = stats;
   console.info("video tracking:", JSON.stringify({
@@ -8509,7 +8599,8 @@ async function analyseVideoFile(file, { trim = true } = {}) {
     model_s: +(stats.detectMs / 1000).toFixed(1), played: stats.played,
     size: `${v.videoWidth}x${v.videoHeight}` }));
   bar(null);
-  off.close();
+  if (off) off.close();
+  if (pw) pw.terminate();
   try { v.pause(); URL.revokeObjectURL(v.src); } catch { /* already gone */ }
   finish();
 }
@@ -8618,7 +8709,7 @@ function neckHoldResultsHTML(res, fps) {
 /** "Tracked in 21 s (seeking 3 s, pose model 16 s)". */
 function trackStatsText(st) {
   const s1 = (ms) => (ms / 1000).toFixed(ms < 10000 ? 1 : 0);
-  return tr(st.played ? "sayTrackedPlayed" : "sayTrackedIn", {
+  return tr(st.mode === "worker" ? "sayTrackedWorker" : st.played ? "sayTrackedPlayed" : "sayTrackedIn", {
     s: s1(st.totalMs), seek: s1(st.seekMs), model: s1(st.detectMs) });
 }
 

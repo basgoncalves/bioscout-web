@@ -487,7 +487,7 @@ export function sessionHTML(ctx) {
     ${weight}
     <div class="simOpts" style="margin-top:6px">
       <span class="sub">${esc(S.c3dDir)}: ${S.c3ds.length} .c3d · 2_experimental: ${S.trials.length}</span>
-      <button type="button" class="ghost" data-ss-addc3d>${t("ss_addC3d")}</button><input type="file" accept=".c3d" multiple data-ss-c3dfile hidden>
+      <button type="button" class="ghost" data-ss-addc3d>${t("ss_addC3d")}</button><input type="file" ${/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "") ? "" : 'accept=".c3d"'} multiple data-ss-c3dfile hidden>
       <button type="button" class="ghost" data-ss-export${S.busy ? " disabled" : ""}>${t("ss_exportC3d", { dir: S.c3dDir })}</button>
     </div>
     <div class="simOpts" style="margin-top:6px">

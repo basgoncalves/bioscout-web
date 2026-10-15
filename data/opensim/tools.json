@@ -145,6 +145,15 @@
      "required": false
     },
     {
+     "id": "so_force",
+     "label": "Muscle forces (.sto) for muscle moments -- default: the SO result",
+     "ext": [
+      ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
      "id": "model",
      "label": "Model (.osim) -- default: the scaled model",
      "ext": [
@@ -243,6 +252,16 @@
      "ext": [
       ".mot",
       ".sto"
+     ],
+     "template": null,
+     "required": false
+    },
+    {
+     "id": "id_sto",
+     "label": "Joint moments (.sto) -- default: the ID result",
+     "ext": [
+      ".sto",
+      ".mot"
      ],
      "template": null,
      "required": false
