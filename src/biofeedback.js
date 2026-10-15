@@ -143,8 +143,8 @@ export const LOAD_KEYS = ["hipJCF", "kneeJCF", "ankleJCF", "quadsF", "glutesF", 
 export const MOVES = {
   squat:  { label: "bfb_mv_squat",  metrics: ["kneeFlex", "valgus", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 70, dir: "above" },
   lunge:  { label: "bfb_mv_lunge",  metrics: ["kneeFlex", "valgus", "hipFlex", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 80, dir: "above" },
-  cmj:    { label: "bfb_mv_cmj",    metrics: ["jumpHeight", "flightTime", "cmKnee", "cmHip", "cmAnkle", "landKnee", "kneeFlex", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "jumpHeight", thr: 30, dir: "above" },
-  shot:   { label: "bfb_mv_shot",   metrics: ["shotElbow", "shotShoulder", "shotKnee", "shotTrunk", "shotJump", "elbowFlex"], def: "shotElbow", thr: 20, dir: "below" },
+  cmj:    { label: "bfb_mv_cmj",    metrics: ["jumpHeight", "flightTime", "cmKnee", "cmHip", "cmAnkle", "landKnee", "kneeFlex", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 90, dir: "above" },
+  shot:   { label: "bfb_mv_shot",   metrics: ["shotElbow", "shotShoulder", "shotKnee", "shotTrunk", "shotJump", "elbowFlex", "shAbd", "kneeFlex", "trunkLean"], def: "elbowFlex", thr: 20, dir: "below" },
   curl:   { label: "bfb_mv_curl",   metrics: ["elbowFlex"], def: "elbowFlex", thr: 110, dir: "above" },
   raise:  { label: "bfb_mv_raise",  metrics: ["shAbd"], def: "shAbd", thr: 90, dir: "above" },
   hinge:  { label: "bfb_mv_hinge",  metrics: ["trunkLean", "hipFlex", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "trunkLean", thr: 45, dir: "above" },
@@ -158,7 +158,7 @@ export const MOVES = {
   plank:  { label: "bfb_mv_plank",  metrics: ["hipFlex", "neckFlex"], def: "hipFlex", thr: 15, dir: "above" },
   heelraise:{ label: "bfb_mv_heelraise", metrics: ["ankleDF", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "ankleDF", thr: -15, dir: "below" },
   neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "headNod", "neckTilt", "headTurn", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
-  free:   { label: "bfb_mv_free",   metrics: Object.keys(METRICS).filter((k) => !METRICS[k].side), def: "kneeFlexL", thr: 70, dir: "above" },
+  free:   { label: "bfb_mv_free",   metrics: Object.keys(METRICS).filter((k) => !METRICS[k].side && !METRICS[k].ev), def: "kneeFlexL", thr: 70, dir: "above" },
 };
 
 const PULSE_MS = 1500;
@@ -191,7 +191,7 @@ export function makeDetectors(emit) {
   const buf = [];                       // {ts, knee, hip, ank}
   const jumps = [];                     // finished jumps {t0, t1, h}
   const pend = [];                      // {at, fn} finalisers due later
-  let gnd = NaN, Lg = NaN, air = false, up = 0, t0 = 0, best = null;
+  let gnd = NaN, Lg = NaN, air = false, up = 0, t0 = 0, best = null, lastShot = -1e9, lastLow = -1e9;
   const avg = (a, b) => (Number.isFinite(a) && Number.isFinite(b) ? (a + b) / 2 : Number.isFinite(a) ? a : b);
   const peak = (k, a, b) => buf.reduce((m, f) => (f.ts >= a && f.ts <= b && f[k] > m ? f[k] : m), -Infinity);
   return function step(ts, img, w) {
@@ -222,13 +222,19 @@ export function makeDetectors(emit) {
     }
     // ---- shot ----
     const s = img[15].y < img[16].y ? 0 : 1, wy = img[15 + s].y;
-    if (wy < img[0].y) {
+    /* One shot = the hand came up from below the shoulder within 2.5 s and
+     * at least 1.5 s after the previous shot. Without these, a hand hovering
+     * above the head (or video jitter) was counted as several shots a second. */
+    if (Math.min(img[15].y, img[16].y) > Math.min(img[11].y, img[12].y)) lastLow = ts;
+    if (wy < img[0].y && ts - lastLow < 2500 && ts - lastShot > 1500) {
       if (!best || wy < best.y) best = { y: wy, ts, elb: elbF(w, s), sh: shEl(w, s), tr: trunk(w) };
     }
     if (best && (wy > best.y + 0.08 * Lg || wy > img[0].y)) {
-      const r = best; best = null;
+      const r = best; best = null; lastShot = r.ts;
       pend.push({ at: r.ts + 700, fn: () => {
         const j = jumps.filter((x) => x.t0 > r.ts - 1000 && x.t0 < r.ts + 300).pop();
+        const dip = peak("knee", r.ts - 1500, r.ts);
+        if (!j && !(dip > 20)) return;      // a shot has a leg drive: a dip or a jump, not just a raised hand
         emit({ shotElbow: r.elb, shotShoulder: r.sh, shotTrunk: r.tr,
                shotKnee: peak("knee", r.ts - 1500, r.ts), shotJump: j ? j.h : 0 });
       } });
@@ -314,7 +320,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     port: null, writer: null, reader: null, lm: null, stream: null, raf: 0,
     active: false, lit: null, value: NaN, lastTs: -1,
   };
-  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, sound: "beep", src: "camera" };
+  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, sound: "beep", src: "camera", extra: [] };
   try { cfg = { ...cfg, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch { /* private */ }
   const save = () => { try { localStorage.setItem(SKEY, JSON.stringify(cfg)); } catch { /* full */ } };
 
@@ -329,8 +335,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   function fillMetrics() {
     const mv = MOVES[cfg.move] || MOVES.free;
-    if (!mv.metrics.includes(cfg.metric)) cfg.metric = mv.def;
-    $("bfbMetric").innerHTML = mv.metrics.map((k) => `<option value="${k}">${tr(METRICS[k].label)}</option>`).join("");
+    // Only time-varying metrics drive the lamp and the plot; per-jump / per-shot
+    // values (jump height, release angles...) go to the table, one row each.
+    const live = mv.metrics.filter((k) => !METRICS[k].ev);
+    if (!live.includes(cfg.metric)) cfg.metric = live.includes(mv.def) ? mv.def : live[0];
+    $("bfbMetric").innerHTML = live.map((k) => `<option value="${k}">${tr(METRICS[k].label)}</option>`).join("");
     $("bfbMetric").value = cfg.metric;
   }
   function syncInputs() {
@@ -344,6 +353,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbZeroNote").textContent = z ? tr("bfb_zeroed", { v: z.toFixed(0) }) : "";
     $("bfbValue").textContent = "–"; $("bfbResults").innerHTML = ""; ema = emaL = emaR = NaN; buildBars();
     $("bfbThr").value = cfg.thr; $("bfbThrN").value = cfg.thr;
+    renderPick();
     $("bfbDir").value = cfg.dir; $("bfbSound").value = cfg.sound || "beep"; $("bfbHyst").value = cfg.hyst; $("bfbBaud").value = String(cfg.baud);
   }
   $("bfbMove").onchange = () => pickMove($("bfbMove").value);
@@ -575,8 +585,27 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbBars").querySelector(`.bfbBarVal[data-side="${side}"]`).textContent = Number.isFinite(v) ? fmt(v) : "–";
     for (const t of $("bfbBars").querySelectorAll(".bfbBarThr")) t.style.left = pct(cfg.thr) + "%";
   }
-  /* Live plot: last 10 s, one line per side, dashed threshold. */
-  const hist = [], WIN = 10000;
+  /* Live plot: last 10 s, one line per side, dashed threshold, plus up to
+   * 5 lines in all from the chips under it. */
+  const hist = [], WIN = 10000, MAXLINES = 5;
+  const XCOL = ["#7aa2f7", "#c678dd", "#56b6c2", "#f7768e", "#9ece6a"];
+  const nMain = () => (METRICS[cfg.metric].pair ? 2 : 1);
+  function extraCols() {
+    const live = liveKeys(MOVES[cfg.move] || MOVES.free);
+    const out = [];
+    for (const k of cfg.extra || []) {
+      if (k === cfg.metric || !METRICS[k] || METRICS[k].ev || (cfg.move !== "free" && !live.includes(k))) continue;
+      if (METRICS[k].pair) out.push([k + "_L", k, "L"], [k + "_R", k, "R"]); else out.push([k, k, ""]);
+    }
+    return out.slice(0, MAXLINES - nMain());
+  }
+  function renderPick() {
+    const host = $("bfbPlotPick"); if (!host) return;
+    const mv = MOVES[cfg.move] || MOVES.free;
+    const keys = mv.metrics.filter((k) => !METRICS[k].ev && k !== cfg.metric);
+    host.innerHTML = `<span class="note">${esc(tr("bfb_plotAlso"))}</span> ` + keys.map((k) =>
+      `<button type="button" class="ghost bmEx${(cfg.extra || []).includes(k) ? " on" : ""}" data-extra="${k}">${esc(short(k))}</button>`).join("");
+  }
   function plot(now) {
     const cv = $("bfbPlot"); if (!cv) return;
     const W = cv.clientWidth || 600, H = cv.clientHeight || 140, dpr = window.devicePixelRatio || 1;
@@ -596,16 +625,30 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     c.fillText("-10 s", 34, H - 2); c.fillText("now", W - 28, H - 2);
     c.setLineDash([6, 4]); c.strokeStyle = "#ffd54a"; c.lineWidth = 1.5;
     c.beginPath(); c.moveTo(34, Y(cfg.thr)); c.lineTo(W - 6, Y(cfg.thr)); c.stroke(); c.setLineDash([]);
-    const series = [["a", acc], ["b", "#e8823a"]];
-    for (const [k, col] of series) {
-      c.strokeStyle = col; c.lineWidth = 2; c.beginPath(); let pen = false;
-      for (const h of hist) { const v = h[k]; if (!Number.isFinite(v)) { pen = false; continue; }
+    const line = (get, col, dash) => {
+      c.strokeStyle = col; c.lineWidth = 2; c.setLineDash(dash || []); c.beginPath(); let pen = false;
+      for (const h of hist) { const v = get(h); if (!Number.isFinite(v)) { pen = false; continue; }
         pen ? c.lineTo(X(h.t), Y(v)) : c.moveTo(X(h.t), Y(v)); pen = true; }
-      c.stroke();
-    }
-    if (METRICS[cfg.metric].pair) {
-      c.fillStyle = acc; c.fillText("L", W - 40, 14); c.fillStyle = "#e8823a"; c.fillText("R", W - 26, 14);
-    }
+      c.stroke(); c.setLineDash([]);
+    };
+    line((h) => h.a, acc); line((h) => h.b, "#e8823a");
+    /* Extra lines: same unit -> drawn on this axis; other unit -> scaled to fit
+     * (its own min..max over the window), marked "~" in the legend. */
+    const legend = METRICS[cfg.metric].pair ? [["L", acc], ["R", "#e8823a"]] : [[short(cfg.metric), acc]];
+    extraCols().forEach(([col, k, sd], i) => {
+      const color = XCOL[i % XCOL.length], same = METRICS[k].unit === unit();
+      let get = (h) => (h.o ? h.o[col] : NaN);
+      if (!same) {
+        const v = hist.map(get).filter(Number.isFinite); if (!v.length) return;
+        const a = Math.min(...v), b = Math.max(...v), r = b - a || 1;
+        const g0 = get; get = (h) => lo + pad + ((g0(h) - a) / r) * (hi - lo - 2 * pad);
+      }
+      line(get, color, [4, 2]);
+      legend.push([(same ? "" : "~") + short(k) + (sd ? " " + sd : ""), color]);
+    });
+    c.textAlign = "right"; let lx = W - 6;
+    for (const [txt, col] of legend.reverse()) { c.fillStyle = col; c.fillText(txt, lx, 14); lx -= c.measureText(txt).width + 10; }
+    c.textAlign = "left";
   }
   /* An event (one jump / one shot) arrived: show it, log it, flash the lamp. */
   const detect = makeDetectors((vals) => {
@@ -693,21 +736,21 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       if (!ld) $("bfbCamNote").textContent = tr("bfb_loadLoading");
     }
     const val = (k) => METRICS[k].f(w, img, head, ld) - ((cfg.zero && cfg.zero[k]) || 0);
-    recordFrame(ts, val, mv);
+    const o = recordFrame(ts, val, mv) || {};
     if (m.ev) return;                       // event metrics update on their own
     const sm = (prev, x) => (Number.isFinite(x) ? (Number.isFinite(prev) ? prev + 0.35 * (x - prev) : x) : NaN);
     let shown;
     if (m.pair) {
       emaL = sm(emaL, val(m.pair[0])); emaR = sm(emaR, val(m.pair[1]));
       showBar(emaL, "L"); showBar(emaR, "R");
-      hist.push({ t: ts, a: emaL, b: emaR });
+      hist.push({ t: ts, a: emaL, b: emaR, o });
       const both = [emaL, emaR].filter(Number.isFinite); if (!both.length) { plot(ts); return; }
       ema = cfg.dir === "above" ? Math.max(...both) : Math.min(...both);   // either side crossing counts
       shown = `L ${Number.isFinite(emaL) ? fmt(emaL) : "–"}  R ${Number.isFinite(emaR) ? fmt(emaR) : "–"}`;
     } else {
       ema = sm(ema, val(cfg.metric));
       if (!Number.isFinite(ema)) { plot(ts); return; }
-      showBar(ema); hist.push({ t: ts, a: ema, b: NaN });
+      showBar(ema); hist.push({ t: ts, a: ema, b: NaN, o });
       shown = fmt(ema);
     }
     plot(ts);
@@ -764,6 +807,18 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (!st.active) send(false, true);
   };
 
+  $("bfbPlotPick").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-extra]"); if (!b) return;
+    const k = b.dataset.extra, cur = cfg.extra || [];
+    if (cur.includes(k)) cfg.extra = cur.filter((x) => x !== k);
+    else {
+      const lines = nMain() + extraCols().length + (METRICS[k].pair ? 2 : 1);
+      if (lines > MAXLINES) { $("bfbCamNote").textContent = tr("bfb_plotMax", { n: MAXLINES }); return; }
+      cfg.extra = [...cur, k];
+    }
+    save(); renderPick();
+  });
+
   /* ---------- session: cycles, tables, export ----------
    * Every frame the live metrics of the chosen movement are recorded
    * (rec.samples). A CYCLE is found on the movement's main metric: it starts
@@ -775,7 +830,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const rec = { t0: null, samples: [], rows: {}, cyc: null };
   const EXC = { "°": 15, BW: 0.5, cm: 5, ms: 100 };
   const mainKey = (mv) => (cfg.move === "free" ? cfg.metric : mv.def);
-  const liveKeys = (mv) => (cfg.move === "free" ? [cfg.metric] : mv.metrics).filter((k) => !METRICS[k].ev);
+  const liveKeys = (mv) => (cfg.move === "free" ? [cfg.metric, ...(cfg.extra || [])] : mv.metrics).filter((k) => METRICS[k] && !METRICS[k].ev);
   function readAll(val, keys) {
     const o = {};
     for (const k of keys) {
@@ -786,20 +841,20 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   function recordFrame(ts, val, mv) {
     if (rec.t0 == null) rec.t0 = ts;
-    const keys = liveKeys(mv); if (!keys.length) return;
+    const keys = liveKeys(mv); if (!keys.length) return {};
     const o = readAll(val, keys);
     if (rec.samples.length < 200000) rec.samples.push({ t: (ts - rec.t0) / 1000, move: cfg.move, ...o });
     // main signal: the side further from rest (either side counts)
-    const mk = mainKey(mv), mm = METRICS[mk]; if (!mm || mm.ev) return;
+    const mk = mainKey(mv), mm = METRICS[mk]; if (!mm || mm.ev) return o;
     const xs = mm.pair ? [o[mk + "_L"], o[mk + "_R"]].filter(Number.isFinite) : [o[mk]].filter(Number.isFinite);
-    if (!xs.length) return;
+    if (!xs.length) return o;
     let c = rec.cyc;
     if (!c || c.move !== cfg.move || c.key !== mk) c = rec.cyc = { move: cfg.move, key: mk, b: NaN, inC: false, frames: [], quiet: 0 };
     const x = Number.isFinite(c.b) ? xs.reduce((a, v) => (Math.abs(v - c.b) > Math.abs(a - c.b) ? v : a), xs[0]) : xs[0];
     const E = EXC[mm.unit] ?? 15;
     if (!c.inC) {
       c.b = Number.isFinite(c.b) ? c.b + 0.05 * (x - c.b) : x;
-      if (Math.abs(x - c.b) > E) { c.inC = true; c.start = ts; c.peak = 0; c.frames = []; }
+      if (Math.abs(x - c.b) > E) { c.inC = true; c.start = ts; c.peak = 0; c.frames = []; c.i0 = Math.max(0, rec.samples.length - 6); }
     }
     if (c.inC) {
       c.frames.push(o); c.peak = Math.max(c.peak, Math.abs(x - c.b));
@@ -809,6 +864,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
         if (dur > 0.4 && dur < 15) addCycleRow(mv, c, dur, (c.start - rec.t0) / 1000);
       }
     }
+    return o;
   }
   /* Extreme of a column over the cycle: whichever of max/min lies further from the first frame. */
   function extreme(frames, col) {
@@ -817,7 +873,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     return Math.abs(a - v[0]) >= Math.abs(b - v[0]) ? a : b;
   }
   function addCycleRow(mv, c, dur, t) {
-    const row = { t, dur };
+    const row = { t, dur, i0: c.i0, i1: rec.samples.length };
     for (const k of liveKeys(mv)) {
       const mm = METRICS[k];
       if (mm.pair) { row[k + "_L"] = extreme(c.frames, k + "_L"); row[k + "_R"] = extreme(c.frames, k + "_R"); }
@@ -831,11 +887,61 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function recordEvent(vals) {
     const mv = MOVES[cfg.move]; if (!mv) return;
     const keys = mv.metrics.filter((k) => METRICS[k].ev && k in vals); if (!keys.length) return;
-    const row = { t: rec.t0 == null ? 0 : (performance.now() - rec.t0) / 1000 };
+    const row = { t: rec.t0 == null ? 0 : (performance.now() - rec.t0) / 1000, ev: true };
     for (const k of keys) row[k] = vals[k];
-    const mk = mainKey(mv); row.hit = mk in vals ? meets(vals[mk]) : null;
+    row.hit = null;
     pushRow(cfg.move, row);
   }
+  /* Rep report: everything recorded for one row, in a window, while the
+   * session keeps recording underneath. Cycle rows have their sample range;
+   * a jump / shot shows the 2.5 s before and 1 s after it. */
+  function openRep(move, idx) {
+    const row = rec.rows[move][idx]; if (!row) return;
+    const smp = row.i0 != null ? rec.samples.slice(row.i0, row.i1 + 1)
+      : rec.samples.filter((x) => x.t > row.t - 2.5 && x.t < row.t + 1 && x.move === move);
+    const cols = columns(move);
+    const u = (k) => METRICS[k].unit;
+    const vals = cols.map((k) => `<tr><td>${esc(short(k))}</td><td>${METRICS[k].pair
+      ? `L ${cell(row[k + "_L"], u(k))} · R ${cell(row[k + "_R"], u(k))}` : cell(row[k], u(k))} ${esc(u(k))}</td></tr>`).join("");
+    const keys = [...new Set(Object.keys(smp[0] || {}).filter((c) => c !== "t" && c !== "move").map((c) => c.replace(/_[LR]$/, "")))];
+    const dlg = document.createElement("dialog"); dlg.className = "bfbRep";
+    dlg.innerHTML = `<div class="lmHead"><b>${esc(tr(MOVES[move].label))} · ${esc(tr("bfb_rep"))} ${idx + 1}</b>
+        <button type="button" class="ghost lmX" aria-label="Close">✕</button></div>
+      <p class="note">t = ${row.t.toFixed(1)} s${row.dur != null ? ` · ${esc(tr("bfb_dur"))} ${row.dur.toFixed(1)}` : ""}${row.hit ? " · ✓" : ""}</p>
+      <table class="bfbRepVals"><tbody>${vals}</tbody></table>
+      <div class="bfbRepPlots">${keys.map((k) => `<div><div class="note">${esc(short(k))} (${esc(u(k))})</div><canvas data-k="${k}" height="110"></canvas></div>`).join("")}</div>`;
+    document.body.appendChild(dlg);
+    dlg.querySelector(".lmX").onclick = () => { dlg.close(); dlg.remove(); };
+    dlg.addEventListener("close", () => dlg.remove());
+    dlg.showModal();
+    const css = getComputedStyle(document.documentElement);
+    const ink = css.getPropertyValue("--muted").trim() || "#999", acc = css.getPropertyValue("--accent").trim() || "#4fb3a0";
+    for (const cv of dlg.querySelectorAll("canvas[data-k]")) {
+      const k = cv.dataset.k, W = cv.clientWidth || 400, H = 110, dpr = window.devicePixelRatio || 1;
+      cv.width = W * dpr; cv.height = H * dpr; const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const ser = METRICS[k].pair ? [[k + "_L", acc], [k + "_R", "#e8823a"]] : [[k, acc]];
+      const all = smp.flatMap((x) => ser.map(([col]) => x[col])).filter(Number.isFinite);
+      if (!all.length || smp.length < 2) continue;
+      let lo = Math.min(...all), hi = Math.max(...all);
+      if (k === cfg.metric) { lo = Math.min(lo, cfg.thr); hi = Math.max(hi, cfg.thr); }
+      const pd = (hi - lo) * 0.1 || 1; lo -= pd; hi += pd;
+      const t0 = smp[0].t, t1 = smp[smp.length - 1].t || t0 + 1;
+      const X = (t) => 30 + ((t - t0) / (t1 - t0 || 1)) * (W - 36), Y = (v) => 6 + (1 - (v - lo) / (hi - lo)) * (H - 20);
+      c.font = "10px system-ui, sans-serif"; c.fillStyle = ink;
+      c.fillText(hi.toFixed(0), 2, 12); c.fillText(lo.toFixed(0), 2, H - 14); c.fillText((t1 - t0).toFixed(1) + " s", W - 34, H - 2);
+      if (k === cfg.metric) { c.setLineDash([5, 3]); c.strokeStyle = "#ffd54a"; c.beginPath(); c.moveTo(30, Y(cfg.thr)); c.lineTo(W - 6, Y(cfg.thr)); c.stroke(); c.setLineDash([]); }
+      for (const [col, color] of ser) {
+        c.strokeStyle = color; c.lineWidth = 2; c.beginPath(); let pen = false;
+        for (const x of smp) { const v = x[col]; if (!Number.isFinite(v)) { pen = false; continue; } pen ? c.lineTo(X(x.t), Y(v)) : c.moveTo(X(x.t), Y(v)); pen = true; }
+        c.stroke();
+      }
+      if (row.ev) { c.strokeStyle = ink; c.beginPath(); c.moveTo(X(row.t), 4); c.lineTo(X(row.t), H - 14); c.stroke(); }
+    }
+  }
+  $("bfbTables").addEventListener("click", (e) => {
+    const tr_ = e.target.closest("tr[data-row]"); if (!tr_) return;
+    openRep(tr_.dataset.move, +tr_.dataset.row);
+  });
   function pushRow(move, row) { (rec.rows[move] ||= []).push(row); renderTables(); }
   /* Short column titles: the metric label without its qualifiers. */
   const short = (k) => tr(METRICS[k].label).replace(/\s*\((?:per |peak|por |pro |Spitze|pico|model|modelo|Modell)[^)]*\)/gi, "").replace(/, (model|modelo|Modell)\b/i, "");
@@ -857,7 +963,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       const rows = rec.rows[move], cols = columns(move);
       const head = `<tr><th>#</th><th>t (s)</th>${rows[0].dur != null ? `<th>${esc(tr("bfb_dur"))}</th>` : ""}${cols.map((k) =>
         `<th>${esc(short(k))}${METRICS[k].pair ? " <small>L / R</small>" : ""} <small>(${esc(METRICS[k].unit)})</small></th>`).join("")}<th>✓</th></tr>`;
-      const body = rows.map((r, i) => `<tr${r.hit ? ' class="hit"' : ""}><td>${i + 1}</td><td>${r.t.toFixed(1)}</td>${r.dur != null ? `<td>${r.dur.toFixed(1)}</td>` : ""}${cols.map((k) => {
+      const body = rows.map((r, i) => `<tr data-move="${move}" data-row="${i}" class="${r.hit ? "hit" : ""}" title="${esc(tr("bfb_repOpen"))}"><td>${i + 1}</td><td>${r.t.toFixed(1)}</td>${r.dur != null ? `<td>${r.dur.toFixed(1)}</td>` : ""}${cols.map((k) => {
         const u = METRICS[k].unit;
         return `<td>${METRICS[k].pair ? `${cell(r[k + "_L"], u)} / ${cell(r[k + "_R"], u)}` : cell(r[k], u)}</td>`;
       }).join("")}<td>${r.hit ? "✓" : r.hit === false ? "✗" : ""}</td></tr>`).join("");
@@ -873,7 +979,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
     const files = [];
     for (const [move, rows] of Object.entries(rec.rows)) {
-      const cols = ["t", ...(rows[0].dur != null ? ["dur"] : []), ...[...new Set(rows.flatMap((r) => Object.keys(r)))].filter((c) => !["t", "dur", "hit"].includes(c)), "hit"];
+      const cols = ["t", ...(rows[0].dur != null ? ["dur"] : []), ...[...new Set(rows.flatMap((r) => Object.keys(r)))].filter((c) => !["t", "dur", "hit", "i0", "i1", "ev"].includes(c)), "hit"];
       files.push({ name: `summary_${move}.csv`, data: csv(rows, cols) });
     }
     if (rec.samples.length) {
