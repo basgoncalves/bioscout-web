@@ -1652,8 +1652,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 12;
-window.BUILD_AT = "2026-10-15 08:45";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 13;
+window.BUILD_AT = "2026-10-15 08:55";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -3417,6 +3417,10 @@ const PEAK_VARS = {
   release_elbow_deg:  { label: "Elbow at release", unit: "°", dp: 0 },
   apex_offset_s:      { label: "Release vs jump apex", unit: "s", dp: 2 },
   load_s:             { label: "Dip to release", unit: "s", dp: 2 },
+  release_angle_deg:  { label: "Release angle (hand velocity)", unit: "°", dp: 0 },
+  release_speed_ms:   { label: "Release speed (hand)", unit: "m/s", dp: 1 },
+  peak_power_wkg:     { label: "Peak push power", unit: "W/kg", dp: 1 },
+  mean_power_wkg:     { label: "Mean push power", unit: "W/kg", dp: 1 },
   legs_to_arm_s:      { label: "Legs to arm (peak knee → peak elbow extension)", unit: "s", dp: 2 },
   release_wrist_speed_ms: { label: "Wrist speed at release", unit: "m/s", dp: 1 },
   knee_ext_vel_dps:   { label: "Peak knee extension velocity", unit: "°/s", dp: 0 },
@@ -10338,7 +10342,8 @@ function shotSummary(res) {
     const v = a.map((r) => r[k]).filter((x) => Number.isFinite(x));
     return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null;
   };
-  const KEYS = [["release_height_m", 2, "m"], ["apex_offset_s", 2, "s"],
+  const KEYS = [["release_height_m", 2, "m"], ["release_angle_deg", 0, "\u00b0"], ["release_speed_ms", 1, "m/s"],
+                ["peak_power_wkg", 1, "W/kg"], ["mean_power_wkg", 1, "W/kg"], ["apex_offset_s", 2, "s"],
                 ["release_elbow_deg", 0, "\u00b0"], ["knee_flex_at_dip_deg", 0, "\u00b0"],
                 ["load_s", 2, "s"], ["legs_to_arm_s", 2, "s"], ["release_wrist_speed_ms", 1, "m/s"],
                 ["knee_ext_vel_dps", 0, "\u00b0/s"], ["elbow_ext_vel_dps", 0, "\u00b0/s"], ["fade_m", 2, "m"]];
@@ -11245,12 +11250,13 @@ function render(res, fps) {
         data-made="1" title="${esc(tr("shotMade"))}">\u25cf</button>
       <button class="ghost mk${r.made === false ? " on" : ""}" data-rep="${r.rep}"
         data-made="0" title="${esc(tr("shotMissed"))}">\u25cb</button></td>`;
+  // Power in watts from the body mass of the set (per kg when it is unknown).
+  const pw = (wkg) => (wkg == null ? "—" : res.massKg > 0 ? (wkg * res.massKg).toFixed(0) : wkg.toFixed(1));
   const shotRows = !isShot ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
       <td>${nn(r.release_height_m)}</td>
-      <td>${nn(r.apex_offset_s, 2)}</td>
-      <td>${nn(r.release_elbow_deg, 0)}\u00b0</td>
-      <td>${nn(r.knee_flex_at_dip_deg, 0)}\u00b0</td>
-      <td>${nn(r.legs_to_arm_s, 2)}</td><td>${nn(r.release_wrist_speed_ms, 1)}</td>
+      <td>${nn(r.release_angle_deg, 0)}\u00b0</td>
+      <td>${nn(r.release_speed_ms, 1)}</td>
+      <td>${pw(r.peak_power_wkg)}</td><td>${pw(r.mean_power_wkg)}</td>
       ${madeCell(r)}</tr>`).join("");
 
   const isStroke = res.activity === "stroke";
@@ -11313,9 +11319,9 @@ function render(res, fps) {
     ? `<tr><th>${tr("strokeN")}</th><th>${tr("strokeType")}</th><th>${tr("ballKmh")}</th>
         <th>${tr("handKmh")}</th><th>${tr("swingS")}</th><th>${tr("contactM")}</th></tr>`
     : isShot
-    ? `<tr><th>${tr("shotN")}</th><th>${tr("releaseH")}</th><th>${tr("vsApex")}</th>
-        <th>${tr("elbowAtRelease")}</th><th>${tr("kneeAtDip")}</th>
-        <th>${tr("legsToArm")}</th><th>${tr("wristMs")}</th>
+    ? `<tr><th>${tr("shotN")}</th><th>${tr("releaseH")}</th>
+        <th>${tr("releaseAngle")}</th><th>${tr("releaseSpeed")}</th>
+        <th>${tr(res.massKg > 0 ? "peakPowerW" : "peakPowerWkg")}</th><th>${tr(res.massKg > 0 ? "meanPowerW" : "meanPowerWkg")}</th>
         <th>${tr("madeCol")}</th></tr>`
     : isDip
     ? `<tr><th>${tr("rep")}</th><th>${tr("down")}</th><th>${tr("up")}</th>
@@ -11414,16 +11420,21 @@ function render(res, fps) {
     const st = meanRep && meanRep.stats[k];
     return st ? `${st.mean.toFixed(d)}<span class="sub"> ±${st.sd.toFixed(d)}</span>` : "—";
   };
+  const msP = (k) => {
+    const st = meanRep && meanRep.stats[k];
+    if (!st) return "—";
+    const f = res.massKg > 0 ? res.massKg : 1, d = res.massKg > 0 ? 0 : 1;
+    return `${(st.mean * f).toFixed(d)}<span class="sub"> ±${(st.sd * f).toFixed(d)}</span>`;
+  };
   const meanRow = !meanRep ? "" : isStroke
     ? `<tr class="meanrow"><td>${tr("mean")}</td><td>\u2014</td>
          <td>${ms("ball_speed_kmh", 0)}</td><td>${ms("hand_speed_kmh", 0)}</td>
          <td>${ms("swing_s")}</td><td>${ms("contact_height_m")}</td></tr>`
     : isShot
     ? `<tr class="meanrow"><td>${tr("mean")}</td>
-         <td>${ms("release_height_m")}</td><td>${ms("apex_offset_s")}</td>
-         <td>${ms("release_elbow_deg", 0)}\u00b0</td>
-         <td>${ms("knee_flex_at_dip_deg", 0)}\u00b0</td>
-         <td>${ms("legs_to_arm_s")}</td><td>${ms("release_wrist_speed_ms", 1)}</td><td>\u2014</td></tr>`
+         <td>${ms("release_height_m")}</td><td>${ms("release_angle_deg", 0)}\u00b0</td>
+         <td>${ms("release_speed_ms", 1)}</td>
+         <td>${msP("peak_power_wkg")}</td><td>${msP("mean_power_wkg")}</td><td>\u2014</td></tr>`
     : isDip
     ? `<tr class="meanrow"><td>${tr("mean")}</td>
          <td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>

@@ -2763,7 +2763,41 @@ export function shotMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_SHOT_CFG) {
   const wristV = rel > 0 && rel < F._n - 1 && pxPerM > 0
     ? Math.hypot(wx[rel + 1] - wx[rel - 1], wristY[rel + 1] - wristY[rel - 1]) * fps / 2 / pxPerM : NaN;
   const fade = pxPerM > 0 && isNum(hipX[dip]) && isNum(hipX[end]) ? Math.abs(hipX[end] - hipX[dip]) / pxPerM : NaN;
+  /* Release speed and angle: the hand's velocity at its FASTEST in the last
+   * 0.3 s before the top of its path -- the ball leaves the hand while the
+   * hand is still moving, and at the very top (the release frame used above,
+   * the hand's highest point) its velocity is zero by definition, which is
+   * why the old "wrist at release" column read 0.1-1 m/s. Picture plane,
+   * angle from the horizontal. */
+  let vRel = NaN, angRel = NaN;
+  if (pxPerM > 0) {
+    for (let i = Math.max(1, rel - Math.round(0.3 * fps)); i <= Math.min(rel, F._n - 2); i++) {
+      const vx = (wx[i + 1] - wx[i - 1]) * fps / 2 / pxPerM, vy = -(wristY[i + 1] - wristY[i - 1]) * fps / 2 / pxPerM;
+      const sp = Math.hypot(vx, vy);
+      if (isNum(sp) && !(sp <= vRel)) { vRel = sp; angRel = (Math.atan2(vy, Math.abs(vx)) * 180) / Math.PI; }
+    }
+  }
+  /* Power of the push, per kg: centre of mass (hip centre) vertical velocity
+   * times (acceleration + g), from the dip to take-off (or release, if the
+   * feet never left). Peak, and the mean over the upward part. The page
+   * multiplies by body mass for watts. */
+  let pPeak = NaN, pMean = NaN;
+  if (pxPerM > 0) {
+    const yM = smooth(hipY.map((y) => (F._floorY - y) / pxPerM), 5);
+    let off = rel;
+    for (let i = dip; i <= rel; i++) if (F.foot_rise[i] > lift * F._scale) { off = i; break; }
+    const P = [];
+    for (let i = Math.max(1, dip); i <= Math.min(off, F._n - 2); i++) {
+      const v = (yM[i + 1] - yM[i - 1]) * fps / 2, a = (yM[i + 1] - 2 * yM[i] + yM[i - 1]) * fps * fps;
+      if (isNum(v) && isNum(a) && v > 0) P.push(v * (a + G));
+    }
+    if (P.length) { pPeak = Math.max(...P); pMean = P.reduce((x, y) => x + y, 0) / P.length; }
+  }
   const extras = {
+    release_speed_ms: isNum(vRel) ? +vRel.toFixed(2) : null,
+    release_angle_deg: isNum(angRel) ? +angRel.toFixed(1) : null,
+    peak_power_wkg: isNum(pPeak) ? +pPeak.toFixed(1) : null,
+    mean_power_wkg: isNum(pMean) ? +pMean.toFixed(1) : null,
     knee_ext_vel_dps: kneeV ? +kneeV.toFixed(0) : null,
     elbow_ext_vel_dps: elbowV ? +elbowV.toFixed(0) : null,
     legs_to_arm_s: kneeV && elbowV ? +((tE - tK) / fps).toFixed(3) : null,
