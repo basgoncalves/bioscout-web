@@ -85,13 +85,17 @@ export const METRICS = {
     const v = sub(ear, sh), m = Math.hypot(...v);
     return m < 1e-9 ? NaN : (Math.acos(Math.max(-1, Math.min(1, -v[1] / m))) * 180) / Math.PI;
   } },
-  headNod:   { label: "bfb_m_headNod",   unit: DEG, f: (w) =>      // looking down = positive
-    90 - ang(midp(w[11], w[12]), midp(w[7], w[8]), w[0]) },
-  neckTilt:  { label: "bfb_m_neckTilt",  unit: DEG, f: (w) => {   // ear-to-ear line vs shoulder line
+  /* Head orientation. With the Face Landmarker running (478 face points,
+   * facial transformation matrix) these are true 3D head angles; without it
+   * they fall back to the pose model's ears and nose. */
+  headNod:   { label: "bfb_m_headNod",   unit: DEG, face: true, f: (w, img, hd) =>   // looking down = positive
+    hd ? hd.pitch : 90 - ang(midp(w[11], w[12]), midp(w[7], w[8]), w[0]) },
+  neckTilt:  { label: "bfb_m_neckTilt",  unit: DEG, face: true, f: (w, img, hd) => {
+    if (hd) return Math.abs(hd.roll);
     const e = sub(w[8], w[7]), s2 = sub(w[12], w[11]);
-    const a = (Math.atan2(e[1], Math.hypot(e[0], e[2])) - Math.atan2(s2[1], Math.hypot(s2[0], s2[2]))) * 180 / Math.PI;
-    return Math.abs(a);
+    return Math.abs((Math.atan2(e[1], Math.hypot(e[0], e[2])) - Math.atan2(s2[1], Math.hypot(s2[0], s2[2]))) * 180 / Math.PI);
   } },
+  headTurn:  { label: "bfb_m_headTurn",  unit: DEG, face: true, f: (w, img, hd) => (hd ? Math.abs(hd.yaw) : NaN) },
   // left + right together: two bars, two plot lines, lamp when EITHER side crosses
   kneeFlex:  { label: "bfb_m_kneeFlex",  unit: DEG, pair: ["kneeFlexL", "kneeFlexR"] },
   hipFlex:   { label: "bfb_m_hipFlex",   unit: DEG, pair: ["hipFlexL", "hipFlexR"] },
@@ -132,7 +136,7 @@ export const MOVES = {
   bridge: { label: "bfb_mv_bridge", metrics: ["hipFlex", "kneeFlex"], def: "hipFlex", thr: 15, dir: "below" },
   plank:  { label: "bfb_mv_plank",  metrics: ["hipFlex", "neckFlex"], def: "hipFlex", thr: 15, dir: "above" },
   heelraise:{ label: "bfb_mv_heelraise", metrics: ["ankleDF", "kneeFlex"], def: "ankleDF", thr: -15, dir: "below" },
-  neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "headNod", "neckTilt", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
+  neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "headNod", "neckTilt", "headTurn", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
   free:   { label: "bfb_mv_free",   metrics: Object.keys(METRICS), def: "kneeFlexL", thr: 70, dir: "above" },
 };
 
@@ -214,6 +218,29 @@ export function makeDetectors(emit) {
 
 const SKEL = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
 const SKEY = "bioscout.biofeedback.v1";
+
+/* Face Landmarker for head pose. The model is served from the repo if
+ * assets/face_landmarker.task exists, otherwise fetched once from Google's
+ * model bucket (testing feature). */
+const FACE_LOCAL = "assets/face_landmarker.task";
+const FACE_REMOTE = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+async function makeFace() {
+  const mp = await import("../assets/vendor/vision_bundle.mjs");
+  const fs = await mp.FilesetResolver.forVisionTasks("./assets/vendor/wasm");
+  let path = FACE_REMOTE;
+  try { const r = await fetch(FACE_LOCAL, { method: "HEAD" }); if (r.ok) path = FACE_LOCAL; } catch { /* use remote */ }
+  const opts = (delegate) => ({ baseOptions: { modelAssetPath: path, delegate }, runningMode: "VIDEO", numFaces: 1,
+    outputFacialTransformationMatrixes: true, minFaceDetectionConfidence: 0.4, minTrackingConfidence: 0.4 });
+  try { return await mp.FaceLandmarker.createFromOptions(fs, opts("GPU")); }
+  catch { return mp.FaceLandmarker.createFromOptions(fs, opts("CPU")); }
+}
+/* Rotation of the face's 4x4 transform (column-major) -> pitch / yaw / roll
+ * in degrees. Pitch is positive looking down. */
+export function headPose(m) {
+  const r00 = m[0], r10 = m[1], r20 = m[2], r21 = m[6], r22 = m[10];
+  const d = 180 / Math.PI;
+  return { pitch: Math.atan2(r21, r22) * d, yaw: Math.asin(Math.max(-1, Math.min(1, -r20))) * d, roll: Math.atan2(r10, r00) * d };
+}
 
 /** Wire up #viewBiofeedback. deps: { $, tr, getLandmarker } */
 export function initBiofeedback({ $, tr, getLandmarker }) {
@@ -491,11 +518,31 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     line(img[7], img[8]); line(img[2], img[5]); line(img[9], img[10]); line(img[0], mouthM);
     ctx.fillStyle = "rgba(255,213,74,.95)";
     for (const p of [shM, neckM, earM, img[0], img[7], img[8]]) { const [x, y] = P(p); ctx.beginPath(); ctx.arc(x, y, 5, 0, 2 * Math.PI); ctx.fill(); }
+    // Head pose from the face model, only while a head metric is chosen.
+    let head = null;
+    if (m.face) {
+      if (!st.face && !st.faceLoading) {
+        st.faceLoading = true; $("bfbCamNote").textContent = tr("bfb_faceLoading");
+        makeFace().then((f) => { st.face = f; $("bfbCamNote").textContent = ""; })
+          .catch(() => { $("bfbCamNote").textContent = tr("bfb_faceFail"); });
+      }
+      if (st.face) {
+        const fr = st.face.detectForVideo(v, ts);
+        const fm = fr.facialTransformationMatrixes && fr.facialTransformationMatrixes[0];
+        const fl = fr.faceLandmarks && fr.faceLandmarks[0];
+        if (fm) head = headPose(fm.data);
+        if (fl) {   // head axes: forehead-chin and cheek-cheek
+          ctx.strokeStyle = "rgba(255,213,74,.95)"; ctx.lineWidth = 3;
+          line(fl[10], fl[152]); line(fl[234], fl[454]); line(fl[168], fl[1]);
+          ctx.strokeStyle = "rgba(80,200,170,.9)"; ctx.lineWidth = 4;
+        }
+      }
+    }
     detect(ts, img, w);
     if (m.ev) return;                       // event metrics update on their own
     ASPECT = (v.videoWidth / v.videoHeight) || ASPECT;
     // "Zero" removes camera tilt / posture offset, per side for paired metrics.
-    const val = (k) => METRICS[k].f(w, img) - ((cfg.zero && cfg.zero[k]) || 0);
+    const val = (k) => METRICS[k].f(w, img, head) - ((cfg.zero && cfg.zero[k]) || 0);
     const sm = (prev, x) => (Number.isFinite(x) ? (Number.isFinite(prev) ? prev + 0.35 * (x - prev) : x) : NaN);
     let shown;
     if (m.pair) {
