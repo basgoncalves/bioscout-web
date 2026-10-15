@@ -13,6 +13,8 @@
  * 2D image angles do. They are camera estimates, not motion capture.
  */
 
+import { bodyMapHTML, REGIONS } from "./bodymap.js";
+
 const L = { sh: [11, 12], el: [13, 14], wr: [15, 16], hip: [23, 24], kn: [25, 26], an: [27, 28] };
 const side = (s) => (s === "R" ? 1 : 0);
 const sub = (a, b) => [a.x - b.x, a.y - b.y, a.z - b.z];
@@ -52,6 +54,10 @@ export const METRICS = {
   shAbdL:    { label: "bfb_m_shAbdL",    unit: DEG, f: (w) => shEl(w, 0) },
   shAbdR:    { label: "bfb_m_shAbdR",    unit: DEG, f: (w) => shEl(w, 1) },
   trunkLean: { label: "bfb_m_trunkLean", unit: DEG, f: (w) => trunk(w) },
+  neckFlex:  { label: "bfb_m_neckFlex",  unit: DEG, f: (w) => {      // head (ears) vs trunk line
+    const sh = midp(w[11], w[12]), hp = midp(w[23], w[24]), ear = midp(w[7], w[8]);
+    return ang(hp, sh, ear) > 0 ? 180 - ang(hp, sh, ear) : NaN;
+  } },
   // countermovement jump -- one value per jump
   jumpHeight:{ label: "bfb_m_jumpHeight",unit: "cm", ev: true, max: 80 },
   flightTime:{ label: "bfb_m_flightTime",unit: "ms", ev: true, max: 1000 },
@@ -76,10 +82,38 @@ export const MOVES = {
   curl:   { label: "bfb_mv_curl",   metrics: ["elbowFlexL", "elbowFlexR"], def: "elbowFlexR", thr: 110, dir: "above" },
   raise:  { label: "bfb_mv_raise",  metrics: ["shAbdL", "shAbdR"], def: "shAbdR", thr: 90, dir: "above" },
   hinge:  { label: "bfb_mv_hinge",  metrics: ["trunkLean", "hipFlexL", "hipFlexR", "kneeFlexL", "kneeFlexR"], def: "trunkLean", thr: 45, dir: "above" },
+  pushup: { label: "bfb_mv_pushup", metrics: ["elbowFlexL", "elbowFlexR", "hipFlexL", "hipFlexR"], def: "elbowFlexR", thr: 90, dir: "above" },
+  dip:    { label: "bfb_mv_dip",    metrics: ["elbowFlexL", "elbowFlexR", "trunkLean"], def: "elbowFlexR", thr: 90, dir: "above" },
+  ohpress:{ label: "bfb_mv_ohpress",metrics: ["shAbdL", "shAbdR", "elbowFlexL", "elbowFlexR", "trunkLean"], def: "shAbdR", thr: 160, dir: "above" },
+  pullup: { label: "bfb_mv_pullup", metrics: ["elbowFlexL", "elbowFlexR", "shAbdL", "shAbdR"], def: "elbowFlexR", thr: 100, dir: "above" },
+  row:    { label: "bfb_mv_row",    metrics: ["elbowFlexL", "elbowFlexR", "trunkLean", "hipFlexL", "hipFlexR"], def: "elbowFlexR", thr: 90, dir: "above" },
+  deadlift:{ label: "bfb_mv_deadlift", metrics: ["trunkLean", "hipFlexL", "hipFlexR", "kneeFlexL", "kneeFlexR"], def: "trunkLean", thr: 60, dir: "above" },
+  bridge: { label: "bfb_mv_bridge", metrics: ["hipFlexL", "hipFlexR", "kneeFlexL", "kneeFlexR"], def: "hipFlexL", thr: 15, dir: "below" },
+  plank:  { label: "bfb_mv_plank",  metrics: ["hipFlexL", "hipFlexR", "neckFlex"], def: "hipFlexL", thr: 15, dir: "above" },
+  heelraise:{ label: "bfb_mv_heelraise", metrics: ["ankleDFL", "ankleDFR", "kneeFlexL", "kneeFlexR"], def: "ankleDFL", thr: -15, dir: "below" },
+  neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
   free:   { label: "bfb_mv_free",   metrics: Object.keys(METRICS), def: "kneeFlexL", thr: 70, dir: "above" },
 };
 
 const PULSE_MS = 1500;
+
+/* Body map: muscle group -> the BioFeedback movements that load it. Sports
+ * movements sit with every group they mainly drive (a jump shot is legs,
+ * glutes, shoulders and triceps), so tapping calves offers it too. */
+export const REGION_MOVES = {
+  neck: ["neck"],
+  shoulders: ["ohpress", "raise", "pushup", "dip", "shot"],
+  chest: ["pushup", "dip"],
+  back: ["row", "pullup", "deadlift", "hinge"],
+  biceps: ["curl", "pullup", "row"],
+  triceps: ["pushup", "dip", "ohpress", "shot"],
+  core: ["plank", "deadlift", "bridge", "hinge"],
+  glutes: ["squat", "lunge", "bridge", "deadlift", "hinge", "cmj", "shot"],
+  quads: ["squat", "lunge", "cmj", "shot"],
+  hamstrings: ["deadlift", "hinge", "bridge", "cmj"],
+  calves: ["heelraise", "cmj", "shot"],
+};
+export const regionsOfMove = (mv) => REGIONS.filter((r) => (REGION_MOVES[r] || []).includes(mv));
 
 /* Jump + shot detectors on the IMAGE landmarks (normalised, y down).
  * Take-off = ankles rise more than 7% of leg length above the learnt floor
@@ -167,7 +201,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   function syncInputs() {
     const m = METRICS[cfg.metric] || METRICS.kneeFlexL, mx = m.max || 180;
-    $("bfbThr").max = mx; $("bfbThrN").max = mx;
+    const mn = m.unit === DEG ? -90 : 0;
+    $("bfbThr").max = mx; $("bfbThrN").max = mx; $("bfbThr").min = mn; $("bfbThrN").min = mn;
     $("bfbUnit").textContent = m.unit;
     $("bfbHint").textContent = m.ev ? tr(cfg.metric.startsWith("shot") ? "bfb_hintShot" : "bfb_hintJump") : "";
     $("bfbHyst").disabled = !!m.ev; $("bfbZero").disabled = !!m.ev;
@@ -177,17 +212,38 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbThr").value = cfg.thr; $("bfbThrN").value = cfg.thr;
     $("bfbDir").value = cfg.dir; $("bfbHyst").value = cfg.hyst; $("bfbBaud").value = String(cfg.baud);
   }
-  $("bfbMove").onchange = () => {
-    cfg.move = $("bfbMove").value; const mv = MOVES[cfg.move];
-    cfg.metric = mv.def; cfg.thr = mv.thr; cfg.dir = mv.dir;
-    fillMetrics(); syncInputs(); save();
-  };
+  $("bfbMove").onchange = () => pickMove($("bfbMove").value);
   $("bfbMetric").onchange = () => { cfg.metric = $("bfbMetric").value; ema = NaN; syncInputs(); save(); };
   $("bfbThr").oninput = () => { cfg.thr = +$("bfbThr").value; $("bfbThrN").value = cfg.thr; save(); };
-  $("bfbThrN").onchange = () => { cfg.thr = Math.max(0, Math.min(+$("bfbThr").max || 180, +$("bfbThrN").value || 0)); $("bfbThr").value = cfg.thr; save(); };
+  $("bfbThrN").onchange = () => { cfg.thr = Math.max(+$("bfbThr").min || 0, Math.min(+$("bfbThr").max || 180, +$("bfbThrN").value || 0)); $("bfbThr").value = cfg.thr; save(); };
   $("bfbDir").onchange = () => { cfg.dir = $("bfbDir").value; save(); };
   $("bfbHyst").onchange = () => { cfg.hyst = Math.max(0, +$("bfbHyst").value || 0); save(); };
   $("bfbBaud").onchange = async () => { cfg.baud = +$("bfbBaud").value; save(); if (st.port) await openPort(st.port); };
+
+  /* ---------- body map ---------- */
+  let region = null;
+  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  function renderBody() {
+    const host = $("bfbBody"); if (!host) return;
+    const mv = region ? (REGION_MOVES[region] || []) : [];
+    host.innerHTML = bodyMapHTML(tr, { selected: region, trained: regionsOfMove(cfg.move), regions: Object.keys(REGION_MOVES), list: false })
+      + (region
+        ? `<div class="bfbChips"><b>${esc(tr("bm_" + region))}</b> ${mv.map((k) =>
+            `<button type="button" class="ghost bmEx${k === cfg.move ? " on" : ""}" data-bfbmove="${k}">${esc(tr(MOVES[k].label))}</button>`).join("")}</div>`
+        : `<p class="note" style="margin:6px 0 0">${esc(tr("bfb_bodyHint"))}</p>`);
+  }
+  function pickMove(k) {
+    cfg.move = k; const mv = MOVES[k];
+    cfg.metric = mv.def; cfg.thr = mv.thr; cfg.dir = mv.dir;
+    $("bfbMove").value = k; fillMetrics(); syncInputs(); save(); renderBody();
+  }
+  $("bfbBody").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-bfbmove]"); if (b) { pickMove(b.dataset.bfbmove); return; }
+    const g = e.target.closest("[data-region]"); if (g) { region = g.dataset.region === region ? null : g.dataset.region; renderBody(); }
+  });
+  $("bfbBody").addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && e.target.closest("[data-region]")) { e.preventDefault(); e.target.closest("[data-region]").dispatchEvent(new MouseEvent("click", { bubbles: true })); }
+  });
 
   /* ---------- serial ---------- */
   async function listPorts() {
@@ -369,7 +425,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   /* ---------- open / leave ---------- */
   function open() {
     $("bfbNoSerial").classList.toggle("hidden", hasSerial);
-    fillMoves(); fillMetrics(); syncInputs(); renderConn(); listPorts();
+    if (!MOVES[cfg.move]) cfg.move = "squat";
+    fillMoves(); fillMetrics(); syncInputs(); renderConn(); listPorts(); renderBody();
     if (!st.port) status("bfb_portNone");
   }
   async function leave() {

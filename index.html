@@ -588,6 +588,9 @@ try {
   #bfbBarFill { height:100%; width:0; background:var(--accent); border-radius:5px; }
   #bfbBarThr { position:absolute; top:-4px; width:2px; height:18px; background:#ffd54a; }
   .bfbLog { max-height:160px; overflow:auto; font-size:12px; }
+  .bfbBody { margin:4px 0 10px; }
+  .bfbChips { margin-top:6px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .bfbChips .bmEx.on { border-color:var(--accent); color:var(--accent); }
   .bfbResults { list-style:none; padding:0; margin:4px 0; display:flex; flex-wrap:wrap; gap:6px; font-size:13px; }
   .bfbResults li { padding:3px 8px; border-radius:6px; background:var(--line, #333); }
   .bfbResults li.ok { background:#ffd54a; color:#222; }
@@ -1364,6 +1367,7 @@ try {
       </div>
 
       <h4 data-i18n="bfb_step2">2. Movement and metric</h4>
+      <div id="bfbBody" class="bfbBody"></div>
       <div class="row bfbRow">
         <label><span data-i18n="bfb_movement">Movement</span><select id="bfbMove"></select></label>
         <label><span data-i18n="bfb_metric">Metric</span><select id="bfbMetric"></select></label>
@@ -1739,8 +1743,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 32;
-window.BUILD_AT = "2026-10-15 17:05";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 33;
+window.BUILD_AT = "2026-10-15 17:13";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
