@@ -1654,8 +1654,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 21;
-window.BUILD_AT = "2026-10-15 13:53";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 22;
+window.BUILD_AT = "2026-10-15 14:02";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1766,6 +1766,7 @@ import { cleanEngineUrl, engineFromSearch, fileKind, makeEngineClient, EngineErr
          MUSCLE_COLORS } from "./src/osimlab.js";
 import { buildSessionFiles } from "./src/osimexport.js";
 import { buildLabTrial, trialZip, nextTrialName, saveTrialToSession } from "./src/labtrial.js";
+import { ballFor } from "./src/ballmodel.js";
 import { S as labSession } from "./src/simsession.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
 import { RTP_REGIONS, rtpPanelHTML, recentTest, INJURY } from "./src/rtp.js";
@@ -2054,6 +2055,8 @@ function attachBall(res, fps) {
   });
   res.wallM = wallM;
   res.ballPoints = ballTracker.track.length;
+  // in the landmarks' pixels, for the BALL marker of the OpenSim export (ballmodel.js)
+  res.ballTrack = ballTracker.track.map((p) => ({ t: p.t, x: p.x * (ballView.vw || 1), y: p.y * (ballView.vh || 1) }));
   res.frameAspect = ballView.vw && ballView.vh ? ballView.vw / ballView.vh : 16 / 9;
 }
 let lastResult = null;
@@ -11073,7 +11076,11 @@ async function labTrialSave() {
   try {
     st.textContent = tr("lt_packing");
     const video = vb ? { name: "video." + extFor(vb.type), data: await blobBytes(vb) } : null;
-    const files = buildLabTrial({ res, frames: fr, fps, trial, video, massKg: res.massKg });
+    let osimText = null;
+    if (ballFor(res.activity)) {   // a ball sport: the model goes out with its ball
+      try { const r = await fetch(new URL("./data/opensim/models/GPK_v4_016.osim", location.href)); if (r.ok) osimText = await r.text(); } catch { /* offline: no model */ }
+    }
+    const files = buildLabTrial({ res, frames: fr, fps, trial, video, massKg: res.massKg, osimText });
     if (labSession.root && labSession.session) {
       const where = await saveTrialToSession(files, trial);
       st.textContent = tr("lt_written", { where });

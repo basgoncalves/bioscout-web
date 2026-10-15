@@ -14,6 +14,7 @@
 import { writeTrc, writeSto, trialFiles, ITERATION } from "./osimexport.js";
 import { makeZip } from "./zip.js";
 import { S as session, writeTrial } from "./simsession.js";
+import { ballFor, ballPath, framesWithBall, addBallToOsim } from "./ballmodel.js";
 
 export const trialFolderName = (activity, n) => `${String(activity || "trial").toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${String(n || 1).padStart(2, "0")}`;
 
@@ -46,15 +47,20 @@ function grfMot(res, frames, fps) {
 }
 
 /** -> [{ name, data }] relative to the session folder. */
-export function buildLabTrial({ res, frames, fps, trial, video = null, massKg = null }) {
+export function buildLabTrial({ res, frames, fps, trial, video = null, massKg = null, osimText = null }) {
   const files = [], exp = `2_experimental/${trial}/`;
+  const ball = ballFor(res.activity), bpath = ball && frames && frames.length ? ballPath(res, frames, fps) : null;
   if (frames && frames.length) {
-    const trc = writeTrc("marker_experimental.trc", frames, { pxPerM: res.pxPerM, fps });
+    // the floor from the body alone, so a ball in flight below the feet cannot move it
+    const floorY = Math.max(...frames.flatMap((f) => Object.values(f.lm || {}).map((p) => p[1])));
+    const trc = writeTrc("marker_experimental.trc", framesWithBall(frames, bpath), { pxPerM: res.pxPerM, fps, floorY });
     if (trc) files.push({ name: exp + "marker_experimental.trc", data: trc });
     const grf = grfMot(res, frames, fps);
     if (grf) files.push({ name: exp + "grf.mot", data: grf });
   }
   if (video) files.push({ name: exp + video.name, data: video.data });
+  const withBall = ball && osimText ? addBallToOsim(osimText, ball) : null;
+  if (withBall) files.push({ name: exp + "GPK_v4_016_with_ball.osim", data: withBall });
   const r = res.whole && res.whole.times ? res.whole : res.reps[0];
   if (r && r.times && r.times.length) {
     const all = trialFiles(`3_iterations/${ITERATION}/${trial}`, r, { columns: res.columns, osimModel: res.osimModel, massKg });
@@ -63,6 +69,10 @@ export function buildLabTrial({ res, frames, fps, trial, video = null, massKg = 
   files.push({ name: exp + "README.txt", data: `${trial}: recorded with BioScout Web (${res.activity}, ${fps.toFixed(1)} fps, camera view ${res.view?.view ?? "?"}).\n`
     + "marker_experimental.trc: pose landmarks in metres (OpenSim frame, y up; depth is the pose model's guess).\n"
     + "grf.mot: ESTIMATED ground reaction, not measured.\n"
+    + (ball ? `BALL marker: the ${ball.sport} ball's centre${bpath ? "" : " (not found in this take)"}`
+      + (res.activity === "jumpshot" ? " -- between the hands until release, then a ballistic flight from the hands' release velocity" : " -- the ball tracker's detections")
+      + `.\nGPK_v4_016_with_ball.osim: the model plus a ball body (${ball.massKg} kg, radius ${ball.radiusM} m) on a free 3-translation joint `
+      + "to ground with a BALL marker; change its mass/inertia/radius in the file and re-run IK/ID on a PC.\n" : "")
     + `3_iterations/${ITERATION}/${trial}/external_biomechanics: joint angles from the video and a planar inverse dynamics.\n` });
   return files;
 }

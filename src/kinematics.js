@@ -3656,6 +3656,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
         // Where release falls in the rep, 0-1: what the load figure marks, and
         // what survives into the mean rep (a scalar is averaged there).
         s.release_frac = b[2] > b[0] ? +((b[1] - b[0]) / (b[2] - b[0])).toFixed(4) : null;
+        s.release_i = (F._lo || 0) + b[1];   // the release frame's grid index (ballmodel.js flies the ball from here)
         s.arm = { r: { shoulder: cut(F.sh_flex_r), elbow: cut(F.elbow_flex_r) },
                   l: { shoulder: cut(F.sh_flex_l), elbow: cut(F.elbow_flex_l) } };
       }
