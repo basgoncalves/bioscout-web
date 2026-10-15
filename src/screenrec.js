@@ -32,6 +32,11 @@ const CSS = `
 `;
 
 let cssAdded = false;
+/* The share and the drawn area outlive one recording: until the page closes,
+ * sharing is stopped, or "Change screen" is pressed, the next recording opens
+ * on the same screen with the same area -- no picker again. */
+const live = { stream: null, crop: null };
+const isLive = () => !!(live.stream && live.stream.getVideoTracks().some((t) => t.readyState === "live"));
 
 function fmt(ms) {
   const s = Math.floor(ms / 1000);
@@ -43,10 +48,14 @@ function fmt(ms) {
  * finished recording (crop in the video's own pixels).
  */
 export async function openScreenRecorder({ t, onClip }) {
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 60 } }, audio: false });
-  } catch { return; }                       // the person closed the share picker
+  let stream = isLive() ? live.stream : null;
+  if (!stream) {
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 60 } }, audio: false });
+    } catch { return; }                     // the person closed the share picker
+    live.stream = stream; live.crop = null;
+    stream.getVideoTracks()[0].addEventListener("ended", () => { if (live.stream === stream) { live.stream = null; live.crop = null; } });
+  }
   if (!cssAdded) {
     const st = document.createElement("style"); st.textContent = CSS; document.head.appendChild(st); cssAdded = true;
   }
@@ -60,6 +69,7 @@ export async function openScreenRecorder({ t, onClip }) {
       <button type="button" class="srRec" data-rec><span class="dot"></span><span data-lab>REC</span></button>
       <button type="button" class="ghost" data-whole>${t("srWhole")}</button>
       ${window.documentPictureInPicture ? `<button type="button" class="ghost" data-float>${t("srFloat")}</button>` : ""}
+      <button type="button" class="ghost" data-change>${t("srChange")}</button>
       <button type="button" class="ghost" data-close>${t("srClose")}</button>
       <span class="sub" data-area></span>
     </div></div>`;
@@ -69,7 +79,7 @@ export async function openScreenRecorder({ t, onClip }) {
   video.srcObject = stream;
   await new Promise((r) => { if (video.videoWidth) r(); else video.onloadedmetadata = () => r(); });
 
-  let crop = null, drag = null;
+  let crop = live.crop, drag = null;
   const draw = () => {
     cv.width = cv.clientWidth; cv.height = cv.clientHeight;
     cx.clearRect(0, 0, cv.width, cv.height);
@@ -91,7 +101,7 @@ export async function openScreenRecorder({ t, onClip }) {
     if (!drag) return;
     const k = video.videoWidth / cv.clientWidth;
     crop = drag.w > 12 && drag.h > 12 ? { x: drag.x * k, y: drag.y * k, w: drag.w * k, h: drag.h * k } : crop;
-    drag = null; draw();
+    drag = null; live.crop = crop; draw();
   };
   const ro = new ResizeObserver(draw); ro.observe(cv); draw();
 
@@ -105,9 +115,11 @@ export async function openScreenRecorder({ t, onClip }) {
       b.querySelector("[data-lab]").textContent = rec ? `REC ${fmt(Date.now() - t0)}` : "REC";
     }
   };
-  const close = () => {
+  const close = (endShare = false) => {
     clearInterval(tick); ro.disconnect();
-    for (const tr of stream.getTracks()) tr.stop();
+    video.srcObject = null;
+    try { stream.getVideoTracks()[0].removeEventListener("ended", onEnded); } catch { /* gone */ }
+    if (endShare) { for (const tr of stream.getTracks()) tr.stop(); live.stream = null; live.crop = null; }
     try { if (pip) pip.close(); } catch { /* gone */ }
     wrap.remove();
   };
@@ -127,10 +139,13 @@ export async function openScreenRecorder({ t, onClip }) {
   const stop = () => { if (rec && rec.state !== "inactive") { clearInterval(tick); rec.stop(); } };
   const toggle = () => (rec ? stop() : start());
   $("[data-rec]").onclick = toggle;
-  $("[data-whole]").onclick = () => { crop = null; draw(); };
+  $("[data-whole]").onclick = () => { crop = null; live.crop = null; draw(); };
+  // another screen or window: end this share and ask again
+  $("[data-change]").onclick = () => { if (rec) { rec.onstop = null; rec.stop(); rec = null; } close(true); openScreenRecorder({ t, onClip }); };
   $("[data-close]").onclick = () => { if (rec) { rec.onstop = null; rec.stop(); rec = null; } close(); };
   // "Stop sharing" in the browser's own bar: keep what was recorded
-  stream.getVideoTracks()[0].addEventListener("ended", () => { if (rec) stop(); else close(); });
+  const onEnded = () => { if (rec) stop(); else close(true); };
+  stream.getVideoTracks()[0].addEventListener("ended", onEnded);
 
   const fl = $("[data-float]");
   if (fl) fl.onclick = async () => {
