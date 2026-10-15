@@ -35,6 +35,7 @@ const MORE_FIELDS = {
   curl: ["elbow_flex_max_deg", "elbow_flex_min_deg", "elbow_range_deg", "shoulder_swing_deg"],
   row: ["elbow_flex_max_deg", "elbow_flex_min_deg", "elbow_range_deg", "trunk_pitch_mean_deg"],
   raise: ["shoulder_elev_max_deg", "shoulder_range_deg", "elbow_flex_mean_deg"],
+  movement: ["knee_range_deg", "hip_range_deg", "elbow_range_deg", "shoulder_range_deg", "trunk_range_deg"],
 };
 
 const PKEY = "bioscout.profiles.v1";

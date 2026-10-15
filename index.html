@@ -1801,8 +1801,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 47;
-window.BUILD_AT = "2026-10-15 20:42";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 48;
+window.BUILD_AT = "2026-10-15 21:51";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -8978,6 +8978,12 @@ async function finish() {
   let detection = null;
   if (activity === "auto") {
     detection = classify(poses);
+    /* Nothing recognised is not the end: a still clip is, but anything that
+     * moved is analysed as a generic movement (kinematics.js "movement"), so
+     * the angles, curves and loads are still there. */
+    if (!detection.activity && detection.reasonKey !== "whyStill") {
+      detection = { ...detection, activity: "movement", fallbackFrom: null };
+    }
     if (!detection.activity) {
       // Refusing is the useful answer: analysing a squat as a pull-up gives
       // numbers that look fine and mean nothing.
@@ -9004,6 +9010,26 @@ async function finish() {
     lastResult = analyse(poses, fps, { heightM, activity,
                                        osimModel: OSIM_MODEL, hold: isNeckHold });
     lastResult.detection = detection;
+    /* Auto-detect picked a movement whose rep finder found nothing (a clip
+     * classified as a pull-up with no pull-up in it): try the next plausible
+     * candidates, then the generic movement, before saying "none found". */
+    if (detection && !lastResult.reps.length) {
+      const first = activity, tried = new Set([activity]);
+      const order = [...Object.entries(detection.scores || {}).sort((a, b) => b[1] - a[1])
+        .filter(([, v]) => v >= 0.5 * MIN_CONFIDENCE).map(([k]) => k).filter((k) => ACTIVITIES[k]), "movement"];
+      for (const cand of order) {
+        if (tried.has(cand)) continue;
+        tried.add(cand);
+        try {
+          const r = analyse(poses, fps, { heightM, activity: cand, osimModel: OSIM_MODEL });
+          if (r.reps.length) {
+            lastResult = r; activity = cand;
+            lastResult.detection = { ...detection, activity: cand, fallbackFrom: first };
+            break;
+          }
+        } catch { /* that finder could not read this clip; try the next */ }
+      }
+    }
     if (activity === "stroke" || activity === "kick") attachBall(lastResult, fps);
     // Where the frames came from decides what can honestly be said about the
     // timing: a file was sampled on a grid we chose, a camera delivered
@@ -9060,7 +9086,9 @@ async function finish() {
     render(lastResult, fps);
     if (fromFile && reviewSrc) addReviewButton(lastResult);
     if (LAB) labTrialReady(lastResult, fps);
-    say(tr("sayAnalysed", { frames: frames.length, fps: fps.toFixed(1) }) +
+    const fb = lastResult.detection && lastResult.detection.fallbackFrom !== undefined ? lastResult.detection : null;
+    if (fb) say(tr(fb.fallbackFrom ? "sayFellBack" : "sayGeneric", { from: tr(fb.fallbackFrom || "auto"), to: tr(lastResult.activity) }));
+    else say(tr("sayAnalysed", { frames: frames.length, fps: fps.toFixed(1) }) +
         (lastResult.trackStats ? " " + trackStatsText(lastResult.trackStats) : ""));
   } catch (err) {
     say(tr("sayAnalysisFailed", { err: err.message }), true);
@@ -11353,6 +11381,12 @@ async function labTrialSave() {
     }
   } catch (e) { st.textContent = "✗ " + e.message; }
 }
+/* Per-rep fields of the generic family, in table order (kinematics.js moreMetrics). */
+const GEN_FIELDS = ["eccentric_s", "concentric_s", "hold_s", "knee_range_deg", "hip_range_deg", "elbow_range_deg",
+  "shoulder_range_deg", "trunk_range_deg", "hip_flex_max_deg", "hip_flex_top_deg", "knee_flex_at_bottom_deg",
+  "knee_flex_mean_deg", "hip_flex_mean_deg", "trunk_pitch_max_deg", "trunk_pitch_mean_deg", "trunk_motion_deg",
+  "body_line_mean_deg", "body_line_max_deg", "elbow_flex_max_deg", "elbow_flex_min_deg", "elbow_flex_top_deg",
+  "elbow_flex_mean_deg", "shoulder_elev_max_deg", "shoulder_swing_deg", "front_knee_flex_max_deg", "trunk_lean_max_deg"];
 function render(res, fps) {
   shownRes = res; shownFps = fps;
   $("shareSetBtn").classList.toggle("hidden", !canShare(res));
@@ -11648,6 +11682,14 @@ function render(res, fps) {
    * training log. The same mistake was fixed once for jumps, with a comment
    * above jumpRows, and left in place here. Lazy is not an optimisation here;
    * it is what makes the mistake impossible to make again. */
+  /* Generic family (kinematics.js MORE: deadlift, lunge, curl, ..., and the
+   * "movement" fallback): their own per-rep fields, not the pull-up columns,
+   * which they do not have (elbow_flex_max_deg.toFixed on undefined threw). */
+  const isGeneric = !!(ACTIVITIES[res.activity] && ACTIVITIES[res.activity].generic);
+  const genCols = !isGeneric ? [] : GEN_FIELDS.filter((k) => res.reps.some((r) => Number.isFinite(r[k])));
+  const genCell = (k, v) => (Number.isFinite(v) ? (k.endsWith("_s") ? v.toFixed(2) : v.toFixed(0) + "°") : "—");
+  const genRows = !isGeneric ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>${
+    genCols.map((k) => `<td>${genCell(k, r[k])}</td>`).join("")}</tr>`).join("");
   const rows = () => res.reps.map((r) => isSquat
     ? `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td><td>${r.eccentric_s.toFixed(2)}</td><td>${r.concentric_s.toFixed(2)}</td>
          <td>${r.knee_flex_max_deg.toFixed(0)}°</td><td>${r.hip_flex_max_deg.toFixed(0)}°</td>
@@ -11655,7 +11697,9 @@ function render(res, fps) {
     : `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td><td>${r.concentric_s.toFixed(2)}</td><td>${r.eccentric_s.toFixed(2)}</td>
          <td>${r.elbow_flex_max_deg.toFixed(0)}°</td><td>${r.arm_flex_range_deg.toFixed(0)}°</td>
          <td>${r.pelvis_travel_m.toFixed(2)}</td></tr>`).join("");
-  const head = isStroke
+  const head = isGeneric
+    ? `<tr><th>${tr("rep")}</th>${genCols.map((k) => `<th>${tr("gen_" + k)}</th>`).join("")}</tr>`
+    : isStroke
     ? `<tr><th>${tr("strokeN")}</th><th>${tr("strokeType")}</th><th>${tr("peakBallKmh")}</th>
         <th>${tr("peakHandKmh")}</th><th>${tr("contactM")}</th><th>${tr("kneeLoadDeg")}</th><th>${tr("swingS")}</th></tr>`
     : isShot
@@ -11837,7 +11881,7 @@ function render(res, fps) {
     <table><thead>${head}</thead><tbody>${
       isStroke ? strokeRows : isShot ? shotRows : isDip ? dipRows : isSL ? slRows : isRun ? runRows
              : isKick ? kickRows : isFoot ? footRows : isHR ? hrRows
-             : isSide ? sideRows : isJump ? jumpRows : rows()}${meanRow}</tbody></table>
+             : isSide ? sideRows : isJump ? jumpRows : isGeneric ? genRows : rows()}${isGeneric ? "" : meanRow}</tbody></table>
     ${removedLine(res)}
     ${qualitySummary(qCounts)}
     <div id="shotSummaryBox">${isShot ? shotSummary(res) : ""}</div>

@@ -3178,6 +3178,24 @@ const MORE_FIND = {
     return f;
   },
 };
+/* Generic movement: the fallback when nothing specific was recognised. The
+ * joint with the largest range in the clip drives the cycles; if it never
+ * repeats, the whole clip is one "rep", so angles, curves and the joint-load
+ * figure are still shown rather than "nothing found". */
+MORE_FIND.movement = (F, c) => {
+  const cands = ["knee_flex", "hip_flex", "elbow_flex", "shoulder_elev", "trunk_pitch"]
+    .map((k) => { const v = (F[k] || []).filter(isNum); return [k, v.length ? Math.max(...v) - Math.min(...v) : 0]; })
+    .sort((a, b) => b[1] - a[1]);
+  const [key, rom] = cands[0];
+  const f = rom >= 25 ? cycleReps(F[key], Math.max(20, 0.5 * rom), c) : { reps: [], depth: [] };
+  f.driver = key;
+  if (!f.reps.length && F._n > 10) {
+    const y = interpNan(F[key] || []); let pk = 0;
+    for (let i = 1; i < y.length; i++) if (isNum(y[i]) && (!isNum(y[pk]) || y[i] > y[pk])) pk = i;
+    f.reps = [[0, Math.min(Math.max(pk, 1), F._n - 2), F._n - 1]];
+  }
+  return f;
+};
 const moreFinder = (id) => (F, cfg = DEFAULT_MORE_CFG) => MORE_FIND[id](F, cfg);
 
 /** Per-rep numbers for the ten, from the measured angles in the rep window. */
@@ -3222,6 +3240,11 @@ export function moreMetrics(activity, F, rep, fps, found, i) {
       if (activity === "curl") o.shoulder_swing_deg = rng("shoulder_elev");
       else o.trunk_pitch_mean_deg = mean("trunk_pitch");
       o.main_range = o.elbow_range_deg; break;
+    case "movement":
+      o.knee_range_deg = rng("knee_flex"); o.hip_range_deg = rng("hip_flex");
+      o.elbow_range_deg = rng("elbow_flex"); o.shoulder_range_deg = rng("shoulder_elev");
+      o.trunk_range_deg = rng("trunk_pitch");
+      o.main_range = Math.max(...[o.knee_range_deg, o.hip_range_deg, o.elbow_range_deg, o.shoulder_range_deg].filter(isNum), 0); break;
     case "raise":
       o.shoulder_elev_max_deg = mx("shoulder_elev");
       o.shoulder_range_deg = rng("shoulder_elev");
@@ -3256,6 +3279,7 @@ export const MORE_ACTIVITIES = {
   curl: MORE("biceps curl", "curl", { armTask: true, phases: ["concentric_s", "eccentric_s"] }),
   row: MORE("bent-over row", "row", { armTask: true, phases: ["concentric_s", "eccentric_s"] }),
   raise: MORE("lateral / front raise", "raise", { armTask: true, phases: ["concentric_s", "eccentric_s"] }),
+  movement: MORE("movement", "movement", { phases: ["concentric_s", "eccentric_s"] }),
 };
 
 export const ACTIVITIES = {
