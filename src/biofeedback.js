@@ -42,11 +42,33 @@ function trunk(w) {               // vs vertical; world y points down
   return m < 1e-9 ? NaN : (Math.acos(Math.max(-1, Math.min(1, -v[1] / m))) * 180) / Math.PI;
 }
 const DEG = "°";
+/* Knee frontal-plane projection angle (FPPA), 2D on the IMAGE, front camera:
+ * 180 - the hip-knee-ankle angle drawn on the screen, positive when the knee
+ * sits inside (towards the midline of) the hip-ankle line = valgus, negative
+ * = varus. Deliberately NOT the 3D estimate: MediaPipe's 3D frontal knee
+ * carries a ~-19 deg bias (McDonnell 2026, see the MSK review). The 2D FPPA
+ * is the clinical video measure; it still depends on the camera facing the
+ * person square-on, so it is shown as a testing metric. */
+let ASPECT = 16 / 9;
+function fppa(img, s) {
+  if (!img) return NaN;
+  const H = img[23 + s], K = img[25 + s], A = img[27 + s];
+  const X = (p) => p.x * ASPECT;
+  const u = [X(H) - X(K), H.y - K.y], v = [X(A) - X(K), A.y - K.y];
+  const m = Math.hypot(...u) * Math.hypot(...v); if (m < 1e-9) return NaN;
+  const a = 180 - (Math.acos(Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1]) / m))) * 180) / Math.PI;
+  // which side of the hip->ankle line is the knee, relative to the pelvis centre?
+  const t = (K.y - H.y) / ((A.y - H.y) || 1e-9), xl = X(H) + t * (X(A) - X(H));
+  const mid = (X(img[23]) + X(img[24])) / 2;
+  return Math.abs(X(K) - mid) < Math.abs(xl - mid) ? a : -a;
+}
 export const METRICS = {
   kneeFlexL: { label: "bfb_m_kneeFlexL", unit: DEG, f: (w) => knee(w, 0) },
   kneeFlexR: { label: "bfb_m_kneeFlexR", unit: DEG, f: (w) => knee(w, 1) },
   hipFlexL:  { label: "bfb_m_hipFlexL",  unit: DEG, f: (w) => hipF(w, 0) },
   hipFlexR:  { label: "bfb_m_hipFlexR",  unit: DEG, f: (w) => hipF(w, 1) },
+  valgusL:   { label: "bfb_m_valgusL",   unit: DEG, f: (w, img) => fppa(img, 0) },
+  valgusR:   { label: "bfb_m_valgusR",   unit: DEG, f: (w, img) => fppa(img, 1) },
   ankleDFL:  { label: "bfb_m_ankleDFL",  unit: DEG, f: (w) => ankD(w, 0) },
   ankleDFR:  { label: "bfb_m_ankleDFR",  unit: DEG, f: (w) => ankD(w, 1) },
   elbowFlexL:{ label: "bfb_m_elbowFlexL",unit: DEG, f: (w) => elbF(w, 0) },
@@ -63,11 +85,20 @@ export const METRICS = {
     const v = sub(ear, sh), m = Math.hypot(...v);
     return m < 1e-9 ? NaN : (Math.acos(Math.max(-1, Math.min(1, -v[1] / m))) * 180) / Math.PI;
   } },
+  headNod:   { label: "bfb_m_headNod",   unit: DEG, f: (w) =>      // looking down = positive
+    90 - ang(midp(w[11], w[12]), midp(w[7], w[8]), w[0]) },
   neckTilt:  { label: "bfb_m_neckTilt",  unit: DEG, f: (w) => {   // ear-to-ear line vs shoulder line
     const e = sub(w[8], w[7]), s2 = sub(w[12], w[11]);
     const a = (Math.atan2(e[1], Math.hypot(e[0], e[2])) - Math.atan2(s2[1], Math.hypot(s2[0], s2[2]))) * 180 / Math.PI;
     return Math.abs(a);
   } },
+  // left + right together: two bars, two plot lines, lamp when EITHER side crosses
+  kneeFlex:  { label: "bfb_m_kneeFlex",  unit: DEG, pair: ["kneeFlexL", "kneeFlexR"] },
+  hipFlex:   { label: "bfb_m_hipFlex",   unit: DEG, pair: ["hipFlexL", "hipFlexR"] },
+  ankleDF:   { label: "bfb_m_ankleDF",   unit: DEG, pair: ["ankleDFL", "ankleDFR"] },
+  elbowFlex: { label: "bfb_m_elbowFlex", unit: DEG, pair: ["elbowFlexL", "elbowFlexR"] },
+  shAbd:     { label: "bfb_m_shAbd",     unit: DEG, pair: ["shAbdL", "shAbdR"] },
+  valgus:    { label: "bfb_m_valgus",    unit: DEG, pair: ["valgusL", "valgusR"] },
   // countermovement jump -- one value per jump
   jumpHeight:{ label: "bfb_m_jumpHeight",unit: "cm", ev: true, max: 80 },
   flightTime:{ label: "bfb_m_flightTime",unit: "ms", ev: true, max: 1000 },
@@ -85,23 +116,23 @@ export const METRICS = {
 
 /* Movement presets: which metrics make sense and a starting threshold. */
 export const MOVES = {
-  squat:  { label: "bfb_mv_squat",  metrics: ["kneeFlexL", "kneeFlexR", "hipFlexL", "hipFlexR", "ankleDFL", "ankleDFR", "trunkLean"], def: "kneeFlexL", thr: 70, dir: "above" },
-  lunge:  { label: "bfb_mv_lunge",  metrics: ["kneeFlexL", "kneeFlexR", "hipFlexL", "hipFlexR", "trunkLean"], def: "kneeFlexL", thr: 80, dir: "above" },
-  cmj:    { label: "bfb_mv_cmj",    metrics: ["jumpHeight", "flightTime", "cmKnee", "cmHip", "cmAnkle", "landKnee", "kneeFlexL", "kneeFlexR", "trunkLean"], def: "jumpHeight", thr: 30, dir: "above" },
-  shot:   { label: "bfb_mv_shot",   metrics: ["shotElbow", "shotShoulder", "shotKnee", "shotTrunk", "shotJump", "elbowFlexR", "elbowFlexL"], def: "shotElbow", thr: 20, dir: "below" },
-  curl:   { label: "bfb_mv_curl",   metrics: ["elbowFlexL", "elbowFlexR"], def: "elbowFlexR", thr: 110, dir: "above" },
-  raise:  { label: "bfb_mv_raise",  metrics: ["shAbdL", "shAbdR"], def: "shAbdR", thr: 90, dir: "above" },
-  hinge:  { label: "bfb_mv_hinge",  metrics: ["trunkLean", "hipFlexL", "hipFlexR", "kneeFlexL", "kneeFlexR"], def: "trunkLean", thr: 45, dir: "above" },
-  pushup: { label: "bfb_mv_pushup", metrics: ["elbowFlexL", "elbowFlexR", "hipFlexL", "hipFlexR"], def: "elbowFlexR", thr: 90, dir: "above" },
-  dip:    { label: "bfb_mv_dip",    metrics: ["elbowFlexL", "elbowFlexR", "trunkLean"], def: "elbowFlexR", thr: 90, dir: "above" },
-  ohpress:{ label: "bfb_mv_ohpress",metrics: ["shAbdL", "shAbdR", "elbowFlexL", "elbowFlexR", "trunkLean"], def: "shAbdR", thr: 160, dir: "above" },
-  pullup: { label: "bfb_mv_pullup", metrics: ["elbowFlexL", "elbowFlexR", "shAbdL", "shAbdR"], def: "elbowFlexR", thr: 100, dir: "above" },
-  row:    { label: "bfb_mv_row",    metrics: ["elbowFlexL", "elbowFlexR", "trunkLean", "hipFlexL", "hipFlexR"], def: "elbowFlexR", thr: 90, dir: "above" },
-  deadlift:{ label: "bfb_mv_deadlift", metrics: ["trunkLean", "hipFlexL", "hipFlexR", "kneeFlexL", "kneeFlexR"], def: "trunkLean", thr: 60, dir: "above" },
-  bridge: { label: "bfb_mv_bridge", metrics: ["hipFlexL", "hipFlexR", "kneeFlexL", "kneeFlexR"], def: "hipFlexL", thr: 15, dir: "below" },
-  plank:  { label: "bfb_mv_plank",  metrics: ["hipFlexL", "hipFlexR", "neckFlex"], def: "hipFlexL", thr: 15, dir: "above" },
-  heelraise:{ label: "bfb_mv_heelraise", metrics: ["ankleDFL", "ankleDFR", "kneeFlexL", "kneeFlexR"], def: "ankleDFL", thr: -15, dir: "below" },
-  neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "neckTilt", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
+  squat:  { label: "bfb_mv_squat",  metrics: ["kneeFlex", "valgus", "hipFlex", "ankleDF", "trunkLean"], def: "kneeFlex", thr: 70, dir: "above" },
+  lunge:  { label: "bfb_mv_lunge",  metrics: ["kneeFlex", "valgus", "hipFlex", "trunkLean"], def: "kneeFlex", thr: 80, dir: "above" },
+  cmj:    { label: "bfb_mv_cmj",    metrics: ["jumpHeight", "flightTime", "cmKnee", "cmHip", "cmAnkle", "landKnee", "kneeFlex", "trunkLean"], def: "jumpHeight", thr: 30, dir: "above" },
+  shot:   { label: "bfb_mv_shot",   metrics: ["shotElbow", "shotShoulder", "shotKnee", "shotTrunk", "shotJump", "elbowFlex"], def: "shotElbow", thr: 20, dir: "below" },
+  curl:   { label: "bfb_mv_curl",   metrics: ["elbowFlex"], def: "elbowFlex", thr: 110, dir: "above" },
+  raise:  { label: "bfb_mv_raise",  metrics: ["shAbd"], def: "shAbd", thr: 90, dir: "above" },
+  hinge:  { label: "bfb_mv_hinge",  metrics: ["trunkLean", "hipFlex", "kneeFlex"], def: "trunkLean", thr: 45, dir: "above" },
+  pushup: { label: "bfb_mv_pushup", metrics: ["elbowFlex", "hipFlex"], def: "elbowFlex", thr: 90, dir: "above" },
+  dip:    { label: "bfb_mv_dip",    metrics: ["elbowFlex", "trunkLean"], def: "elbowFlex", thr: 90, dir: "above" },
+  ohpress:{ label: "bfb_mv_ohpress",metrics: ["shAbd", "elbowFlex", "trunkLean"], def: "shAbd", thr: 160, dir: "above" },
+  pullup: { label: "bfb_mv_pullup", metrics: ["elbowFlex", "shAbd"], def: "elbowFlex", thr: 100, dir: "above" },
+  row:    { label: "bfb_mv_row",    metrics: ["elbowFlex", "trunkLean", "hipFlex"], def: "elbowFlex", thr: 90, dir: "above" },
+  deadlift:{ label: "bfb_mv_deadlift", metrics: ["trunkLean", "hipFlex", "kneeFlex"], def: "trunkLean", thr: 60, dir: "above" },
+  bridge: { label: "bfb_mv_bridge", metrics: ["hipFlex", "kneeFlex"], def: "hipFlex", thr: 15, dir: "below" },
+  plank:  { label: "bfb_mv_plank",  metrics: ["hipFlex", "neckFlex"], def: "hipFlex", thr: 15, dir: "above" },
+  heelraise:{ label: "bfb_mv_heelraise", metrics: ["ankleDF", "kneeFlex"], def: "ankleDF", thr: -15, dir: "below" },
+  neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "headNod", "neckTilt", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
   free:   { label: "bfb_mv_free",   metrics: Object.keys(METRICS), def: "kneeFlexL", thr: 70, dir: "above" },
 };
 
@@ -216,14 +247,14 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbUnit").textContent = m.unit;
     $("bfbHint").textContent = m.ev ? tr(cfg.metric.startsWith("shot") ? "bfb_hintShot" : "bfb_hintJump") : "";
     $("bfbHyst").disabled = !!m.ev; $("bfbZero").disabled = !!m.ev;
-    const z = cfg.zero && cfg.zero[cfg.metric];
+    const zk = m.pair ? m.pair[0] : cfg.metric, z = cfg.zero && cfg.zero[zk];
     $("bfbZeroNote").textContent = z ? tr("bfb_zeroed", { v: z.toFixed(0) }) : "";
-    $("bfbValue").textContent = "–"; $("bfbResults").innerHTML = ""; showBar(0);
+    $("bfbValue").textContent = "–"; $("bfbResults").innerHTML = ""; ema = emaL = emaR = NaN; buildBars();
     $("bfbThr").value = cfg.thr; $("bfbThrN").value = cfg.thr;
     $("bfbDir").value = cfg.dir; $("bfbSound").value = cfg.sound || "beep"; $("bfbHyst").value = cfg.hyst; $("bfbBaud").value = String(cfg.baud);
   }
   $("bfbMove").onchange = () => pickMove($("bfbMove").value);
-  $("bfbMetric").onchange = () => { cfg.metric = $("bfbMetric").value; ema = NaN; syncInputs(); save(); };
+  $("bfbMetric").onchange = () => { cfg.metric = $("bfbMetric").value; syncInputs(); save(); };
   $("bfbThr").oninput = () => { cfg.thr = +$("bfbThr").value; $("bfbThrN").value = cfg.thr; save(); };
   $("bfbThrN").onchange = () => { cfg.thr = Math.max(+$("bfbThr").min || 0, Math.min(+$("bfbThr").max || 180, +$("bfbThrN").value || 0)); $("bfbThr").value = cfg.thr; save(); };
   $("bfbDir").onchange = () => { cfg.dir = $("bfbDir").value; save(); };
@@ -239,7 +270,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function tone(f = 880, ms = 120, when = 0) {
     if (cfg.sound === "off") return;
     try {
-      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if (actx.state !== "running") actx.resume();
       const t = actx.currentTime + when, o = actx.createOscillator(), g = actx.createGain();
       o.type = "sine"; o.frequency.value = f;
       g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
@@ -247,7 +278,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       o.connect(g).connect(actx.destination); o.start(t); o.stop(t + ms / 1000 + 0.02);
     } catch { /* no audio */ }
   }
-  setInterval(() => { if (st.active && overSince && cfg.sound === "repeat") tone(880, 90); }, 400);
+  setInterval(() => { if (st.stream && overSince && cfg.sound === "repeat") tone(880, 90); }, 400);
   $("bfbSound").onchange = () => { cfg.sound = $("bfbSound").value; save(); tone(880, 120); };
 
   /* ---------- body map ---------- */
@@ -364,14 +395,59 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (st.stream) st.stream.getTracks().forEach((t) => t.stop());
     st.stream = null;
   }
-  let ema = NaN, on = false, pulseTo = 0;
+  let ema = NaN, emaL = NaN, emaR = NaN, on = false, pulseTo = 0;
   const unit = () => METRICS[cfg.metric].unit;
   const fmt = (v) => (unit() === "cm" ? v.toFixed(1) : v.toFixed(0)) + (unit() === DEG ? "°" : " " + unit());
   const meets = (v) => (cfg.dir === "above" ? v > cfg.thr : v < cfg.thr);
   const barMax = () => METRICS[cfg.metric].max || 180;
-  function showBar(v) {
-    $("bfbBarFill").style.width = Math.max(0, Math.min(100, (v / barMax()) * 100)) + "%";
-    $("bfbBarThr").style.left = Math.min(100, (cfg.thr / barMax()) * 100) + "%";
+  const barMin = () => (unit() === DEG ? Math.min(0, cfg.thr - 10) : 0);
+  const pct = (x) => Math.max(0, Math.min(100, ((x - barMin()) / (barMax() - barMin())) * 100));
+  /* One bar per side (L, R) for paired metrics, one bar otherwise. */
+  function buildBars() {
+    const m = METRICS[cfg.metric], sides = m.pair ? ["L", "R"] : [""];
+    $("bfbBars").innerHTML = sides.map((sd) => `<div class="bfbBarRow"><span class="bfbSide">${sd}</span>
+      <div class="bfbBar"><div class="bfbBarFill" data-side="${sd}"></div><div class="bfbBarThr"></div></div>
+      <span class="bfbBarVal" data-side="${sd}">–</span></div>`).join("");
+    hist.length = 0;
+  }
+  function showBar(v, side = "") {
+    const f = $("bfbBars").querySelector(`.bfbBarFill[data-side="${side}"]`); if (!f) return;
+    const ok = Number.isFinite(v) && meets(v);
+    f.style.width = Number.isFinite(v) ? pct(v) + "%" : "0"; f.classList.toggle("hit", ok);
+    $("bfbBars").querySelector(`.bfbBarVal[data-side="${side}"]`).textContent = Number.isFinite(v) ? fmt(v) : "–";
+    for (const t of $("bfbBars").querySelectorAll(".bfbBarThr")) t.style.left = pct(cfg.thr) + "%";
+  }
+  /* Live plot: last 10 s, one line per side, dashed threshold. */
+  const hist = [], WIN = 10000;
+  function plot(now) {
+    const cv = $("bfbPlot"); if (!cv) return;
+    const W = cv.clientWidth || 600, H = cv.clientHeight || 140, dpr = window.devicePixelRatio || 1;
+    if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+    const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+    while (hist.length && hist[0].t < now - WIN) hist.shift();
+    let lo = cfg.thr, hi = cfg.thr;
+    for (const h of hist) for (const x of [h.a, h.b]) if (Number.isFinite(x)) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
+    const pad = Math.max(5, (hi - lo) * 0.15); lo -= pad; hi += pad;
+    const css = getComputedStyle(document.documentElement);
+    const ink = css.getPropertyValue("--muted").trim() || "#999", acc = css.getPropertyValue("--accent").trim() || "#4fb3a0";
+    const X = (t) => 34 + ((t - (now - WIN)) / WIN) * (W - 40), Y = (v) => 8 + (1 - (v - lo) / (hi - lo)) * (H - 22);
+    c.font = "11px system-ui, sans-serif"; c.fillStyle = ink; c.strokeStyle = ink; c.globalAlpha = 0.35; c.lineWidth = 1;
+    for (const v of [lo + pad, (lo + hi) / 2, hi - pad]) { c.beginPath(); c.moveTo(34, Y(v)); c.lineTo(W - 6, Y(v)); c.stroke(); }
+    c.globalAlpha = 1;
+    for (const v of [lo + pad, hi - pad]) c.fillText(v.toFixed(0), 2, Y(v) + 4);
+    c.fillText("-10 s", 34, H - 2); c.fillText("now", W - 28, H - 2);
+    c.setLineDash([6, 4]); c.strokeStyle = "#ffd54a"; c.lineWidth = 1.5;
+    c.beginPath(); c.moveTo(34, Y(cfg.thr)); c.lineTo(W - 6, Y(cfg.thr)); c.stroke(); c.setLineDash([]);
+    const series = [["a", acc], ["b", "#e8823a"]];
+    for (const [k, col] of series) {
+      c.strokeStyle = col; c.lineWidth = 2; c.beginPath(); let pen = false;
+      for (const h of hist) { const v = h[k]; if (!Number.isFinite(v)) { pen = false; continue; }
+        pen ? c.lineTo(X(h.t), Y(v)) : c.moveTo(X(h.t), Y(v)); pen = true; }
+      c.stroke();
+    }
+    if (METRICS[cfg.metric].pair) {
+      c.fillStyle = acc; c.fillText("L", W - 40, 14); c.fillStyle = "#e8823a"; c.fillText("R", W - 26, 14);
+    }
   }
   /* An event (one jump / one shot) arrived: show it, log it, flash the lamp. */
   const detect = makeDetectors((vals) => {
@@ -379,10 +455,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const v = vals[cfg.metric]; if (!Number.isFinite(v)) return;
     const ok = meets(v);
     $("bfbValue").textContent = fmt(v); $("bfbValue").classList.toggle("hit", ok); showBar(v);
+    { const t = performance.now(); hist.push({ t, a: v, b: NaN }); plot(t); }
     const li = document.createElement("li"); li.textContent = (ok ? "✓ " : "✗ ") + fmt(v);
     li.className = ok ? "ok" : ""; $("bfbResults").prepend(li);
     while ($("bfbResults").children.length > 8) $("bfbResults").lastChild.remove();
-    if (st.active) { if (ok) { tone(988, 110); tone(1319, 160, 0.13); } else tone(330, 220); }
+    if (ok) { tone(988, 110); tone(1319, 160, 0.13); } else tone(330, 220);
     if (ok) {
       $("bfbLamp").classList.add("on");
       if (st.active) send(true, true);
@@ -403,27 +480,47 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (!img || !w) { if (!m.ev) { $("bfbValue").textContent = "–"; if (st.active) send(false); } return; }
     ctx.lineWidth = 4; ctx.strokeStyle = "rgba(80,200,170,.9)";
     for (const [a, b] of SKEL) { ctx.beginPath(); ctx.moveTo(img[a].x * cv.width, img[a].y * cv.height); ctx.lineTo(img[b].x * cv.width, img[b].y * cv.height); ctx.stroke(); }
-    // Neck = shoulder centre -> ear centre (the line the neck metrics use), head = circle on the ears.
+    /* Head and neck: shoulder centre -> neck -> ear centre (what "head
+     * forward" measures), ear centre -> nose (what "head nod" measures),
+     * plus ear-ear, eye-eye and mouth so the head's tilt is visible. */
     const P = (p) => [p.x * cv.width, p.y * cv.height];
-    const [sx, sy] = P(midp(img[11], img[12])), [ex, ey] = P(midp(img[7], img[8]));
-    const hr = Math.hypot((img[7].x - img[8].x) * cv.width, (img[7].y - img[8].y) * cv.height) * 0.75;
-    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
-    ctx.beginPath(); ctx.arc(ex, ey, Math.max(10, hr), 0, 2 * Math.PI); ctx.stroke();
+    const line = (p, q) => { ctx.beginPath(); ctx.moveTo(...P(p)); ctx.lineTo(...P(q)); ctx.stroke(); };
+    const shM = midp(img[11], img[12]), earM = midp(img[7], img[8]), mouthM = midp(img[9], img[10]);
+    const neckM = { x: (shM.x * 2 + earM.x) / 3, y: (shM.y * 2 + earM.y) / 3, z: 0 };
+    line(shM, neckM); line(neckM, earM); line(earM, img[0]);
+    line(img[7], img[8]); line(img[2], img[5]); line(img[9], img[10]); line(img[0], mouthM);
+    ctx.fillStyle = "rgba(255,213,74,.95)";
+    for (const p of [shM, neckM, earM, img[0], img[7], img[8]]) { const [x, y] = P(p); ctx.beginPath(); ctx.arc(x, y, 5, 0, 2 * Math.PI); ctx.fill(); }
     detect(ts, img, w);
     if (m.ev) return;                       // event metrics update on their own
-    const raw = m.f(w) - (cfg.zero[cfg.metric] || 0);   // "Zero" removes camera tilt / posture offset
-    if (!Number.isFinite(raw)) return;
-    ema = Number.isFinite(ema) ? ema + 0.35 * (raw - ema) : raw;     // light smoothing against jitter
-    st.value = ema;
-    $("bfbValue").textContent = fmt(ema);
-    showBar(ema);
+    ASPECT = (v.videoWidth / v.videoHeight) || ASPECT;
+    // "Zero" removes camera tilt / posture offset, per side for paired metrics.
+    const val = (k) => METRICS[k].f(w, img) - ((cfg.zero && cfg.zero[k]) || 0);
+    const sm = (prev, x) => (Number.isFinite(x) ? (Number.isFinite(prev) ? prev + 0.35 * (x - prev) : x) : NaN);
+    let shown;
+    if (m.pair) {
+      emaL = sm(emaL, val(m.pair[0])); emaR = sm(emaR, val(m.pair[1]));
+      showBar(emaL, "L"); showBar(emaR, "R");
+      hist.push({ t: ts, a: emaL, b: emaR });
+      const both = [emaL, emaR].filter(Number.isFinite); if (!both.length) { plot(ts); return; }
+      ema = cfg.dir === "above" ? Math.max(...both) : Math.min(...both);   // either side crossing counts
+      shown = `L ${Number.isFinite(emaL) ? fmt(emaL) : "–"}  R ${Number.isFinite(emaR) ? fmt(emaR) : "–"}`;
+    } else {
+      ema = sm(ema, val(cfg.metric));
+      if (!Number.isFinite(ema)) { plot(ts); return; }
+      showBar(ema); hist.push({ t: ts, a: ema, b: NaN });
+      shown = fmt(ema);
+    }
+    plot(ts);
+    st.value = ema; st.valL = emaL; st.valR = emaR;
+    $("bfbValue").textContent = shown;
     // Hysteresis: switch on past thr, off only once back by `hyst`.
     const h = cfg.hyst;
     if (cfg.dir === "above") on = on ? ema > cfg.thr - h : ema > cfg.thr;
     else on = on ? ema < cfg.thr + h : ema < cfg.thr;
     $("bfbValue").classList.toggle("hit", on);
     $("bfbLamp").classList.toggle("on", on);
-    if (st.active && on && !overSince && cfg.sound !== "off") tone(880, 140);
+    if (on && !overSince && cfg.sound !== "off") tone(880, 140);
     overSince = on;
     if (st.active) send(on);
   }
@@ -434,6 +531,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     st.writer.write(new TextEncoder().encode(st.lit ? "1\n" : "0\n")).catch(() => {});
   }, 500);
   $("bfbCamBtn").onclick = async () => {
+    try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch { /* no audio */ }
     if (st.stream) { stopCam(); $("bfbCamBtn").textContent = tr("bfb_camStart"); return; }
     $("bfbCamNote").textContent = tr("bfb_loadingModel");
     if (!st.lm) { st.lm = await getLandmarker(); if (!st.lm) { $("bfbCamNote").textContent = tr("bfb_modelFail"); return; } }
@@ -447,11 +545,16 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * ~10-20 deg), so stand in your neutral posture and press it once. */
   $("bfbZero").onclick = () => {
     const m = METRICS[cfg.metric]; if (m.ev || !Number.isFinite(st.value)) return;
-    cfg.zero = { ...(cfg.zero || {}), [cfg.metric]: (cfg.zero[cfg.metric] || 0) + st.value };
-    ema = NaN; save(); $("bfbZeroNote").textContent = tr("bfb_zeroed", { v: cfg.zero[cfg.metric].toFixed(0) });
+    const z = { ...(cfg.zero || {}) };
+    const add = (k, v) => { if (Number.isFinite(v)) z[k] = (z[k] || 0) + v; };
+    if (m.pair) { add(m.pair[0], st.valL); add(m.pair[1], st.valR); } else add(cfg.metric, st.value);
+    cfg.zero = z; ema = emaL = emaR = NaN; save();
+    $("bfbZeroNote").textContent = tr("bfb_zeroed", { v: (z[m.pair ? m.pair[0] : cfg.metric] || 0).toFixed(0) });
   };
   $("bfbZeroReset").onclick = () => {
-    if (cfg.zero) delete cfg.zero[cfg.metric]; ema = NaN; save(); $("bfbZeroNote").textContent = "";
+    const m = METRICS[cfg.metric];
+    if (cfg.zero) for (const k of m.pair || [cfg.metric]) delete cfg.zero[k];
+    ema = emaL = emaR = NaN; save(); $("bfbZeroNote").textContent = "";
   };
   $("bfbActivate").onclick = () => {
     st.active = !st.active;
