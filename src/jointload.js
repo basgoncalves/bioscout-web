@@ -181,7 +181,7 @@ export function loadEvents(rep, activity, spec, side, grf, kneeSign = 1) {
       push("jlEvPeakLoad", argmax(grf, first, last));
       push("jlEvPushOff", argmin(hip, first, last));
     }
-  } else if (fam === "jump" && activity === "jumpshot" && tyOk && rep.bounds) {
+  } else if (fam === "jump" && activity === "jumpshot" && tyOk && isNum(rep.release_frac)) {
     /* The shot, as a coach reads it: the lowest point of the dip (preparation),
      * the fastest the body is rising, take-off, the release, and the landing a
      * quarter of a second on -- the moment the knees take the load. */
@@ -195,7 +195,7 @@ export function loadEvents(rep, activity, spec, side, grf, kneeSign = 1) {
     push("jlEvLowCOM", low);
     if (end0 - low >= 2) push("jlEvPeakVel", argmax(vel, low, end0));
     if (off > 0) push("jlEvTakeoff", off);
-    const rel = rep.bounds[1] - rep.bounds[0];
+    const rel = Math.round(rep.release_frac * (n - 1));
     if (rel > 0 && rel < n) push("jlEvRelease", rel);
     if (land > 0) {
       const dt = (t[n - 1] - t[0]) / Math.max(1, n - 1);

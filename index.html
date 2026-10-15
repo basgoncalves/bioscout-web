@@ -1652,8 +1652,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 9;
-window.BUILD_AT = "2026-10-15 06:44";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 10;
+window.BUILD_AT = "2026-10-15 07:00";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -8354,7 +8354,7 @@ async function analyseVideoFile(file, { trim = true } = {}) {
    * after the slot at 0.0667 s, and a seek there returned frame 1. Measured
    * in headless Chromium, 2026-09-30: with this rule both paths return the
    * identical frame for all 89 slots of a 3 s clip. */
-  const half = assumed ? 0 : probedDt / 2;
+  const half = (assumed ? dt : probedDt) / 2;
   const seekOf = (i) => Math.min(tOf(i) + half, Math.max(0, duration - 1e-3));
   const stats = { frames: n, seeks: 0, seekMs: 0, detectMs: 0, played: 0, mode: "seek" };
   const t0 = performance.now();
@@ -8407,7 +8407,10 @@ async function analyseVideoFile(file, { trim = true } = {}) {
    *
    * Needs the clip's own frame interval from the probe; a clip whose rate was
    * assumed stays on seeks, which are always right, only slower. */
-  const nativeDt = assumed ? null : probedDt;
+  // A clip whose rate could not be probed is played on the 30 Hz grid too: the
+  // nearest presented frame to each slot, as a seek would give (Bas, 2026-10-15:
+  // the seek path took over 3 min for 350 frames).
+  const nativeDt = assumed ? dt : probedDt;
   const canPlay = !!(nativeDt && v.requestVideoFrameCallback && v.cancelVideoFrameCallback)
     && window.__bsNoPlay !== true;       // test hook: force the seek path
   const EPS = 1e-6;

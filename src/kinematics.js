@@ -2670,7 +2670,7 @@ export function findShotReps(F, cfg = DEFAULT_SHOT_CFG) {
 
   const reps = [];
   let prevEnd = 0;
-  for (const rel of merged) {
+  for (let rel of merged) {
     // The dip: the lowest the hand got in the last dipLookS before release,
     // and not before the previous shot's follow-through ended.
     const from = Math.max(prevEnd, rel - sec(c.dipLookS));
@@ -2689,6 +2689,14 @@ export function findShotReps(F, cfg = DEFAULT_SHOT_CFG) {
     for (let i = rel + 1; i <= stop; i++) if (over[i] < low) low = over[i];
     const need = lim > n - 1 ? c.minDrop / 3 : c.minDrop;
     if (over[rel] - low < need) continue;
+    /* Release is the hand's highest point above the FLOOR between the dip and
+     * the top found above. Against the shoulder the top kept coming at the
+     * landing: the shoulders drop as the knees take the load while the
+     * follow-through is still held up, so the hand reads highest "above the
+     * shoulder" just after touch-down (Bas, 2026-10-15). */
+    let relF = dip;
+    for (let i = dip; i <= rel; i++) if (isNum(hand[i]) && !(hand[i] <= hand[relF])) relF = i;
+    if (relF > dip + 1) rel = relF;
     const end = Math.min(n - 1, rel + sec(c.followS));
     if (end <= rel) continue;
     reps.push([dip, rel, end]);
@@ -3595,7 +3603,10 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       if (spec.shot) {
         Object.assign(s, shotMetrics(F, b, fps, pxPerM, conf));
         // Both arms over the rep, for the stick figures (jointload.js poseAt).
-        const cut = (a) => (a ? interpNan(a).slice(b[0], b[2] + 1).map((v) => (isNum(v) ? +v.toFixed(1) : null)) : null);
+        const cut = (a) => (a ? interpNan(a).slice(b[0], b[2] + 1).map((v) => (isNum(v) ? +v.toFixed(1) : 0)) : null);
+        // Where release falls in the rep, 0-1: what the load figure marks, and
+        // what survives into the mean rep (a scalar is averaged there).
+        s.release_frac = b[2] > b[0] ? +((b[1] - b[0]) / (b[2] - b[0])).toFixed(4) : null;
         s.arm = { r: { shoulder: cut(F.sh_flex_r), elbow: cut(F.elbow_flex_r) },
                   l: { shoulder: cut(F.sh_flex_l), elbow: cut(F.elbow_flex_l) } };
       }

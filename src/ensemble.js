@@ -224,11 +224,19 @@ export function ensembleRep(reps) {
 
   const [coords, coordSd] = meanDict(usable, (r) => r.coords, align);
   const [dyn, dynSd] = meanDict(usable, (r) => r.dyn, align);
+  // The jump shot's arms (stick figures), averaged like the coordinates.
+  let arm = null;
+  if (usable.every((r) => r.arm)) {
+    const flat = (r) => ({ sr: r.arm.r?.shoulder, er: r.arm.r?.elbow, sl: r.arm.l?.shoulder, el: r.arm.l?.elbow });
+    const [m] = meanDict(usable, flat, align);
+    if (m && (m.sr || m.sl)) arm = { r: { shoulder: m.sr, elbow: m.er }, l: { shoulder: m.sl, elbow: m.el } };
+  }
 
   const out = {
     rep: "mean", isMean: true, soloRep: solo, nReps: usable.length,
     times: pct, timeUnit: "%",
     coords, sd: solo ? {} : { coords: coordSd },
+    ...(arm ? { arm } : {}),
     bounds: usable[0].bounds,
     // Where the turnaround falls. When the reps were event-aligned this is
     // exactly where every rep's turnaround now sits; otherwise it is the mean
