@@ -1474,7 +1474,20 @@ export function jumpMetrics(F, rep, fps, pxPerM, cfg = DEFAULT_JUMP_CFG) {
     && (height_flight_m > R * comH || comH > R * height_flight_m);
   if (tooLong || tooHigh || notFalling) return null;
 
+  /* Peak power of the push, per kg: the hip centre (a stand-in for the centre
+   * of mass) vertical velocity times (acceleration + g), from the start of the
+   * movement to take-off, on the upward part only. */
+  let pPeak = NaN;
+  if (pxPerM > 0) {
+    for (let i = Math.max(1, t0); i <= Math.min(offIdx, hipY.length - 2); i++) {
+      const v = -(hipY[i + 1] - hipY[i - 1]) * fps / 2 / pxPerM;
+      const acc = -(hipY[i + 1] - 2 * hipY[i] + hipY[i - 1]) * fps * fps / pxPerM;
+      if (Number.isFinite(v) && Number.isFinite(acc) && v > 0) pPeak = Math.max(Number.isFinite(pPeak) ? pPeak : -Infinity, v * (acc + 9.80665));
+    }
+  }
+
   return {
+    peak_power_wkg: Number.isFinite(pPeak) && pPeak > 0 ? +pPeak.toFixed(1) : null,
     implausible: disagree,
     free_fall_accel_ms2: freeFallA == null ? null : +freeFallA.toFixed(2),
     takeoff_frame: offIdx, land_frame: b2, apex_frame: apex,
@@ -3568,6 +3581,17 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       if (jm) {
         Object.assign(s, jm);
         s.mismatch = spec.expectCountermovement !== jm.has_countermovement;
+        // The deepest the joints went before take-off (the countermovement), either side.
+        const upto = Math.max(1, (jm.takeoff_frame ?? b[1]) - b[0] + 1);
+        const peak = (names) => {
+          let m = -Infinity;
+          for (const nm of names) { const arr = coords[nm]; if (!arr) continue;
+            for (let k = 0; k < Math.min(upto, arr.length); k++) if (isNum(arr[k]) && arr[k] > m) m = arr[k]; }
+          return Number.isFinite(m) ? +m.toFixed(1) : null;
+        };
+        s.peak_hip_flex_deg = peak(["hip_flexion_r", "hip_flexion_l"]);
+        s.peak_knee_flex_deg = peak(["knee_angle_r", "knee_angle_l"]);
+        s.peak_ankle_df_deg = peak(["ankle_angle_r", "ankle_angle_l"]);   // OpenSim: + is dorsiflexion
       }
     }
     s[spec.phases[0]] = (top - b0) / fps;

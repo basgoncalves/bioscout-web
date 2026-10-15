@@ -1661,8 +1661,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 24;
-window.BUILD_AT = "2026-10-15 14:15";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 25;
+window.BUILD_AT = "2026-10-15 15:38";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -11244,13 +11244,14 @@ function render(res, fps) {
 
   const isJump = !!ACTIVITIES[res.activity].jump;
   const cm = (v, dp = 1) => (v == null ? "—" : (v * 100).toFixed(dp));
+  const jn = (v, d, u = "") => (v == null ? "—" : v.toFixed(d) + u);
   const jumpRows = !isJump ? "" : res.reps.map((r) => `<tr><td>${r.rep}${qDot(r)}${rmBtn(r)}</td>
-      <td>${r.flight_s == null ? "—" : r.flight_s.toFixed(3)}</td>
       <td${r.implausible ? ' style="color:var(--warn)"' : ""}>${
         r.height_flight_m == null ? "—" : cm(r.height_flight_m) +
         `<span class="sub"> ±${cm(r.flight_uncertainty_m)}</span>`}</td>
-      <td>${cm(r.height_com_m)}</td><td>${cm(r.countermovement_m)}</td>
-      <td>${r.push_s == null ? "—" : r.push_s.toFixed(2)}</td></tr>`).join("");
+      <td>${jn(r.peak_power_wkg, 1)}</td>
+      <td>${jn(r.peak_hip_flex_deg, 0, "°")}</td><td>${jn(r.peak_knee_flex_deg, 0, "°")}</td>
+      <td>${jn(r.peak_ankle_df_deg, 0, "°")}</td></tr>`).join("");
   const mismatched = isJump ? res.reps.filter((r) => r.mismatch) : [];
   const suspect = isJump ? res.reps.filter((r) => r.implausible) : [];
 
@@ -11445,8 +11446,8 @@ function render(res, fps) {
     ? `<tr><th>${tr("step")}</th><th>${tr("plantSide")}</th><th>${tr("outS")}</th>
         <th>${tr("backS")}</th><th>${tr("excursionM")}</th><th>${tr("kneeAtPlant")}</th></tr>`
     : isJump
-    ? `<tr><th>${tr("jump")}</th><th>${tr("flightS")}</th><th>${tr("heightFlight")}</th>
-        <th>${tr("heightHipRise")}</th><th>${tr("countermove")}</th><th>${tr("pushS")}</th></tr>`
+    ? `<tr><th>${tr("jump")}</th><th>${tr("jumpHeightCm")}</th><th>${tr("peakPowerWkg")}</th>
+        <th>${tr("peakHipFlex")}</th><th>${tr("peakKneeFlex")}</th><th>${tr("peakAnkleDf")}</th></tr>`
     : isSquat
       ? `<tr><th>${tr("rep")}</th><th>${tr("down")}</th><th>${tr("up")}</th><th>${tr("knee")}</th><th>${tr("hip")}</th><th>${tr("depthM")}</th></tr>`
       : `<tr><th>${tr("rep")}</th><th>${tr("up")}</th><th>${tr("down")}</th><th>${tr("elbow")}</th><th>${tr("shoulder")}</th><th>${tr("riseM")}</th></tr>`;
@@ -11569,14 +11570,12 @@ function render(res, fps) {
          <td>${ms("excursion_m")}</td>
          <td>${ms("knee_flex_at_plant_deg", 0)}°</td></tr>`
     : isJump
-    ? `<tr class="meanrow"><td>${tr("mean")}</td><td>${ms("flight_s", 3)}</td>
+    ? `<tr class="meanrow"><td>${tr("mean")}</td>
          <td>${(() => { const st = meanRep.stats.height_flight_m;
                         return st ? `${(st.mean * 100).toFixed(1)}<span class="sub"> ±${(st.sd * 100).toFixed(1)}</span>` : "—"; })()}</td>
-         <td>${(() => { const st = meanRep.stats.height_com_m;
-                        return st ? (st.mean * 100).toFixed(1) : "—"; })()}</td>
-         <td>${(() => { const st = meanRep.stats.countermovement_m;
-                        return st ? (st.mean * 100).toFixed(1) : "—"; })()}</td>
-         <td>${ms("push_s")}</td></tr>`
+         <td>${ms("peak_power_wkg", 1)}</td>
+         <td>${ms("peak_hip_flex_deg", 0)}°</td><td>${ms("peak_knee_flex_deg", 0)}°</td>
+         <td>${ms("peak_ankle_df_deg", 0)}°</td></tr>`
     : (isSquat
     ? `<tr class="meanrow"><td>${tr("mean")}</td><td>${ms("eccentric_s")}</td><td>${ms("concentric_s")}</td>
          <td>${ms("knee_flex_max_deg", 0)}°</td><td>${ms("hip_flex_max_deg", 0)}°</td>
