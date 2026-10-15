@@ -1342,9 +1342,11 @@ try {
        threshold -> Arduino lamp over Web Serial). On main, a work-in-progress page. -->
   <section id="viewBiofeedback" class="hidden">
     <div class="card" style="text-align:center">
-      <b style="font-size:16px" data-i18n="doorBiofeedback">BioFeedback (testing)</b>
+      <div class="labHead"><b style="font-size:16px" data-i18n="doorBiofeedback">BioFeedback (testing)</b>
+        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+      <img src="./assets/charachters/yamcha.jpeg" alt="" style="display:block;margin:10px auto 0;width:100%;max-width:360px;border-radius:12px">
       <p class="note" style="margin:6px 0 12px" data-i18n="bfb_wip">Work in progress: live feedback from the camera to a lamp or buzzer on a connected Arduino, coming soon.</p>
-      <video id="bfbPromo" src="./assets/media/bioscout_promo.mp4" muted loop playsinline preload="none"
+      <video id="bfbPromo" src="./assets/media/bioscout_promo.mp4" muted loop playsinline autoplay preload="auto"
              style="width:100%;max-width:360px;max-height:70vh;border-radius:12px;background:#000"></video>
     </div>
   </section>
@@ -1689,8 +1691,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 30;
-window.BUILD_AT = "2026-10-15 16:54";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 31;
+window.BUILD_AT = "2026-10-15 18:30";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1736,6 +1738,7 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
 import { inverseDynamics } from "./src/dynamics.js";
 import { gradeReps } from "./src/repquality.js";
 import { screenRecSupported, openScreenRecorder } from "./src/screenrec.js";
+import { jcfContributions, jcfContribSVG } from "./src/jcfcontrib.js";
 import { ytSupported, openYouTubeClip } from "./src/ytclip.js";
 import { athleteSummary, taskStats, curveSummary, curveSVG, generalHTML, taskTableHTML,
          ASM_WINDOWS, ASM_METRICS, stats as asmStats, mr as asmMR } from "./src/athsummary.js";
@@ -9422,6 +9425,7 @@ const METRIC_META = {
    * the numbers happen to be stored was never their problem. */
   muscle: { title: "jmMuscleTitle", unit: "N", note: null, zero: true, src: "forces" },
   jrf:    { title: "jointContactForce", unit: "unitBodyweight", note: null, zero: true, src: "jrf" },
+  contrib: { title: "jcfContribTitle", unit: "unitBodyweight", note: null, zero: true, src: "contrib" },
 };
 const jointSel = {};   // "<activity>|<metric>" -> joints ticked
 const muscleTicks = {};  // activity -> { muscles: [base], sides: ["l","r"] }
@@ -9432,6 +9436,7 @@ function metricAvailable(rep, res, metric) {
   const src = METRIC_META[metric] && METRIC_META[metric].src;
   if (src === "forces") return !!(rep.forces && rep.forces.length && rep.forceNames);
   if (src === "jrf") return !!(rep.jrf && rep.jrf.length && rep.jrfNames);
+  if (src === "contrib") return !!(rep.jrf && rep.jrf.length && rep.forces && rep.forces.length && muscleJoints);
   return jointOptions(rep.jm, metric, res.activity).length > 0;
 }
 
@@ -9642,6 +9647,15 @@ function metricPlot(rep, res, metric) {
   // The two that read their own arrays rather than rep.jm.
   if (metric === "muscle") return metricAvailable(rep, res, "muscle") ? musclePlot(rep, res) : "";
   if (metric === "jrf") return metricAvailable(rep, res, "jrf") ? jrfPlot(rep, res) : "";
+  if (metric === "contrib") {
+    if (!metricAvailable(rep, res, "contrib")) return "";
+    const bwN = (res.massKg || parseFloat($("mass").value) || 75) * 9.80665;
+    const marks = Number.isFinite(rep.contact_frac) ? [{ frac: rep.contact_frac, label: tr("jlEvContact") }]
+      : Number.isFinite(rep.release_frac) ? [{ frac: rep.release_frac, label: tr("jlEvRelease") }] : [];
+    const svg = jcfContribSVG(jcfContributions(rep, muscleJoints, bwN), { t: (k) => esc(tr(k)), marks });
+    return svg ? `<h2 style="font-size:15px;margin:6px 0 4px">${tr("jcfContribTitle")}</h2>${svg}
+      <p class="note">${tr("jcfContribNote")}</p>` : "";
+  }
   const jm = rep.jm;
   const opts = jointOptions(jm, metric, res.activity);
   if (!opts.length) return "";
@@ -9743,7 +9757,7 @@ function metricPlot(rep, res, metric) {
  * the product of two curves already on this menu and adds no independent
  * information -- and it carried the error of both (Bas, 2026-09-19).
  * jointmetrics.js still computes it; the export still contains it. */
-const PLOT_METRICS = ["angle", "vel", "moment", "power", "muscle", "jrf"];
+const PLOT_METRICS = ["angle", "vel", "moment", "power", "muscle", "jrf", "contrib"];
 const metricSel = {};   // activity -> the metric last picked
 
 function drawMetric(box, rep, res) {
@@ -11430,8 +11444,9 @@ function render(res, fps) {
       <td>${tr(r.stroke_type || "strokeUnnamed")}</td>
       <td>${nn(r.ball_speed_kmh, 0)}</td>
       <td>${nn(r.hand_speed_kmh, 0)}</td>
-      <td>${nn(r.swing_s)}</td>
-      <td>${nn(r.contact_height_m)}</td></tr>`).join("");
+      <td>${nn(r.contact_height_m)}</td>
+      <td>${r.knee_flex_load_deg == null ? "—" : r.knee_flex_load_deg.toFixed(0) + "°"}</td>
+      <td>${nn(r.swing_s)}</td></tr>`).join("");
 
   /* Kick back and heel raise: per leg, so the leg is the second column, as it
    * is for a single-leg squat. The heel raise had no row of its own and fell
@@ -11482,8 +11497,8 @@ function render(res, fps) {
          <td>${r.elbow_flex_max_deg.toFixed(0)}°</td><td>${r.arm_flex_range_deg.toFixed(0)}°</td>
          <td>${r.pelvis_travel_m.toFixed(2)}</td></tr>`).join("");
   const head = isStroke
-    ? `<tr><th>${tr("strokeN")}</th><th>${tr("strokeType")}</th><th>${tr("ballKmh")}</th>
-        <th>${tr("handKmh")}</th><th>${tr("swingS")}</th><th>${tr("contactM")}</th></tr>`
+    ? `<tr><th>${tr("strokeN")}</th><th>${tr("strokeType")}</th><th>${tr("peakBallKmh")}</th>
+        <th>${tr("peakHandKmh")}</th><th>${tr("contactM")}</th><th>${tr("kneeLoadDeg")}</th><th>${tr("swingS")}</th></tr>`
     : isShot
     ? `<tr><th>${tr("shotN")}</th><th>${tr("releaseH")}</th>
         <th>${tr("releaseAngle")}</th><th>${tr("releaseSpeed")}</th>
@@ -11595,7 +11610,8 @@ function render(res, fps) {
   const meanRow = !meanRep ? "" : isStroke
     ? `<tr class="meanrow"><td>${tr("mean")}</td><td>\u2014</td>
          <td>${ms("ball_speed_kmh", 0)}</td><td>${ms("hand_speed_kmh", 0)}</td>
-         <td>${ms("swing_s")}</td><td>${ms("contact_height_m")}</td></tr>`
+         <td>${ms("contact_height_m")}</td><td>${ms("knee_flex_load_deg", 0)}°</td>
+         <td>${ms("swing_s")}</td></tr>`
     : isShot
     ? `<tr class="meanrow"><td>${tr("mean")}</td>
          <td>${ms("release_height_m")}</td><td>${ms("release_angle_deg", 0)}\u00b0</td>

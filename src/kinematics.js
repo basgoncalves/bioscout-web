@@ -3363,13 +3363,14 @@ export const ACTIVITIES = {
     phases: ["load_s", "follow_s"], shot: true,
   },
   /* A racket stroke borrows the shot's coordinate set for the legs. The
-   * player travels and the arm is free, so nothing here is fed to the force
-   * models: `openChain` keeps the reaction force and muscle panels off. */
+   * player may travel: `travels` keeps the force models off a clip where the
+   * body crossed the court, and a stroke hit on the spot gets the legs'
+   * ground reaction, muscle forces and joint loads like a squat or a jump. */
   stroke: {
     label: "racket stroke", columns: SQUAT_DRIVEN_COORDS, defaultCfg: DEFAULT_STROKE_CFG,
     features: buildStrokeFeatures, findReps: findStrokeReps,
     coords: squatRepCoordinates, reference: jumpReferencePositions,
-    phases: ["swing_s", "follow_s"], stroke: true, openChain: true,
+    phases: ["swing_s", "follow_s"], stroke: true, travels: true,
   },
   /* Glute kick back. Per leg, like the heel raise: one clip, each rep tagged
    * with the leg that kicked. `openChain` because the working leg is in the
@@ -3686,6 +3687,8 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       }
       if (spec.stroke) {
         Object.assign(s, strokeMetrics(F, b, fps, pxPerM, found, i));
+        // where contact falls in the rep, 0-1: the joint-load figure marks it
+        s.contact_frac = b[2] > b[0] ? +((b[1] - b[0]) / (b[2] - b[0])).toFixed(4) : null;
       }
       if (activity === "sidestep") {
         Object.assign(s, sidestepMetrics(F, b, fps, pxPerM, found.midX ?? refB));
