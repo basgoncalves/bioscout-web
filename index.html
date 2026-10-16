@@ -637,6 +637,9 @@ try {
   .bfbGreenDot { width:22px; height:22px; display:inline-block; vertical-align:middle; }
   .bfbGreenDot.on { background:#4caf50 !important; border-color:#b9f6ca !important; box-shadow:0 0 16px 6px rgba(76,175,80,.7) !important; }
   .bfbDots { display:flex; gap:6px; }
+  .bfbPinTest { gap:6px !important; }
+  .bfbPinBtn { min-width:2.6em; padding:6px 8px; font-variant-numeric:tabular-nums; }
+  .bfbPinBtn.on { background:#4caf50; color:#fff; border-color:#b9f6ca; }
   .bfbLamp.sm { width:19px; height:19px; border-width:1.5px; }
   .bfbLamp.l2.on { background:#ff9a3c; border-color:#ffd2a8; box-shadow:0 0 14px 5px rgba(255,154,60,.7); }
   .bfbLamp.l3.on { background:#ff4d4d; border-color:#ffc0c0; box-shadow:0 0 14px 5px rgba(255,77,77,.75); }
@@ -1535,15 +1538,9 @@ try {
         <label><input type="checkbox" id="bfbFsrLamp"> <span data-i18n="bfb_fsrLamp">Lamps follow pressure</span></label>
         <label><span data-i18n="bfb_fsrThr">Levels (%)</span> <input id="bfbFsrThr" size="10" inputmode="decimal"></label>
       </div>
-      <div class="row bfbRow">
-        <label><span data-i18n="bfb_green">Green lamp: someone opens BioScout</span>
-          <select id="bfbGreen"><option value="flash" data-i18n="bfb_greenFlash">Flash when someone new arrives</option>
-            <option value="while" data-i18n="bfb_greenWhile">On while anyone else is online</option>
-            <option value="off" data-i18n="bfb_greenOff">Off</option></select></label>
-        <button type="button" class="ghost" id="bfbGreenTest" data-i18n="bfb_greenTest">Test green</button>
-        <span class="bfbLamp bfbGreenDot" id="bfbGreenDot" title="Green lamp"></span>
-        <span class="note" id="bfbOnline"></span>
-      </div>
+      <h4 style="margin:10px 0 4px" data-i18n="bfb_pinTest">Test each pin</h4>
+      <p class="note" data-i18n="bfb_pinTestNote">Tap a pin to switch it on or off — find which socket a cable is in. Coloured underline = the lamp set to that pin.</p>
+      <div class="row bfbRow bfbPinTest" id="bfbPinTest"></div>
 
         </div>
       </dialog>
@@ -1985,8 +1982,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 58;
-window.BUILD_AT = "2026-10-16 15:37";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 59;
+window.BUILD_AT = "2026-10-16 15:39";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

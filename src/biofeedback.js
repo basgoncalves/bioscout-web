@@ -17,7 +17,6 @@ import { initPressure } from "./pressure.js";
 import { bodyMapHTML, REGIONS } from "./bodymap.js";
 import { loadForceModel, predictForces } from "./forces.js";
 import { makeZip } from "./zip.js";
-import { onPresence, greenCommand } from "./presence.js";
 import { jointLoadSVG } from "./jointload.js";
 
 const L = { sh: [11, 12], el: [13, 14], wr: [15, 16], hip: [23, 24], kn: [25, 26], an: [27, 28] };
@@ -468,7 +467,6 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbLoadL").value = wx.L; $("bfbLoadR").value = wx.R; syncExt();
     $("bfbLoadWrap").classList.toggle("hidden", !(MOVES[cfg.move] && MOVES[cfg.move].wt));
     $("bfbLoadNote").textContent = MOVES[cfg.move] && MOVES[cfg.move].bar ? tr("bfb_loadBarHint") : "";
-    $("bfbGreen").value = cfg.green || "flash";
     $("bfbDir").value = cfg.dir; $("bfbSound").value = cfg.sound || "beep"; $("bfbHyst").value = cfg.hyst; $("bfbBaud").value = String(cfg.baud);
   }
   $("bfbMove").onchange = () => pickMove($("bfbMove").value);
@@ -646,39 +644,32 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (p && p !== st.port) await openPort(p);
   };
   $("bfbDisconnect").onclick = async () => { await send(false, true); await closePort(); st.port = null; status("bfb_portNone"); renderConn(); listPorts(); };
-  /* Green lamp: someone has BioScout open (presence.js). Independent of the
-   * yellow biofeedback lamp and of Activate: it works as soon as a board is
-   * connected. 'G' / 'g' on the same serial line. */
-  let greenTo = 0;
-  const green = async (on) => {
-    $("bfbGreenDot").classList.toggle("on", on);
-    if (!st.writer) return;
-    try { await st.writer.write(new TextEncoder().encode(on ? "G\n" : "g\n")); log("→ " + (on ? "G" : "g")); } catch { /* port gone */ }
-  };
-  $("bfbGreen").onchange = () => { cfg.green = $("bfbGreen").value; save(); if (cfg.green === "off") green(false); };
-  $("bfbGreenTest").onclick = () => { green(true); clearTimeout(greenTo); greenTo = setTimeout(() => green(false), 1500); };
-  onPresence((e) => {
-    if (e.type === "status") {
-      $("bfbOnline").textContent = tr(e.status === "online" ? "bfb_onlineN" : "bfb_onlineOff", { n: e.others });
-      return;
-    }
-    $("bfbOnline").textContent = tr("bfb_onlineN", { n: e.others });
-    const c = greenCommand(cfg.green, e);
-    if (c.on == null) return;
-    clearTimeout(greenTo);
-    green(c.on);
-    if (c.on && c.pulseMs) greenTo = setTimeout(() => green(false), c.pulseMs);
-  });
+  /* Pin tester: switch any digital pin 2-13 on or off, to find which
+   * socket a cable is in or check an LED. Needs sketch v4+ ("T<pin>:<0|1>"). */
+  const pinOn = new Set();
+  function renderPinTest() {
+    const host = $("bfbPinTest"); if (!host) return;
+    const P = cfg.pins || [13, 12, 11, 8, 7], role = { [P[0]]: "#ffd54a", [P[1]]: "#ff9a3c", [P[2]]: "#ff4d4d", [P[4]]: "#9aa4b2" };
+    host.innerHTML = Array.from({ length: 12 }, (_, j) => j + 2).map((n) =>
+      `<button type="button" class="ghost bfbPinBtn${pinOn.has(n) ? " on" : ""}" data-tpin="${n}"${st.port && st.v3 ? "" : " disabled"}
+        style="${role[n] ? `box-shadow:inset 0 -3px 0 ${role[n]}` : ""}">${n}</button>`).join("")
+      + `<button type="button" class="ghost" id="bfbPinAllOff"${st.port && st.v3 ? "" : " disabled"}>${esc(tr("bfb_testOff"))}</button>`;
+    for (const b of host.querySelectorAll("[data-tpin]")) b.onclick = () => {
+      const n = +b.dataset.tpin, on = !pinOn.has(n);
+      on ? pinOn.add(n) : pinOn.delete(n); writeLine(`T${n}:${on ? 1 : 0}`); renderPinTest();
+    };
+    $("bfbPinAllOff").onclick = async () => { for (const n of [...pinOn]) await writeLine(`T${n}:0`); pinOn.clear(); await sendLevel(0, true); renderPinTest(); };
+  }
   $("bfbTestOn").onclick = () => sendLevel(3, true);
   $("bfbTestOff").onclick = () => sendLevel(0, true);
   for (const b of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) b.onclick = () => sendLevel(+b.dataset.testlv, true);
   /* Pins: which Arduino pin drives each lamp. A v3 sketch takes "P<i>:<pin>"
    * and keeps it in EEPROM, so trying another pin or cable needs no upload. */
-  const PIN_KEYS = ["bfb_pinY", "bfb_pinO", "bfb_pinR", "bfb_pinG", "bfb_pinRelay"];
+  const PIN_KEYS = ["bfb_pinY", "bfb_pinO", "bfb_pinR", null, "bfb_pinRelay"];   // slot 3 (green) not shown
   function renderPins() {
     const host = $("bfbPins"); if (!host) return;
     const P = cfg.pins || [13, 12, 11, 8, 7];
-    host.innerHTML = PIN_KEYS.map((k, i) => `<label><span>${esc(tr(k))}</span><select data-pin="${i}">${
+    host.innerHTML = PIN_KEYS.map((k, i) => !k ? "" : `<label><span>${esc(tr(k))}</span><select data-pin="${i}">${
       Array.from({ length: 12 }, (_, j) => j + 2).map((n) => `<option${n === P[i] ? " selected" : ""}>${n}</option>`).join("")}</select></label>`).join("");
     for (const sel of host.querySelectorAll("select")) sel.onchange = () => {
       const i = +sel.dataset.pin; cfg.pins = [...P]; cfg.pins[i] = +sel.value; save();
@@ -689,6 +680,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbPinsNote").textContent = !st.port ? "" : !st.v3 ? tr("bfb_oldSketch")
       : same ? tr("bfb_pinsOk") : tr("bfb_pinsDiff", { pins: (B || []).join(", ") });
     $("bfbPinsSend").disabled = !st.port || !st.v3;
+    renderPinTest();
   }
   $("bfbPinsSend").onclick = async () => { const P = cfg.pins || [13, 12, 11, 8, 7]; for (let i = 0; i < 5; i++) await writeLine(`P${i}:${P[i]}`); };
   /* Sketch editor: the .ino in a window, editable, kept in this browser.

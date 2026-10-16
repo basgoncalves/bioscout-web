@@ -36,7 +36,7 @@
  * and the heavy version moves only when a vendored asset actually changes,
  * which is rarely. A shell bump can no longer cost anybody a 20 MB download.
  */
-const SHELL_CACHE = "bioscout-shell-v235";
+const SHELL_CACHE = "bioscout-shell-v236";
 const HEAVY_CACHE = "bioscout-heavy-v1";
 const PIN_CACHE = "bioscout-pin";        // which old build the person chose (one entry), and its files
 const KEEP = [SHELL_CACHE, HEAVY_CACHE, PIN_CACHE];

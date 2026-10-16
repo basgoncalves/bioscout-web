@@ -6,6 +6,7 @@
 //   P<i>:<pin>   -> move lamp i to another pin and remember it (EEPROM)
 //                   i: 0 yellow, 1 orange, 2 red, 3 green, 4 relay. e.g. P1:10
 //   ?            -> reply with the current pins
+//   T<pin>:<0|1> -> drive any pin 2-13 directly (pin tester), e.g. T9:1 -> "PIN 9 1"
 //   S / s        -> pressure stream on / off: "F <0-1023>" from A0 at 50 Hz
 //   F            -> one pressure reading now
 // Pressure sensor (FSR 402 or similar) as a voltage divider on A0:
@@ -64,6 +65,12 @@ void handle() {
         apply();
       }
       report(); break;
+    }
+    if (c == 'T') {                       // T<pin>:<0|1>  pin tester
+      int p = atoi(line + k + 1); char *col = strchr(line + k, ':');
+      if (okPin(p) && col) { pinMode(p, OUTPUT); digitalWrite(p, col[1] == '1' ? HIGH : LOW);
+        Serial.print("PIN "); Serial.print(p); Serial.print(" "); Serial.println(col[1] == '1' ? 1 : 0); }
+      break;
     }
     if (c == 'L' && k + 1 < n) { setLevel(line[k + 1] - '0'); k++; }
     else if (c == '1') setLevel(1);
