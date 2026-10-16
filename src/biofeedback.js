@@ -14,6 +14,7 @@
  */
 
 import { flashUno } from "./stk500.js";
+import { measure as measureSegs, summarise as summariseSegs, constrain as constrainSegs, fromOsim, SEGS } from "./bodyscale.js";
 import { bodyMapHTML, REGIONS } from "./bodymap.js";
 import { loadForceModel, predictForces } from "./forces.js";
 import { makeZip } from "./zip.js";
@@ -1160,6 +1161,52 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       pulseTo = setTimeout(() => { showDots(0); if (st.active) sendLevel(0, true); }, PULSE_MS);
     }
   });
+  /* "Scale to me": a guided capture -> personal segment lengths (bodyscale.js).
+   * Bones keep the camera's direction, take the person's length, so angles
+   * stay as they were and lever arms (moments) become the person's own. */
+  let scaleRun = null;
+  const STEPS = [["bfb_sc1", 4], ["bfb_sc2", 4], ["bfb_sc3", 4], ["bfb_sc4", 8]];
+  function renderScale() {
+    const p = cfg.scale;
+    $("bfbScaleSt").textContent = p ? tr(p.source === "osim" ? "bfb_scaleOsimOn" : "bfb_scaleOn", { date: (p.made || "").slice(0, 10) }) : tr("bfb_scaleOff");
+    $("bfbScaleUse").checked = !!(p && cfg.useScale); $("bfbScaleUse").disabled = !p; $("bfbScaleClear").disabled = !p;
+    $("bfbScaleTbl").innerHTML = p ? `<table><tr>${Object.keys(SEGS).map((k) => `<td>${esc(tr("bfb_seg_" + k))}</td>`).join("")}</tr><tr>${Object.keys(SEGS).map((k) =>
+      `<td><b>${(p.seg[k] * 100).toFixed(1)}</b> cm${p.from && p.from[k] === "height" ? "*" : p.spread && Number.isFinite(p.spread[k]) ? ` <small>±${(p.spread[k] * (p.sizeFactor || 1) * 50).toFixed(1)}</small>` : ""}</td>`).join("")}</tr></table>`
+      + (p.from ? `<small>${esc(tr("bfb_scaleStar"))}</small>` : "") : "";
+  }
+  $("bfbScaleUse").onchange = () => { cfg.useScale = $("bfbScaleUse").checked; save(); renderScale(); };
+  $("bfbScaleClear").onclick = () => { cfg.scale = null; cfg.useScale = false; save(); renderScale(); };
+  $("bfbScaleOsim").onchange = async () => {
+    const f = $("bfbScaleOsim").files[0]; if (!f) return;
+    try {
+      const p = fromOsim(await f.text(), cfg.height || 1.75);
+      cfg.scale = p; cfg.useScale = true;
+      if (Number.isFinite(p.massKg) && p.massKg > 20) { cfg.mass = +p.massKg.toFixed(1); $("bfbMass").value = cfg.mass; syncExt(); }
+      save(); renderScale();
+    } catch (e) { $("bfbScaleSt").textContent = tr("bfb_scaleFail", { err: e.message }); }
+    $("bfbScaleOsim").value = "";
+  };
+  $("bfbScaleGo").onclick = () => {
+    if (!st.stream) { $("bfbScaleSt").textContent = tr("bfb_scaleCam"); return; }
+    if (scaleRun) return;
+    scaleRun = { frames: [] };
+    const total = STEPS.reduce((a, [, s]) => a + s, 0), t0 = performance.now();
+    $("bfbGuide").classList.remove("hidden");
+    const tick = () => {
+      const el = (performance.now() - t0) / 1000;
+      let acc = 0, step = STEPS.length - 1;
+      for (let i = 0; i < STEPS.length; i++) { if (el < acc + STEPS[i][1]) { step = i; break; } acc += STEPS[i][1]; }
+      $("bfbGuideTxt").textContent = `${step + 1}/${STEPS.length} · ${tr(STEPS[step][0])}`;
+      $("bfbGuideFill").style.width = Math.min(100, (el / total) * 100) + "%";
+      if (el < total && st.stream) { requestAnimationFrame(tick); return; }
+      $("bfbGuide").classList.add("hidden");
+      const fr = scaleRun.frames; scaleRun = null;
+      if (fr.length < 30) { $("bfbScaleSt").textContent = tr("bfb_scaleFew"); return; }
+      cfg.scale = summariseSegs(fr, cfg.height || 1.75); cfg.useScale = true; save(); renderScale();
+      tone(1047, 120); tone(1319, 160, 0.13);
+    };
+    tick();
+  };
   function frame() {
     st.raf = requestAnimationFrame(frame);
     const v = $("bfbVideo"); if (!st.lm || v.readyState < 2) return;
@@ -1179,7 +1226,9 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const r = st.lm.detectForVideo(S.el, ts);
     cv.width = S.w; cv.height = S.h;
     ctx.clearRect(0, 0, cv.width, cv.height);
-    const img = r.landmarks && r.landmarks[0], w = r.worldLandmarks && r.worldLandmarks[0];
+    const img = r.landmarks && r.landmarks[0], w0 = r.worldLandmarks && r.worldLandmarks[0];
+    if (w0 && scaleRun) scaleRun.frames.push(measureSegs(w0));
+    const w = w0 && cfg.useScale && cfg.scale ? constrainSegs(w0, cfg.scale) : w0;   // personal bone lengths
     const m = METRICS[cfg.metric];
     if (!img || !w) { if (!m.ev) { $("bfbValue").textContent = "–"; if (st.active) send(false); } return; }
     ctx.lineWidth = 4; ctx.strokeStyle = "rgba(80,200,170,.9)";
@@ -1646,7 +1695,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function open() {
     $("bfbNoSerial").classList.toggle("hidden", hasSerial);
     if (!MOVES[cfg.move]) cfg.move = "squat";
-    fillMoves(); fillMetrics(); syncInputs(); renderConn(); listPorts(); renderBody(); renderSrc(); renderTables();
+    fillMoves(); fillMetrics(); syncInputs(); renderScale(); renderConn(); listPorts(); renderBody(); renderSrc(); renderTables();
     if (!st.port) status("bfb_portNone");
   }
   async function leave() {

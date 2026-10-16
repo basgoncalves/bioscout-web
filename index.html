@@ -655,6 +655,16 @@ try {
   .bfbGreenDot { width:22px; height:22px; display:inline-block; vertical-align:middle; }
   .bfbGreenDot.on { background:#4caf50 !important; border-color:#b9f6ca !important; box-shadow:0 0 16px 6px rgba(76,175,80,.7) !important; }
   .bfbDots { display:flex; gap:6px; }
+  .bfbScale { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:4px 0 8px; font-size:13px; }
+  .bfbScaleSt { flex:1 1 200px; color:var(--muted); }
+  .bfbScaleUse { display:inline-flex; align-items:center; gap:4px; }
+  .bfbScaleUse input { width:auto !important; margin:0; }
+  .bfbFileBtn { cursor:pointer; display:inline-flex; align-items:center; border:1px solid var(--line,#333); border-radius:8px; }
+  .bfbScaleTbl { flex-basis:100%; font-size:12px; color:var(--muted); }
+  .bfbScaleTbl table { border-collapse:collapse; } .bfbScaleTbl td { padding:1px 10px 1px 0; }
+  .bfbGuide { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:4; background:rgba(0,0,0,.6); color:#fff; padding:14px 18px; border-radius:12px; text-align:center; max-width:80%; pointer-events:none; }
+  .bfbGuide b { font-size:20px; line-height:1.3; display:block; margin-bottom:8px; }
+  .bfbGuideBar { height:6px; background:rgba(255,255,255,.25); border-radius:3px; overflow:hidden; } .bfbGuideBar i { display:block; height:100%; width:0; background:#4fb3a0; }
   .bfbCamBar { position:absolute; left:8px; right:8px; bottom:8px; z-index:3; display:flex; gap:6px; justify-content:center; flex-wrap:wrap; }
   .bfbCamBar .bfbCamCtl { width:auto !important; min-height:0 !important; margin:0 !important; padding:4px 10px !important; font-size:12px !important; font-weight:600;
     background:rgba(0,0,0,.45) !important; color:#fff !important; border:1px solid rgba(255,255,255,.35) !important; border-radius:999px !important; backdrop-filter:blur(4px); }
@@ -1647,12 +1657,21 @@ try {
       </div>
 
       <h4 data-i18n="bfb_step3">3. Camera and go</h4>
+      <div class="bfbScale">
+        <span class="bfbScaleSt" id="bfbScaleSt"></span>
+        <button type="button" class="ghost bfbPinPick" id="bfbScaleGo" data-i18n="bfb_scaleGo">Scale to me</button>
+        <label class="ghost bfbPinPick bfbFileBtn"><span data-i18n="bfb_scaleOsim">Load .osim</span><input type="file" id="bfbScaleOsim" accept=".osim,.xml" hidden></label>
+        <label class="bfbScaleUse"><input type="checkbox" id="bfbScaleUse"> <span data-i18n="bfb_scaleUse">use</span></label>
+        <button type="button" class="ghost bfbPinPick" id="bfbScaleClear" data-i18n="bfb_scaleClear">Clear</button>
+        <div class="bfbScaleTbl" id="bfbScaleTbl"></div>
+      </div>
       <div class="bfbLive">
       <div class="bfbStage" id="bfbStage">
         <video id="bfbVideo" playsinline muted></video>
         <canvas id="bfbSrcCv" class="hidden"></canvas>
         <canvas id="bfbCanvas"></canvas>
         <div class="bfbCamBar"><button type="button" class="bfbCamCtl" id="bfbCamBtn" data-i18n="bfb_camStart">Start camera</button><button type="button" class="bfbCamCtl" id="bfbFlip" data-i18n="bfb_flip">Flip camera</button><button type="button" class="bfbCamCtl" id="bfbZero" data-i18n="bfb_zero">Zero (neutral posture)</button><button type="button" class="bfbCamCtl" id="bfbZeroReset" data-i18n="bfb_zeroReset">Clear zero</button></div>
+        <div class="bfbGuide hidden" id="bfbGuide"><b id="bfbGuideTxt"></b><div class="bfbGuideBar"><i id="bfbGuideFill"></i></div></div>
         <div class="bfbHud"><span id="bfbValue">–</span><span class="bfbDots"><span id="bfbLamp" class="bfbLamp sm l1" title="Yellow"></span><span id="bfbLamp2" class="bfbLamp sm l2" title="Orange"></span><span id="bfbLamp3" class="bfbLamp sm l3" title="Red"></span></span></div>
       </div>
       <aside id="bfbQuick" class="bfbQuick" aria-label="Trials"></aside>
@@ -2025,8 +2044,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 70;
-window.BUILD_AT = "2026-10-16 17:49";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 71;
+window.BUILD_AT = "2026-10-16 18:05";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
