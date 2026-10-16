@@ -6,6 +6,5 @@ for /f %%b in ('git branch --show-current') do (
   echo Branch: %%b
   if /i not "%%b"=="analysis" echo WARNING: this launcher is meant for branch "analysis" - run: git checkout analysis
 )
-start "" "http://localhost:5173/?lab=1#viewAnalysis"
-python serve.py 5173
+python serve.py 5173 --open "?lab=1#viewAnalysis"
 pause

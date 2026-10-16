@@ -9,6 +9,5 @@ for /f %%b in ('git branch --show-current') do (
   if /i not "%%b"=="pressure-sensor" echo WARNING: this launcher is meant for branch "pressure-sensor" - run: git checkout pressure-sensor
 )
 echo In the page: Connect external device - Arduino - Choose port - Pressure sensor - Start stream
-start "" "http://localhost:5173/?lab=1#viewBiofeedback"
-python serve.py 5173
+python serve.py 5173 --open "?lab=1#viewBiofeedback"
 pause
