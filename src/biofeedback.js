@@ -86,20 +86,26 @@ function accel(key, p) {
   const last = h[h.length - 1];
   if (!last || last.t !== t) {
     if (last && t - last.t > 0.5) h.length = 0;                 // a pause: start again
-    const prev = h[h.length - 1], a = 0.45;                     // light smoothing
+    const prev = h[h.length - 1], a = 0.25;                     // position smoothing (camera jitter)
     h.push(prev ? { t, x: prev.x + a * (p.x - prev.x), y: prev.y + a * (p.y - prev.y), z: prev.z + a * (p.z - prev.z) } : { t, x: p.x, y: p.y, z: p.z });
     while (h.length > 2 && h[0].t < t - 0.4) h.shift();
   }
   const p0 = h[h.length - 1];
-  const p1 = [...h].reverse().find((q) => p0.t - q.t >= 0.05);
-  const p2 = p1 && [...h].reverse().find((q) => p1.t - q.t >= 0.05);
+  const p1 = [...h].reverse().find((q) => p0.t - q.t >= 0.09);
+  const p2 = p1 && [...h].reverse().find((q) => p1.t - q.t >= 0.09);
   if (!p2) return { x: 0, y: 0, z: 0 };
-  const out = {};
+  const raw = {};
   for (const c of ["x", "y", "z"]) {
     const v1 = (p0[c] - p1[c]) / (p0.t - p1.t), v2 = (p1[c] - p2[c]) / (p1.t - p2.t);
-    out[c] = Math.max(-40, Math.min(40, (v1 - v2) / ((p0.t - p2.t) / 2)));
+    let a = (v1 - v2) / ((p0.t - p2.t) / 2);
+    a = Math.abs(a) < 0.8 ? 0 : a;                              // below ~0.8 m/s2 it is jitter, not movement
+    raw[c] = Math.max(-20, Math.min(20, a));
   }
-  return out;
+  // the acceleration itself is smoothed too, once per frame
+  const sk = key + ":a", sp = ACC.get(sk);
+  if (sp && sp.t === t) return sp.v;
+  const v = sp ? { x: sp.v.x + 0.3 * (raw.x - sp.v.x), y: sp.v.y + 0.3 * (raw.y - sp.v.y), z: sp.v.z + 0.3 * (raw.z - sp.v.z) } : raw;
+  ACC.set(sk, { t, v }); return v;
 }
 const lerp = (A, B, f) => ({ x: A.x + f * (B.x - A.x), y: A.y + f * (B.y - A.y), z: A.z + f * (B.z - A.z) });
 /* |sum r x m(a - g)| about joint J for masses [{p, m, key}] */
@@ -516,7 +522,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     }
     renderPick();
     $("bfbMass").value = cfg.mass ?? 75; $("bfbHeight").value = cfg.height ?? 1.75; const wx = wtOf(cfg.move);
-    $("bfbLoadL").value = wx.L; $("bfbLoadR").value = wx.R; syncExt();
+    for (const sd of ["L", "R"]) if (document.activeElement !== $("bfbLoad" + sd)) $("bfbLoad" + sd).value = wx[sd];
+    syncExt();
     $("bfbLoadWrap").classList.toggle("hidden", !(MOVES[cfg.move] && MOVES[cfg.move].wt));
     $("bfbLoadNote").textContent = MOVES[cfg.move] && MOVES[cfg.move].bar ? tr("bfb_loadBarHint") : "";
     $("bfbDir").value = cfg.dir; $("bfbSound").value = cfg.sound || "beep"; $("bfbHyst").value = cfg.hyst; $("bfbBaud").value = String(cfg.baud);
@@ -525,6 +532,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   for (const [id, key, lo, hi] of [["bfbMass", "mass", 20, 250], ["bfbHeight", "height", 1, 2.4]]) {
     $(id).onchange = () => { cfg[key] = Math.max(lo, Math.min(hi, +$(id).value || 0)); $(id).value = cfg[key]; syncExt(); save(); if (key === "height") barT.reset(); };
   }
+  for (const sd of ["L", "R"]) $("bfbLoad" + sd).oninput = () => {        // live while typing; no rewrite of the box
+    const v = +$("bfbLoad" + sd).value; if (!Number.isFinite(v) || v < 0 || v > 300) return;
+    cfg.wt = { ...cfg.wt, [cfg.move]: { ...wtOf(cfg.move), [sd]: v } }; syncExt(); save();
+  };
   for (const sd of ["L", "R"]) $("bfbLoad" + sd).onchange = () => {
     const v = Math.max(0, Math.min(300, +$("bfbLoad" + sd).value || 0)); $("bfbLoad" + sd).value = v;
     cfg.wt = { ...cfg.wt, [cfg.move]: { ...wtOf(cfg.move), [sd]: v } }; syncExt(); save();
