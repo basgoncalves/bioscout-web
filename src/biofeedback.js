@@ -478,7 +478,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function pickMove(k) {
     cfg.move = k; const mv = MOVES[k];
     cfg.metric = mv.def; cfg.thr = mv.thr; cfg.dir = mv.dir; cfg.hyst = HYST[METRICS[mv.def].unit] ?? 3;
-    $("bfbMove").value = k; fillMetrics(); syncInputs(); save(); renderBody();
+    $("bfbMove").value = k; fillMetrics(); syncInputs(); save(); renderBody(); renderQuick();
   }
   $("bfbBody").addEventListener("click", (e) => {
     const b = e.target.closest("[data-bfbmove]"); if (b) { pickMove(b.dataset.bfbmove); return; }
@@ -1213,7 +1213,41 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
         <div class="tableScroll"><table><thead>${head}</thead><tbody>${body}</tbody></table></div></div>`;
     }).join("");
     $("bfbSave").disabled = !rec.samples.length && !Object.keys(rec.rows).length;
+    renderQuick();
   }
+  /* Quick view next to the camera: trial count + one value of choice for the
+     current movement (newest first). Clicking a row opens the full rep report. */
+  function renderQuick() {
+    const host = $("bfbQuick"); if (!host) return;
+    const move = rec.rows[cfg.move] ? cfg.move : Object.keys(rec.rows).pop();
+    const rows = move ? rec.rows[move] : [];
+    if (!rows || !rows.length) {
+      host.innerHTML = `<div class="qh"><span>${esc(tr("bfb_quickTitle"))}</span><b>0</b></div><p class="note">${esc(tr("bfb_quickEmpty"))}</p>`;
+      return;
+    }
+    const opts = [...Object.keys(REPCOLS).filter((k) => rows.some((r) => k in r)).map((k) => ["r:" + k, tr(REPCOLS[k][0])]),
+                  ...columns(move).map((k) => ["m:" + k, short(k)])];
+    if (rows[0].dur != null) opts.unshift(["dur", tr("bfb_dur")]);
+    let pick = (cfg.quick || {})[move];
+    if (!opts.some((o) => o[0] === pick)) pick = (opts.find((o) => o[0] === "m:" + cfg.metric.replace(/[LR]$/, "")) || opts.find((o) => o[0].startsWith("m:")) || opts[0] || [""])[0];
+    const val = (r) => {
+      if (pick === "dur") return r.dur != null ? r.dur.toFixed(1) + " s" : "–";
+      const k = pick.slice(2);
+      if (pick.startsWith("r:")) return repCell(k, r[k]) + " " + REPCOLS[k][1];
+      const u = METRICS[k].unit;
+      return METRICS[k].pair ? `${cell(r[k + "_L"], u)} / ${cell(r[k + "_R"], u)}` : cell(r[k], u) + " " + u;
+    };
+    const body = rows.map((r, i) => [r, i]).reverse().map(([r, i]) =>
+      `<tr data-move="${move}" data-row="${i}" class="${r.hit ? "hit" : ""}" title="${esc(tr("bfb_repOpen"))}"><td>${i + 1}</td><td>${val(r)}</td></tr>`).join("");
+    host.innerHTML = `<div class="qh"><span>${esc(tr(MOVES[move].label))}</span><b>${rows.length}</b></div>
+      <select aria-label="${esc(tr("bfb_quickCol"))}">${opts.map(([v, l]) => `<option value="${v}"${v === pick ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
+      <div class="qs"><table><tbody>${body}</tbody></table></div>`;
+    host.querySelector("select").onchange = (e) => { cfg.quick = { ...(cfg.quick || {}), [move]: e.target.value }; save(); renderQuick(); };
+  }
+  $("bfbQuick").addEventListener("click", (e) => {
+    const tr_ = e.target.closest("tr[data-row]"); if (!tr_) return;
+    openRep(tr_.dataset.move, +tr_.dataset.row);
+  });
   const csv = (rows, cols) => [cols.join(","), ...rows.map((r) => cols.map((c) => {
     const v = r[c]; return v == null ? "" : typeof v === "number" ? (Number.isFinite(v) ? +v.toFixed(4) : "") : String(v).includes(",") ? `"${v}"` : v;
   }).join(","))].join("\n");
