@@ -68,7 +68,7 @@ no wiring at all.
 ## 4. Connect from BioScout Web
 
 1. Open BioScout Web in Chrome or Edge on the PC with the Arduino (local:
-   `serve_local.bat` → http://localhost:5173, or the live site).
+   `launchers\biofeedback.bat` → http://localhost:5173, or the live site).
 2. Home → **BioFeedback** → **Choose port…** → pick the Uno → "Connected at 9600 baud".
 3. **Test lamp on / off** → yellow. **Test green** → green flashes 1.5 s.
 4. Green lamp mode (step 1 of the page):
