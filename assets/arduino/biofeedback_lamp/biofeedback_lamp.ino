@@ -3,7 +3,7 @@
 //   L0 L1 L2 L3  -> level: 0 off, 1 yellow, 2 yellow+orange, 3 yellow+orange+red
 //   1 / 0        -> yellow on / off (older apps; same as L1 / L0)
 //   G / g        -> GREEN lamp on / off (someone has BioScout open)
-//   P<i>:<pin>   -> move lamp i to another pin and remember it (EEPROM)
+//   P<i>:<pin>   -> move lamp i to another pin and remember it (EEPROM); P<i>:0 = lamp not used
 //                   i: 0 yellow, 1 orange, 2 red, 3 green, 4 relay. e.g. P1:10
 //   ?            -> reply with the current pins
 //   T<pin>:<0|1> -> drive any pin 2-13 directly (pin tester), e.g. T9:1 -> "PIN 9 1"
@@ -87,8 +87,8 @@ void muxStep() {                               // one digit per call (every 2 ms
 bool okPin(int p) { return p >= 2 && p <= 13; }
 
 void apply() {
-  for (byte i = 0; i < 3; i++) digitalWrite(pins[i], level > i ? HIGH : LOW);
-  digitalWrite(pins[3], green ? HIGH : LOW);
+  for (byte i = 0; i < 3; i++) if (pins[i]) digitalWrite(pins[i], level > i ? HIGH : LOW);   // 0 = lamp not used
+  if (pins[3]) digitalWrite(pins[3], green ? HIGH : LOW);
   // pins[4] (old "relay" slot) is no longer driven; kept so saved EEPROM layouts still load
 }
 
@@ -108,9 +108,9 @@ void handle() {
     char c = line[k];
     if (c == 'P') {                       // P<i>:<pin>
       int i = line[k + 1] - '0'; int p = atoi(line + k + 3);
-      if (i >= 0 && i <= 4 && line[k + 2] == ':' && okPin(p)) {
-        digitalWrite(pins[i], LOW); pinMode(pins[i], INPUT);
-        pins[i] = p; pinMode(p, OUTPUT);
+      if (i >= 0 && i <= 4 && line[k + 2] == ':' && (okPin(p) || p == 0)) {   // P<i>:0 = lamp not used
+        if (pins[i]) { digitalWrite(pins[i], LOW); pinMode(pins[i], INPUT); }
+        pins[i] = p; if (p) pinMode(p, OUTPUT);
         EEPROM.update(i, p); EEPROM.update(5, MAGIC);
         apply();
       }
@@ -148,8 +148,8 @@ void setup() {
   bool saved = EEPROM.read(5) == MAGIC;
   for (byte i = 0; i < 5; i++) {
     byte p = saved ? EEPROM.read(i) : DEF[i];
-    pins[i] = okPin(p) ? p : DEF[i];
-    if (i < 4) { pinMode(pins[i], OUTPUT); digitalWrite(pins[i], LOW); }
+    pins[i] = okPin(p) || (saved && p == 0) ? p : DEF[i];
+    if (i < 4 && pins[i]) { pinMode(pins[i], OUTPUT); digitalWrite(pins[i], LOW); }
   }
   Serial.begin(9600);
   Serial.println("BIOSCOUT_LAMP_READY v6 FSR DISP");

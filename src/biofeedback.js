@@ -693,13 +693,14 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const pinOn = new Set();
   function renderPinTest() {
     const host = $("bfbPinTest"); if (!host) return;
-    const P = cfg.pins || [13, 12, 11, 8, 7], role = { [P[2]]: LVCOL[2], [P[1]]: LVCOL[1], [P[0]]: LVCOL[0] };
+    const P = cfg.pins || [13, 12, 11, 8, 7], role = {}; for (const i of [2, 1, 0]) if (P[i]) role[P[i]] = LVCOL[i];
     host.innerHTML = Array.from({ length: 12 }, (_, j) => j + 2).map((n) =>
-      `<button type="button" class="ghost bfbPinBtn${pinOn.has(n) ? " on" : ""}" data-tpin="${n}"${st.port ? "" : " disabled"}
+      `<button type="button" class="ghost bfbPinBtn${pinOn.has(n) ? " on" : ""}" data-tpin="${n}"${st.port || assignLamp != null ? "" : " disabled"}
         style="${role[n] ? `box-shadow:inset 0 -3px 0 ${role[n]}` : ""}">${n}</button>`).join("")
       + `<button type="button" class="ghost bfbPinOff" id="bfbPinAllOff"${st.port ? "" : " disabled"}>${esc(tr("bfb_testOff"))}</button>`;
     /* Pulse > 0: a tap lights the pin for that long; 0: tap on, tap off. */
     for (const b of host.querySelectorAll("[data-tpin]")) b.onclick = () => {
+      if (assignLamp != null) { setLampPin(assignLamp, +b.dataset.tpin); return; }
       if (!(st.ver >= 5)) { flashHint(); return; }               // older sketches read "T6:1" as "lamp on"
       const n = +b.dataset.tpin, ms = +cfg.pulse || 0, on = !pinOn.has(n);
       on ? pinOn.add(n) : pinOn.delete(n); writeLine(`T${n}:${on ? 1 : 0}`); renderPinTest();
@@ -740,6 +741,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const i = +b.dataset.testlv - 1, P = cfg.pins || [13, 12, 11, 8, 7];
     lampOn[i] = !lampOn[i];
     for (const x of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) x.classList.toggle("on", lampOn[+x.dataset.testlv - 1]);
+    if (!P[i]) { lampOn[i] = false; b.classList.remove("on"); return; }
     if (st.ver >= 5) await writeLine(`T${P[i]}:${lampOn[i] ? 1 : 0}`);
     else { lampOn[i] = false; b.classList.remove("on"); flashHint(); }
   };
@@ -747,18 +749,30 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   /* Pins: which Arduino pin drives each lamp. A v3 sketch takes "P<i>:<pin>"
    * and keeps it in EEPROM, so trying another pin or cable needs no upload. */
   const PIN_KEYS = ["bfb_pinY", "bfb_pinO", "bfb_pinR"];   // slots 3-4 (green, old relay) not shown
+  let assignLamp = null;
+  function setLampPin(i, pin) {
+    const P = [...(cfg.pins || [13, 12, 11, 8, 7])];
+    if (pin) for (let j = 0; j < 3; j++) if (j !== i && P[j] === pin) { P[j] = 0; if (st.v3) writeLine(`P${j}:0`); }   // one lamp per pin
+    P[i] = pin; cfg.pins = P; save(); assignLamp = null;
+    if (st.v3) writeLine(`P${i}:${pin}`);
+    renderPins();
+  }
   function renderPins() {
     const host = $("bfbPins"); if (!host) return;
     const P = cfg.pins || [13, 12, 11, 8, 7];
-    host.innerHTML = PIN_KEYS.map((k, i) => !k ? "" : `<label><span><input type="color" class="bfbCol" data-col="${i}" value="${LVCOL[i]}" aria-label="${esc(tr(k))}"> ${esc(tr(k))}</span><select data-pin="${i}">${
-      Array.from({ length: 12 }, (_, j) => j + 2).map((n) => `<option${n === P[i] ? " selected" : ""}>${n}</option>`).join("")}</select></label>`).join("");
-    for (const sel of host.querySelectorAll("select")) sel.onchange = () => {
-      const i = +sel.dataset.pin; cfg.pins = [...P]; cfg.pins[i] = +sel.value; save();
-      if (st.v3) writeLine(`P${i}:${sel.value}`);
-      renderPins();
-    };
+    /* Each lamp: colour + name + its pin. Tap the pin chip, then a number in
+     * "Test each pin" (or None) -- no dropdowns. */
+    host.innerHTML = PIN_KEYS.map((k, i) => `<div class="bfbLampChip${assignLamp === i ? " on" : ""}">
+        <input type="color" class="bfbCol" data-col="${i}" value="${LVCOL[i]}" aria-label="${esc(tr(k))}">
+        <span>${esc(tr(k))}</span>
+        <button type="button" class="ghost bfbPinPick" data-assign="${i}">${P[i] ? "pin " + P[i] : esc(tr("bfb_none"))}</button>
+      </div>`).join("")
+      + (assignLamp != null ? `<span class="note">${esc(tr("bfb_assignHint", { lamp: tr(PIN_KEYS[assignLamp]) }))}</span>
+        <button type="button" class="ghost bfbPinPick" data-none="1">${esc(tr("bfb_none"))}</button>` : "");
+    for (const b of host.querySelectorAll("[data-assign]")) b.onclick = () => { assignLamp = assignLamp === +b.dataset.assign ? null : +b.dataset.assign; renderPins(); };
+    const none = host.querySelector("[data-none]"); if (none) none.onclick = () => setLampPin(assignLamp, 0);
     const B = st.boardPins, same = B && B.every((n, i) => n === P[i]);
-    const used = [0, 1, 2].map((i) => P[i]), dup = used.find((n, i) => used.indexOf(n) !== i);
+    const used = [0, 1, 2].map((i) => P[i]).filter(Boolean), dup = used.find((n, i) => used.indexOf(n) !== i);
     $("bfbPinsNote").textContent = [dup ? tr("bfb_pinsClash", { pin: dup }) : "", !st.port ? "" : !st.v3 ? tr("bfb_oldSketch")
       : same ? tr("bfb_pinsOk") : tr("bfb_pinsDiff", { pins: (B || []).join(", ") })].filter(Boolean).join(" ");
     paintColors(); renderAnPick();
