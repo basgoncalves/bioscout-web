@@ -586,6 +586,43 @@ try {
   .lmReviewRow { margin-bottom:8px; }
   .glossLink { margin:12px 0 0; font-size:13px; }
   .glossLink a { color:var(--muted, inherit); }
+  /* Analysis (src/analysis.js) */
+  .wrap:has(#viewAnalysis:not(.hidden)) { max-width:1200px !important; }
+  #viewAnalysis button.anSmall, #viewAnalysis label.anSmall { width:auto; margin:0; padding:7px 12px; font-size:14px; display:inline-flex; align-items:center; cursor:pointer; }
+  #viewAnalysis label.anFileBtn { border:1px solid var(--line); border-radius:10px; font-weight:600; }
+  #viewAnalysis .anBtns, #viewAnalysis .anSeg, #viewAnalysis .anTabs { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+  #viewAnalysis .anTabs button { width:auto; margin:0; padding:8px 16px; }
+  #viewAnalysis .anTab.on, #viewAnalysis .anSeg .on { border-color:var(--accent); color:var(--accent); box-shadow:inset 0 -2px 0 var(--accent); }
+  #viewAnalysis .anRoles { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:10px; margin:8px 0; }
+  #viewAnalysis .anRole { display:flex; flex-direction:column; gap:4px; font-size:13px; color:var(--muted); }
+  #viewAnalysis .anRole input, #viewAnalysis .anRole select { padding:8px 10px; font-size:15px; }
+  #viewAnalysis .anMulti { grid-column:1 / -1; }
+  #viewAnalysis .anChips { display:flex; flex-wrap:wrap; gap:6px; }
+  #viewAnalysis .anChip { display:inline-flex; gap:5px; align-items:center; padding:5px 10px; border:1px solid var(--line); border-radius:999px; font-size:13.5px; color:var(--ink); cursor:pointer; }
+  #viewAnalysis .anChip.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); }
+  #viewAnalysis .anChip input { width:auto; margin:0; }
+  #viewAnalysis .anCheck { display:flex; gap:8px; align-items:center; margin:8px 0; font-size:14px; }
+  #viewAnalysis .anCheck input { width:auto; }
+  #viewAnalysis .anPattern { display:flex; gap:8px; align-items:end; }
+  #viewAnalysis .anPattern .anRole { flex:1; }
+  #viewAnalysis .anTblWrap { overflow:auto; max-width:100%; }
+  #viewAnalysis .anVars, #viewAnalysis .anCurves { max-height:340px; }
+  #viewAnalysis table.anTbl { border-collapse:collapse; font-size:13.5px; width:100%; }
+  #viewAnalysis .anTbl th, #viewAnalysis .anTbl td { padding:5px 8px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
+  #viewAnalysis .anTbl th { position:sticky; top:0; background:var(--card); font-weight:600; color:var(--muted); }
+  #viewAnalysis .anTbl td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  #viewAnalysis .anTbl td.sig { font-weight:700; color:var(--accent); }
+  #viewAnalysis .anTbl select.anMini { padding:3px 6px; font-size:13px; width:auto; }
+  #viewAnalysis .anTbl input.anCell { padding:3px 6px; font-size:13px; min-width:70px; width:100%; }
+  #viewAnalysis .anChecks tr.bad td { color:var(--warn); }
+  #viewAnalysis .anChecks tr.ok td:first-child { color:var(--good); }
+  #viewAnalysis .anChecks td { white-space:normal; }
+  #viewAnalysis .anBlock { margin:14px 0; }
+  #viewAnalysis .anBlockHead { font-weight:600; margin:0 0 6px; }
+  #viewAnalysis .anFigBox svg { max-width:860px; display:block; }
+  #viewAnalysis .anNote { margin:6px 0; }
+  #viewAnalysis .anNote.bad { color:var(--warn); }
+  #viewAnalysis .labHead { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
   .bfbRow { gap:10px; align-items:end; flex-wrap:wrap; margin:6px 0; }
   .bfbRow label { display:flex; flex-direction:column; gap:4px; font-size:13px; }
   .bfbStage { position:relative; background:#000; border-radius:12px; overflow:hidden; aspect-ratio:16/9; margin-top:6px; }
@@ -1363,13 +1400,15 @@ try {
   </section>
 
   <!-- Lab demo home: Record (the recorder), Process (files, src/process.js),
-       Simulate (OpenSim + CEINMS through the lab engine, src/osimlab.js). -->
+       Simulate (OpenSim + CEINMS through the lab engine, src/osimlab.js),
+       Analysis (statistics, reliability, SPM: src/analysis.js), BioFeedback. -->
   <section id="viewHome" class="hidden">
     <p class="note" style="margin:0 4px 12px" data-i18n="labHomeNote">Pick what you want to do. Nothing is uploaded unless you connect to the lab engine in Simulate.</p>
     <div class="labDoors">
       <button type="button" class="labDoor" id="doorRecord"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/><circle cx="9.5" cy="12" r="2.5"/></svg><div><b data-i18n="doorRecord">Record</b><span data-i18n="doorRecordNote">Film a movement with this device and read its joint angles, moments and estimated loads.</span></div></button>
       <button type="button" class="labDoor" id="doorProcess"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 20h18"/><path d="M4 16l4-6 4 3 4-8 4 5"/><circle cx="8" cy="10" r="1"/><circle cx="16" cy="5" r="1"/></svg><div><b data-i18n="doorProcess">Process</b><span data-i18n="doorProcessNote">Open lab files (force plates, EMG, motion capture, OpenSim results), filter, plot and analyse them.</span></div></button>
       <div class="labDoor" id="doorSimulate" role="button" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="4" r="2"/><path d="M12 6v7M8 9h8M12 13l-3 8M12 13l3 8"/><path d="M5 12c-1 2-1 4 0 6M19 12c1 2 1 4 0 6"/></svg><div><b data-i18n="doorSimulate">Simulate</b><span data-i18n="doorSimulateNote">Run OpenSim and CEINMS on a marker and force-plate trial: scaling, IK, ID, static optimisation, muscle and joint contact forces.</span><span class="doorLinks"><a href="https://opensim.stanford.edu/" target="_blank" rel="noopener">OpenSim ↗</a> · <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4655131/" target="_blank" rel="noopener">CEINMS ↗</a></span></div></div>
+      <button type="button" class="labDoor" id="doorAnalysis"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 20h18"/><rect x="5" y="11" width="3" height="7" rx="0.5"/><rect x="10.5" y="7" width="3" height="11" rx="0.5"/><rect x="16" y="13" width="3" height="5" rx="0.5"/><path d="M4 8c3-5 6 2 9-3s5 1 7-1" stroke-dasharray="2 1.6"/></svg><div><b data-i18n="doorAnalysis">Analysis</b><span data-i18n="doorAnalysisNote">Statistics on your results: reliability (ICC, SEM, MDC, Bland-Altman, CMC), t-tests, ANOVA, ANCOVA, correlation and regression, and SPM on whole curves. Exports for JASP, SPSS and Python.</span></div></button>
       <button type="button" class="labDoor" id="doorBiofeedback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><div><b data-i18n="doorBiofeedback">BioFeedback (testing)</b><span data-i18n="doorBiofeedbackNote">Watch one joint angle with the camera and switch a lamp on a connected Arduino when it crosses a threshold.</span></div></button>
     </div>
     <div class="devBox">
@@ -1485,6 +1524,12 @@ try {
       <button type="button" class="ghost hidden" id="osimToggle" style="margin:0" data-i18n="osimOpen">OpenSim trial (markers and force plates)</button>
       <div id="osimBody" class="hidden" style="margin-top:12px"></div>
     </div>
+  </section>
+
+  <!-- Analysis: reliability, JASP/SPSS-style statistics and SPM on curves (src/analysis.js,
+       maths in src/stats.js, src/reliability.js, src/spm.js). Mounted on first open. -->
+  <section id="viewAnalysis" class="hidden">
+    <div id="analysisRoot"><p class="note" data-i18n="loading">Loading…</p></div>
   </section>
 
   <section id="viewRecord" class="hidden">
@@ -1812,8 +1857,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 50;
-window.BUILD_AT = "2026-10-16 11:54";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 51;
+window.BUILD_AT = "2026-10-16 12:08";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -5284,9 +5329,9 @@ $("mealShotFile").onchange = (e) => {
  * there is still exactly one source of truth for the athlete.
  */
 const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat", "viewSummary",
-               "viewHome", "viewProcess", "viewSimulate", "viewBiofeedback"];
+               "viewHome", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback"];
 /* The lab demo's screens: a home with three doors, and what they open. */
-const LAB_VIEWS = ["viewHome", "viewRecord", "viewProcess", "viewSimulate", "viewBiofeedback"];
+const LAB_VIEWS = ["viewHome", "viewRecord", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -5336,6 +5381,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewChat") chat.open();
   if (id === "viewProcess") openProcess();
   if (id === "viewSimulate") openSimulate();
+  if (id === "viewAnalysis") openAnalysis();
   if (id === "viewBiofeedback") biofeedback.open();
 });
 
@@ -7565,6 +7611,20 @@ function osimInit() {
 /* Process: the module (and its file readers) loads the first time the door is
  * opened, so the recorder's start-up does not pay for it. */
 let processMounted = null;
+/* Analysis (src/analysis.js): imported on first open, like Process. */
+let analysisMounted = null;
+function openAnalysis() {
+  if (analysisMounted) return;
+  analysisMounted = import("./src/analysis.js").then((m) => m.mountAnalysis($("analysisRoot"), {
+    t: tr,
+    download(name, data) {
+      const blob = data instanceof Blob ? data : new Blob([data], { type: "text/plain" });
+      const url = URL.createObjectURL(blob), a = document.createElement("a");
+      a.href = url; a.download = name; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 10000);
+    },
+  })).catch((e) => { analysisMounted = null; $("analysisRoot").innerHTML = `<p class="note banner">${esc(e.message)}</p>`; });
+}
 function openProcess() {
   if (processMounted) return;
   processMounted = import("./src/process.js").then((m) => m.mountProcess($("processRoot"), {
@@ -7636,6 +7696,7 @@ function enterLab() {
   });
   $("doorRecord").onclick = () => showView("viewRecord");
   $("doorProcess").onclick = () => { showView("viewProcess"); openProcess(); };
+  $("doorAnalysis").onclick = () => { showView("viewAnalysis"); openAnalysis(); };
   $("doorBiofeedback").onclick = () => { showView("viewBiofeedback"); biofeedback.open(); };
   $("doorSimulate").onclick = (e) => { if (e.target.closest("a")) return; showView("viewSimulate"); openSimulate(); };
   $("doorSimulate").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("doorSimulate").click(); } };
@@ -7651,6 +7712,7 @@ function enterLab() {
   history.replaceState({ view: land }, "", "#" + land);
   showView(land, false);
   if (land === "viewProcess") openProcess();
+  if (land === "viewAnalysis") openAnalysis();
   if (land === "viewBiofeedback") queueMicrotask(() => biofeedback && biofeedback.open());
 }
 
