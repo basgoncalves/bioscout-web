@@ -47,3 +47,4 @@ tests/vision_model/results/
 # written by serve.py when the port is taken
 _private/launchers/server_busy.html
 server_busy.html
+_scratch/

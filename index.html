@@ -1,6 +1,24 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script>
+/* If start-up code throws, say so on the page (instead of a half-built screen),
+   with the message to copy. Local testing only shows it; nothing is sent. */
+(function () {
+  var shown = 0;
+  function show(msg) {
+    if (shown++ > 2) return;
+    var d = document.querySelector("[data-bs-err]");
+    if (!d) { d = document.createElement("div"); d.setAttribute("data-bs-err", "");
+      d.style.cssText = "position:fixed;left:8px;right:8px;bottom:8px;z-index:99999;background:#5b1d1d;color:#fff;border:1px solid #e66;border-radius:10px;padding:10px 12px;font:13px/1.4 system-ui,sans-serif;white-space:pre-wrap;max-height:40vh;overflow:auto";
+      (document.body || document.documentElement).appendChild(d); }
+    d.textContent = (d.textContent ? d.textContent + "\n" : "Start-up error (please send this text):\n") + msg;
+  }
+  window.addEventListener("error", function (e) { show((e.message || "error") + (e.filename ? "  @ " + e.filename.split("/").pop() + ":" + e.lineno : "")); });
+  window.addEventListener("unhandledrejection", function (e) { var r = e.reason || {}; show("(promise) " + (r.message || r) + (r.stack ? "\n" + String(r.stack).split("\n").slice(1, 3).join("\n") : "")); });
+})();
+</script>
+
 <meta charset="utf-8">
 <!-- No screen is shown until the app has chosen one: without this the login
      screen (the only view not hidden in the markup) flashes for a frame before
@@ -1982,8 +2000,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 65;
-window.BUILD_AT = "2026-10-16 16:52";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 66;
+window.BUILD_AT = "2026-10-16 17:10";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
