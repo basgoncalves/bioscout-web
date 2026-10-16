@@ -637,6 +637,8 @@ try {
   .bfbGreenDot { width:22px; height:22px; display:inline-block; vertical-align:middle; }
   .bfbGreenDot.on { background:#4caf50 !important; border-color:#b9f6ca !important; box-shadow:0 0 16px 6px rgba(76,175,80,.7) !important; }
   .bfbDots { display:flex; gap:6px; }
+  .bfbCol { width:26px; height:22px; padding:0; border:1px solid var(--line,#444); border-radius:6px; background:none; vertical-align:middle; cursor:pointer; }
+  .bfbColReset { font-size:11px; padding:2px 8px; margin-left:8px; }
   .bfbPinTest { gap:6px !important; }
   .bfbPinBtn { min-width:2.6em; padding:6px 8px; font-variant-numeric:tabular-nums; }
   .bfbPinBtn.on { background:#4caf50; color:#fff; border-color:#b9f6ca; }
@@ -1503,9 +1505,9 @@ try {
       </div>
       <p class="note" id="bfbPortStatus"></p>
       <div class="row bfbRow">
-        <button type="button" class="ghost bfbLvBtn" data-testlv="1"><span class="bfbSw" style="background:#ffd54a"></span><span data-i18n="bfb_pinY">Yellow</span></button>
-        <button type="button" class="ghost bfbLvBtn" data-testlv="2"><span class="bfbSw" style="background:#ff9a3c"></span><span data-i18n="bfb_pinO">Orange</span></button>
-        <button type="button" class="ghost bfbLvBtn" data-testlv="3"><span class="bfbSw" style="background:#ff4d4d"></span><span data-i18n="bfb_pinR">Red</span></button>
+        <button type="button" class="ghost bfbLvBtn" data-testlv="1"><span class="bfbSw" data-sw="0"></span><span data-i18n="bfb_pinY">Lamp 1</span></button>
+        <button type="button" class="ghost bfbLvBtn" data-testlv="2"><span class="bfbSw" data-sw="1"></span><span data-i18n="bfb_pinO">Lamp 2</span></button>
+        <button type="button" class="ghost bfbLvBtn" data-testlv="3"><span class="bfbSw" data-sw="2"></span><span data-i18n="bfb_pinR">Lamp 3</span></button>
         <button type="button" class="ghost" id="bfbTestOn" data-i18n="bfb_testOn">All on</button>
         <button type="button" class="ghost" id="bfbTestOff" data-i18n="bfb_testOff">All off</button>
       </div>
@@ -1536,6 +1538,7 @@ try {
       <canvas id="bfbFsrCv" style="width:100%;height:80px;margin-top:6px"></canvas>
       <div class="row bfbRow">
         <label><input type="checkbox" id="bfbFsrLamp"> <span data-i18n="bfb_fsrLamp">Lamps follow pressure</span></label>
+        <label><span data-i18n="bfb_fsrDisp">4-digit display</span> <select id="bfbFsrDisp"><option value="off" data-i18n="bfb_fsrDispOff">Off</option><option value="pct" data-i18n="bfb_fsrDispPct">% of range</option><option value="raw" data-i18n="bfb_fsrDispRaw">Raw 0–1023</option></select></label>
         <label><span data-i18n="bfb_fsrThr">Levels (%)</span> <input id="bfbFsrThr" size="10" inputmode="decimal"></label>
       </div>
       <h4 style="margin:10px 0 4px" data-i18n="bfb_pinTest">Test each pin</h4>
@@ -1579,21 +1582,21 @@ try {
         <label><span data-i18n="bfb_sound">Sound</span><select id="bfbSound"><option value="off" data-i18n="bfb_soundOff">Off</option><option value="beep" data-i18n="bfb_soundBeep">Beep when crossed</option><option value="repeat" data-i18n="bfb_soundRepeat">Beep while over</option></select></label>
       </div>
       <div class="bfbThrRow">
-        <span class="bfbThrLbl"><span class="bfbSw" style="background:#ffd54a"></span><span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>)</span>
+        <span class="bfbThrLbl"><input type="color" class="bfbCol" data-col="0" aria-label="Colour 1"> <span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>) <button type="button" class="ghost bfbColReset" data-colreset data-i18n="bfb_colReset">Default colours</button></span>
         <div class="bfbThrCtl">
           <input type="range" id="bfbThr" min="0" max="180" step="1" aria-label="Threshold">
           <input type="number" id="bfbThrN" min="0" max="180" step="1" aria-label="Threshold">
         </div>
       </div>
       <div class="bfbThrRow">
-        <label class="bfbThrLbl"><input type="checkbox" id="bfbThrOn2"> <span class="bfbSw" style="background:#ff9a3c"></span><span data-i18n="bfb_thr2">Orange threshold</span></label>
+        <label class="bfbThrLbl"><input type="checkbox" id="bfbThrOn2"> <input type="color" class="bfbCol" data-col="1" aria-label="Colour 2"> <span data-i18n="bfb_thr2">Threshold 2</span></label>
         <div class="bfbThrCtl">
           <input type="range" id="bfbThr2" min="0" max="180" step="1" aria-label="Orange threshold">
           <input type="number" id="bfbThrN2" min="0" max="180" step="1" aria-label="Orange threshold">
         </div>
       </div>
       <div class="bfbThrRow">
-        <label class="bfbThrLbl"><input type="checkbox" id="bfbThrOn3"> <span class="bfbSw" style="background:#ff4d4d"></span><span data-i18n="bfb_thr3">Red threshold</span></label>
+        <label class="bfbThrLbl"><input type="checkbox" id="bfbThrOn3"> <input type="color" class="bfbCol" data-col="2" aria-label="Colour 3"> <span data-i18n="bfb_thr3">Threshold 3</span></label>
         <div class="bfbThrCtl">
           <input type="range" id="bfbThr3" min="0" max="180" step="1" aria-label="Red threshold">
           <input type="number" id="bfbThrN3" min="0" max="180" step="1" aria-label="Red threshold">
@@ -1982,8 +1985,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 59;
-window.BUILD_AT = "2026-10-16 15:39";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 60;
+window.BUILD_AT = "2026-10-16 15:57";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

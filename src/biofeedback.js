@@ -578,13 +578,13 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       fsr.onOpen(); readLoop(port);
       await listPorts();
       // Uno-style boards reset when the port opens; give the bootloader a moment.
-      st.v3 = false; st.boardPins = null; renderPins();
+      st.v3 = false; st.ver = 0; st.boardPins = null; renderPins();
       setTimeout(() => { writeLine("?"); send(false, true); }, 1800);
     } catch (e) { st.port = null; status("bfb_portFail", { err: e.message }, true); }
     renderConn();
   }
   function onLine(ln) {
-    if (ln.startsWith("BIOSCOUT_LAMP_READY")) { st.v3 = /v[3-9]/.test(ln); renderPins(); }
+    if (ln.startsWith("BIOSCOUT_LAMP_READY")) { st.ver = +((/v(\d+)/.exec(ln) || [])[1] || 2); st.v3 = st.ver >= 3; renderPins(); }
     const m = /^PINS ([\d,]+)/.exec(ln);
     if (m) { st.v3 = true; st.boardPins = m[1].split(",").map(Number); renderPins(); }
   }
@@ -612,9 +612,9 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     catch (e) { status("bfb_portFail", { err: e.message }, true); }
   }
   const send = (on, force = false) => sendLevel(on ? 1 : 0, force);
-  const writeLine = async (txt) => {
+  const writeLine = async (txt, quiet = false) => {
     if (!st.writer) return;
-    try { await st.writer.write(new TextEncoder().encode(txt + "\n")); log("→ " + txt); } catch { /* port gone */ }
+    try { await st.writer.write(new TextEncoder().encode(txt + "\n")); if (!quiet) log("→ " + txt); } catch { /* port gone */ }
   };
   /* Pressure sensor on A0 (sketch v4): live trace, zero/max, can drive the lamp. */
   const fsr = initPressure({ $, tr, writeLine, sendLevel });
@@ -649,11 +649,12 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const pinOn = new Set();
   function renderPinTest() {
     const host = $("bfbPinTest"); if (!host) return;
-    const P = cfg.pins || [13, 12, 11, 8, 7], role = { [P[0]]: "#ffd54a", [P[1]]: "#ff9a3c", [P[2]]: "#ff4d4d", [P[4]]: "#9aa4b2" };
+    const P = cfg.pins || [13, 12, 11, 8, 7], role = { [P[4]]: "#9aa4b2", [P[2]]: LVCOL[2], [P[1]]: LVCOL[1], [P[0]]: LVCOL[0] };
     host.innerHTML = Array.from({ length: 12 }, (_, j) => j + 2).map((n) =>
-      `<button type="button" class="ghost bfbPinBtn${pinOn.has(n) ? " on" : ""}" data-tpin="${n}"${st.port && st.v3 ? "" : " disabled"}
+      `<button type="button" class="ghost bfbPinBtn${pinOn.has(n) ? " on" : ""}" data-tpin="${n}"${st.port && st.ver >= 5 ? "" : " disabled"}
         style="${role[n] ? `box-shadow:inset 0 -3px 0 ${role[n]}` : ""}">${n}</button>`).join("")
-      + `<button type="button" class="ghost" id="bfbPinAllOff"${st.port && st.v3 ? "" : " disabled"}>${esc(tr("bfb_testOff"))}</button>`;
+      + `<button type="button" class="ghost" id="bfbPinAllOff"${st.port && st.ver >= 5 ? "" : " disabled"}>${esc(tr("bfb_testOff"))}</button>`
+      + (st.port && st.ver < 5 ? `<p class="note" style="flex-basis:100%">${esc(tr("bfb_pinTestOld"))}</p>` : "");
     for (const b of host.querySelectorAll("[data-tpin]")) b.onclick = () => {
       const n = +b.dataset.tpin, on = !pinOn.has(n);
       on ? pinOn.add(n) : pinOn.delete(n); writeLine(`T${n}:${on ? 1 : 0}`); renderPinTest();
@@ -669,7 +670,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function renderPins() {
     const host = $("bfbPins"); if (!host) return;
     const P = cfg.pins || [13, 12, 11, 8, 7];
-    host.innerHTML = PIN_KEYS.map((k, i) => !k ? "" : `<label><span>${esc(tr(k))}</span><select data-pin="${i}">${
+    host.innerHTML = PIN_KEYS.map((k, i) => !k ? "" : `<label><span>${i < 3 ? `<span class="bfbSw" data-sw="${i}"></span>` : ""}${esc(tr(k))}</span><select data-pin="${i}">${
       Array.from({ length: 12 }, (_, j) => j + 2).map((n) => `<option${n === P[i] ? " selected" : ""}>${n}</option>`).join("")}</select></label>`).join("");
     for (const sel of host.querySelectorAll("select")) sel.onchange = () => {
       const i = +sel.dataset.pin; cfg.pins = [...P]; cfg.pins[i] = +sel.value; save();
@@ -677,8 +678,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       renderPins();
     };
     const B = st.boardPins, same = B && B.every((n, i) => n === P[i]);
-    $("bfbPinsNote").textContent = !st.port ? "" : !st.v3 ? tr("bfb_oldSketch")
-      : same ? tr("bfb_pinsOk") : tr("bfb_pinsDiff", { pins: (B || []).join(", ") });
+    const used = [0, 1, 2, 4].map((i) => P[i]), dup = used.find((n, i) => used.indexOf(n) !== i);
+    $("bfbPinsNote").textContent = [dup ? tr("bfb_pinsClash", { pin: dup }) : "", !st.port ? "" : !st.v3 ? tr("bfb_oldSketch")
+      : same ? tr("bfb_pinsOk") : tr("bfb_pinsDiff", { pins: (B || []).join(", ") }), tr("bfb_relayNote")].filter(Boolean).join(" ");
+    paintColors();
     $("bfbPinsSend").disabled = !st.port || !st.v3;
     renderPinTest();
   }
@@ -808,7 +811,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const meets = (v) => (cfg.dir === "above" ? v > cfg.thr : v < cfg.thr);
   /* Three thresholds -> yellow, orange, red. Level = how many are crossed
    * (each with its own hysteresis), so the lamps light cumulatively. */
-  const LVCOL = ["#ffd54a", "#ff9a3c", "#ff4d4d"];
+  /* Lamp colours, editable; default green, yellow, red. LVCOL is cfg.colors
+   * itself, so a change shows everywhere at once. */
+  const LVDEF = ["#4caf50", "#ffd54a", "#ff4d4d"];
+  if (!Array.isArray(cfg.colors) || cfg.colors.length !== 3) cfg.colors = [...LVDEF];
+  const LVCOL = cfg.colors;
   const thrs = () => [cfg.thr, cfg.thr2, cfg.thr3].map((t) => (Number.isFinite(t) ? t : NaN));
   const levelNow = (v) => thrs().filter((t) => Number.isFinite(t) && (cfg.dir === "above" ? v > t : v < t)).length;
   const cross = [false, false, false];
@@ -821,7 +828,23 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     });
     return n;
   }
-  function showDots(lv) { ["bfbLamp", "bfbLamp2", "bfbLamp3"].forEach((id, i) => $(id).classList.toggle("on", lv > i)); }
+  function showDots(lv) {
+    ["bfbLamp", "bfbLamp2", "bfbLamp3"].forEach((id, i) => {
+      const el = $(id), on = lv > i, c = LVCOL[i];
+      el.classList.toggle("on", on);
+      el.style.background = on ? c : ""; el.style.borderColor = on ? c : ""; el.style.boxShadow = on ? `0 0 14px 5px ${c}b3` : "";
+    });
+  }
+  function paintColors() {
+    for (const el of document.querySelectorAll("#viewBiofeedback [data-sw], #bfbDevDlg [data-sw]")) el.style.background = LVCOL[+el.dataset.sw];
+    for (const el of document.querySelectorAll("#viewBiofeedback input[data-col]")) el.value = LVCOL[+el.dataset.col];
+  }
+  for (const el of document.querySelectorAll("#viewBiofeedback input[data-col]")) el.oninput = () => {
+    LVCOL[+el.dataset.col] = el.value; save(); paintColors(); buildBars(); renderPinTest();
+  };
+  for (const el of document.querySelectorAll("#viewBiofeedback [data-colreset]")) el.onclick = () => {
+    LVCOL.splice(0, 3, ...LVDEF); save(); paintColors(); buildBars(); renderPinTest();
+  };
   const barMax = () => METRICS[cfg.metric].max || 180;
   const barMin = () => (unit() === DEG ? Math.min(0, cfg.thr - 10) : 0);
   const pct = (x) => Math.max(0, Math.min(100, ((x - barMin()) / (barMax() - barMin())) * 100));
@@ -838,7 +861,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const ok = Number.isFinite(v) && meets(v);
     const lv = Number.isFinite(v) ? levelNow(v) : 0;
     f.style.width = Number.isFinite(v) ? pct(v) + "%" : "0"; f.classList.toggle("hit", ok);
-    f.classList.toggle("l2", lv >= 2); f.classList.toggle("l3", lv >= 3);
+    f.style.background = lv ? LVCOL[lv - 1] : "";
     $("bfbBars").querySelector(`.bfbBarVal[data-side="${side}"]`).textContent = Number.isFinite(v) ? fmt(v) : "–";
     const T = thrs();
     for (const t of $("bfbBars").querySelectorAll(".bfbBarThr")) {
