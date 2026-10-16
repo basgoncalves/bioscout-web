@@ -68,7 +68,7 @@ no wiring at all.
 ## 4. Connect from BioScout Web
 
 1. Open BioScout Web in Chrome or Edge on the PC with the Arduino (local:
-   `launchers\biofeedback.bat` → http://localhost:5173, or the live site).
+   `_private\launchers\biofeedback.bat` → http://localhost:5173, or the live site).
 2. Home → **BioFeedback** → **Choose port…** → pick the Uno → "Connected at 9600 baud".
 3. **Test lamp on / off** → yellow. **Test green** → green flashes 1.5 s.
 4. Green lamp mode (step 1 of the page):
@@ -110,3 +110,28 @@ An Arduino pin gives ~20 mA: enough for an LED, not for a bulb, a motor or an LE
 | "Could not open the port" | IDE Serial Monitor still open; close it |
 | Green never lights, count says "not connected" | See §5 (Realtime public access / network) |
 | LED very bright / orange-ish | No resistor — add the 220 Ω |
+
+## 8. Three-level lamps (sketch v3)
+
+The app now has three thresholds — **yellow, orange, red** — and the lamps light cumulatively
+(level 1 = yellow, 2 = yellow + orange, 3 = all three). Default pins:
+
+| Lamp | Pin | Command |
+|---|---|---|
+| Yellow | 13 | `L1` (or `1`) |
+| Orange | 12 | `L2` |
+| Red | 11 | `L3` |
+| Green (someone online) | 8 | `G` / `g` |
+| Relay (any level on) | 7 | follows `L1`–`L3` |
+
+Each LED gets its own 220 Ω resistor; all short legs go to the GND rail, as for yellow.
+
+**Change pins without re-uploading:** Connect external device → Arduino → *Pins*. The app sends
+`P<i>:<pin>` (e.g. `P1:10` puts orange on pin 10); the board keeps it in EEPROM and answers
+`PINS 13,12,11,8,7`. `?` asks for the current pins.
+
+**Edit the sketch:** *Edit Arduino sketch…* opens the code in a window (kept in your browser).
+Download the .ino and upload with `_private/launchers/flash_arduino.bat` or the Arduino IDE — a browser
+cannot compile Arduino code.
+
+An old (v2) board still works for yellow and green; the app says so and asks for the upload.

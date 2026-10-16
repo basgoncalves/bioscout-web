@@ -636,6 +636,17 @@ try {
   .bfbLamp { width:38px; height:38px; border-radius:50%; background:#333; border:2px solid #666; }
   .bfbGreenDot { width:22px; height:22px; display:inline-block; vertical-align:middle; }
   .bfbGreenDot.on { background:#4caf50 !important; border-color:#b9f6ca !important; box-shadow:0 0 16px 6px rgba(76,175,80,.7) !important; }
+  .bfbDots { display:flex; gap:6px; }
+  .bfbLamp.sm { width:19px; height:19px; border-width:1.5px; }
+  .bfbLamp.l2.on { background:#ff9a3c; border-color:#ffd2a8; box-shadow:0 0 14px 5px rgba(255,154,60,.7); }
+  .bfbLamp.l3.on { background:#ff4d4d; border-color:#ffc0c0; box-shadow:0 0 14px 5px rgba(255,77,77,.75); }
+  .bfbBarFill.l2 { background:#ff9a3c; }
+  .bfbBarFill.l3 { background:#ff4d4d; }
+  .bfbSw { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+  .bfbLvBtn { display:inline-flex; align-items:center; }
+  .bfbPins label { min-width:5.5em; }
+  .bfbSketchDlg { width:min(900px, 96vw); }
+  .bfbSketchTxt { width:100%; height:min(60vh, 520px); font:12px/1.4 ui-monospace, Consolas, monospace; white-space:pre; tab-size:2; box-sizing:border-box; }
   .bfbLamp.on { background:#ffd54a; border-color:#fff3b0; box-shadow:0 0 24px 8px rgba(255,213,74,.7); }
   .bfbBarRow { display:flex; align-items:center; gap:8px; margin:8px 0; }
   .bfbSide { width:1.2em; font-weight:700; }
@@ -1489,9 +1500,40 @@ try {
       </div>
       <p class="note" id="bfbPortStatus"></p>
       <div class="row bfbRow">
-        <button type="button" class="ghost" id="bfbTestOn" data-i18n="bfb_testOn">Test lamp on</button>
-        <button type="button" class="ghost" id="bfbTestOff" data-i18n="bfb_testOff">Test lamp off</button>
+        <button type="button" class="ghost bfbLvBtn" data-testlv="1"><span class="bfbSw" style="background:#ffd54a"></span><span data-i18n="bfb_pinY">Yellow</span></button>
+        <button type="button" class="ghost bfbLvBtn" data-testlv="2"><span class="bfbSw" style="background:#ff9a3c"></span><span data-i18n="bfb_pinO">Orange</span></button>
+        <button type="button" class="ghost bfbLvBtn" data-testlv="3"><span class="bfbSw" style="background:#ff4d4d"></span><span data-i18n="bfb_pinR">Red</span></button>
+        <button type="button" class="ghost" id="bfbTestOn" data-i18n="bfb_testOn">All on</button>
+        <button type="button" class="ghost" id="bfbTestOff" data-i18n="bfb_testOff">All off</button>
+      </div>
+      <h4 style="margin:10px 0 4px" data-i18n="bfb_pins">Pins</h4>
+      <div class="row bfbRow bfbPins" id="bfbPins"></div>
+      <p class="note" id="bfbPinsNote"></p>
+      <div class="row bfbRow">
+        <button type="button" class="ghost" id="bfbPinsSend" data-i18n="bfb_pinsSend">Send pins to board</button>
+        <button type="button" class="ghost" id="bfbSketchEdit" data-i18n="bfb_sketchEdit">Edit Arduino sketch…</button>
         <a href="./assets/arduino/biofeedback_lamp/biofeedback_lamp.ino" download data-i18n="bfb_sketch">Arduino sketch (.ino)</a>
+      </div>
+      <h4 style="margin:10px 0 4px" data-i18n="bfb_fsr">Pressure sensor (A0)</h4>
+      <p class="note" data-i18n="bfb_fsrHint">FSR between 5V and A0, 10 kΩ from A0 to GND. Raw counts 0–1023 and % of your zero–max range; not calibrated in newtons.</p>
+      <p class="note bad" id="bfbFsrNote"></p>
+      <div class="row bfbRow">
+        <button type="button" id="bfbFsrStream" data-i18n="bfb_fsrStart">Start stream</button>
+        <button type="button" class="ghost" id="bfbFsrOnce" data-i18n="bfb_fsrOnce">Read once</button>
+        <button type="button" class="ghost" id="bfbFsrZero" data-i18n="bfb_fsrZero">Set zero (unloaded)</button>
+        <button type="button" class="ghost" id="bfbFsrMax" data-i18n="bfb_fsrMax">Set max (full press)</button>
+        <button type="button" class="ghost" id="bfbFsrCsv" data-i18n="bfb_fsrCsv">Download CSV</button>
+      </div>
+      <div class="row bfbRow" style="align-items:center;gap:12px">
+        <b id="bfbFsrPct" style="font-size:1.4em;min-width:4.5em">–</b>
+        <span class="note"><span data-i18n="bfb_fsrRaw">raw</span> <span id="bfbFsrRaw">–</span></span>
+        <span class="note" id="bfbFsrCal"></span>
+      </div>
+      <div style="height:8px;background:var(--line,#ddd);border-radius:4px;overflow:hidden"><div id="bfbFsrBar" style="height:100%;width:0;background:var(--acc,#3a8ee8);transition:width .05s"></div></div>
+      <canvas id="bfbFsrCv" style="width:100%;height:80px;margin-top:6px"></canvas>
+      <div class="row bfbRow">
+        <label><input type="checkbox" id="bfbFsrLamp"> <span data-i18n="bfb_fsrLamp">Lamps follow pressure</span></label>
+        <label><span data-i18n="bfb_fsrThr">Levels (%)</span> <input id="bfbFsrThr" size="10" inputmode="decimal"></label>
       </div>
       <div class="row bfbRow">
         <label><span data-i18n="bfb_green">Green lamp: someone opens BioScout</span>
@@ -1503,6 +1545,18 @@ try {
         <span class="note" id="bfbOnline"></span>
       </div>
 
+        </div>
+      </dialog>
+
+      <dialog id="bfbSketchDlg" class="bfbSketchDlg">
+        <div class="bfbDlgHead"><b data-i18n="bfb_sketchTitle">Arduino sketch</b><button type="button" class="ghost" id="bfbSketchClose" aria-label="Close">✕</button></div>
+        <p class="note" data-i18n="bfb_sketchNote">Edit the code here; it is kept in this browser. A browser cannot compile for the Arduino: download the .ino and upload it with _private/launchers/flash_arduino.bat or the Arduino IDE. Pins can be changed without uploading (Pins, above).</p>
+        <textarea id="bfbSketchTxt" class="bfbSketchTxt" spellcheck="false"></textarea>
+        <div class="row bfbRow">
+          <button type="button" id="bfbSketchDl" data-i18n="bfb_sketchDl">Download .ino</button>
+          <button type="button" class="ghost" id="bfbSketchCopy" data-i18n="bfb_sketchCopy">Copy</button>
+          <button type="button" class="ghost" id="bfbSketchPins" data-i18n="bfb_sketchPins">Put my pins in the code</button>
+          <button type="button" class="ghost" id="bfbSketchReset" data-i18n="bfb_sketchReset">Reset to original</button>
         </div>
       </dialog>
 
@@ -1528,10 +1582,24 @@ try {
         <label><span data-i18n="bfb_sound">Sound</span><select id="bfbSound"><option value="off" data-i18n="bfb_soundOff">Off</option><option value="beep" data-i18n="bfb_soundBeep">Beep when crossed</option><option value="repeat" data-i18n="bfb_soundRepeat">Beep while over</option></select></label>
       </div>
       <div class="bfbThrRow">
-        <span class="bfbThrLbl"><span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>)</span>
+        <span class="bfbThrLbl"><span class="bfbSw" style="background:#ffd54a"></span><span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>)</span>
         <div class="bfbThrCtl">
           <input type="range" id="bfbThr" min="0" max="180" step="1" aria-label="Threshold">
           <input type="number" id="bfbThrN" min="0" max="180" step="1" aria-label="Threshold">
+        </div>
+      </div>
+      <div class="bfbThrRow">
+        <label class="bfbThrLbl"><input type="checkbox" id="bfbThrOn2"> <span class="bfbSw" style="background:#ff9a3c"></span><span data-i18n="bfb_thr2">Orange threshold</span></label>
+        <div class="bfbThrCtl">
+          <input type="range" id="bfbThr2" min="0" max="180" step="1" aria-label="Orange threshold">
+          <input type="number" id="bfbThrN2" min="0" max="180" step="1" aria-label="Orange threshold">
+        </div>
+      </div>
+      <div class="bfbThrRow">
+        <label class="bfbThrLbl"><input type="checkbox" id="bfbThrOn3"> <span class="bfbSw" style="background:#ff4d4d"></span><span data-i18n="bfb_thr3">Red threshold</span></label>
+        <div class="bfbThrCtl">
+          <input type="range" id="bfbThr3" min="0" max="180" step="1" aria-label="Red threshold">
+          <input type="number" id="bfbThrN3" min="0" max="180" step="1" aria-label="Red threshold">
         </div>
       </div>
 
@@ -1541,7 +1609,7 @@ try {
         <video id="bfbVideo" playsinline muted></video>
         <canvas id="bfbSrcCv" class="hidden"></canvas>
         <canvas id="bfbCanvas"></canvas>
-        <div class="bfbHud"><span id="bfbValue">–</span><span id="bfbLamp" class="bfbLamp" title="Lamp"></span></div>
+        <div class="bfbHud"><span id="bfbValue">–</span><span class="bfbDots"><span id="bfbLamp" class="bfbLamp sm l1" title="Yellow"></span><span id="bfbLamp2" class="bfbLamp sm l2" title="Orange"></span><span id="bfbLamp3" class="bfbLamp sm l3" title="Red"></span></span></div>
       </div>
       <aside id="bfbQuick" class="bfbQuick" aria-label="Trials"></aside>
       </div>
@@ -1917,8 +1985,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 56;
-window.BUILD_AT = "2026-10-16 14:43";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 57;
+window.BUILD_AT = "2026-10-16 15:33";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

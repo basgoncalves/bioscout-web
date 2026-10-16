@@ -13,6 +13,7 @@
  * 2D image angles do. They are camera estimates, not motion capture.
  */
 
+import { initPressure } from "./pressure.js";
 import { bodyMapHTML, REGIONS } from "./bodymap.js";
 import { loadForceModel, predictForces } from "./forces.js";
 import { makeZip } from "./zip.js";
@@ -415,7 +416,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     port: null, writer: null, reader: null, lm: null, stream: null, raf: 0,
     active: false, lit: null, value: NaN, lastTs: -1,
   };
-  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, green: "flash", sound: "beep", src: "camera", facing: "user", extra: [], mass: 75, height: 1.75, load: 0 };
+  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, green: "flash", sound: "beep", src: "camera", facing: "user", extra: [], mass: 75, height: 1.75, load: 0, thr2: null, thr3: null, pins: [13, 12, 11, 8, 7] };
   try { cfg = { ...cfg, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch { /* private */ }
   /* Load per movement and side: cfg.wt[move] = { L, R } kg. Only movements
    * marked wt take one; a kick or a jump shot never does. */
@@ -446,7 +447,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function syncInputs() {
     const m = METRICS[cfg.metric] || METRICS.kneeFlexL, mx = m.unit === "BW" ? 1000 : m.max || 180;   // threshold limit; the bars keep m.max
     const mn = m.unit === DEG ? -90 : 0;
-    $("bfbThr").max = mx; $("bfbThrN").max = mx; $("bfbThr").min = mn; $("bfbThrN").min = mn;
+    for (const id of ["bfbThr", "bfbThrN", "bfbThr2", "bfbThrN2", "bfbThr3", "bfbThrN3"]) { $(id).max = mx; $(id).min = mn; $(id).step = m.unit === "BW" || m.unit === "m/s" ? "0.1" : "1"; }
     $("bfbUnit").textContent = m.unit;
     $("bfbHint").textContent = [cfg.move === "shot" ? tr("bfb_hintShot") : cfg.move === "cmj" || cfg.move === "sj" ? tr("bfb_hintJump") : "",
       m.load ? tr("bfb_hintLoad") : ""].filter(Boolean).join(" ");
@@ -457,6 +458,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbZeroNote").textContent = z ? tr("bfb_zeroed", { v: z.toFixed(0) }) : "";
     $("bfbValue").textContent = "–"; $("bfbResults").innerHTML = ""; ema = emaL = emaR = NaN; buildBars();
     $("bfbThr").value = cfg.thr; $("bfbThrN").value = cfg.thr;
+    for (const i of [2, 3]) {
+      const t = cfg["thr" + i], on = Number.isFinite(t);
+      $("bfbThrOn" + i).checked = on; $("bfbThr" + i).disabled = $("bfbThrN" + i).disabled = !on;
+      $("bfbThr" + i).value = on ? t : cfg.thr; $("bfbThrN" + i).value = on ? t : "";
+    }
     renderPick();
     $("bfbMass").value = cfg.mass ?? 75; $("bfbHeight").value = cfg.height ?? 1.75; const wx = wtOf(cfg.move);
     $("bfbLoadL").value = wx.L; $("bfbLoadR").value = wx.R; syncExt();
@@ -477,9 +483,24 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const before = METRICS[cfg.metric] && METRICS[cfg.metric].unit;
     cfg.metric = $("bfbMetric").value;
     const u = METRICS[cfg.metric].unit;   // a 30 deg threshold means nothing in body weights
-    if (u !== before) { cfg.thr = { BW: 3, cm: 30, ms: 500, "m/s": 0.5, W: 500, Nm: 30 }[u] ?? 30; cfg.hyst = HYST[u] ?? 3; }
+    if (u !== before) { cfg.thr = { BW: 3, cm: 30, ms: 500, "m/s": 0.5, W: 500, Nm: 30 }[u] ?? 30; cfg.hyst = HYST[u] ?? 3; cfg.thr2 = cfg.thr3 = null; }
     syncInputs(); save();
   };
+  /* Orange (2) and red (3) thresholds: optional, off = null. Turning one on
+   * starts it a step beyond the one before, in the "light when" direction. */
+  for (const i of [2, 3]) {
+    const clamp = (v) => Math.max(+$("bfbThr").min, Math.min(+$("bfbThr").max, v));
+    $("bfbThrOn" + i).onchange = () => {
+      if ($("bfbThrOn" + i).checked) {
+        const prev = Number.isFinite(cfg["thr" + (i - 1)]) ? cfg["thr" + (i - 1)] : cfg.thr;
+        const d = Math.max(+$("bfbThr").step || 1, (+$("bfbThr").max - +$("bfbThr").min) * 0.1) * (cfg.dir === "above" ? 1 : -1);
+        cfg["thr" + i] = +clamp(prev + d).toFixed(2);
+      } else cfg["thr" + i] = null;
+      save(); syncInputs();
+    };
+    $("bfbThr" + i).oninput = () => { cfg["thr" + i] = +$("bfbThr" + i).value; $("bfbThrN" + i).value = cfg["thr" + i]; save(); };
+    $("bfbThrN" + i).onchange = () => { cfg["thr" + i] = clamp(+$("bfbThrN" + i).value || 0); $("bfbThr" + i).value = cfg["thr" + i]; save(); };
+  }
   $("bfbThr").oninput = () => { cfg.thr = +$("bfbThr").value; $("bfbThrN").value = cfg.thr; save(); };
   $("bfbThrN").onchange = () => { cfg.thr = Math.max(+$("bfbThr").min || 0, Math.min(+$("bfbThr").max || 180, +$("bfbThrN").value || 0)); $("bfbThr").value = cfg.thr; save(); };
   $("bfbDir").onchange = () => { cfg.dir = $("bfbDir").value; save(); };
@@ -520,7 +541,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   function pickMove(k) {
     cfg.move = k; const mv = MOVES[k];
-    cfg.metric = mv.def; cfg.thr = mv.thr; cfg.dir = mv.dir; cfg.hyst = HYST[METRICS[mv.def].unit] ?? 3;
+    cfg.metric = mv.def; cfg.thr = mv.thr; cfg.dir = mv.dir; cfg.hyst = HYST[METRICS[mv.def].unit] ?? 3; cfg.thr2 = cfg.thr3 = null;
     $("bfbMove").value = k; fillMetrics(); syncInputs(); save(); renderBody(); renderQuick();
   }
   $("bfbBody").addEventListener("click", (e) => {
@@ -548,6 +569,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     try { if (st.writer) { st.writer.releaseLock(); } } catch { /* gone */ }
     try { if (st.port) await st.port.close(); } catch { /* already closed */ }
     st.reader = st.writer = null; st.lit = null;
+    if (typeof fsr !== "undefined") fsr.onClose();
   }
   async function openPort(port) {
     await closePort();
@@ -555,12 +577,18 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       await port.open({ baudRate: cfg.baud });
       st.port = port; st.writer = port.writable.getWriter();
       status("bfb_portOpen", { baud: cfg.baud });
-      readLoop(port);
+      fsr.onOpen(); readLoop(port);
       await listPorts();
       // Uno-style boards reset when the port opens; give the bootloader a moment.
-      setTimeout(() => send(false, true), 1800);
+      st.v3 = false; st.boardPins = null; renderPins();
+      setTimeout(() => { writeLine("?"); send(false, true); }, 1800);
     } catch (e) { st.port = null; status("bfb_portFail", { err: e.message }, true); }
     renderConn();
+  }
+  function onLine(ln) {
+    if (ln.startsWith("BIOSCOUT_LAMP_READY")) { st.v3 = /v[3-9]/.test(ln); renderPins(); }
+    const m = /^PINS ([\d,]+)/.exec(ln);
+    if (m) { st.v3 = true; st.boardPins = m[1].split(",").map(Number); renderPins(); }
   }
   async function readLoop(port) {
     const dec = new TextDecoder(); let buf = "";
@@ -569,19 +597,29 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       for (;;) {
         const { value, done } = await st.reader.read(); if (done) break;
         buf += dec.decode(value); let i;
-        while ((i = buf.indexOf("\n")) >= 0) { const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (ln && ln !== st.lastRx) { st.lastRx = ln; log("← " + ln); } }
+        while ((i = buf.indexOf("\n")) >= 0) { const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (ln && fsr.onLine(ln)) continue; if (ln) onLine(ln); if (ln && ln !== st.lastRx) { st.lastRx = ln; log("← " + ln); } }
       }
     } catch { /* port closed or unplugged */ }
   }
-  async function send(on, force = false) {
-    if (cfg.invert) on = !on;
-    if (!force && st.lit === on) return;
-    st.lit = on;
-    $("bfbLamp").classList.toggle("on", on);
+  /* Lamp level 0-3 on the wire: "L<n>" for a v3 sketch, plain 1/0 (yellow
+   * only) for an older one, which ignores the L. */
+  const lvMsg = (lv) => (st.v3 ? "L" + lv : lv ? "1" : "0");
+  async function sendLevel(lv, force = false) {
+    if (cfg.invert) lv = lv ? 0 : 1;
+    if (!force && st.lit === lv) return;
+    st.lit = lv;
+    showDots(lv);
     if (!st.writer) return;
-    try { await st.writer.write(new TextEncoder().encode(on ? "1\n" : "0\n")); log("→ " + (on ? "1" : "0")); }
+    try { await st.writer.write(new TextEncoder().encode(lvMsg(lv) + "\n")); log("→ " + lvMsg(lv)); }
     catch (e) { status("bfb_portFail", { err: e.message }, true); }
   }
+  const send = (on, force = false) => sendLevel(on ? 1 : 0, force);
+  const writeLine = async (txt) => {
+    if (!st.writer) return;
+    try { await st.writer.write(new TextEncoder().encode(txt + "\n")); log("→ " + txt); } catch { /* port gone */ }
+  };
+  /* Pressure sensor on A0 (sketch v4): live trace, zero/max, can drive the lamp. */
+  const fsr = initPressure({ $, tr, writeLine, sendLevel });
   /* "Connect external device": a small button opens a window listing the
    * devices (only the Arduino for now); the dot next to it is green while a
    * board is connected. */
@@ -595,6 +633,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbDevDot").classList.toggle("on", !!st.port);
     $("bfbDisconnect").disabled = !st.port;
     $("bfbTestOn").disabled = $("bfbTestOff").disabled = !st.port;
+    for (const b of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) b.disabled = !st.port;
+    renderPins();
   }
   $("bfbChoosePort").onclick = async () => {
     if (!hasSerial) return;
@@ -629,8 +669,50 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     green(c.on);
     if (c.on && c.pulseMs) greenTo = setTimeout(() => green(false), c.pulseMs);
   });
-  $("bfbTestOn").onclick = () => send(true, true);
-  $("bfbTestOff").onclick = () => send(false, true);
+  $("bfbTestOn").onclick = () => sendLevel(3, true);
+  $("bfbTestOff").onclick = () => sendLevel(0, true);
+  for (const b of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) b.onclick = () => sendLevel(+b.dataset.testlv, true);
+  /* Pins: which Arduino pin drives each lamp. A v3 sketch takes "P<i>:<pin>"
+   * and keeps it in EEPROM, so trying another pin or cable needs no upload. */
+  const PIN_KEYS = ["bfb_pinY", "bfb_pinO", "bfb_pinR", "bfb_pinG", "bfb_pinRelay"];
+  function renderPins() {
+    const host = $("bfbPins"); if (!host) return;
+    const P = cfg.pins || [13, 12, 11, 8, 7];
+    host.innerHTML = PIN_KEYS.map((k, i) => `<label><span>${esc(tr(k))}</span><select data-pin="${i}">${
+      Array.from({ length: 12 }, (_, j) => j + 2).map((n) => `<option${n === P[i] ? " selected" : ""}>${n}</option>`).join("")}</select></label>`).join("");
+    for (const sel of host.querySelectorAll("select")) sel.onchange = () => {
+      const i = +sel.dataset.pin; cfg.pins = [...P]; cfg.pins[i] = +sel.value; save();
+      if (st.v3) writeLine(`P${i}:${sel.value}`);
+      renderPins();
+    };
+    const B = st.boardPins, same = B && B.every((n, i) => n === P[i]);
+    $("bfbPinsNote").textContent = !st.port ? "" : !st.v3 ? tr("bfb_oldSketch")
+      : same ? tr("bfb_pinsOk") : tr("bfb_pinsDiff", { pins: (B || []).join(", ") });
+    $("bfbPinsSend").disabled = !st.port || !st.v3;
+  }
+  $("bfbPinsSend").onclick = async () => { const P = cfg.pins || [13, 12, 11, 8, 7]; for (let i = 0; i < 5; i++) await writeLine(`P${i}:${P[i]}`); };
+  /* Sketch editor: the .ino in a window, editable, kept in this browser.
+   * The browser cannot compile for the Arduino, so it is downloaded and
+   * uploaded with _private/launchers/flash_arduino.bat or the Arduino IDE. */
+  const SK_KEY = "bioscout.bfb.sketch.v1";
+  const withPins = (txt) => txt.replace(/const byte DEF\[5\] = \{[^}]*\};/, `const byte DEF[5] = {${(cfg.pins || [13, 12, 11, 8, 7]).join(", ")}};`);
+  async function defaultSketch() {
+    const r = await fetch(new URL("../assets/arduino/biofeedback_lamp/biofeedback_lamp.ino", import.meta.url), { cache: "no-cache" }); return r.ok ? r.text() : "";
+  }
+  $("bfbSketchEdit").onclick = async () => {
+    let txt = null; try { txt = localStorage.getItem(SK_KEY); } catch { /* private */ }
+    $("bfbSketchTxt").value = txt || withPins(await defaultSketch());
+    $("bfbSketchDlg").showModal();
+  };
+  $("bfbSketchTxt").oninput = () => { try { localStorage.setItem(SK_KEY, $("bfbSketchTxt").value); } catch { /* full */ } };
+  $("bfbSketchPins").onclick = () => { $("bfbSketchTxt").value = withPins($("bfbSketchTxt").value); $("bfbSketchTxt").oninput(); };
+  $("bfbSketchReset").onclick = async () => { $("bfbSketchTxt").value = withPins(await defaultSketch()); try { localStorage.removeItem(SK_KEY); } catch { /* private */ } };
+  $("bfbSketchCopy").onclick = () => navigator.clipboard && navigator.clipboard.writeText($("bfbSketchTxt").value);
+  $("bfbSketchDl").onclick = () => {
+    const url = URL.createObjectURL(new Blob([$("bfbSketchTxt").value], { type: "text/plain" })), a = document.createElement("a");
+    a.href = url; a.download = "biofeedback_lamp.ino"; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 3000);
+  };
+  $("bfbSketchClose").onclick = () => $("bfbSketchDlg").close();
   if (hasSerial) {
     navigator.serial.addEventListener("disconnect", (e) => {
       if (e.target === st.port) { closePort(); st.port = null; status("bfb_portLost", null, true); renderConn(); }
@@ -726,12 +808,28 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (st.stream) st.stream.getTracks().forEach((t) => t.stop());
     st.stream = null;
   }
-  let ema = NaN, emaL = NaN, emaR = NaN, on = false, pulseTo = 0;
+  let ema = NaN, emaL = NaN, emaR = NaN, on = false, pulseTo = 0, lastLv = 0;
   const loadEst = makeLoadEstimator();
   const barT = makeBarTracker(), barTrail = [];
   const unit = () => METRICS[cfg.metric].unit;
   const fmt = (v) => (unit() === "m/s" ? v.toFixed(2) : unit() === "cm" || unit() === "BW" ? v.toFixed(1) : v.toFixed(0)) + (unit() === DEG ? "°" : " " + unit());
   const meets = (v) => (cfg.dir === "above" ? v > cfg.thr : v < cfg.thr);
+  /* Three thresholds -> yellow, orange, red. Level = how many are crossed
+   * (each with its own hysteresis), so the lamps light cumulatively. */
+  const LVCOL = ["#ffd54a", "#ff9a3c", "#ff4d4d"];
+  const thrs = () => [cfg.thr, cfg.thr2, cfg.thr3].map((t) => (Number.isFinite(t) ? t : NaN));
+  const levelNow = (v) => thrs().filter((t) => Number.isFinite(t) && (cfg.dir === "above" ? v > t : v < t)).length;
+  const cross = [false, false, false];
+  function levelOf(v) {
+    const h = cfg.hyst; let n = 0;
+    thrs().forEach((t, i) => {
+      if (!Number.isFinite(t) || !Number.isFinite(v)) { cross[i] = false; return; }
+      cross[i] = cfg.dir === "above" ? (cross[i] ? v > t - h : v > t) : (cross[i] ? v < t + h : v < t);
+      if (cross[i]) n++;
+    });
+    return n;
+  }
+  function showDots(lv) { ["bfbLamp", "bfbLamp2", "bfbLamp3"].forEach((id, i) => $(id).classList.toggle("on", lv > i)); }
   const barMax = () => METRICS[cfg.metric].max || 180;
   const barMin = () => (unit() === DEG ? Math.min(0, cfg.thr - 10) : 0);
   const pct = (x) => Math.max(0, Math.min(100, ((x - barMin()) / (barMax() - barMin())) * 100));
@@ -739,16 +837,21 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function buildBars() {
     const m = METRICS[cfg.metric], sides = m.pair ? ["L", "R"] : [""];
     $("bfbBars").innerHTML = sides.map((sd) => `<div class="bfbBarRow"><span class="bfbSide">${sd}</span>
-      <div class="bfbBar"><div class="bfbBarFill" data-side="${sd}"></div><div class="bfbBarThr"></div></div>
+      <div class="bfbBar"><div class="bfbBarFill" data-side="${sd}"></div>${[0, 1, 2].map((i) => `<div class="bfbBarThr" data-lv="${i}" style="background:${LVCOL[i]}"></div>`).join("")}</div>
       <span class="bfbBarVal" data-side="${sd}">–</span></div>`).join("");
     hist.length = 0;
   }
   function showBar(v, side = "") {
     const f = $("bfbBars").querySelector(`.bfbBarFill[data-side="${side}"]`); if (!f) return;
     const ok = Number.isFinite(v) && meets(v);
+    const lv = Number.isFinite(v) ? levelNow(v) : 0;
     f.style.width = Number.isFinite(v) ? pct(v) + "%" : "0"; f.classList.toggle("hit", ok);
+    f.classList.toggle("l2", lv >= 2); f.classList.toggle("l3", lv >= 3);
     $("bfbBars").querySelector(`.bfbBarVal[data-side="${side}"]`).textContent = Number.isFinite(v) ? fmt(v) : "–";
-    for (const t of $("bfbBars").querySelectorAll(".bfbBarThr")) t.style.left = pct(cfg.thr) + "%";
+    const T = thrs();
+    for (const t of $("bfbBars").querySelectorAll(".bfbBarThr")) {
+      const x = T[+t.dataset.lv]; t.style.display = Number.isFinite(x) ? "" : "none"; if (Number.isFinite(x)) t.style.left = pct(x) + "%";
+    }
   }
   /* Live plot: last 10 s, one line per side, dashed threshold, plus up to
    * 5 lines in all from the chips under it. */
@@ -777,7 +880,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
     const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
     while (hist.length && hist[0].t < now - WIN) hist.shift();
-    let lo = cfg.thr, hi = cfg.thr;
+    const TT = thrs().filter(Number.isFinite);
+    let lo = Math.min(...TT), hi = Math.max(...TT);
     const sameCols = extraCols().filter(([, k]) => METRICS[k].unit === unit()).map(([col]) => col);
     for (const h of hist) for (const x of [h.a, h.b, ...sameCols.map((c) => (h.o ? h.o[c] : NaN))]) if (Number.isFinite(x)) { lo = Math.min(lo, x); hi = Math.max(hi, x); }
     const pad = Math.max(unit() === "BW" ? 0.3 : 5, (hi - lo) * 0.15); lo -= pad; hi += pad;
@@ -789,8 +893,9 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     c.globalAlpha = 1;
     for (const v of [lo + pad, hi - pad]) c.fillText(v.toFixed(unit() === "BW" ? 1 : 0), 2, Y(v) + 4);
     c.fillText("-10 s", 34, H - 2); c.fillText("now", W - 28, H - 2);
-    c.setLineDash([6, 4]); c.strokeStyle = "#ffd54a"; c.lineWidth = 1.5;
-    c.beginPath(); c.moveTo(34, Y(cfg.thr)); c.lineTo(W - 6, Y(cfg.thr)); c.stroke(); c.setLineDash([]);
+    c.setLineDash([6, 4]); c.lineWidth = 1.5;
+    thrs().forEach((t, i) => { if (!Number.isFinite(t)) return; c.strokeStyle = LVCOL[i]; c.beginPath(); c.moveTo(34, Y(t)); c.lineTo(W - 6, Y(t)); c.stroke(); });
+    c.setLineDash([]);
     const line = (get, col, dash) => {
       c.strokeStyle = col; c.lineWidth = 2; c.setLineDash(dash || []); c.beginPath(); let pen = false;
       for (const h of hist) { const v = get(h); if (!Number.isFinite(v)) { pen = false; continue; }
@@ -829,10 +934,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     while ($("bfbResults").children.length > 8) $("bfbResults").lastChild.remove();
     if (ok) { tone(988, 110); tone(1319, 160, 0.13); } else tone(330, 220);
     if (ok) {
-      $("bfbLamp").classList.add("on");
-      if (st.active) send(true, true);
+      const lv = levelNow(v);
+      showDots(lv);
+      if (st.active) sendLevel(lv, true);
       clearTimeout(pulseTo);
-      pulseTo = setTimeout(() => { $("bfbLamp").classList.remove("on"); if (st.active) send(false, true); }, PULSE_MS);
+      pulseTo = setTimeout(() => { showDots(0); if (st.active) sendLevel(0, true); }, PULSE_MS);
     }
   });
   function frame() {
@@ -933,20 +1039,20 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     st.value = ema; st.valL = emaL; st.valR = emaR;
     $("bfbValue").textContent = shown;
     // Hysteresis: switch on past thr, off only once back by `hyst`.
-    const h = cfg.hyst;
-    if (cfg.dir === "above") on = on ? ema > cfg.thr - h : ema > cfg.thr;
-    else on = on ? ema < cfg.thr + h : ema < cfg.thr;
+    const lv = levelOf(ema);
+    if (lv > lastLv && cfg.sound !== "off") tone([880, 1047, 1319][lv - 1], 140);   // higher pitch per level
+    lastLv = lv; on = lv > 0;
     $("bfbValue").classList.toggle("hit", on);
-    $("bfbLamp").classList.toggle("on", on);
-    if (on && !overSince && cfg.sound !== "off") tone(880, 140);
+    $("bfbValue").style.color = on ? LVCOL[lv - 1] : "";
+    showDots(lv);
     overSince = on;
-    if (st.active) send(on);
+    if (st.active && !fsr.drivesLamp()) sendLevel(lv);   // pressure owns the lamp when ticked
   }
   /* Belt and braces: while active, re-send the lamp state every 500 ms, so a
    * byte lost to a board reset or a busy port corrects itself. Not logged. */
   setInterval(() => {
     if (!st.active || !st.writer || st.lit == null) return;
-    st.writer.write(new TextEncoder().encode(st.lit ? "1\n" : "0\n")).catch(() => {});
+    st.writer.write(new TextEncoder().encode(lvMsg(st.lit) + "\n")).catch(() => {});
   }, 500);
   $("bfbCamBtn").onclick = async () => {
     try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch { /* no audio */ }
@@ -1306,7 +1412,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       files.push({ name: "timeseries.csv", data: csv(rec.samples, cols) });
     }
     files.push({ name: "settings.json", data: JSON.stringify({ saved: new Date().toISOString(), source: cfg.src, movement: cfg.move,
-      metric: cfg.metric, bodyMassKg: cfg.mass, heightM: cfg.height, loadKg: wtOf(cfg.move), threshold: cfg.thr, unit: METRICS[cfg.metric].unit, lightWhen: cfg.dir, hysteresis: cfg.hyst, zero: cfg.zero }, null, 2) });
+      metric: cfg.metric, bodyMassKg: cfg.mass, heightM: cfg.height, loadKg: wtOf(cfg.move), threshold: cfg.thr, thresholds: { yellow: cfg.thr, orange: cfg.thr2, red: cfg.thr3 }, unit: METRICS[cfg.metric].unit, lightWhen: cfg.dir, hysteresis: cfg.hyst, zero: cfg.zero }, null, 2) });
     files.push({ name: "README.txt", data: tr("bfb_readme") });
     const blob = makeZip(files), url = URL.createObjectURL(blob), a = document.createElement("a");
     a.href = url; a.download = `bioscout_biofeedback_${stamp}.zip`; document.body.appendChild(a); a.click();

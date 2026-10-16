@@ -87,10 +87,13 @@ const ok = (c, m) => { if (c) console.log("ok    " + m); else { fails++; console
 // 4 -- sketch
 {
   const ino = readFileSync("assets/arduino/biofeedback_lamp/biofeedback_lamp.ino", "utf8");
-  ok(/GREEN_PIN\s*=\s*8/.test(ino), "sketch: green lamp on pin 8");
-  ok(/YELLOW_PIN\s*=\s*13/.test(ino), "sketch: yellow lamp on pin 13");
-  ok(/c == 'G'[^\n]*GREEN_PIN, HIGH/.test(ino) && /c == 'g'[^\n]*GREEN_PIN, LOW/.test(ino), "sketch: 'G' / 'g' switch green");
-  ok(/c == '1'[^\n]*YELLOW_PIN, HIGH/.test(ino) && /c == '0'[^\n]*YELLOW_PIN, LOW/.test(ino), "sketch: '1' / '0' still switch yellow");
+  ok(/DEF\[5\]\s*=\s*\{\s*13,\s*12,\s*11,\s*8,\s*7\s*\}/.test(ino), "sketch v3: default pins yellow 13, orange 12, red 11, green 8, relay 7");
+  ok(/c == 'G'[^\n]*green = true/.test(ino) && /c == 'g'[^\n]*green = false/.test(ino) && /GREEN_ON/.test(ino), "sketch: 'G' / 'g' switch green and answer GREEN_ON/OFF");
+  ok(/c == '1'\) setLevel\(1\)/.test(ino) && /c == '0'\) setLevel\(0\)/.test(ino), "sketch: '1' / '0' still switch yellow (level 1 / 0)");
+  ok(/c == 'L'/.test(ino) && /level > i \? HIGH : LOW/.test(ino), "sketch: L0-L3 light yellow, orange, red cumulatively");
+  ok(/c == 'P'/.test(ino) && /EEPROM\.update/.test(ino) && /okPin/.test(ino), "sketch: P<i>:<pin> moves a lamp, checked and kept in EEPROM");
+  ok(/BIOSCOUT_LAMP_READY v[3-9]/.test(ino) && /report\(\)/.test(ino), "sketch: says v3+ and reports PINS so the app can tell old from new");
+  ok(/FSR/.test(ino) && /analogRead\(FSR_PIN\)/.test(ino) && /c == .S./.test(ino), "sketch v4: pressure on A0, S/s stream, READY line says FSR");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nALL PRESENCE TESTS PASSED");
