@@ -94,6 +94,8 @@ const ok = (c, m) => { if (c) console.log("ok    " + m); else { fails++; console
   ok(/c == 'P'/.test(ino) && /EEPROM\.update/.test(ino) && /okPin/.test(ino), "sketch: P<i>:<pin> moves a lamp, checked and kept in EEPROM");
   ok(/BIOSCOUT_LAMP_READY v[3-9]/.test(ino) && /report\(\)/.test(ino), "sketch: says v3+ and reports PINS so the app can tell old from new");
   ok(/FSR/.test(ino) && /analogRead\(FSR_PIN\)/.test(ino) && /c == .S./.test(ino), "sketch v4: pressure on A0, S/s stream, READY line says FSR");
+  ok(/DISP/.test(ino) && /c == 'D'/.test(ino) && /c == 'd'/.test(ino) && /shiftOut\(SR_DATA, SR_CLK/.test(ino), "sketch v6: 4-digit display via 74HC595, D<n> / D / d");
+  ok(!/dispOn = true;/.test(ino.split("void setup")[1].split("void loop")[0]), "sketch v6: display stays off until the app asks (pins free for the tester)");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nALL PRESENCE TESTS PASSED");
