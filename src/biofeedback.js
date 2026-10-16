@@ -460,6 +460,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const wtOf = (move) => (MOVES[move] && MOVES[move].wt ? { L: 0, R: 0, ...(cfg.wt[move] || {}) } : { L: 0, R: 0 });
   const loadOf = (move) => { const x = wtOf(move); return (+x.L || 0) + (+x.R || 0); };
   const syncExt = () => { const x = wtOf(cfg.move); EXT.L = +x.L || 0; EXT.R = +x.R || 0; EXT.body = cfg.mass || 75; };
+  const metOf = (i) => (i > 1 && (cfg.tm || [])[i - 2] && METRICS[cfg.tm[i - 2]] ? cfg.tm[i - 2] : cfg.metric);
+  function limOf(k) {                                   // slider range for metric k: default, or what the user set
+    const m = METRICS[k] || METRICS.kneeFlexL, d = [m.unit === DEG ? -90 : 0, m.unit === "BW" ? 1000 : m.max || 180];
+    const u = (cfg.lim || {})[k]; return u && Number.isFinite(u.min) && Number.isFinite(u.max) && u.max > u.min ? [u.min, u.max] : d;
+  }
   const save = () => { try { localStorage.setItem(SKEY, JSON.stringify(cfg)); } catch { /* full */ } };
 
   const hasSerial = "serial" in navigator;
@@ -481,9 +486,18 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbMetric").value = cfg.metric;
   }
   function syncInputs() {
-    const m = METRICS[cfg.metric] || METRICS.kneeFlexL, mx = m.unit === "BW" ? 1000 : m.max || 180;   // threshold limit; the bars keep m.max
-    const mn = m.unit === DEG ? -90 : 0;
-    for (const id of ["bfbThr", "bfbThrN", "bfbThr2", "bfbThrN2", "bfbThr3", "bfbThrN3"]) { $(id).max = mx; $(id).min = mn; $(id).step = m.unit === "BW" || m.unit === "m/s" ? "0.1" : "1"; }
+    const m = METRICS[cfg.metric] || METRICS.kneeFlexL;
+    for (const i of [1, 2, 3]) {                     // each threshold row: its metric's limits (editable)
+      const k = metOf(i), [mn, mx] = limOf(k), mm = METRICS[k], sfx = i === 1 ? "" : i;
+      for (const id of ["bfbThr" + sfx, "bfbThrN" + sfx]) { $(id).max = mx; $(id).min = mn; $(id).step = mm.unit === "BW" || mm.unit === "m/s" ? "0.1" : "1"; }
+      const box = document.querySelector(`.bfbLim[data-row="${i}"]`);
+      if (box) box.innerHTML = `<input type="number" data-lim="min" value="${mn}" title="${esc(tr("bfb_limMin"))}">–<input type="number" data-lim="max" value="${mx}" title="${esc(tr("bfb_limMax"))}"> ${esc(mm.unit)}`;
+      if (i > 1) {
+        const sel = $("bfbThrMet" + i), live = liveKeys(MOVES[cfg.move] || MOVES.free);
+        sel.innerHTML = `<option value="">${esc(tr("bfb_sameMetric"))}</option>` + live.filter((x) => x !== cfg.metric).map((x) => `<option value="${x}">${esc(tr(METRICS[x].label))}</option>`).join("");
+        sel.value = (cfg.tm || [])[i - 2] && live.includes(cfg.tm[i - 2]) ? cfg.tm[i - 2] : "";
+      }
+    }
     $("bfbUnit").textContent = m.unit;
     $("bfbHint").textContent = [cfg.move === "shot" ? tr("bfb_hintShot") : cfg.move === "cmj" || cfg.move === "sj" ? tr("bfb_hintJump") : "",
       m.load ? tr("bfb_hintLoad") : ""].filter(Boolean).join(" ");
@@ -521,14 +535,33 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (u !== before) { cfg.thr = { BW: 3, cm: 30, ms: 500, "m/s": 0.5, W: 500, Nm: 30 }[u] ?? 30; cfg.hyst = HYST[u] ?? 3; cfg.thr2 = cfg.thr3 = null; }
     syncInputs(); save();
   };
+  /* Slider limits per metric (the bars and plot follow them) and an own
+   * metric for thresholds 2 and 3, so one lamp can watch e.g. elbow moment
+   * and another trunk lean. */
+  $("viewBiofeedback").addEventListener("change", (e) => {
+    const el = e.target;
+    if (el.matches && el.matches(".bfbLim input")) {
+      const i = +el.closest(".bfbLim").dataset.row, k = metOf(i), [mn, mx] = limOf(k);
+      const v = +el.value; if (!Number.isFinite(v)) return;
+      const lim = { min: mn, max: mx, [el.dataset.lim]: v };
+      if (lim.max <= lim.min) return syncInputs();
+      cfg.lim = { ...(cfg.lim || {}), [k]: lim }; save(); syncInputs();
+    } else if (el.matches && el.matches(".bfbThrMet")) {
+      const i = +el.id.slice(-1); cfg.tm = [...(cfg.tm || [null, null])]; cfg.tm[i - 2] = el.value || null;
+      const [mn, mx] = limOf(metOf(i)); cfg["thr" + i] = Number.isFinite(cfg["thr" + i]) ? Math.max(mn, Math.min(mx, cfg["thr" + i])) : cfg["thr" + i];
+      if (el.value && !Number.isFinite(cfg["thr" + i])) cfg["thr" + i] = +(mn + (mx - mn) * 0.5).toFixed(1);
+      lampEma[i - 1] = NaN; save(); syncInputs();
+    }
+  });
   /* Orange (2) and red (3) thresholds: optional, off = null. Turning one on
    * starts it a step beyond the one before, in the "light when" direction. */
   for (const i of [2, 3]) {
-    const clamp = (v) => Math.max(+$("bfbThr").min, Math.min(+$("bfbThr").max, v));
+    const clamp = (v) => Math.max(+$("bfbThr" + i).min, Math.min(+$("bfbThr" + i).max, v));
     $("bfbThrOn" + i).onchange = () => {
       if ($("bfbThrOn" + i).checked) {
-        const prev = Number.isFinite(cfg["thr" + (i - 1)]) ? cfg["thr" + (i - 1)] : cfg.thr;
-        const d = Math.max(+$("bfbThr").step || 1, (+$("bfbThr").max - +$("bfbThr").min) * 0.1) * (cfg.dir === "above" ? 1 : -1);
+        const own = metOf(i) !== cfg.metric, [mn, mx] = limOf(metOf(i));
+        const prev = own ? mn + (mx - mn) * 0.4 : Number.isFinite(cfg["thr" + (i - 1)]) ? cfg["thr" + (i - 1)] : cfg.thr;
+        const d = Math.max(+$("bfbThr" + i).step || 1, (mx - mn) * 0.1) * (cfg.dir === "above" ? 1 : -1);
         cfg["thr" + i] = +clamp(prev + d).toFixed(2);
       } else cfg["thr" + i] = null;
       save(); syncInputs();
@@ -576,7 +609,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   function pickMove(k) {
     cfg.move = k; const mv = MOVES[k];
-    cfg.metric = mv.def; cfg.thr = mv.thr; cfg.dir = mv.dir; cfg.hyst = HYST[METRICS[mv.def].unit] ?? 3; cfg.thr2 = cfg.thr3 = null;
+    cfg.metric = mv.def; cfg.thr = mv.thr; cfg.dir = mv.dir; cfg.hyst = HYST[METRICS[mv.def].unit] ?? 3; cfg.thr2 = cfg.thr3 = null; cfg.tm = [null, null];
     $("bfbMove").value = k; fillMetrics(); syncInputs(); save(); renderBody(); renderQuick();
   }
   $("bfbBody").addEventListener("click", (e) => {
@@ -949,7 +982,44 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const LVDEF = ["#4caf50", "#ffd54a", "#ff4d4d"];
   if (!Array.isArray(cfg.colors) || cfg.colors.length !== 3) cfg.colors = [...LVDEF];
   const LVCOL = cfg.colors;
-  const thrs = () => [cfg.thr, cfg.thr2, cfg.thr3].map((t) => (Number.isFinite(t) ? t : NaN));
+  const thrs = () => [cfg.thr, cfg.thr2, cfg.thr3].map((t, i) => (Number.isFinite(t) && metOf(i + 1) === cfg.metric ? t : NaN));
+  /* Each lamp i: its own metric's value against its own threshold, with
+   * hysteresis in that metric's unit. Lamps are independent now. */
+  const lampEma = [NaN, NaN, NaN], lampOnSt = [false, false, false];
+  function lampStates(mainV, val) {
+    return [1, 2, 3].map((i) => {
+      const t = i === 1 ? cfg.thr : cfg["thr" + i], k = metOf(i);
+      if (!Number.isFinite(t)) return (lampOnSt[i - 1] = false);
+      let v = mainV;
+      if (k !== cfg.metric) {
+        const mm = METRICS[k]; let x;
+        if (mm.pair) { const a = [val(mm.pair[0]), val(mm.pair[1])].filter(Number.isFinite); x = a.length ? (cfg.dir === "above" ? Math.max(...a) : Math.min(...a)) : NaN; }
+        else x = val(k);
+        const p = lampEma[i - 1]; v = lampEma[i - 1] = Number.isFinite(x) ? (Number.isFinite(p) ? p + 0.35 * (x - p) : x) : NaN;
+      }
+      if (!Number.isFinite(v)) return (lampOnSt[i - 1] = false);
+      const h = k === cfg.metric ? cfg.hyst : HYST[METRICS[k].unit] ?? 3, was = lampOnSt[i - 1];
+      return (lampOnSt[i - 1] = cfg.dir === "above" ? (was ? v > t - h : v > t) : (was ? v < t + h : v < t));
+    });
+  }
+  function showLamps(sts) {
+    ["bfbLamp", "bfbLamp2", "bfbLamp3"].forEach((id, i) => {
+      const el = $(id), on = !!sts[i], c = LVCOL[i];
+      el.classList.toggle("on", on);
+      el.style.background = on ? c : ""; el.style.borderColor = on ? c : ""; el.style.boxShadow = on ? `0 0 14px 5px ${c}b3` : "";
+    });
+  }
+  /* To the board: each lamp on its own pin (sketch v5 T<pin>); older sketches
+   * only have cumulative levels, so they get the count. */
+  async function sendLamps(sts, force = false) {
+    if (cfg.invert) sts = sts.map((x) => !x);
+    const key = sts.map(Number).join("");
+    if (!force && st.litKey === key) return;
+    st.litKey = key; st.lamps = sts;
+    if (!st.writer) return;
+    if (st.ver >= 5) { const P = cfg.pins || [13, 12, 11]; for (let i = 0; i < 3; i++) if (P[i]) await writeLine(`T${P[i]}:${sts[i] ? 1 : 0}`, true); log("→ lamps " + key); }
+    else await sendLevel(sts.filter(Boolean).length, true);
+  }
   const levelNow = (v) => thrs().filter((t) => Number.isFinite(t) && (cfg.dir === "above" ? v > t : v < t)).length;
   const cross = [false, false, false];
   function levelOf(v) {
@@ -979,8 +1049,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   for (const el of document.querySelectorAll("#viewBiofeedback [data-colreset]")) el.onclick = () => {
     LVCOL.splice(0, 3, ...LVDEF); save(); paintColors(); buildBars(); renderPinTest();
   };
-  const barMax = () => METRICS[cfg.metric].max || 180;
-  const barMin = () => (unit() === DEG ? Math.min(0, cfg.thr - 10) : 0);
+  const barMax = () => ((cfg.lim || {})[cfg.metric] ? limOf(cfg.metric)[1] : METRICS[cfg.metric].max || 180);
+  const barMin = () => ((cfg.lim || {})[cfg.metric] ? limOf(cfg.metric)[0] : unit() === DEG ? Math.min(0, cfg.thr - 10) : 0);
   const pct = (x) => Math.max(0, Math.min(100, ((x - barMin()) / (barMax() - barMin())) * 100));
   /* One bar per side (L, R) for paired metrics, one bar otherwise. */
   function buildBars() {
@@ -1189,19 +1259,21 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     st.value = ema; st.valL = emaL; st.valR = emaR;
     $("bfbValue").textContent = shown;
     // Hysteresis: switch on past thr, off only once back by `hyst`.
-    const lv = levelOf(ema);
-    if (lv > lastLv && cfg.sound !== "off") tone([880, 1047, 1319][lv - 1], 140);   // higher pitch per level
+    const sts = lampStates(ema, val), lv = sts.filter(Boolean).length, top = sts.lastIndexOf(true);
+    if (lv > lastLv && cfg.sound !== "off") tone([880, 1047, 1319][lv - 1], 140);   // higher pitch per lamp
     lastLv = lv; on = lv > 0;
     $("bfbValue").classList.toggle("hit", on);
-    $("bfbValue").style.color = on ? LVCOL[lv - 1] : "";
-    showDots(lv);
+    $("bfbValue").style.color = on ? LVCOL[top] : "";
+    showLamps(sts);
     overSince = on;
-    if (st.active) sendLevel(lv);
+    if (st.active) sendLamps(sts);
   }
   /* Belt and braces: while active, re-send the lamp state every 500 ms, so a
    * byte lost to a board reset or a busy port corrects itself. Not logged. */
   setInterval(() => {
-    if (!st.active || !st.writer || st.lit == null) return;
+    if (!st.active || !st.writer) return;
+    if (st.ver >= 5 && st.lamps) { const P = cfg.pins || [13, 12, 11]; for (let i = 0; i < 3; i++) if (P[i]) writeLine(`T${P[i]}:${st.lamps[i] ? 1 : 0}`, true); return; }
+    if (st.lit == null) return;
     st.writer.write(new TextEncoder().encode(lvMsg(st.lit) + "\n")).catch(() => {});
   }, 500);
   $("bfbCamBtn").onclick = async () => {
