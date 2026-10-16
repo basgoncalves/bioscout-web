@@ -870,8 +870,15 @@ try {
   .prChip { display:inline-flex; align-items:center; gap:6px; padding:4px 6px 4px 12px; border-radius:999px;
             background:var(--accent); color:#fff; font-size:16px; }
   .prChip button { width:auto; margin:0; padding:0 8px; background:transparent; color:#fff; border:0; font-size:18px; line-height:1; }
-  .wrap:has(#viewProcess:not(.hidden)) { max-width:1500px !important; }
+  /* Process: a centred column like BioFeedback (not edge-to-edge), so the
+     text reads at its real size instead of being spread across a wide screen. */
+  .wrap:has(#viewProcess:not(.hidden)) { max-width:1120px !important; }
   :root[data-layout="desktop"] section#viewProcess { max-width:none; }
+  #viewProcess .card { border-radius:16px; padding:16px 18px; }
+  #viewProcess table { font-size:16px; }
+  #viewProcess th { font-size:13.5px; letter-spacing:.02em; }
+  #viewProcess small, #viewProcess .tiny { font-size:15px; }
+  #viewProcess .prCols { max-height:320px; }
   .prToolRow { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; padding:7px 0; border-top:1px solid var(--line); }
   .prToolRow:first-of-type { border-top:0; }
   .prToolRow > button { width:auto; margin:0; padding:10px 14px; font-size:18.5px; min-width:230px; text-align:left; }
@@ -2045,8 +2052,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 73;
-window.BUILD_AT = "2026-10-16 18:23";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 74;
+window.BUILD_AT = "2026-10-16 18:41";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
