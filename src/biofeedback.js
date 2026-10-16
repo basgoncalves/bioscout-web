@@ -591,8 +591,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       <span class="bfbSw" style="background:${AN_COL[i]}"></span>A${i} <span class="note" data-anv="${i}"></span></label>`).join("");
     for (const cb of host.querySelectorAll("[data-an]")) cb.onchange = () => {
       const i = +cb.dataset.an; cfg.an = cb.checked ? [...new Set([...(cfg.an || []), i])] : (cfg.an || []).filter((x) => x !== i); save();
-      if (!(st.ver >= 5)) flashHint();
-      writeLine(cfg.an.length ? "A" : "a");
+      anHist.length = 0;
+      if (st.ver >= 5) writeLine(cfg.an.length ? "A" : "a");
+      else { flashHint(); writeLine(cfg.an.includes(0) ? "S" : "s"); }   // old board: only A0 can be previewed
+      anPlot();
     };
   }
   function anPlot() {
@@ -603,12 +605,23 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const now = performance.now(); while (anHist.length && anHist[0].t < now - 10000) anHist.shift();
     const X = (t) => 30 + ((t - (now - 10000)) / 10000) * (W - 34), Y = (v) => 6 + (1 - v / 1023) * (H - 16);
     c.font = "10px system-ui, sans-serif"; c.fillStyle = "#888"; c.fillText("1023", 0, 12); c.fillText("0", 18, H - 8);
+    if ((cfg.an || []).length && !anHist.length) {
+      c.fillStyle = "#aaa"; c.font = "12px system-ui, sans-serif";
+      c.fillText(st.port ? (st.ver >= 5 ? tr("bfb_anWait") : tr("bfb_anOld")) : tr("bfb_flashConnect"), 40, H / 2);
+    }
     for (const i of cfg.an || []) {
       c.strokeStyle = AN_COL[i]; c.lineWidth = 1.8; c.beginPath();
       anHist.forEach((h, j) => (j ? c.lineTo(X(h.t), Y(h.v[i])) : c.moveTo(X(h.t), Y(h.v[i])))); c.stroke();
     }
   }
   function onLine(ln) {
+    const fm = /^F (\d+)$/.exec(ln);
+    if (fm) {                                        // v4 board: A0 only, via its "S" stream
+      const v = [+fm[1], NaN, NaN, NaN, NaN, NaN]; anHist.push({ t: performance.now(), v }); anPlot();
+      const el = document.querySelector('[data-anv="0"]'); if (el) el.textContent = v[0];
+      return true;
+    }
+    if (/^(STREAM_ON|STREAM_OFF|AN_ON|AN_OFF)$/.test(ln)) return true;
     if (ln.startsWith("AN ")) {
       const v = ln.slice(3).split(",").map(Number); if (v.length !== 6) return true;
       anHist.push({ t: performance.now(), v }); anPlot();
@@ -710,6 +723,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       const r = await flashUno(port, hex, { onProgress: (f) => { $("bfbFlashNote").textContent = tr("bfb_flashing", { p: Math.round(f * 100) }); } });
       $("bfbFlashNote").textContent = tr("bfb_flashDone", { kb: (r.bytes / 1024).toFixed(1) });
       await openPort(port);
+      setTimeout(async () => { const P = cfg.pins || [13, 12, 11, 8, 7]; for (let i = 0; i < 3; i++) await writeLine(`P${i}:${P[i]}`); }, 2600);
     } catch (e) {
       $("bfbFlashNote").textContent = tr("bfb_flashFail", { err: e.message });
       try { await openPort(port); } catch { /* leave it */ }
@@ -748,10 +762,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbPinsNote").textContent = [dup ? tr("bfb_pinsClash", { pin: dup }) : "", !st.port ? "" : !st.v3 ? tr("bfb_oldSketch")
       : same ? tr("bfb_pinsOk") : tr("bfb_pinsDiff", { pins: (B || []).join(", ") })].filter(Boolean).join(" ");
     paintColors(); renderAnPick();
-    $("bfbPinsSend").disabled = !st.port || !st.v3;
+    $("bfbFlash").parentElement.classList.toggle("hidden", !!st.port && st.ver >= 5);   // one button, only while needed
     renderPinTest();
   }
-  $("bfbPinsSend").onclick = async () => { const P = cfg.pins || [13, 12, 11, 8, 7]; for (let i = 0; i < 3; i++) await writeLine(`P${i}:${P[i]}`); };
+  $("bfbDevDone").onclick = () => $("bfbDevDlg").close();
   /* Sketch editor: the .ino in a window, editable, kept in this browser.
    * The browser cannot compile for the Arduino, so it is downloaded and
    * uploaded with _private/launchers/flash_arduino.bat or the Arduino IDE. */

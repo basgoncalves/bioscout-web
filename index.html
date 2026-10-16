@@ -1531,7 +1531,6 @@ try {
       <div class="row bfbRow bfbPins" id="bfbPins"></div>
       <p class="note" id="bfbPinsNote"></p>
       <div class="row bfbRow">
-        <button type="button" class="ghost" id="bfbPinsSend" data-i18n="bfb_pinsSend">Send pins to board</button>
         <button type="button" class="ghost" id="bfbSketchEdit" data-i18n="bfb_sketchEdit">Edit Arduino sketch…</button>
         <a href="./assets/arduino/biofeedback_lamp/biofeedback_lamp.ino" download data-i18n="bfb_sketch">Arduino sketch (.ino)</a>
       </div>
@@ -1540,7 +1539,9 @@ try {
       <div class="row bfbRow bfbAnPick" id="bfbAnPick"></div>
       <canvas id="bfbAnCv" class="bfbPlot" style="height:110px"></canvas>
 
-
+        </div>
+        <div class="row bfbRow" style="justify-content:flex-end;margin-top:12px">
+          <button type="button" id="bfbDevDone" data-i18n="bfb_done" style="min-width:8em">Done</button>
         </div>
       </dialog>
 
@@ -1981,8 +1982,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 64;
-window.BUILD_AT = "2026-10-16 16:47";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 65;
+window.BUILD_AT = "2026-10-16 16:52";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
