@@ -8,6 +8,7 @@
 //   ?            -> reply with the current pins
 //   T<pin>:<0|1> -> drive any pin 2-13 directly (pin tester), e.g. T9:1 -> "PIN 9 1"
 //   V            -> "VERSION 5" (so the app knows the pin tester is there)
+//   A / a        -> analog inputs stream on / off: "AN v0,v1,v2,v3,v4,v5" (A0-A5, 0-1023) at 25 Hz
 //   S / s        -> pressure stream on / off: "F <0-1023>" from A0 at 50 Hz
 //   F            -> one pressure reading now
 //   D<n>         -> 4-digit display on, showing n (-999..9999), e.g. D57
@@ -19,7 +20,7 @@
 // Pressure sensor (FSR 402 or similar) as a voltage divider on A0:
 //   5V -- FSR -- A0 -- 10 kohm -- GND   (see _private/arduino_server/pressure_sensor.md)
 // Default wiring (see _private/arduino_server/lampsetup.md), each LED with its own 220 ohm:
-//   pin 13 yellow, pin 12 orange, pin 11 red, pin 8 green; pin 7 relay (follows "any level on").
+//   pin 13 yellow, pin 12 orange, pin 11 red, pin 8 green.
 // Never drive a motor or mains lamp straight from a pin: use a relay / transistor module.
 #include <EEPROM.h>
 
@@ -33,6 +34,8 @@ byte n = 0;
 unsigned long lastRx = 0;
 const byte FSR_PIN = A0;
 bool streaming = false;
+bool anStream = false;
+unsigned long lastA = 0;
 unsigned long lastF = 0;
 
 int readFsr() {                       // mean of 4 samples (~0.5 ms) against noise
@@ -86,7 +89,7 @@ bool okPin(int p) { return p >= 2 && p <= 13; }
 void apply() {
   for (byte i = 0; i < 3; i++) digitalWrite(pins[i], level > i ? HIGH : LOW);
   digitalWrite(pins[3], green ? HIGH : LOW);
-  digitalWrite(pins[4], level > 0 ? HIGH : LOW);
+  // pins[4] (old "relay" slot) is no longer driven; kept so saved EEPROM layouts still load
 }
 
 void report() {
@@ -126,6 +129,8 @@ void handle() {
     else if (c == 'g') { green = false; apply(); Serial.println("GREEN_OFF"); }
     else if (c == '?') report();
     else if (c == 'V') Serial.println("VERSION 5");
+    else if (c == 'A') { anStream = true; Serial.println("AN_ON"); }
+    else if (c == 'a') { anStream = false; Serial.println("AN_OFF"); }
     else if (c == 'S') { streaming = true; Serial.println("STREAM_ON"); }
     else if (c == 's') { streaming = false; Serial.println("STREAM_OFF"); }
     else if (c == 'F') sendF();
@@ -144,7 +149,7 @@ void setup() {
   for (byte i = 0; i < 5; i++) {
     byte p = saved ? EEPROM.read(i) : DEF[i];
     pins[i] = okPin(p) ? p : DEF[i];
-    pinMode(pins[i], OUTPUT); digitalWrite(pins[i], LOW);
+    if (i < 4) { pinMode(pins[i], OUTPUT); digitalWrite(pins[i], LOW); }
   }
   Serial.begin(9600);
   Serial.println("BIOSCOUT_LAMP_READY v6 FSR DISP");
@@ -159,6 +164,10 @@ void loop() {
   }
   if (n && millis() - lastRx > 60) handle();   // Serial Monitor with "No line ending"
   if (streaming && millis() - lastF >= 20) { lastF = millis(); sendF(); }   // 50 Hz
+  if (anStream && millis() - lastA >= 40) {                                 // 25 Hz, all six analog inputs
+    lastA = millis(); Serial.print("AN ");
+    for (byte i = 0; i < 6; i++) { Serial.print(analogRead(A0 + i)); Serial.print(i < 5 ? "," : "\n"); }
+  }
   if (dispOn) {
     if (dispRaw && millis() - lastShow >= 100) { lastShow = millis(); showNumber(readFsr()); }
     if (millis() - lastMux >= 2) { lastMux = millis(); muxStep(); }

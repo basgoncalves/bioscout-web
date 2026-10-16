@@ -583,10 +583,41 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     } catch (e) { st.port = null; status("bfb_portFail", { err: e.message }, true); }
     renderConn();
   }
+  /* Live analog inputs A0-A5 (sketch v5 "A"/"a" -> "AN v0,...,v5" at 25 Hz). */
+  const AN_COL = ["#4fb3a0", "#7aa2f7", "#e8823a", "#c678dd", "#e5c07b", "#f7768e"], anHist = [];
+  function renderAnPick() {
+    const host = $("bfbAnPick"); if (!host) return;
+    const sel = cfg.an || [];
+    host.innerHTML = [0, 1, 2, 3, 4, 5].map((i) => `<label><input type="checkbox" data-an="${i}"${sel.includes(i) ? " checked" : ""}${st.port && st.ver >= 5 ? "" : " disabled"}>
+      <span class="bfbSw" style="background:${AN_COL[i]}"></span>A${i} <span class="note" data-anv="${i}"></span></label>`).join("");
+    for (const cb of host.querySelectorAll("[data-an]")) cb.onchange = () => {
+      const i = +cb.dataset.an; cfg.an = cb.checked ? [...new Set([...(cfg.an || []), i])] : (cfg.an || []).filter((x) => x !== i); save();
+      writeLine(cfg.an.length ? "A" : "a");
+    };
+  }
+  function anPlot() {
+    const cv = $("bfbAnCv"); if (!cv || !cv.isConnected) return;
+    const W = cv.clientWidth || 400, H = cv.clientHeight || 110, dpr = window.devicePixelRatio || 1;
+    if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+    const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+    const now = performance.now(); while (anHist.length && anHist[0].t < now - 10000) anHist.shift();
+    const X = (t) => 30 + ((t - (now - 10000)) / 10000) * (W - 34), Y = (v) => 6 + (1 - v / 1023) * (H - 16);
+    c.font = "10px system-ui, sans-serif"; c.fillStyle = "#888"; c.fillText("1023", 0, 12); c.fillText("0", 18, H - 8);
+    for (const i of cfg.an || []) {
+      c.strokeStyle = AN_COL[i]; c.lineWidth = 1.8; c.beginPath();
+      anHist.forEach((h, j) => (j ? c.lineTo(X(h.t), Y(h.v[i])) : c.moveTo(X(h.t), Y(h.v[i])))); c.stroke();
+    }
+  }
   function onLine(ln) {
+    if (ln.startsWith("AN ")) {
+      const v = ln.slice(3).split(",").map(Number); if (v.length !== 6) return true;
+      anHist.push({ t: performance.now(), v }); anPlot();
+      for (const i of cfg.an || []) { const el = document.querySelector(`[data-anv="${i}"]`); if (el) el.textContent = v[i]; }
+      return true;                                   // not logged: 25 lines a second
+    }
     if (ln.startsWith("BIOSCOUT_LAMP_READY")) { st.ver = +((/v(\d+)/.exec(ln) || [])[1] || 2); st.v3 = st.ver >= 3; renderPins(); }
     const vm = /^VERSION (\d+)/.exec(ln) || (/^PIN \d+ [01]/.test(ln) ? [0, 5] : null);
-    if (vm && +vm[1] > (st.ver || 0)) { st.ver = +vm[1]; st.v3 = true; renderPins(); }
+    if (vm && +vm[1] > (st.ver || 0)) { st.ver = +vm[1]; st.v3 = true; renderPins(); if ((cfg.an || []).length && st.ver >= 5) writeLine("A"); }
     const m = /^PINS ([\d,]+)/.exec(ln);
     if (m) { st.v3 = true; st.boardPins = m[1].split(",").map(Number); renderPins(); }
   }
@@ -597,7 +628,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       for (;;) {
         const { value, done } = await st.reader.read(); if (done) break;
         buf += dec.decode(value); let i;
-        while ((i = buf.indexOf("\n")) >= 0) { const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (ln && fsr.onLine(ln)) continue; if (ln) onLine(ln); if (ln && ln !== st.lastRx) { st.lastRx = ln; log("← " + ln); } }
+        while ((i = buf.indexOf("\n")) >= 0) { const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (ln && fsr.onLine(ln)) continue; if (ln && onLine(ln)) continue; if (ln && ln !== st.lastRx) { st.lastRx = ln; log("← " + ln); } }
       }
     } catch { /* port closed or unplugged */ }
   }
@@ -651,7 +682,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const pinOn = new Set();
   function renderPinTest() {
     const host = $("bfbPinTest"); if (!host) return;
-    const P = cfg.pins || [13, 12, 11, 8, 7], role = { [P[4]]: "#9aa4b2", [P[2]]: LVCOL[2], [P[1]]: LVCOL[1], [P[0]]: LVCOL[0] };
+    const P = cfg.pins || [13, 12, 11, 8, 7], role = { [P[2]]: LVCOL[2], [P[1]]: LVCOL[1], [P[0]]: LVCOL[0] };
     host.innerHTML = Array.from({ length: 12 }, (_, j) => j + 2).map((n) =>
       `<button type="button" class="ghost bfbPinBtn${pinOn.has(n) ? " on" : ""}" data-tpin="${n}"${st.port && st.ver >= 5 ? "" : " disabled"}
         style="${role[n] ? `box-shadow:inset 0 -3px 0 ${role[n]}` : ""}">${n}</button>`).join("")
@@ -679,11 +710,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const lampsOff = () => { lampOn.fill(false); for (const x of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) x.classList.remove("on"); };
   /* Pins: which Arduino pin drives each lamp. A v3 sketch takes "P<i>:<pin>"
    * and keeps it in EEPROM, so trying another pin or cable needs no upload. */
-  const PIN_KEYS = ["bfb_pinY", "bfb_pinO", "bfb_pinR", null, "bfb_pinRelay"];   // slot 3 (green) not shown
+  const PIN_KEYS = ["bfb_pinY", "bfb_pinO", "bfb_pinR"];   // slots 3-4 (green, old relay) not shown
   function renderPins() {
     const host = $("bfbPins"); if (!host) return;
     const P = cfg.pins || [13, 12, 11, 8, 7];
-    host.innerHTML = PIN_KEYS.map((k, i) => !k ? "" : `<label><span>${i < 3 ? `<span class="bfbSw" data-sw="${i}"></span>` : ""}${esc(tr(k))}</span><select data-pin="${i}">${
+    host.innerHTML = PIN_KEYS.map((k, i) => !k ? "" : `<label><span><input type="color" class="bfbCol" data-col="${i}" value="${LVCOL[i]}" aria-label="${esc(tr(k))}"> ${esc(tr(k))}</span><select data-pin="${i}">${
       Array.from({ length: 12 }, (_, j) => j + 2).map((n) => `<option${n === P[i] ? " selected" : ""}>${n}</option>`).join("")}</select></label>`).join("");
     for (const sel of host.querySelectorAll("select")) sel.onchange = () => {
       const i = +sel.dataset.pin; cfg.pins = [...P]; cfg.pins[i] = +sel.value; save();
@@ -691,14 +722,14 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       renderPins();
     };
     const B = st.boardPins, same = B && B.every((n, i) => n === P[i]);
-    const used = [0, 1, 2, 4].map((i) => P[i]), dup = used.find((n, i) => used.indexOf(n) !== i);
+    const used = [0, 1, 2].map((i) => P[i]), dup = used.find((n, i) => used.indexOf(n) !== i);
     $("bfbPinsNote").textContent = [dup ? tr("bfb_pinsClash", { pin: dup }) : "", !st.port ? "" : !st.v3 ? tr("bfb_oldSketch")
-      : same ? tr("bfb_pinsOk") : tr("bfb_pinsDiff", { pins: (B || []).join(", ") }), tr("bfb_relayNote")].filter(Boolean).join(" ");
-    paintColors();
+      : same ? tr("bfb_pinsOk") : tr("bfb_pinsDiff", { pins: (B || []).join(", ") })].filter(Boolean).join(" ");
+    paintColors(); renderAnPick();
     $("bfbPinsSend").disabled = !st.port || !st.v3;
     renderPinTest();
   }
-  $("bfbPinsSend").onclick = async () => { const P = cfg.pins || [13, 12, 11, 8, 7]; for (let i = 0; i < 5; i++) await writeLine(`P${i}:${P[i]}`); };
+  $("bfbPinsSend").onclick = async () => { const P = cfg.pins || [13, 12, 11, 8, 7]; for (let i = 0; i < 3; i++) await writeLine(`P${i}:${P[i]}`); };
   /* Sketch editor: the .ino in a window, editable, kept in this browser.
    * The browser cannot compile for the Arduino, so it is downloaded and
    * uploaded with _private/launchers/flash_arduino.bat or the Arduino IDE. */
@@ -850,11 +881,12 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   function paintColors() {
     for (const el of document.querySelectorAll("#viewBiofeedback [data-sw], #bfbDevDlg [data-sw]")) el.style.background = LVCOL[+el.dataset.sw];
-    for (const el of document.querySelectorAll("#viewBiofeedback input[data-col]")) el.value = LVCOL[+el.dataset.col];
+    for (const el of document.querySelectorAll("#viewBiofeedback input[data-col]")) if (el !== document.activeElement) el.value = LVCOL[+el.dataset.col];
   }
-  for (const el of document.querySelectorAll("#viewBiofeedback input[data-col]")) el.oninput = () => {
+  $("viewBiofeedback").addEventListener("input", (e) => {
+    const el = e.target; if (!el.matches || !el.matches("input[data-col]")) return;
     LVCOL[+el.dataset.col] = el.value; save(); paintColors(); buildBars(); renderPinTest();
-  };
+  });
   for (const el of document.querySelectorAll("#viewBiofeedback [data-colreset]")) el.onclick = () => {
     LVCOL.splice(0, 3, ...LVDEF); save(); paintColors(); buildBars(); renderPinTest();
   };

@@ -637,6 +637,8 @@ try {
   .bfbGreenDot { width:22px; height:22px; display:inline-block; vertical-align:middle; }
   .bfbGreenDot.on { background:#4caf50 !important; border-color:#b9f6ca !important; box-shadow:0 0 16px 6px rgba(76,175,80,.7) !important; }
   .bfbDots { display:flex; gap:6px; }
+  .bfbAnPick { gap:8px !important; align-items:center; }
+  .bfbAnPick label { display:inline-flex; align-items:center; gap:4px; min-width:0; }
   .bfbCol { width:26px; height:22px; padding:0; border:1px solid var(--line,#444); border-radius:6px; background:none; vertical-align:middle; cursor:pointer; }
   .bfbColReset { font-size:11px; padding:2px 8px; margin-left:8px; }
   .bfbPinTest { gap:6px !important; }
@@ -1522,6 +1524,10 @@ try {
         <button type="button" class="ghost" id="bfbSketchEdit" data-i18n="bfb_sketchEdit">Edit Arduino sketch…</button>
         <a href="./assets/arduino/biofeedback_lamp/biofeedback_lamp.ino" download data-i18n="bfb_sketch">Arduino sketch (.ino)</a>
       </div>
+      <h4 style="margin:10px 0 4px" data-i18n="bfb_anTitle">Live inputs (A0–A5)</h4>
+      <p class="note" data-i18n="bfb_anNote">Tick the analog inputs to plot live (0–1023). An input with nothing connected floats and shows random values.</p>
+      <div class="row bfbRow bfbAnPick" id="bfbAnPick"></div>
+      <canvas id="bfbAnCv" class="bfbPlot" style="height:110px"></canvas>
       <h4 style="margin:10px 0 4px" data-i18n="bfb_fsr">Pressure sensor (A0)</h4>
       <p class="note" data-i18n="bfb_fsrHint">FSR between 5V and A0, 10 kΩ from A0 to GND. Raw counts 0–1023 and % of your zero–max range; not calibrated in newtons.</p>
       <p class="note bad" id="bfbFsrNote"></p>
@@ -1986,8 +1992,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 61;
-window.BUILD_AT = "2026-10-16 16:17";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 62;
+window.BUILD_AT = "2026-10-16 16:29";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
