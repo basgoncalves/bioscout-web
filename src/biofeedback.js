@@ -703,7 +703,16 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const vm = /^VERSION (\d+)/.exec(ln) || (/^PIN \d+ [01]/.test(ln) ? [0, 5] : null);
     if (vm && +vm[1] > (st.ver || 0)) { st.ver = +vm[1]; st.v3 = true; renderPins(); $("bfbFlashNote").textContent = ""; $("bfbFlash").classList.remove("pulse"); if ((cfg.an || []).length && st.ver >= 5) writeLine("A"); }
     const m = /^PINS ([\d,]+)/.exec(ln);
-    if (m) { st.v3 = true; st.boardPins = m[1].split(",").map(Number); renderPins(); }
+    if (m) {
+      st.v3 = true; st.boardPins = m[1].split(",").map(Number);
+      if (importPins) {
+        importPins = false;
+        const P = [...(cfg.pins || [13, 12, 11, 8, 7])]; for (let i = 0; i < 3; i++) P[i] = st.boardPins[i] || 0;
+        cfg.pins = P; save();
+        $("bfbFlashNote").textContent = tr("bfb_pinsImported", { pins: P.slice(0, 3).map((n) => n || "–").join(", ") });
+      }
+      renderPins();
+    }
   }
   async function readLoop(port) {
     const dec = new TextDecoder(); let buf = "";
@@ -853,6 +862,14 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     renderPinTest();
   }
   $("bfbDevDone").onclick = () => $("bfbDevDlg").close();
+  /* Keep what is already on the board: ask it for its pins ("?" -> "PINS a,b,c,...")
+   * and take them as the lamps' pins, instead of updating the firmware. */
+  let importPins = false;
+  $("bfbPinsImport").onclick = () => {
+    if (!st.port) { $("bfbFlashNote").textContent = tr("bfb_flashConnect"); return; }
+    importPins = true; writeLine("?");
+    setTimeout(() => { if (importPins) { importPins = false; $("bfbFlashNote").textContent = tr("bfb_pinsNoReply"); } }, 1500);
+  };
   /* Sketch editor: the .ino in a window, editable, kept in this browser.
    * The browser cannot compile for the Arduino, so it is downloaded and
    * uploaded with _private/launchers/flash_arduino.bat or the Arduino IDE. */
