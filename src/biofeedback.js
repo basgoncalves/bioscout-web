@@ -13,7 +13,7 @@
  * 2D image angles do. They are camera estimates, not motion capture.
  */
 
-import { initPressure } from "./pressure.js";
+import { flashUno } from "./stk500.js";
 import { bodyMapHTML, REGIONS } from "./bodymap.js";
 import { loadForceModel, predictForces } from "./forces.js";
 import { makeZip } from "./zip.js";
@@ -567,7 +567,6 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     try { if (st.writer) { st.writer.releaseLock(); } } catch { /* gone */ }
     try { if (st.port) await st.port.close(); } catch { /* already closed */ }
     st.reader = st.writer = null; st.lit = null;
-    if (typeof fsr !== "undefined") fsr.onClose();
   }
   async function openPort(port) {
     await closePort();
@@ -575,7 +574,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       await port.open({ baudRate: cfg.baud });
       st.port = port; st.writer = port.writable.getWriter();
       status("bfb_portOpen", { baud: cfg.baud });
-      fsr.onOpen(); readLoop(port);
+      readLoop(port);
       await listPorts();
       // Uno-style boards reset when the port opens; give the bootloader a moment.
       st.v3 = false; st.ver = 0; st.boardPins = null; renderPins();
@@ -588,10 +587,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function renderAnPick() {
     const host = $("bfbAnPick"); if (!host) return;
     const sel = cfg.an || [];
-    host.innerHTML = [0, 1, 2, 3, 4, 5].map((i) => `<label><input type="checkbox" data-an="${i}"${sel.includes(i) ? " checked" : ""}${st.port && st.ver >= 5 ? "" : " disabled"}>
+    host.innerHTML = [0, 1, 2, 3, 4, 5].map((i) => `<label><input type="checkbox" data-an="${i}"${sel.includes(i) ? " checked" : ""}${st.port ? "" : " disabled"}>
       <span class="bfbSw" style="background:${AN_COL[i]}"></span>A${i} <span class="note" data-anv="${i}"></span></label>`).join("");
     for (const cb of host.querySelectorAll("[data-an]")) cb.onchange = () => {
       const i = +cb.dataset.an; cfg.an = cb.checked ? [...new Set([...(cfg.an || []), i])] : (cfg.an || []).filter((x) => x !== i); save();
+      if (!(st.ver >= 5)) flashHint();
       writeLine(cfg.an.length ? "A" : "a");
     };
   }
@@ -615,9 +615,9 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       for (const i of cfg.an || []) { const el = document.querySelector(`[data-anv="${i}"]`); if (el) el.textContent = v[i]; }
       return true;                                   // not logged: 25 lines a second
     }
-    if (ln.startsWith("BIOSCOUT_LAMP_READY")) { st.ver = +((/v(\d+)/.exec(ln) || [])[1] || 2); st.v3 = st.ver >= 3; renderPins(); }
+    if (ln.startsWith("BIOSCOUT_LAMP_READY")) { st.ver = +((/v(\d+)/.exec(ln) || [])[1] || 2); st.v3 = st.ver >= 3; renderPins(); if (st.ver < 5) flashHint(); }
     const vm = /^VERSION (\d+)/.exec(ln) || (/^PIN \d+ [01]/.test(ln) ? [0, 5] : null);
-    if (vm && +vm[1] > (st.ver || 0)) { st.ver = +vm[1]; st.v3 = true; renderPins(); if ((cfg.an || []).length && st.ver >= 5) writeLine("A"); }
+    if (vm && +vm[1] > (st.ver || 0)) { st.ver = +vm[1]; st.v3 = true; renderPins(); $("bfbFlashNote").textContent = ""; $("bfbFlash").classList.remove("pulse"); if ((cfg.an || []).length && st.ver >= 5) writeLine("A"); }
     const m = /^PINS ([\d,]+)/.exec(ln);
     if (m) { st.v3 = true; st.boardPins = m[1].split(",").map(Number); renderPins(); }
   }
@@ -628,7 +628,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       for (;;) {
         const { value, done } = await st.reader.read(); if (done) break;
         buf += dec.decode(value); let i;
-        while ((i = buf.indexOf("\n")) >= 0) { const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (ln && fsr.onLine(ln)) continue; if (ln && onLine(ln)) continue; if (ln && ln !== st.lastRx) { st.lastRx = ln; log("← " + ln); } }
+        while ((i = buf.indexOf("\n")) >= 0) { const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (ln && onLine(ln)) continue; if (ln && ln !== st.lastRx) { st.lastRx = ln; log("← " + ln); } }
       }
     } catch { /* port closed or unplugged */ }
   }
@@ -649,8 +649,6 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (!st.writer) return;
     try { await st.writer.write(new TextEncoder().encode(txt + "\n")); if (!quiet) log("→ " + txt); } catch { /* port gone */ }
   };
-  /* Pressure sensor on A0 (sketch v4): live trace, zero/max, can drive the lamp. */
-  const fsr = initPressure({ $, tr, writeLine, sendLevel });
   /* "Connect external device": a small button opens a window listing the
    * devices (only the Arduino for now); the dot next to it is green while a
    * board is connected. */
@@ -684,16 +682,40 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const host = $("bfbPinTest"); if (!host) return;
     const P = cfg.pins || [13, 12, 11, 8, 7], role = { [P[2]]: LVCOL[2], [P[1]]: LVCOL[1], [P[0]]: LVCOL[0] };
     host.innerHTML = Array.from({ length: 12 }, (_, j) => j + 2).map((n) =>
-      `<button type="button" class="ghost bfbPinBtn${pinOn.has(n) ? " on" : ""}" data-tpin="${n}"${st.port && st.ver >= 5 ? "" : " disabled"}
+      `<button type="button" class="ghost bfbPinBtn${pinOn.has(n) ? " on" : ""}" data-tpin="${n}"${st.port ? "" : " disabled"}
         style="${role[n] ? `box-shadow:inset 0 -3px 0 ${role[n]}` : ""}">${n}</button>`).join("")
-      + `<button type="button" class="ghost" id="bfbPinAllOff"${st.port && st.ver >= 5 ? "" : " disabled"}>${esc(tr("bfb_testOff"))}</button>`
-      + (st.port && st.ver < 5 ? `<p class="note" style="flex-basis:100%">${esc(tr("bfb_pinTestOld"))}</p>` : "");
+      + `<button type="button" class="ghost bfbPinOff" id="bfbPinAllOff"${st.port ? "" : " disabled"}>${esc(tr("bfb_testOff"))}</button>`;
+    /* Pulse > 0: a tap lights the pin for that long; 0: tap on, tap off. */
     for (const b of host.querySelectorAll("[data-tpin]")) b.onclick = () => {
-      const n = +b.dataset.tpin, on = !pinOn.has(n);
+      if (!(st.ver >= 5)) { flashHint(); return; }               // older sketches read "T6:1" as "lamp on"
+      const n = +b.dataset.tpin, ms = +cfg.pulse || 0, on = !pinOn.has(n);
       on ? pinOn.add(n) : pinOn.delete(n); writeLine(`T${n}:${on ? 1 : 0}`); renderPinTest();
+      if (on && ms > 0) setTimeout(() => { if (pinOn.delete(n)) { writeLine(`T${n}:0`); renderPinTest(); } }, ms);
     };
     $("bfbPinAllOff").onclick = async () => { for (const n of [...pinOn]) await writeLine(`T${n}:0`); pinOn.clear(); await sendLevel(0, true); renderPinTest(); };
   }
+  if (cfg.pulse == null) cfg.pulse = 1000;
+  $("bfbPulse").value = cfg.pulse;
+  $("bfbPulse").onchange = () => { cfg.pulse = Math.max(0, Math.min(10000, +$("bfbPulse").value || 0)); $("bfbPulse").value = cfg.pulse; save(); };
+  /* Update board firmware: writes the bundled sketch (.hex, built from the
+   * .ino in the repo) through this same port. Fixes "old sketch" for good. */
+  function flashHint() { $("bfbFlashNote").textContent = tr("bfb_flashNeed"); $("bfbFlash").classList.add("pulse"); }
+  $("bfbFlash").onclick = async () => {
+    const port = st.port; if (!port) { $("bfbFlashNote").textContent = tr("bfb_flashConnect"); return; }
+    $("bfbFlash").disabled = true; $("bfbFlash").classList.remove("pulse");
+    try {
+      const hex = await (await fetch(new URL("../assets/arduino/biofeedback_lamp/biofeedback_lamp.hex", import.meta.url), { cache: "no-cache" })).text();
+      await closePort();
+      $("bfbFlashNote").textContent = tr("bfb_flashing", { p: 0 });
+      const r = await flashUno(port, hex, { onProgress: (f) => { $("bfbFlashNote").textContent = tr("bfb_flashing", { p: Math.round(f * 100) }); } });
+      $("bfbFlashNote").textContent = tr("bfb_flashDone", { kb: (r.bytes / 1024).toFixed(1) });
+      await openPort(port);
+    } catch (e) {
+      $("bfbFlashNote").textContent = tr("bfb_flashFail", { err: e.message });
+      try { await openPort(port); } catch { /* leave it */ }
+    }
+    $("bfbFlash").disabled = false;
+  };
   $("bfbTestOn").onclick = () => sendLevel(3, true);
   $("bfbTestOff").onclick = () => { lampsOff(); sendLevel(0, true); };
   /* Lamp 1/2/3 buttons: each switches only its own lamp, on and off.
@@ -705,7 +727,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     lampOn[i] = !lampOn[i];
     for (const x of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) x.classList.toggle("on", lampOn[+x.dataset.testlv - 1]);
     if (st.ver >= 5) await writeLine(`T${P[i]}:${lampOn[i] ? 1 : 0}`);
-    else await sendLevel(lampOn[i] ? i + 1 : 0, true);
+    else { lampOn[i] = false; b.classList.remove("on"); flashHint(); }
   };
   const lampsOff = () => { lampOn.fill(false); for (const x of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) x.classList.remove("on"); };
   /* Pins: which Arduino pin drives each lamp. A v3 sketch takes "P<i>:<pin>"
@@ -1106,7 +1128,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbValue").style.color = on ? LVCOL[lv - 1] : "";
     showDots(lv);
     overSince = on;
-    if (st.active && !fsr.drivesLamp()) sendLevel(lv);   // pressure owns the lamp when ticked
+    if (st.active) sendLevel(lv);
   }
   /* Belt and braces: while active, re-send the lamp state every 500 ms, so a
    * byte lost to a board reset or a busy port corrects itself. Not logged. */
