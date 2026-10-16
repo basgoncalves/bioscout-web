@@ -680,7 +680,6 @@ try {
   .bfbQuick tr { cursor:pointer; }
   .bfbQuick tr:hover td { background:color-mix(in srgb, var(--accent) 14%, transparent); }
   .bfbQuick tr.hit td { background:color-mix(in srgb, #ffd54a 18%, transparent); }
-  .bfbLoadWrap { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; }
   .bfbLoadWrap.hidden { display:none; }
   .bfbLoadWrap .note { flex-basis:100%; margin:0; }
   .bfbTbl { margin:10px 0; }
@@ -1511,11 +1510,13 @@ try {
       <div id="bfbBody" class="bfbBody"></div>
       <div class="row bfbRow">
         <label><span data-i18n="bfb_movement">Movement</span><select id="bfbMove"></select></label>
-        <span id="bfbLoadWrap" class="bfbLoadWrap">
-          <label><span data-i18n="bfb_loadL">Left load (kg)</span><input type="number" id="bfbLoadL" min="0" max="300" step="0.5" style="width:6em"></label>
-          <label><span data-i18n="bfb_loadR">Right load (kg)</span><input type="number" id="bfbLoadR" min="0" max="300" step="0.5" style="width:6em"></label>
-          <small class="note" id="bfbLoadNote"></small>
-        </span>
+      </div>
+      <div class="row bfbRow bfbLoadWrap" id="bfbLoadWrap">
+        <label><span data-i18n="bfb_loadL">Left load (kg)</span><input type="number" id="bfbLoadL" min="0" max="300" step="0.5"></label>
+        <label><span data-i18n="bfb_loadR">Right load (kg)</span><input type="number" id="bfbLoadR" min="0" max="300" step="0.5"></label>
+        <small class="note" id="bfbLoadNote"></small>
+      </div>
+      <div class="row bfbRow">
         <label><span data-i18n="bfb_metric">Metric</span><select id="bfbMetric"></select></label>
         <label><span data-i18n="bfb_when">Light when</span>
           <select id="bfbDir"><option value="above" data-i18n="bfb_above">above threshold</option><option value="below" data-i18n="bfb_below">below threshold</option></select></label>
@@ -1916,8 +1917,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 54;
-window.BUILD_AT = "2026-10-16 14:07";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 55;
+window.BUILD_AT = "2026-10-16 14:08";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
