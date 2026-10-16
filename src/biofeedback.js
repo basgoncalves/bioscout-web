@@ -16,6 +16,7 @@
 import { bodyMapHTML, REGIONS } from "./bodymap.js";
 import { loadForceModel, predictForces } from "./forces.js";
 import { makeZip } from "./zip.js";
+import { onPresence, greenCommand } from "./presence.js";
 import { jointLoadSVG } from "./jointload.js";
 
 const L = { sh: [11, 12], el: [13, 14], wr: [15, 16], hip: [23, 24], kn: [25, 26], an: [27, 28] };
@@ -383,7 +384,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     port: null, writer: null, reader: null, lm: null, stream: null, raf: 0,
     active: false, lit: null, value: NaN, lastTs: -1,
   };
-  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, sound: "beep", src: "camera", facing: "user", extra: [], mass: 75, height: 1.75, load: 0 };
+  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, green: "flash", sound: "beep", src: "camera", facing: "user", extra: [], mass: 75, height: 1.75, load: 0 };
   try { cfg = { ...cfg, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch { /* private */ }
   const save = () => { try { localStorage.setItem(SKEY, JSON.stringify(cfg)); } catch { /* full */ } };
 
@@ -422,6 +423,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     renderPick();
     $("bfbMass").value = cfg.mass ?? 75; $("bfbHeight").value = cfg.height ?? 1.75; $("bfbLoad").value = cfg.load ?? 0;
     $("bfbLoadWrap").classList.toggle("hidden", !(MOVES[cfg.move] && MOVES[cfg.move].bar));
+    $("bfbGreen").value = cfg.green || "flash";
     $("bfbDir").value = cfg.dir; $("bfbSound").value = cfg.sound || "beep"; $("bfbHyst").value = cfg.hyst; $("bfbBaud").value = String(cfg.baud);
   }
   $("bfbMove").onchange = () => pickMove($("bfbMove").value);
@@ -551,6 +553,29 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (p && p !== st.port) await openPort(p);
   };
   $("bfbDisconnect").onclick = async () => { await send(false, true); await closePort(); st.port = null; status("bfb_portNone"); renderConn(); listPorts(); };
+  /* Green lamp: someone has BioScout open (presence.js). Independent of the
+   * yellow biofeedback lamp and of Activate: it works as soon as a board is
+   * connected. 'G' / 'g' on the same serial line. */
+  let greenTo = 0;
+  const green = async (on) => {
+    $("bfbGreenDot").classList.toggle("on", on);
+    if (!st.writer) return;
+    try { await st.writer.write(new TextEncoder().encode(on ? "G\n" : "g\n")); log("→ " + (on ? "G" : "g")); } catch { /* port gone */ }
+  };
+  $("bfbGreen").onchange = () => { cfg.green = $("bfbGreen").value; save(); if (cfg.green === "off") green(false); };
+  $("bfbGreenTest").onclick = () => { green(true); clearTimeout(greenTo); greenTo = setTimeout(() => green(false), 1500); };
+  onPresence((e) => {
+    if (e.type === "status") {
+      $("bfbOnline").textContent = tr(e.status === "online" ? "bfb_onlineN" : "bfb_onlineOff", { n: e.others });
+      return;
+    }
+    $("bfbOnline").textContent = tr("bfb_onlineN", { n: e.others });
+    const c = greenCommand(cfg.green, e);
+    if (c.on == null) return;
+    clearTimeout(greenTo);
+    green(c.on);
+    if (c.on && c.pulseMs) greenTo = setTimeout(() => green(false), c.pulseMs);
+  });
   $("bfbTestOn").onclick = () => send(true, true);
   $("bfbTestOff").onclick = () => send(false, true);
   if (hasSerial) {

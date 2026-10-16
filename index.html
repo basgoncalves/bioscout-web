@@ -597,6 +597,8 @@ try {
   #bfbValue { font:700 42px/1 system-ui, sans-serif; color:#fff; text-shadow:0 2px 6px #000; }
   #bfbValue.hit { color:#ffd54a; }
   .bfbLamp { width:38px; height:38px; border-radius:50%; background:#333; border:2px solid #666; }
+  .bfbGreenDot { width:22px; height:22px; display:inline-block; vertical-align:middle; }
+  .bfbGreenDot.on { background:#4caf50 !important; border-color:#b9f6ca !important; box-shadow:0 0 16px 6px rgba(76,175,80,.7) !important; }
   .bfbLamp.on { background:#ffd54a; border-color:#fff3b0; box-shadow:0 0 24px 8px rgba(255,213,74,.7); }
   .bfbBarRow { display:flex; align-items:center; gap:8px; margin:8px 0; }
   .bfbSide { width:1.2em; font-weight:700; }
@@ -1405,6 +1407,15 @@ try {
         <button type="button" class="ghost" id="bfbTestOff" data-i18n="bfb_testOff">Test lamp off</button>
         <a href="./assets/arduino/biofeedback_lamp/biofeedback_lamp.ino" download data-i18n="bfb_sketch">Arduino sketch (.ino)</a>
       </div>
+      <div class="row bfbRow">
+        <label><span data-i18n="bfb_green">Green lamp: someone opens BioScout</span>
+          <select id="bfbGreen"><option value="flash" data-i18n="bfb_greenFlash">Flash when someone new arrives</option>
+            <option value="while" data-i18n="bfb_greenWhile">On while anyone else is online</option>
+            <option value="off" data-i18n="bfb_greenOff">Off</option></select></label>
+        <button type="button" class="ghost" id="bfbGreenTest" data-i18n="bfb_greenTest">Test green</button>
+        <span class="bfbLamp bfbGreenDot" id="bfbGreenDot" title="Green lamp"></span>
+        <span class="note" id="bfbOnline"></span>
+      </div>
 
       <h4 data-i18n="bfb_step2">2. Movement and metric</h4>
       <div id="bfbBody" class="bfbBody"></div>
@@ -1801,8 +1812,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 49;
-window.BUILD_AT = "2026-10-16 08:45";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 50;
+window.BUILD_AT = "2026-10-16 11:54";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -1930,6 +1941,7 @@ import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 // called the array.
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
 import { initBiofeedback } from "./src/biofeedback.js";
+import { startPresence } from "./src/presence.js";
 import { createPreview, openReview } from "./src/lmreview.js";
 import { ensembleRep, mergeSides } from "./src/ensemble.js";
 import { neckLoadHTML } from "./src/neckload.js";
@@ -2012,6 +2024,9 @@ async function startPoseWorker() {
 const $ = (id) => document.getElementById(id);
 /* BioFeedback (testing): its own landmarker, so its timestamps never clash with the recorder's. */
 let biofeedback = null;
+/* Presence: every open page joins the "online" channel with a random key, so
+ * the BioFeedback page can light the green lamp (src/presence.js; privacy.html). */
+queueMicrotask(() => { try { if (CLOUD && CLOUD.url) startPresence({ url: CLOUD.url, key: CLOUD.key }); } catch { /* no realtime */ } });
 queueMicrotask(() => { biofeedback = initBiofeedback({ $, tr, getLandmarker: async () => ((await loadMediaPipe()) ? makeLandmarker() : null) }); });
 const statusEl = $("status");
 const say = (t, warn) => {

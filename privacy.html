@@ -45,7 +45,7 @@
 <body>
 <div class="wrap">
   <h1>Privacy notice</h1>
-  <p class="sub">BioScout Web · last updated 10 September 2026 · <a href="./">back to the app</a></p>
+  <p class="sub">BioScout Web · last updated 16 October 2026 · <a href="./">back to the app</a></p>
 
   <div class="card">
     <h2>Who is responsible</h2>
@@ -58,8 +58,20 @@
     <p>Everything stays on your device. Videos you record or open are analysed on the device and are
     <b>never uploaded</b>. Profiles, sessions, meals, diary, sleep, weight, vitals, water and coffee,
     cycle, assessments and imported activities are kept in your browser's local storage, and meal photos
-    in its local database. Nothing is sent to BioScout or anyone else. Clearing the browser's data or
+    in its local database. None of this is sent to BioScout or anyone else (the only thing the app sends
+    without an account is the anonymous "online now" signal below). Clearing the browser's data or
     uninstalling the app deletes it; the Export button makes a file you can keep.</p>
+  </div>
+
+  <div class="card">
+    <h2>The "online now" signal</h2>
+    <p>While the app is open, it joins a live "online now" channel on Supabase Realtime (servers in
+    Frankfurt, EU) with a <b>random code made fresh on every visit</b>. The code is not linked to an account,
+    a device or a person, is not written to any database, and disappears when the page closes. It only
+    lets the app's maker see how many copies of BioScout are open right now (for example, a lamp that lights
+    up in the lab when someone starts using it). As with any web connection, Supabase sees the connection's
+    IP address while it is open; BioScout does not keep it. Legal basis: legitimate interest in knowing that the
+    service is being used, with no personal data kept.</p>
   </div>
 
   <div class="card">
