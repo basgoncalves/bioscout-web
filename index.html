@@ -647,6 +647,25 @@ try {
   .bfbPlot { width:100%; height:140px; display:block; margin:6px 0; background:var(--card); border:1px solid var(--line, #333); border-radius:8px; }
   #bfbValue { font-size:34px !important; }
   .bfbLog { max-height:160px; overflow:auto; font-size:12px; }
+  .bfbTop { display:flex; align-items:center; gap:10px; margin:8px 0 12px; flex-wrap:nowrap; }
+  .bfbTop .bfbDevBtn { width:auto; margin:0; padding:6px 12px; font-size:13px; white-space:nowrap; flex:none; }
+  .bfbDevDot, .bfbGreenDot { flex:none; }
+  .bfbRow label { min-width:6.5em; flex:1 1 auto; }
+  .bfbRow select { max-width:100%; }
+  .bfbTop #bfbActivate { flex:1 1 auto; min-width:0; width:auto; margin:0; padding:8px 16px; }
+  .bfbDevDot { width:14px; height:14px; display:inline-block; }
+  .bfbDevDot.on { background:#4caf50 !important; border-color:#b9f6ca !important; }
+  dialog.bfbDevDlg { width:min(720px, 96vw); max-width:96vw; padding:14px; border-radius:12px; border:1px solid var(--line, #333); background:var(--card); color:var(--ink); }
+  dialog.bfbDevDlg .lmHead { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  dialog.bfbDevDlg .lmX { width:auto; margin:0; padding:4px 10px; }
+  .bfbDevPick { width:auto; margin:0; padding:10px 18px; }
+  .bfbDevPick.on { border-color:var(--accent); color:var(--accent); }
+  .bfbThrRow { margin:8px 0 10px; }
+  .bfbThrLbl { font-size:13px; display:block; margin-bottom:4px; }
+  .bfbThrCtl { display:flex; align-items:center; gap:12px; }
+  .bfbThrCtl input[type=range] { flex:1; width:100%; height:36px; margin:0; accent-color:var(--accent); }
+  .bfbThrCtl input[type=range]::-webkit-slider-thumb { width:28px; height:28px; }
+  .bfbThrCtl input[type=number] { width:4.2em; flex:none; margin:0; padding-left:6px; padding-right:6px; }
   .bfbTbl { margin:10px 0; }
   .bfbTbl table { font-size:13px; font-variant-numeric:tabular-nums; }
   .bfbTbl th small { font-weight:400; opacity:.7; }
@@ -1432,7 +1451,19 @@ try {
         <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
       <p class="note hidden bad" id="bfbNoSerial" data-i18n="bfb_noSerial">This browser cannot talk to USB devices. Use Chrome or Edge on a computer; the lamp is still shown on screen.</p>
 
-      <h4 data-i18n="bfb_step1">1. Arduino</h4>
+      <div class="row bfbTop">
+        <button type="button" class="ghost bfbDevBtn" id="bfbDevBtn"><span aria-hidden="true">🔌</span> <span data-i18n="bfb_devices">Connect external device</span></button>
+        <span class="bfbLamp bfbDevDot" id="bfbDevDot" title="Device"></span>
+        <button type="button" id="bfbActivate" data-i18n="bfb_activate">Activate</button>
+      </div>
+      <dialog id="bfbDevDlg" class="bfbDevDlg">
+        <div class="lmHead"><b data-i18n="bfb_devices">Connect external device</b>
+          <button type="button" class="ghost lmX" id="bfbDevClose" aria-label="Close">✕</button></div>
+        <div class="row bfbRow" id="bfbDevList">
+          <button type="button" class="ghost bfbDevPick" id="bfbDevArduino"><span aria-hidden="true">💡</span> Arduino</button>
+        </div>
+        <div id="bfbArduinoPanel" class="hidden">
+          <h4 style="margin:10px 0 4px">Arduino</h4>
       <div class="row bfbRow">
         <button type="button" id="bfbChoosePort" data-i18n="bfb_choosePort">Choose port…</button>
         <select id="bfbPortSel" aria-label="Port"></select>
@@ -1456,6 +1487,9 @@ try {
         <span class="note" id="bfbOnline"></span>
       </div>
 
+        </div>
+      </dialog>
+
       <h4 data-i18n="bfb_step2">2. Movement and metric</h4>
       <div id="bfbBody" class="bfbBody"></div>
       <div class="row bfbRow">
@@ -1468,13 +1502,15 @@ try {
         <label><span data-i18n="bfb_mass">Body mass (kg)</span><input type="number" id="bfbMass" min="20" max="250" step="0.5" style="width:6em"></label>
         <label><span data-i18n="bfb_height">Height (m)</span><input type="number" id="bfbHeight" min="1" max="2.4" step="0.01" style="width:6em"></label>
         <label id="bfbLoadWrap"><span data-i18n="bfb_load">Bar load (kg)</span><input type="number" id="bfbLoad" min="0" max="500" step="2.5" style="width:6em"></label>
-      </div>
-      <div class="row bfbRow">
-        <label style="flex:1"><span><span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>)</span>
-          <input type="range" id="bfbThr" min="0" max="180" step="1"></label>
-        <input type="number" id="bfbThrN" min="0" max="180" step="1" style="width:5em" aria-label="Threshold">
-        <label><span><span data-i18n="bfb_hyst">Hysteresis</span> (<span id="bfbHystUnit">°</span>)</span><input type="number" id="bfbHyst" min="0" max="20" step="1" style="width:4.5em"></label>
+        <label><span><span data-i18n="bfb_hyst">Hysteresis</span> (<span id="bfbHystUnit">°</span>)</span><input type="number" id="bfbHyst" min="0" max="20" step="1" style="width:5em"></label>
         <label><span data-i18n="bfb_sound">Sound</span><select id="bfbSound"><option value="off" data-i18n="bfb_soundOff">Off</option><option value="beep" data-i18n="bfb_soundBeep">Beep when crossed</option><option value="repeat" data-i18n="bfb_soundRepeat">Beep while over</option></select></label>
+      </div>
+      <div class="bfbThrRow">
+        <span class="bfbThrLbl"><span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>)</span>
+        <div class="bfbThrCtl">
+          <input type="range" id="bfbThr" min="0" max="180" step="1" aria-label="Threshold">
+          <input type="number" id="bfbThrN" min="0" max="180" step="1" aria-label="Threshold">
+        </div>
       </div>
 
       <h4 data-i18n="bfb_step3">3. Camera and go</h4>
@@ -1497,7 +1533,6 @@ try {
         <button type="button" class="ghost hidden" id="bfbAreaClear" data-i18n="bfb_areaClear">Whole screen</button>
         <button type="button" class="ghost" id="bfbZero" data-i18n="bfb_zero">Zero (neutral posture)</button>
         <button type="button" class="ghost" id="bfbZeroReset" data-i18n="bfb_zeroReset">Clear zero</button>
-        <button type="button" id="bfbActivate" data-i18n="bfb_activate">Activate</button>
       </div>
       <p class="note" id="bfbZeroNote"></p>
       <div class="row bfbRow">
@@ -1857,8 +1892,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 51;
-window.BUILD_AT = "2026-10-16 12:08";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 52;
+window.BUILD_AT = "2026-10-16 12:53";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

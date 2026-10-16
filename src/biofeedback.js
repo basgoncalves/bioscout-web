@@ -539,7 +539,17 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     try { await st.writer.write(new TextEncoder().encode(on ? "1\n" : "0\n")); log("→ " + (on ? "1" : "0")); }
     catch (e) { status("bfb_portFail", { err: e.message }, true); }
   }
+  /* "Connect external device": a small button opens a window listing the
+   * devices (only the Arduino for now); the dot next to it is green while a
+   * board is connected. */
+  $("bfbDevBtn").onclick = () => { $("bfbDevDlg").showModal(); listPorts(); };
+  $("bfbDevClose").onclick = () => $("bfbDevDlg").close();
+  $("bfbDevArduino").onclick = () => {
+    const p = $("bfbArduinoPanel"); p.classList.toggle("hidden");
+    $("bfbDevArduino").classList.toggle("on", !p.classList.contains("hidden"));
+  };
   function renderConn() {
+    $("bfbDevDot").classList.toggle("on", !!st.port);
     $("bfbDisconnect").disabled = !st.port;
     $("bfbTestOn").disabled = $("bfbTestOff").disabled = !st.port;
   }
