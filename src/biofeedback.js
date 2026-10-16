@@ -66,6 +66,24 @@ function fppa(img, s) {
   const mid = (X(img[23]) + X(img[24])) / 2;
   return Math.abs(X(K) - mid) < Math.abs(xl - mid) ? a : -a;
 }
+/* Hand-held / bar load per side (kg) and body mass, set by the page. Used for
+ * the static arm moments below and to scale the per-side model loads. */
+export const EXT = { L: 0, R: 0, body: 75 };
+const G0 = 9.80665;
+const hz = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);      // horizontal lever arm (m)
+/* Quasi-static moment about the elbow / shoulder: forearm+hand and upper-arm
+ * weight (Dempster fractions) plus the load in that hand. Gravity only, no
+ * accelerations -- a lever-arm estimate, not inverse dynamics. */
+function elbMom(w, s) {
+  const E = w[L.el[s]], W = w[L.wr[s]], d = hz(E, W);
+  return G0 * (0.022 * EXT.body * 0.682 * d + EXT["LR"[s]] * d);
+}
+function shMom(w, s) {
+  const S = w[L.sh[s]], E = w[L.el[s]], W = w[L.wr[s]];
+  const cUA = { x: S.x + 0.436 * (E.x - S.x), z: S.z + 0.436 * (E.z - S.z) };
+  const cFA = { x: E.x + 0.682 * (W.x - E.x), z: E.z + 0.682 * (W.z - E.z) };
+  return G0 * (0.028 * EXT.body * hz(S, cUA) + 0.022 * EXT.body * hz(S, cFA) + EXT["LR"[s]] * hz(S, W));
+}
 export const METRICS = {
   kneeFlexL: { label: "bfb_m_kneeFlexL", unit: DEG, f: (w) => knee(w, 0) },
   kneeFlexR: { label: "bfb_m_kneeFlexR", unit: DEG, f: (w) => knee(w, 1) },
@@ -106,6 +124,12 @@ export const METRICS = {
   ankleDF:   { label: "bfb_m_ankleDF",   unit: DEG, pair: ["ankleDFL", "ankleDFR"] },
   elbowFlex: { label: "bfb_m_elbowFlex", unit: DEG, pair: ["elbowFlexL", "elbowFlexR"] },
   shAbd:     { label: "bfb_m_shAbd",     unit: DEG, pair: ["shAbdL", "shAbdR"] },
+  elbMomL:   { label: "bfb_m_elbMomL", unit: "Nm", max: 120, f: (w) => elbMom(w, 0) },
+  elbMomR:   { label: "bfb_m_elbMomR", unit: "Nm", max: 120, f: (w) => elbMom(w, 1) },
+  shMomL:    { label: "bfb_m_shMomL",  unit: "Nm", max: 200, f: (w) => shMom(w, 0) },
+  shMomR:    { label: "bfb_m_shMomR",  unit: "Nm", max: 200, f: (w) => shMom(w, 1) },
+  elbMom:    { label: "bfb_m_elbMom",  unit: "Nm", max: 120, pair: ["elbMomL", "elbMomR"] },
+  shMom:     { label: "bfb_m_shMom",   unit: "Nm", max: 200, pair: ["shMomL", "shMomR"] },
   valgus:    { label: "bfb_m_valgus",    unit: DEG, pair: ["valgusL", "valgusR"] },
   /* Model estimates (data/force_model_v2.json, the app's static-optimisation
    * surrogate) from the live sagittal angles, in body weights. 4th argument
@@ -151,26 +175,26 @@ export const LOAD_KEYS = ["hipJCF", "kneeJCF", "ankleJCF", "quadsF", "glutesF", 
 
 /* Movement presets: which metrics make sense and a starting threshold. */
 export const MOVES = {
-  squat:  { label: "bfb_mv_squat",  bar: "shoulders", metrics: ["kneeFlex", "valgus", "hipFlex", "ankleDF", "trunkLean", "barY", "barX", "barVel", "barPow", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 70, dir: "above" },
-  deadlift:{ label: "bfb_mv_deadlift", bar: "hands", metrics: ["trunkLean", "hipFlex", "kneeFlex", "barY", "barX", "barVel", "barPow", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "trunkLean", thr: 60, dir: "above" },
+  squat:  { label: "bfb_mv_squat",  bar: "shoulders", wt: true, metrics: ["kneeFlex", "valgus", "hipFlex", "ankleDF", "trunkLean", "barY", "barX", "barVel", "barPow", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 70, dir: "above" },
+  deadlift:{ label: "bfb_mv_deadlift", bar: "hands", wt: true, metrics: ["trunkLean", "hipFlex", "kneeFlex", "shMom", "barY", "barX", "barVel", "barPow", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "trunkLean", thr: 60, dir: "above" },
   pullup: { label: "bfb_mv_pullup", metrics: ["elbowFlex", "shAbd"], def: "elbowFlex", thr: 100, dir: "above" },
-  slsquat:{ label: "bfb_mv_slsquat", metrics: ["kneeFlex", "valgus", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 60, dir: "above" },
+  slsquat:{ label: "bfb_mv_slsquat", wt: true, metrics: ["kneeFlex", "valgus", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 60, dir: "above" },
   sj:     { label: "bfb_mv_sj",     metrics: ["jumpHeight", "flightTime", "cmKnee", "cmHip", "cmAnkle", "landKnee", "kneeFlex", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 90, dir: "above" },
   cmj:    { label: "bfb_mv_cmj",    metrics: ["jumpHeight", "flightTime", "cmKnee", "cmHip", "cmAnkle", "landKnee", "kneeFlex", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 90, dir: "above" },
   shot:   { label: "bfb_mv_shot",   metrics: ["shotElbow", "shotShoulder", "shotKnee", "shotTrunk", "shotJump", "elbowFlex", "shAbd", "kneeFlex", "trunkLean"], def: "elbowFlex", thr: 20, dir: "below" },
   kick:   { label: "bfb_mv_kick",   metrics: ["hipFlex", "kneeFlex", "trunkLean", "ankleDF", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "hipFlex", thr: 60, dir: "above" },
   stroke: { label: "bfb_mv_stroke", metrics: ["shAbd", "elbowFlex", "trunkLean", "kneeFlex", "hipFlex"], def: "shAbd", thr: 90, dir: "above" },
-  lunge:  { label: "bfb_mv_lunge",  metrics: ["kneeFlex", "valgus", "hipFlex", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 80, dir: "above" },
-  hinge:  { label: "bfb_mv_hinge",  metrics: ["trunkLean", "hipFlex", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "trunkLean", thr: 45, dir: "above" },
+  lunge:  { label: "bfb_mv_lunge", wt: true, metrics: ["kneeFlex", "valgus", "hipFlex", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 80, dir: "above" },
+  hinge:  { label: "bfb_mv_hinge", wt: true, metrics: ["trunkLean", "hipFlex", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "trunkLean", thr: 45, dir: "above" },
   pushup: { label: "bfb_mv_pushup", metrics: ["elbowFlex", "hipFlex"], def: "elbowFlex", thr: 90, dir: "above" },
   dip:    { label: "bfb_mv_dip",    metrics: ["elbowFlex", "trunkLean"], def: "elbowFlex", thr: 90, dir: "above" },
-  ohpress:{ label: "bfb_mv_ohpress",metrics: ["shAbd", "elbowFlex", "trunkLean"], def: "shAbd", thr: 160, dir: "above" },
-  curl:   { label: "bfb_mv_curl",   metrics: ["elbowFlex"], def: "elbowFlex", thr: 110, dir: "above" },
-  row:    { label: "bfb_mv_row",    metrics: ["elbowFlex", "trunkLean", "hipFlex"], def: "elbowFlex", thr: 90, dir: "above" },
-  raise:  { label: "bfb_mv_raise",  metrics: ["shAbd"], def: "shAbd", thr: 90, dir: "above" },
-  bridge: { label: "bfb_mv_bridge", metrics: ["hipFlex", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "hipFlex", thr: 15, dir: "below" },
+  ohpress:{ label: "bfb_mv_ohpress", wt: true, metrics: ["shAbd", "elbowFlex", "shMom", "elbMom", "trunkLean"], def: "shAbd", thr: 160, dir: "above" },
+  curl:   { label: "bfb_mv_curl", wt: true, metrics: ["elbowFlex", "elbMom", "shMom"], def: "elbowFlex", thr: 110, dir: "above" },
+  row:    { label: "bfb_mv_row", wt: true, metrics: ["elbowFlex", "elbMom", "shMom", "trunkLean", "hipFlex"], def: "elbowFlex", thr: 90, dir: "above" },
+  raise:  { label: "bfb_mv_raise", wt: true, metrics: ["shAbd", "shMom", "elbMom"], def: "shAbd", thr: 90, dir: "above" },
+  bridge: { label: "bfb_mv_bridge", wt: true, metrics: ["hipFlex", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "hipFlex", thr: 15, dir: "below" },
   plank:  { label: "bfb_mv_plank",  metrics: ["hipFlex", "neckFlex"], def: "hipFlex", thr: 15, dir: "above" },
-  heelraise:{ label: "bfb_mv_heelraise", metrics: ["ankleDF", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "ankleDF", thr: -15, dir: "below" },
+  heelraise:{ label: "bfb_mv_heelraise", wt: true, metrics: ["ankleDF", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "ankleDF", thr: -15, dir: "below" },
   neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "headNod", "neckTilt", "headTurn", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
   free:   { label: "bfb_mv_free",   metrics: [], def: "kneeFlex", thr: 70, dir: "above" },
 };
@@ -184,7 +208,7 @@ export const MOVES = {
  * event detectors only, not from the cycle finder as well. */
 const EVENT_MOVES = new Set(["cmj", "sj", "shot"]);
 /* Hysteresis default per unit: 3 deg is sensible, 3 body weights is not. */
-const HYST = { "°": 3, BW: 0.3, cm: 2, ms: 30, "m/s": 0.05, W: 50 };
+const HYST = { "°": 3, BW: 0.3, cm: 2, ms: 30, "m/s": 0.05, W: 50, Nm: 3 };
 
 /* Bar tracker. Scale: nose-to-ankle is ~0.89 of standing height, learnt
  * only while standing tall (knees nearly straight) so a squat does not
@@ -354,7 +378,7 @@ export function makeLoadEstimator() {
   return {
     ready: () => !!model,
     async load() { if (!model) model = await (loading || (loading = loadForceModel())); return model; },
-    push(ts, w, bodyKg = 75, loadKg = 0, heightM = 1.75) {
+    push(ts, w, bodyKg = 75, loadKg = 0, heightM = 1.75, side = null) {
       const c = liveCoords(w); if (Object.values(c).some((x) => !Number.isFinite(x))) return out;
       buf.push({ t: ts / 1000, c }); while (buf.length > 9) buf.shift();
       if (!model || buf.length < 5 || ts - last < 66) return out;
@@ -369,9 +393,16 @@ export function makeLoadEstimator() {
       r.jrfNames.forEach((nm, i) => {           // hip_r_mag -> hipJCFR
         const [j, sd] = nm.split("_"); o[j + "JCF" + sd.toUpperCase()] = r.jrf[n][i] * k;
       });
+      /* Uneven loads (dumbbell in one hand, offset bar): each leg is scaled as
+       * if the athlete carried twice THAT side's load, instead of the mean. */
+      const ks = { L: k, R: k };
+      if (side && loadKg > 0) for (const sd of ["L", "R"]) ks[sd] = (bodyKg + 2 * Math.max(0, side[sd] || 0)) / bodyKg;
       for (const [g, pre] of Object.entries(GROUPS)) for (const sd of ["l", "r"]) {
         let f = 0; r.muscleNames.forEach((nm, i) => { if (nm.endsWith("_" + sd) && pre.some((p) => nm.startsWith(p))) f += r.forces[n][i]; });
         o[g + sd.toUpperCase()] = Math.max(0, f / bw);
+      }
+      if (side && loadKg > 0) for (const key of Object.keys(o)) {
+        o[key] *= ks[key.slice(-1)] / k;
       }
       out = o; return out;
     },
@@ -386,6 +417,12 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   };
   let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, green: "flash", sound: "beep", src: "camera", facing: "user", extra: [], mass: 75, height: 1.75, load: 0 };
   try { cfg = { ...cfg, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch { /* private */ }
+  /* Load per movement and side: cfg.wt[move] = { L, R } kg. Only movements
+   * marked wt take one; a kick or a jump shot never does. */
+  if (!cfg.wt) { cfg.wt = {}; if (cfg.load > 0) for (const mv of ["squat", "deadlift"]) cfg.wt[mv] = { L: cfg.load / 2, R: cfg.load / 2 }; }
+  const wtOf = (move) => (MOVES[move] && MOVES[move].wt ? { L: 0, R: 0, ...(cfg.wt[move] || {}) } : { L: 0, R: 0 });
+  const loadOf = (move) => { const x = wtOf(move); return (+x.L || 0) + (+x.R || 0); };
+  const syncExt = () => { const x = wtOf(cfg.move); EXT.L = +x.L || 0; EXT.R = +x.R || 0; EXT.body = cfg.mass || 75; };
   const save = () => { try { localStorage.setItem(SKEY, JSON.stringify(cfg)); } catch { /* full */ } };
 
   const hasSerial = "serial" in navigator;
@@ -421,20 +458,26 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbValue").textContent = "–"; $("bfbResults").innerHTML = ""; ema = emaL = emaR = NaN; buildBars();
     $("bfbThr").value = cfg.thr; $("bfbThrN").value = cfg.thr;
     renderPick();
-    $("bfbMass").value = cfg.mass ?? 75; $("bfbHeight").value = cfg.height ?? 1.75; $("bfbLoad").value = cfg.load ?? 0;
-    $("bfbLoadWrap").classList.toggle("hidden", !(MOVES[cfg.move] && MOVES[cfg.move].bar));
+    $("bfbMass").value = cfg.mass ?? 75; $("bfbHeight").value = cfg.height ?? 1.75; const wx = wtOf(cfg.move);
+    $("bfbLoadL").value = wx.L; $("bfbLoadR").value = wx.R; syncExt();
+    $("bfbLoadWrap").classList.toggle("hidden", !(MOVES[cfg.move] && MOVES[cfg.move].wt));
+    $("bfbLoadNote").textContent = MOVES[cfg.move] && MOVES[cfg.move].bar ? tr("bfb_loadBarHint") : "";
     $("bfbGreen").value = cfg.green || "flash";
     $("bfbDir").value = cfg.dir; $("bfbSound").value = cfg.sound || "beep"; $("bfbHyst").value = cfg.hyst; $("bfbBaud").value = String(cfg.baud);
   }
   $("bfbMove").onchange = () => pickMove($("bfbMove").value);
-  for (const [id, key, lo, hi] of [["bfbMass", "mass", 20, 250], ["bfbHeight", "height", 1, 2.4], ["bfbLoad", "load", 0, 500]]) {
-    $(id).onchange = () => { cfg[key] = Math.max(lo, Math.min(hi, +$(id).value || 0)); $(id).value = cfg[key]; save(); if (key === "height") barT.reset(); };
+  for (const [id, key, lo, hi] of [["bfbMass", "mass", 20, 250], ["bfbHeight", "height", 1, 2.4]]) {
+    $(id).onchange = () => { cfg[key] = Math.max(lo, Math.min(hi, +$(id).value || 0)); $(id).value = cfg[key]; syncExt(); save(); if (key === "height") barT.reset(); };
   }
+  for (const sd of ["L", "R"]) $("bfbLoad" + sd).onchange = () => {
+    const v = Math.max(0, Math.min(300, +$("bfbLoad" + sd).value || 0)); $("bfbLoad" + sd).value = v;
+    cfg.wt = { ...cfg.wt, [cfg.move]: { ...wtOf(cfg.move), [sd]: v } }; syncExt(); save();
+  };
   $("bfbMetric").onchange = () => {
     const before = METRICS[cfg.metric] && METRICS[cfg.metric].unit;
     cfg.metric = $("bfbMetric").value;
     const u = METRICS[cfg.metric].unit;   // a 30 deg threshold means nothing in body weights
-    if (u !== before) { cfg.thr = { BW: 3, cm: 30, ms: 500, "m/s": 0.5, W: 500 }[u] ?? 30; cfg.hyst = HYST[u] ?? 3; }
+    if (u !== before) { cfg.thr = { BW: 3, cm: 30, ms: 500, "m/s": 0.5, W: 500, Nm: 30 }[u] ?? 30; cfg.hyst = HYST[u] ?? 3; }
     syncInputs(); save();
   };
   $("bfbThr").oninput = () => { cfg.thr = +$("bfbThr").value; $("bfbThrN").value = cfg.thr; save(); };
@@ -855,12 +898,12 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (m.load || (cfg.move !== "free" && mv.metrics.some((k) => METRICS[k].load))) {
       if (!loadEst.ready()) loadEst.load().then(() => { $("bfbCamNote").textContent = ""; })
         .catch(() => { $("bfbCamNote").textContent = tr("bfb_loadFail"); });
-      ld = loadEst.push(ts, w, cfg.mass || 75, mv.bar ? cfg.load || 0 : 0, cfg.height || 1.75);
+      ld = loadEst.push(ts, w, cfg.mass || 75, loadOf(cfg.move), cfg.height || 1.75, wtOf(cfg.move));
       if (!ld) $("bfbCamNote").textContent = tr("bfb_loadLoading");
     }
     let bb = null;
     if (mv.bar) {
-      bb = barT.step(ts, img, S.w, S.h, mv.bar, cfg.height || 1.75, Math.max(knee(w, 0), knee(w, 1)), cfg.load || 0);
+      bb = barT.step(ts, img, S.w, S.h, mv.bar, cfg.height || 1.75, Math.max(knee(w, 0), knee(w, 1)), loadOf(cfg.move));
       if (bb) {   // the bar on the video: a dot, and its path over the last 3 s
         barTrail.push([ts, bb.raw]); while (barTrail.length && barTrail[0][0] < ts - 3000) barTrail.shift();
         ctx.strokeStyle = "rgba(255,213,74,.9)"; ctx.lineWidth = 3; ctx.beginPath();
@@ -1023,7 +1066,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       if (xs.length) row.barDrift = xs.reduce((a, v) => (Math.abs(v) > Math.abs(a) ? v : a), 0);
       if (up.length) { row.barVpk = Math.max(...up); row.barVmean = up.reduce((a, v) => a + v, 0) / up.length; }
       const pw = c.frames.map((f) => f.barPow).filter(Number.isFinite); if (pw.length) row.barPpk = Math.max(...pw);
-      row.load = cfg.load || 0;
+      row.load = loadOf(c.move || cfg.move);
       delete row.barY; delete row.barX; delete row.barVel; delete row.barPow;
     }
     const p = METRICS[c.key];
@@ -1149,7 +1192,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     try { model = await loadEst.load(); } catch { box.innerHTML = `<p class="note">${esc(tr("bfb_loadFail"))}</p>`; return; }
     const coords = {}; for (const key of Object.keys(smp[0]._c)) coords[key] = smp.map((x) => x._c[key]);
     const times = smp.map((x) => x.t - smp[0].t);
-    const body = cfg.mass || 75, ext = MOVES[move] && MOVES[move].bar ? cfg.load || 0 : 0;
+    const body = cfg.mass || 75, ext = loadOf(move);
     const out = predictForces(model, coords, smp.length, { massKg: body + ext, heightM: cfg.height || 1.75, times });
     const repObj = { coords, times, loads: out.loads, loadNames: out.loadNames, jrf: out.jrf, jrfNames: out.jrfNames };
     let plane = "sagittal", side = "r";
@@ -1263,7 +1306,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       files.push({ name: "timeseries.csv", data: csv(rec.samples, cols) });
     }
     files.push({ name: "settings.json", data: JSON.stringify({ saved: new Date().toISOString(), source: cfg.src, movement: cfg.move,
-      metric: cfg.metric, bodyMassKg: cfg.mass, heightM: cfg.height, barLoadKg: cfg.load, threshold: cfg.thr, unit: METRICS[cfg.metric].unit, lightWhen: cfg.dir, hysteresis: cfg.hyst, zero: cfg.zero }, null, 2) });
+      metric: cfg.metric, bodyMassKg: cfg.mass, heightM: cfg.height, loadKg: wtOf(cfg.move), threshold: cfg.thr, unit: METRICS[cfg.metric].unit, lightWhen: cfg.dir, hysteresis: cfg.hyst, zero: cfg.zero }, null, 2) });
     files.push({ name: "README.txt", data: tr("bfb_readme") });
     const blob = makeZip(files), url = URL.createObjectURL(blob), a = document.createElement("a");
     a.href = url; a.download = `bioscout_biofeedback_${stamp}.zip`; document.body.appendChild(a); a.click();
