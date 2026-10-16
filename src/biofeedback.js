@@ -68,21 +68,58 @@ function fppa(img, s) {
 }
 /* Hand-held / bar load per side (kg) and body mass, set by the page. Used for
  * the static arm moments below and to scale the per-side model loads. */
-export const EXT = { L: 0, R: 0, body: 75 };
+export const EXT = { L: 0, R: 0, body: 75, t: NaN };   // t: frame time (s), set by the page
 const G0 = 9.80665;
-const hz = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);      // horizontal lever arm (m)
-/* Quasi-static moment about the elbow / shoulder: forearm+hand and upper-arm
- * weight (Dempster fractions) plus the load in that hand. Gravity only, no
- * accelerations -- a lever-arm estimate, not inverse dynamics. */
+/* Arm moments with the movement's speed in them: each mass (upper arm,
+ * forearm+hand, the load in the hand) needs a force m*(a - g) to move as it
+ * does, and the joint moment is the sum of r x m*(a - g) about the joint
+ * (Newton-Euler with point masses; segment spin inertia left out). Standing
+ * still (a = 0) gives the old gravity-only lever-arm value. MediaPipe world
+ * axes: metres, y pointing DOWN, so gravity is +y. Accelerations come from
+ * smoothed landmark positions over ~0.1 s and are capped, because camera
+ * landmarks are noisy. */
+const ACC = new Map();
+function accel(key, p) {
+  const t = EXT.t; if (!Number.isFinite(t)) return { x: 0, y: 0, z: 0 };
+  let h = ACC.get(key); if (!h) ACC.set(key, (h = []));
+  const last = h[h.length - 1];
+  if (!last || last.t !== t) {
+    if (last && t - last.t > 0.5) h.length = 0;                 // a pause: start again
+    const prev = h[h.length - 1], a = 0.45;                     // light smoothing
+    h.push(prev ? { t, x: prev.x + a * (p.x - prev.x), y: prev.y + a * (p.y - prev.y), z: prev.z + a * (p.z - prev.z) } : { t, x: p.x, y: p.y, z: p.z });
+    while (h.length > 2 && h[0].t < t - 0.4) h.shift();
+  }
+  const p0 = h[h.length - 1];
+  const p1 = [...h].reverse().find((q) => p0.t - q.t >= 0.05);
+  const p2 = p1 && [...h].reverse().find((q) => p1.t - q.t >= 0.05);
+  if (!p2) return { x: 0, y: 0, z: 0 };
+  const out = {};
+  for (const c of ["x", "y", "z"]) {
+    const v1 = (p0[c] - p1[c]) / (p0.t - p1.t), v2 = (p1[c] - p2[c]) / (p1.t - p2.t);
+    out[c] = Math.max(-40, Math.min(40, (v1 - v2) / ((p0.t - p2.t) / 2)));
+  }
+  return out;
+}
+const lerp = (A, B, f) => ({ x: A.x + f * (B.x - A.x), y: A.y + f * (B.y - A.y), z: A.z + f * (B.z - A.z) });
+/* |sum r x m(a - g)| about joint J for masses [{p, m, key}] */
+function jointMoment(J, masses) {
+  let Mx = 0, My = 0, Mz = 0;
+  for (const { p, m, key } of masses) {
+    if (!(m > 0)) continue;
+    const a = accel(key, p), r = { x: p.x - J.x, y: p.y - J.y, z: p.z - J.z };
+    const F = { x: m * a.x, y: m * (a.y - G0), z: m * a.z };
+    Mx += r.y * F.z - r.z * F.y; My += r.z * F.x - r.x * F.z; Mz += r.x * F.y - r.y * F.x;
+  }
+  return Math.hypot(Mx, My, Mz);
+}
 function elbMom(w, s) {
-  const E = w[L.el[s]], W = w[L.wr[s]], d = hz(E, W);
-  return G0 * (0.022 * EXT.body * 0.682 * d + EXT["LR"[s]] * d);
+  const E = w[L.el[s]], W = w[L.wr[s]];
+  return jointMoment(E, [{ p: lerp(E, W, 0.682), m: 0.022 * EXT.body, key: "fa" + s }, { p: W, m: EXT["LR"[s]], key: "wr" + s }]);
 }
 function shMom(w, s) {
   const S = w[L.sh[s]], E = w[L.el[s]], W = w[L.wr[s]];
-  const cUA = { x: S.x + 0.436 * (E.x - S.x), z: S.z + 0.436 * (E.z - S.z) };
-  const cFA = { x: E.x + 0.682 * (W.x - E.x), z: E.z + 0.682 * (W.z - E.z) };
-  return G0 * (0.028 * EXT.body * hz(S, cUA) + 0.022 * EXT.body * hz(S, cFA) + EXT["LR"[s]] * hz(S, W));
+  return jointMoment(S, [{ p: lerp(S, E, 0.436), m: 0.028 * EXT.body, key: "ua" + s },
+    { p: lerp(E, W, 0.682), m: 0.022 * EXT.body, key: "fa" + s }, { p: W, m: EXT["LR"[s]], key: "wr" + s }]);
 }
 export const METRICS = {
   kneeFlexL: { label: "bfb_m_kneeFlexL", unit: DEG, f: (w) => knee(w, 0) },
@@ -737,7 +774,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * Sketch v5 drives the lamp's pin directly (T<pin>); older sketches only
    * know levels, so there the button shows that level. */
   const lampOn = [false, false, false];
-  for (const b of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) b.onclick = async () => {
+  const lampTest = async (b) => {
     const i = +b.dataset.testlv - 1, P = cfg.pins || [13, 12, 11, 8, 7];
     lampOn[i] = !lampOn[i];
     for (const x of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) x.classList.toggle("on", lampOn[+x.dataset.testlv - 1]);
@@ -745,6 +782,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (st.ver >= 5) await writeLine(`T${P[i]}:${lampOn[i] ? 1 : 0}`);
     else { lampOn[i] = false; b.classList.remove("on"); flashHint(); }
   };
+  const bindLampTests = () => { for (const b of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) b.onclick = () => lampTest(b); };
   const lampsOff = () => { lampOn.fill(false); for (const x of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) x.classList.remove("on"); };
   /* Pins: which Arduino pin drives each lamp. A v3 sketch takes "P<i>:<pin>"
    * and keeps it in EEPROM, so trying another pin or cable needs no upload. */
@@ -764,17 +802,18 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
      * "Test each pin" (or None) -- no dropdowns. */
     host.innerHTML = PIN_KEYS.map((k, i) => `<div class="bfbLampChip${assignLamp === i ? " on" : ""}">
         <input type="color" class="bfbCol" data-col="${i}" value="${LVCOL[i]}" aria-label="${esc(tr(k))}">
-        <span>${esc(tr(k))}</span>
-        <button type="button" class="ghost bfbPinPick" data-assign="${i}">${P[i] ? "pin " + P[i] : esc(tr("bfb_none"))}</button>
+        <button type="button" class="ghost bfbPinPick bfbLvBtn${lampOn[i] ? " on" : ""}" data-testlv="${i + 1}" title="${esc(tr("bfb_lampTest"))}">${esc(tr(k))}</button>
+        <button type="button" class="ghost bfbPinPick" data-assign="${i}" title="${esc(tr("bfb_lampPin"))}">${P[i] ? "pin " + P[i] : esc(tr("bfb_none"))}</button>
       </div>`).join("")
       + (assignLamp != null ? `<span class="note">${esc(tr("bfb_assignHint", { lamp: tr(PIN_KEYS[assignLamp]) }))}</span>
         <button type="button" class="ghost bfbPinPick" data-none="1">${esc(tr("bfb_none"))}</button>` : "");
+    bindLampTests();
     for (const b of host.querySelectorAll("[data-assign]")) b.onclick = () => { assignLamp = assignLamp === +b.dataset.assign ? null : +b.dataset.assign; renderPins(); };
     const none = host.querySelector("[data-none]"); if (none) none.onclick = () => setLampPin(assignLamp, 0);
     const B = st.boardPins, same = B && B.every((n, i) => n === P[i]);
     const used = [0, 1, 2].map((i) => P[i]).filter(Boolean), dup = used.find((n, i) => used.indexOf(n) !== i);
     $("bfbPinsNote").textContent = [dup ? tr("bfb_pinsClash", { pin: dup }) : "", !st.port ? "" : !st.v3 ? tr("bfb_oldSketch")
-      : same ? tr("bfb_pinsOk") : tr("bfb_pinsDiff", { pins: (B || []).join(", ") })].filter(Boolean).join(" ");
+      : same || !(st.ver >= 5) ? "" : tr("bfb_pinsDiff", { pins: (B || []).slice(0, 3).map((n) => n || "–").join(", ") })].filter(Boolean).join(" ");
     paintColors(); renderAnPick();
     $("bfbFlash").parentElement.classList.toggle("hidden", !!st.port && st.ver >= 5);   // one button, only while needed
     renderPinTest();
@@ -1127,6 +1166,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
         ctx.fillStyle = "#ffd54a"; ctx.beginPath(); ctx.arc(bb.raw[0], bb.raw[1], 9, 0, 7); ctx.fill();
       } else $("bfbCamNote").textContent = tr("bfb_barScale");
     }
+    EXT.t = ts / 1000;                      // arm moments use the movement's accelerations
     const val = (k) => METRICS[k].f(w, img, head, ld, bb) - ((cfg.zero && cfg.zero[k]) || 0);
     const o = recordFrame(ts, val, mv, w) || {};
     if (m.ev) return;                       // event metrics update on their own

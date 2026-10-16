@@ -36,9 +36,10 @@ async function session(port, baud, img, onProgress) {
     rx = [];
     await w.write(new Uint8Array([...bytes, 0x20]));           // 0x20 = Sync_CRC_EOP
     const t0 = performance.now();
-    while (rx.length < n + 2 && performance.now() - t0 < timeout) await sleep(4);
-    const i = rx.indexOf(0x14);                                 // Resp_STK_INSYNC
-    if (i < 0 || rx[i + n + 1] !== 0x10) throw new Error("no answer from bootloader");
+    const find = () => { for (let i = rx.length - n - 2; i >= 0; i--) if (rx[i] === 0x14 && rx[i + n + 1] === 0x10) return i; return -1; };
+    let i;
+    while ((i = find()) < 0 && performance.now() - t0 < timeout) await sleep(4);   // INSYNC ... OK, last one wins
+    if (i < 0) throw new Error("no answer from bootloader (" + bytes[0].toString(16) + ")");
     return rx.slice(i + 1, i + 1 + n);
   };
   try {
@@ -47,6 +48,8 @@ async function session(port, baud, img, onProgress) {
     let ok = false;
     for (let k = 0; k < 12 && !ok; k++) { try { await cmd([0x30], 0, 150); ok = true; } catch { /* keep trying */ } }
     if (!ok) throw new Error("no bootloader at " + baud);
+    for (let k = 0; k < 3; k++) { try { await cmd([0x30], 0, 100); } catch { /* settle */ } }   // flush late sync replies
+    await sleep(60); rx = [];
     const sig = await cmd([0x75], 3);
     if (sig[0] !== 0x1e || sig[1] !== 0x95 || sig[2] !== 0x0f) throw new Error("not an ATmega328P (" + sig.map((x) => x.toString(16)).join(" ") + ")");
     await cmd([0x50]);                                          // enter programming mode

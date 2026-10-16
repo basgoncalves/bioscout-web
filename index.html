@@ -665,10 +665,15 @@ try {
   .bfbLampChip.on { border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
   .bfbPinPick { width:auto !important; flex:none !important; min-height:0 !important; padding:3px 10px !important; font-size:12px !important; margin:0 !important; }
   /* compact settings: no stretched checkboxes / buttons, tighter rows */
-  #viewBiofeedback .bfbThrRow { margin:4px 0 6px; }
+  /* one line per threshold: [tick][colour][name] [slider] [value] */
+  #viewBiofeedback .bfbThrRow { display:grid; grid-template-columns:minmax(150px, 30%) 1fr; align-items:center; gap:10px; margin:2px 0; }
+  #viewBiofeedback .bfbThrRow .bfbThrLbl { margin:0; flex-wrap:nowrap; white-space:nowrap; overflow:hidden; font-size:13px; }
+  #viewBiofeedback .bfbThrRow .bfbThrCtl { gap:8px; }
+  #viewBiofeedback .bfbThrRow input[type=number] { padding-top:4px; padding-bottom:4px; }
+  @media (max-width:520px) { #viewBiofeedback .bfbThrRow { grid-template-columns:1fr; gap:2px; } }
   #viewBiofeedback .bfbThrLbl { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:2px; }
   #viewBiofeedback .bfbThrLbl input[type=checkbox] { width:auto !important; margin:0; flex:none; }
-  #viewBiofeedback .bfbColReset { width:auto !important; min-height:0 !important; margin:0 0 0 auto !important; padding:2px 10px !important; }
+  #viewBiofeedback .bfbColReset { width:auto !important; min-height:0 !important; margin:0 0 0 4px !important; padding:0 7px !important; line-height:20px; }
   #viewBiofeedback .bfbThrCtl input[type=range] { height:26px; }
   #viewBiofeedback .bfbRow { gap:8px; margin:4px 0; }
   #bfbDevDlg { max-height:92vh; overflow:auto; }
@@ -1557,15 +1562,12 @@ try {
       <h4 style="margin:10px 0 4px" class="bfbPinHead"><span data-i18n="bfb_pinTest">Test each pin</span>
         <label class="note"><span data-i18n="bfb_pulse">pulse</span> <input type="number" id="bfbPulse" min="0" max="10000" step="100"> ms</label></h4>
       <div class="row bfbRow bfbPinTest" id="bfbPinTest"></div>
-      <div class="row bfbRow">
-        <button type="button" class="ghost bfbLvBtn" data-testlv="1"><span class="bfbSw" data-sw="0"></span><span data-i18n="bfb_pinY">Lamp 1</span></button>
-        <button type="button" class="ghost bfbLvBtn" data-testlv="2"><span class="bfbSw" data-sw="1"></span><span data-i18n="bfb_pinO">Lamp 2</span></button>
-        <button type="button" class="ghost bfbLvBtn" data-testlv="3"><span class="bfbSw" data-sw="2"></span><span data-i18n="bfb_pinR">Lamp 3</span></button>
-        <button type="button" class="ghost" id="bfbTestOn" data-i18n="bfb_testOn">All on</button>
-        <button type="button" class="ghost" id="bfbTestOff" data-i18n="bfb_testOff">All off</button>
-      </div>
-      <h4 style="margin:10px 0 4px" data-i18n="bfb_pins">Pins</h4>
+      <h4 style="margin:10px 0 4px" data-i18n="bfb_lamps">Lamps</h4>
       <div class="row bfbRow bfbPins" id="bfbPins"></div>
+      <div class="row bfbRow">
+        <button type="button" class="ghost bfbPinPick" id="bfbTestOn" data-i18n="bfb_testOn">All on</button>
+        <button type="button" class="ghost bfbPinPick" id="bfbTestOff" data-i18n="bfb_testOff">All off</button>
+      </div>
       <p class="note" id="bfbPinsNote"></p>
       <div class="row bfbRow">
         <button type="button" class="ghost" id="bfbSketchEdit" data-i18n="bfb_sketchEdit">Edit Arduino sketch…</button>
@@ -1616,7 +1618,7 @@ try {
         <label><span data-i18n="bfb_sound">Sound</span><select id="bfbSound"><option value="off" data-i18n="bfb_soundOff">Off</option><option value="beep" data-i18n="bfb_soundBeep">Beep when crossed</option><option value="repeat" data-i18n="bfb_soundRepeat">Beep while over</option></select></label>
       </div>
       <div class="bfbThrRow">
-        <span class="bfbThrLbl"><input type="color" class="bfbCol" data-col="0" aria-label="Colour 1"> <span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>) <button type="button" class="ghost bfbColReset" data-colreset data-i18n="bfb_colReset">Default colours</button></span>
+        <span class="bfbThrLbl"><input type="color" class="bfbCol" data-col="0" aria-label="Colour 1"> <span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>) <button type="button" class="ghost bfbColReset" data-colreset data-i18n-title="bfb_colReset" title="Default colours" aria-label="Default colours">↺</button></span>
         <div class="bfbThrCtl">
           <input type="range" id="bfbThr" min="0" max="180" step="1" aria-label="Threshold">
           <input type="number" id="bfbThrN" min="0" max="180" step="1" aria-label="Threshold">
@@ -2016,8 +2018,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 68;
-window.BUILD_AT = "2026-10-16 17:29";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 69;
+window.BUILD_AT = "2026-10-16 17:40";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
