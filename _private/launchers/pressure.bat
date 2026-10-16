@@ -1,7 +1,7 @@
 @echo off
 REM Serve BioScout Web and open BioFeedback for the Arduino pressure sensor (A0).
 REM Serves whatever branch is checked out (expected: pressure-sensor).
-REM Wiring: _private\arduino_server\pressure_sensor.md
+REM Wiring: _private\arduino_server\arduino_setup.md
 REM Upload sketch v4 first with flash_arduino.bat (only once per board).
 cd /d "%~dp0..\.."
 for /f %%b in ('git branch --show-current') do (

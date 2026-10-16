@@ -14,12 +14,12 @@
 //   D<n>         -> 4-digit display on, showing n (-999..9999), e.g. D57
 //   D            -> 4-digit display on, showing the live A0 reading
 //   d            -> 4-digit display off (its pins are released)
-// 4-digit display (5641AS, common cathode) through a 74HC595 - see pressure_sensor.md:
+// 4-digit display (5641AS, common cathode) through a 74HC595 - see _private/arduino_server/arduino_setup.md:
 //   595 DS = pin 2, SH_CP = pin 3, ST_CP = pin 4; digits D1..D4 = pins 5, 6, 9, 10.
 //   Off until the first D, so the pin tester and lamps can use those pins otherwise.
 // Pressure sensor (FSR 402 or similar) as a voltage divider on A0:
-//   5V -- FSR -- A0 -- 10 kohm -- GND   (see _private/arduino_server/pressure_sensor.md)
-// Default wiring (see _private/arduino_server/lampsetup.md), each LED with its own 220 ohm:
+//   5V -- FSR -- A0 -- 10 kohm -- GND   (see _private/arduino_server/arduino_setup.md)
+// Default wiring (see _private/arduino_server/arduino_setup.md), each LED with its own 220 ohm:
 //   pin 13 yellow, pin 12 orange, pin 11 red, pin 8 green.
 // Never drive a motor or mains lamp straight from a pin: use a relay / transistor module.
 #include <EEPROM.h>
