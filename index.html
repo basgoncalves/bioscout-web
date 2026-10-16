@@ -641,7 +641,7 @@ try {
   .bfbColReset { font-size:11px; padding:2px 8px; margin-left:8px; }
   .bfbPinTest { gap:6px !important; }
   .bfbPinBtn { min-width:2.6em; padding:6px 8px; font-variant-numeric:tabular-nums; }
-  .bfbPinBtn.on { background:#4caf50; color:#fff; border-color:#b9f6ca; }
+  .bfbPinBtn.on, .bfbLvBtn.on { background:#4caf50; color:#fff; border-color:#b9f6ca; }
   .bfbLamp.sm { width:19px; height:19px; border-width:1.5px; }
   .bfbLamp.l2.on { background:#ff9a3c; border-color:#ffd2a8; box-shadow:0 0 14px 5px rgba(255,154,60,.7); }
   .bfbLamp.l3.on { background:#ff4d4d; border-color:#ffc0c0; box-shadow:0 0 14px 5px rgba(255,77,77,.75); }
@@ -1504,6 +1504,9 @@ try {
         <button type="button" class="ghost" id="bfbDisconnect" data-i18n="bfb_disconnect">Disconnect</button>
       </div>
       <p class="note" id="bfbPortStatus"></p>
+      <h4 style="margin:10px 0 4px" data-i18n="bfb_pinTest">Test each pin</h4>
+      <p class="note" data-i18n="bfb_pinTestNote">Tap a pin to switch it on or off — find which socket a cable is in. Coloured underline = the lamp set to that pin.</p>
+      <div class="row bfbRow bfbPinTest" id="bfbPinTest"></div>
       <div class="row bfbRow">
         <button type="button" class="ghost bfbLvBtn" data-testlv="1"><span class="bfbSw" data-sw="0"></span><span data-i18n="bfb_pinY">Lamp 1</span></button>
         <button type="button" class="ghost bfbLvBtn" data-testlv="2"><span class="bfbSw" data-sw="1"></span><span data-i18n="bfb_pinO">Lamp 2</span></button>
@@ -1541,9 +1544,7 @@ try {
         <label><span data-i18n="bfb_fsrDisp">4-digit display</span> <select id="bfbFsrDisp"><option value="off" data-i18n="bfb_fsrDispOff">Off</option><option value="pct" data-i18n="bfb_fsrDispPct">% of range</option><option value="raw" data-i18n="bfb_fsrDispRaw">Raw 0–1023</option></select></label>
         <label><span data-i18n="bfb_fsrThr">Levels (%)</span> <input id="bfbFsrThr" size="10" inputmode="decimal"></label>
       </div>
-      <h4 style="margin:10px 0 4px" data-i18n="bfb_pinTest">Test each pin</h4>
-      <p class="note" data-i18n="bfb_pinTestNote">Tap a pin to switch it on or off — find which socket a cable is in. Coloured underline = the lamp set to that pin.</p>
-      <div class="row bfbRow bfbPinTest" id="bfbPinTest"></div>
+
 
         </div>
       </dialog>
@@ -1985,8 +1986,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 60;
-window.BUILD_AT = "2026-10-16 15:57";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 61;
+window.BUILD_AT = "2026-10-16 16:17";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

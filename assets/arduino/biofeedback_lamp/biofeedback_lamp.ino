@@ -7,6 +7,7 @@
 //                   i: 0 yellow, 1 orange, 2 red, 3 green, 4 relay. e.g. P1:10
 //   ?            -> reply with the current pins
 //   T<pin>:<0|1> -> drive any pin 2-13 directly (pin tester), e.g. T9:1 -> "PIN 9 1"
+//   V            -> "VERSION 5" (so the app knows the pin tester is there)
 //   S / s        -> pressure stream on / off: "F <0-1023>" from A0 at 50 Hz
 //   F            -> one pressure reading now
 //   D<n>         -> 4-digit display on, showing n (-999..9999), e.g. D57
@@ -124,6 +125,7 @@ void handle() {
     else if (c == 'G') { green = true; apply(); Serial.println("GREEN_ON"); }
     else if (c == 'g') { green = false; apply(); Serial.println("GREEN_OFF"); }
     else if (c == '?') report();
+    else if (c == 'V') Serial.println("VERSION 5");
     else if (c == 'S') { streaming = true; Serial.println("STREAM_ON"); }
     else if (c == 's') { streaming = false; Serial.println("STREAM_OFF"); }
     else if (c == 'F') sendF();

@@ -579,12 +579,14 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       await listPorts();
       // Uno-style boards reset when the port opens; give the bootloader a moment.
       st.v3 = false; st.ver = 0; st.boardPins = null; renderPins();
-      setTimeout(() => { writeLine("?"); send(false, true); }, 1800);
+      setTimeout(() => { writeLine("V"); writeLine("?"); send(false, true); }, 1800);
     } catch (e) { st.port = null; status("bfb_portFail", { err: e.message }, true); }
     renderConn();
   }
   function onLine(ln) {
     if (ln.startsWith("BIOSCOUT_LAMP_READY")) { st.ver = +((/v(\d+)/.exec(ln) || [])[1] || 2); st.v3 = st.ver >= 3; renderPins(); }
+    const vm = /^VERSION (\d+)/.exec(ln) || (/^PIN \d+ [01]/.test(ln) ? [0, 5] : null);
+    if (vm && +vm[1] > (st.ver || 0)) { st.ver = +vm[1]; st.v3 = true; renderPins(); }
     const m = /^PINS ([\d,]+)/.exec(ln);
     if (m) { st.v3 = true; st.boardPins = m[1].split(",").map(Number); renderPins(); }
   }
@@ -662,8 +664,19 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbPinAllOff").onclick = async () => { for (const n of [...pinOn]) await writeLine(`T${n}:0`); pinOn.clear(); await sendLevel(0, true); renderPinTest(); };
   }
   $("bfbTestOn").onclick = () => sendLevel(3, true);
-  $("bfbTestOff").onclick = () => sendLevel(0, true);
-  for (const b of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) b.onclick = () => sendLevel(+b.dataset.testlv, true);
+  $("bfbTestOff").onclick = () => { lampsOff(); sendLevel(0, true); };
+  /* Lamp 1/2/3 buttons: each switches only its own lamp, on and off.
+   * Sketch v5 drives the lamp's pin directly (T<pin>); older sketches only
+   * know levels, so there the button shows that level. */
+  const lampOn = [false, false, false];
+  for (const b of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) b.onclick = async () => {
+    const i = +b.dataset.testlv - 1, P = cfg.pins || [13, 12, 11, 8, 7];
+    lampOn[i] = !lampOn[i];
+    for (const x of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) x.classList.toggle("on", lampOn[+x.dataset.testlv - 1]);
+    if (st.ver >= 5) await writeLine(`T${P[i]}:${lampOn[i] ? 1 : 0}`);
+    else await sendLevel(lampOn[i] ? i + 1 : 0, true);
+  };
+  const lampsOff = () => { lampOn.fill(false); for (const x of document.querySelectorAll("#bfbArduinoPanel [data-testlv]")) x.classList.remove("on"); };
   /* Pins: which Arduino pin drives each lamp. A v3 sketch takes "P<i>:<pin>"
    * and keeps it in EEPROM, so trying another pin or cable needs no upload. */
   const PIN_KEYS = ["bfb_pinY", "bfb_pinO", "bfb_pinR", null, "bfb_pinRelay"];   // slot 3 (green) not shown
