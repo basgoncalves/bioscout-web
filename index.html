@@ -641,9 +641,11 @@ try {
   .bfbAnPick label { display:inline-flex; align-items:center; gap:4px; min-width:0; }
   .bfbCol { width:26px; height:22px; padding:0; border:1px solid var(--line,#444); border-radius:6px; background:none; vertical-align:middle; cursor:pointer; }
   .bfbColReset { font-size:11px; padding:2px 8px; margin-left:8px; }
-  .bfbPinTest { gap:4px !important; flex-wrap:nowrap !important; }
-  .bfbPinBtn { flex:1 1 0; min-width:0 !important; padding:6px 0 !important; font-variant-numeric:tabular-nums; }
-  .bfbPinOff { flex:0 0 auto; white-space:nowrap; padding:6px 14px !important; }
+  .bfbPinTest { display:grid !important; grid-template-columns:repeat(12, minmax(30px, 1fr)) minmax(76px, auto); gap:4px !important; }
+  .bfbPinTest > button { width:auto !important; min-width:0 !important; margin:0 !important; }
+  .bfbPinBtn { padding:8px 0 !important; font-variant-numeric:tabular-nums; text-align:center; }
+  .bfbPinOff { white-space:nowrap; padding:8px 10px !important; }
+  @media (max-width:560px) { .bfbPinTest { grid-template-columns:repeat(6, 1fr); } .bfbPinOff { grid-column:span 6; } }
   .bfbPinHead { display:flex; align-items:center; gap:12px; }
   .bfbPinHead label { font-weight:400; display:inline-flex; align-items:center; gap:4px; }
   .bfbPinHead input { width:5em; padding:2px 6px; }
@@ -1979,8 +1981,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 63;
-window.BUILD_AT = "2026-10-16 16:41";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 64;
+window.BUILD_AT = "2026-10-16 16:47";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
