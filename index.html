@@ -1648,6 +1648,7 @@ try {
         <label><span data-i18n="bfb_motPin">Pin</span><select id="bfbMotPin"></select></label>
         <label><span data-i18n="bfb_motSecs">Seconds</span><input type="number" id="bfbMotSecs" min="0.1" max="30" step="0.1" style="width:5em"></label>
         <button type="button" class="ghost" id="bfbMotTest" data-i18n="bfb_motTest">Test motor</button>
+        <span class="note" id="bfbMotNote"></span>
       </div>
 
         </div>
@@ -2116,8 +2117,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 93;
-window.BUILD_AT = "2026-10-17 11:46";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 94;
+window.BUILD_AT = "2026-10-17 12:02";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

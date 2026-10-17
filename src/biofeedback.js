@@ -865,7 +865,13 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   $("bfbMotLamp").onchange = () => { cfg.motor.lamp = +$("bfbMotLamp").value; save(); };
   $("bfbMotPin").onchange = () => { writeLine(`T${cfg.motor.pin}:0`, true); cfg.motor.pin = +$("bfbMotPin").value; save(); };
   $("bfbMotSecs").onchange = () => { const s = +$("bfbMotSecs").value; cfg.motor.secs = Number.isFinite(s) && s > 0 ? Math.min(30, s) : 2; $("bfbMotSecs").value = cfg.motor.secs; save(); };
-  $("bfbMotTest").onclick = () => { if (!st.port) { $("bfbLcdNote").textContent = tr("bfb_lcdConnect"); return; } motorPulse(); };
+  $("bfbMotTest").onclick = () => {
+    const n = $("bfbMotNote");
+    if (!st.port || !st.writer) { n.textContent = tr("bfb_lcdConnect"); return; }
+    if (!(st.ver >= 5)) { n.textContent = tr("bfb_lcdOld"); return; }
+    n.textContent = tr("bfb_motOn", { pin: cfg.motor.pin, s: Math.max(0.1, +cfg.motor.secs || 2) });
+    motorPulse();
+  };
   async function lcdLampText(txt) {
     if (!st.writer) return;
     if (!(st.ver >= 8)) { $("bfbLcdNote").textContent = tr("bfb_lcdOld"); $("bfbLcdFlash").classList.remove("hidden"); flashHint(); return; }
