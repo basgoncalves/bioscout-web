@@ -1630,7 +1630,8 @@ try {
         <button type="button" class="hidden" id="bfbLcdFlash" data-i18n="bfb_flash">Update board firmware</button>
       </div>
       <div class="row bfbRow">
-        <label><span data-i18n="bfb_lcdV">Line 2 during BioFeedback</span><select id="bfbLcdV"><option value="" data-i18n="bfb_lcdVOff">Lamp text only</option><option value="0">A0 (V)</option><option value="1">A1 (V)</option><option value="2">A2 (V)</option><option value="3">A3 (V)</option><option value="4">A4 (V)</option><option value="5">A5 (V)</option></select></label>
+        <label><span data-i18n="bfb_emgPin">Finger input</span><select id="bfbEmgPin"><option value="0">A0</option><option value="1">A1</option><option value="2">A2</option><option value="3">A3</option><option value="4">A4</option><option value="5">A5</option></select></label>
+        <label><span data-i18n="bfb_lcdV">Line 2 during BioFeedback</span><select id="bfbLcdV"><option value="" data-i18n="bfb_lcdVOff">Lamp text only</option><option value="v" data-i18n="bfb_lcdVv">Input voltage (V)</option><option value="dv" data-i18n="bfb_lcdVdv">ΔV red − blue (V)</option><option value="emg" data-i18n="bfb_lcdVemg">Pseudo-EMG (mV)</option></select></label>
         <span class="note" id="bfbLcdVNote"></span>
       </div>
       <h4 style="margin:10px 0 4px" data-i18n="bfb_lampTxtTitle">Text per lamp</h4>
@@ -2117,8 +2118,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 94;
-window.BUILD_AT = "2026-10-17 12:02";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 95;
+window.BUILD_AT = "2026-10-17 12:12";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -7126,11 +7127,20 @@ function liveHudTick() {
   hud.classList.toggle("hidden", !show);
   if (!show) return;
   let act = $("activity").value;
+  /* Frames with a body in them. With nobody in view (a far-away or zoomed
+   * shot, the phone pointing at a wall) the classifier and the counter were fed
+   * empty or noise poses and named a movement anyway -- usually pull-up. Now:
+   * no body in most of the last ~2 s, or fewer than 20 body frames, no label.
+   * (frames only holds detections, so this counts recent ones by time.) */
+  const body = frames, last = frames.length ? frames[frames.length - 1].t : -1e9;
+  const now = performance.now(), recentN = frames.filter((f) => now - f.t < 2000).length;
+  const seen = now - last < 1000 && recentN >= 8;     // a body in most frames of the last 2 s
+  if (!seen || body.length < 20) { $("liveHudCount").textContent = "\u2013"; $("liveHudAct").textContent = ""; return; }
   if (act === "auto") {
     act = null;
-    if (frames.length >= 20) {
+    {
       const poses = {};
-      frames.forEach((f, i) => { poses[f.i ?? i] = f.lm; });
+      body.forEach((f, i) => { poses[f.i ?? i] = f.lm; });
       try { act = classify(poses).activity; } catch { act = null; }
     }
   }
