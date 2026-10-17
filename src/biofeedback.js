@@ -818,12 +818,30 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const top = sts.lastIndexOf(true);
     if (top === st.msgTop) return;
     st.msgTop = top;
+    if (top >= 0 && +(cfg.motor || {}).lamp === top + 1) motorPulse();   // crossed into the motor's lamp
     const T = cfg.lampTxt || [], txt = top >= 0 ? (T[top + 1] || "") : (T[0] || "");
     if (!txt) return;                                // nothing set for this lamp: keep what is shown
     const msg = $("bfbLampMsg");
     if (msg) { msg.textContent = txt; msg.style.color = top >= 0 ? LVCOL[top] : "#fff"; }
     lcdLampText(txt);                                // the LCD follows as soon as a board is connected
   }
+  /* Motor (through a transistor on a free pin, default 9): on for N seconds
+   * when the chosen lamp's line is crossed. Uses the pin tester command
+   * T<pin>:1 / :0 (firmware v5+), so no new upload is needed. */
+  cfg.motor = { lamp: 0, pin: 9, secs: 2, ...(cfg.motor || {}) };
+  let motorTo = 0;
+  async function motorPulse() {
+    const M = cfg.motor; if (!st.writer || !(st.ver >= 5) || !M.pin) return;
+    clearTimeout(motorTo);
+    await writeLine(`T${M.pin}:1`, true);
+    motorTo = setTimeout(() => writeLine(`T${M.pin}:0`, true), Math.max(0.1, +M.secs || 2) * 1000);
+  }
+  $("bfbMotPin").innerHTML = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((n) => `<option>${n}</option>`).join("");
+  $("bfbMotLamp").value = String(cfg.motor.lamp); $("bfbMotPin").value = String(cfg.motor.pin); $("bfbMotSecs").value = cfg.motor.secs;
+  $("bfbMotLamp").onchange = () => { cfg.motor.lamp = +$("bfbMotLamp").value; save(); };
+  $("bfbMotPin").onchange = () => { writeLine(`T${cfg.motor.pin}:0`, true); cfg.motor.pin = +$("bfbMotPin").value; save(); };
+  $("bfbMotSecs").onchange = () => { const s = +$("bfbMotSecs").value; cfg.motor.secs = Number.isFinite(s) && s > 0 ? Math.min(30, s) : 2; $("bfbMotSecs").value = cfg.motor.secs; save(); };
+  $("bfbMotTest").onclick = () => { if (!st.port) { $("bfbLcdNote").textContent = tr("bfb_lcdConnect"); return; } motorPulse(); };
   async function lcdLampText(txt) {
     if (!st.writer) return;
     if (!(st.ver >= 8)) { $("bfbLcdNote").textContent = tr("bfb_lcdOld"); $("bfbLcdFlash").classList.remove("hidden"); flashHint(); return; }

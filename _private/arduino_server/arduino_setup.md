@@ -13,6 +13,7 @@ sketch: `assets/arduino/biofeedback_lamp/biofeedback_lamp.ino` (v7).
 | 3 lamps (LEDs) | **wired, working** | 13, 12, 11 |
 | LCD 1602 text screen | **wired, working** (sketch v7) | A1–A5, 10 |
 | Pressure sensor / stand-in | not wired | A0 |
+| DC motor (kit, 3–6 V) | optional, §5b | 9 |
 | 4-digit 7-segment display | not wired — alternative to the LCD (shares pin 10) | 2–6, 9, 10 |
 
 ### Pin map (Uno)
@@ -21,7 +22,8 @@ sketch: `assets/arduino/biofeedback_lamp/biofeedback_lamp.ino` (v7).
 |---|---|---|
 | 0, 1 | USB serial | never use |
 | 2, 3, 4 | 4-digit display (74HC595 data / clock / latch) | only if the display is fitted |
-| 5, 6, 9 | 4-digit display digits D1–D3 | only if the display is fitted |
+| 5, 6 | 4-digit display digits D1–D2 | only if the display is fitted |
+| **9** | **Motor** (through a PN2222 transistor) — *or* 4-digit display digit D3 | motor **or** display |
 | **10** | **LCD D7** — *or* 4-digit display digit D4 | LCD **or** display, not both |
 | **11** | **Lamp 3** | default red |
 | **12** | **Lamp 2** | default yellow |
@@ -393,6 +395,44 @@ along the top right-to-left.
 | All digits show the same | digit wires D5/D6/D9/D10 swapped or touching |
 | Very dim / lit "inverted" | display is common anode (`…BS`) — see the box above |
 | One digit missing | its digit wire (D5/D6/D9/D10) |
+
+---
+
+## 5b. DC motor (vibration / cue)
+
+The kit's small 3–6 V motor (fan blade optional) spins for a set time when a
+chosen lamp's line is crossed — a cue you can feel or hear.
+
+![Motor through a PN2222 transistor on pin 9](motor_wiring.svg)
+
+### Parts (all in the kit)
+- DC motor 3–6 V
+- **PN2222** NPN transistor — the switch
+- **1 kΩ** resistor (brown-black-black-brown-brown) — pin 9 → transistor base
+- **1N4007** diode (black, silver stripe) — absorbs the motor's voltage spike
+
+**Never connect the motor straight to a pin:** a pin gives ~20 mA, the motor
+needs 100–250 mA, and its spike at switch-off can destroy the pin.
+
+### Connections
+| From | To |
+|---|---|
+| Uno **pin 9** | 1 kΩ → PN2222 **B** (middle leg) |
+| PN2222 **E** (left leg, flat side facing you) | **− rail** (GND) |
+| PN2222 **C** (right leg) | motor **black** wire **and** diode end *without* stripe |
+| **+ rail** (5V) | motor **red** wire **and** diode end **with the silver stripe** |
+
+Diode backwards = short circuit across 5V: check the stripe points to **+**.
+
+### In the app
+Arduino window → **Motor**: *Start with* Lamp 1 / 2 / 3 (or Off), *Pin* (9),
+*Seconds* (2). **Test motor** spins it once. Uses the pin command `T9:1` / `T9:0`,
+so any firmware v5+ works — no upload needed.
+
+### If the Uno resets or the LCD flickers when the motor starts
+USB 5V is at its limit. Power the motor from the kit's **power-supply module**
+(or a 4×AA pack) instead of the + rail, and connect that supply's **GND to the
+Uno's GND**.
 
 ---
 
