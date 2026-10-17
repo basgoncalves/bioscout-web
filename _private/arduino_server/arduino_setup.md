@@ -2,7 +2,7 @@
 
 One Arduino Uno on USB, driven by the BioScout Web **BioFeedback** page (Web Serial,
 Chrome / Edge on a computer). Every part below is optional and they all share one
-sketch: `assets/arduino/biofeedback_lamp/biofeedback_lamp.ino` (v6).
+sketch: `assets/arduino/biofeedback_lamp/biofeedback_lamp.ino` (v7).
 
 ![Current setup: three lamps and the LCD 1602](arduino_overview.svg)
 
@@ -11,7 +11,7 @@ sketch: `assets/arduino/biofeedback_lamp/biofeedback_lamp.ino` (v6).
 | Part | Status | Pins |
 |---|---|---|
 | 3 lamps (LEDs) | **wired, working** | 13, 12, 11 |
-| LCD 1602 text screen | **wired**, not driven by the sketch yet | A1–A5, 10 |
+| LCD 1602 text screen | **wired, working** (sketch v7) | A1–A5, 10 |
 | Pressure sensor / stand-in | not wired | A0 |
 | 4-digit 7-segment display | not wired — alternative to the LCD (shares pin 10) | 2–6, 9, 10 |
 
@@ -44,7 +44,7 @@ uploads, checks the board answers. Or Arduino IDE → open the .ino → Board
 **Arduino Uno**, Port **COMx** → Upload, then **close the Serial Monitor/IDE**
 (only one program can hold the port).
 
-On connect the board prints `BIOSCOUT_LAMP_READY v6 FSR DISP` and its pins.
+On connect the board prints `BIOSCOUT_LAMP_READY v7 FSR DISP LCD` and its pins.
 The app tells you if the board runs an older sketch.
 
 **Edit the sketch in the app:** Connect external device → Arduino → *Edit Arduino
@@ -118,6 +118,15 @@ and the pressure sensor (A0) are untouched.
 ### Parts
 - LCD1602 module (kit) — push its 16 pins into one row of the breadboard
 - 10 kΩ potentiometer (kit) — **contrast**; without it the screen looks blank
+  - The kit pot (black, "B103", push-on knob) has its 3 legs in a **triangle**
+    (2 on one side, 1 on the other), not in a line as drawn, and its body covers
+    the holes around it. Two easy ways:
+    1. **No breadboard:** slide the **female ends of 3 female-to-male Dupont wires**
+       (kit, 20 pcs) onto the legs: middle leg → LCD pin 3, outer legs → + rail and − rail.
+    2. **Across the middle gap:** the two side-by-side legs in one half, the single leg
+       in the other half. Then every leg is in its own column; plug wires into the free
+       holes of those columns (each column has 5 connected holes, the body only hides some).
+    - Never let two legs share one column in the same half (that shorts them).
 - 220 Ω resistor (red-red-brown) — backlight current limit
 - ~14 jumper wires
 
@@ -141,7 +150,18 @@ and the pressure sensor (A0) are untouched.
 
 Breadboard rails: Uno **5V → + rail**, Uno **GND → − rail** (top rails in the picture).
 
-### Arduino code (not in the BioScout sketch yet)
+### Setting the text from BioScout
+
+Arduino window → **Screen text (LCD 16×2)** → type line 1 and line 2 (max 16
+characters each) → **Show on screen** (or Enter). **Clear screen** blanks both.
+Accents are dropped ("Übung" → "Ubung") because the LCD has none. The board keeps
+the last text in EEPROM and shows it again after a power-off; first start shows
+`BioScout / ready`. If the app says the firmware is older, press **Update board
+firmware** (≈10 s, from the browser).
+
+Without the app: Serial Monitor at 9600 → `W1:Hello` / `W2:World`.
+
+### Arduino code (how the sketch drives it)
 ```cpp
 #include <LiquidCrystal.h>
 //               RS  E   D4  D5  D6  D7
@@ -378,6 +398,7 @@ along the top right-to-left.
 | `F` | one pressure reading | `F <0-1023>` |
 | `A` / `a` | all analog inputs on / off (25 Hz) | `AN v0,…,v5` |
 | `D<n>` / `D` / `d` | 4-digit display: show n / live A0 / off | `DISP_ON` / `DISP_OFF` |
+| `W1:<text>` / `W2:<text>` | LCD line 1 / 2 (16 chars, kept in EEPROM) | `LCD n <text>` |
 | `G` / `g` | legacy green lamp (pin 8) | `GREEN_ON` / `GREEN_OFF` |
 
 Quick test without the app: Arduino IDE Serial Monitor at 9600 → type `L3`, `L0`, `?`.
@@ -392,7 +413,7 @@ Quick test without the app: Arduino IDE Serial Monitor at 9600 → type `L3`, `L
 | No `←` replies at all | board runs another sketch → upload again |
 | "Could not open the port" | IDE Serial Monitor / another tab still holds it — close it |
 | LED very bright / odd colour | no resistor — add the 220 Ω |
-| App says "older sketch" | upload v6 with `flash_arduino.bat` |
+| App says "older sketch" / firmware | **Update board firmware** in the Arduino window (or `flash_arduino.bat`) |
 | Pin tester / lamp on 2–6, 9, 10 acts strange | 4-digit display is switched on — set it to Off |
 
 ---

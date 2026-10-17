@@ -805,6 +805,27 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   /* Update board firmware: writes the bundled sketch (.hex, built from the
    * .ino in the repo) through this same port. Fixes "old sketch" for good. */
   function flashHint() { $("bfbFlashNote").textContent = tr("bfb_flashNeed"); $("bfbFlash").classList.add("pulse"); }
+  /* LCD 1602 text (sketch v7): "W1:<text>" / "W2:<text>", 16 characters a
+   * line, ASCII only (the LCD has no accents: "Übung" -> "Ubung"). The board
+   * keeps the last text in EEPROM, so it is still there after a power-off. */
+  const lcdAscii = (s) => String(s || "").replace(/ß/g, "ss").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x20-\x7e]/g, "?").slice(0, 16);
+  cfg.lcd = Array.isArray(cfg.lcd) ? cfg.lcd : ["BioScout", "ready"];
+  $("bfbLcd1").value = cfg.lcd[0] || ""; $("bfbLcd2").value = cfg.lcd[1] || "";
+  async function lcdSend(lines) {
+    if (!st.port) { $("bfbLcdNote").textContent = tr("bfb_lcdConnect"); return; }
+    if (!(st.ver >= 7)) { $("bfbLcdNote").textContent = tr("bfb_lcdOld"); flashHint(); return; }
+    const L = lines.map(lcdAscii);
+    await writeLine("W1:" + L[0]); await writeLine("W2:" + L[1]);
+    $("bfbLcdNote").textContent = tr("bfb_lcdSent");
+  }
+  $("bfbLcdSend").onclick = () => {
+    cfg.lcd = [$("bfbLcd1").value, $("bfbLcd2").value]; save();
+    $("bfbLcd1").value = lcdAscii(cfg.lcd[0]); $("bfbLcd2").value = lcdAscii(cfg.lcd[1]);
+    lcdSend(cfg.lcd);
+  };
+  $("bfbLcdClear").onclick = () => lcdSend(["", ""]);
+  for (const id of ["bfbLcd1", "bfbLcd2"]) $(id).onkeydown = (e) => { if (e.key === "Enter") $("bfbLcdSend").click(); };
   $("bfbFlash").onclick = async () => {
     const port = st.port; if (!port) { $("bfbFlashNote").textContent = tr("bfb_flashConnect"); return; }
     $("bfbFlash").disabled = true; $("bfbFlash").classList.remove("pulse");
@@ -869,7 +890,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbPinsNote").textContent = [dup ? tr("bfb_pinsClash", { pin: dup }) : "", !st.port ? "" : !st.v3 ? tr("bfb_oldSketch")
       : same || !(st.ver >= 5) ? "" : tr("bfb_pinsDiff", { pins: (B || []).slice(0, 3).map((n) => n || "–").join(", ") })].filter(Boolean).join(" ");
     paintColors(); renderAnPick();
-    $("bfbFlash").parentElement.classList.toggle("hidden", !!st.port && st.ver >= 5);   // one button, only while needed
+    $("bfbFlash").parentElement.classList.toggle("hidden", !!st.port && st.ver >= 7);   // one button, only while the board is behind the bundled firmware (v7)
     renderPinTest();
   }
   $("bfbDevDone").onclick = () => $("bfbDevDlg").close();

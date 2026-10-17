@@ -25,6 +25,8 @@ const TKEY = "bioscout.terms.v4";
 export const LANGUAGES = { en: "English", pt: "Português", de: "Deutsch" };
 
 const EN = {
+  an_fileFilter: "Only files matching (applies to files and folders)",
+  an_noFileMatch: "No file matches {f}.",
   // Analysis (src/analysis.js)
   doorAnalysis: "Analysis",
   doorAnalysisNote: "Statistics on your results: reliability (ICC, SEM, MDC, Bland-Altman, CMC), t-tests, ANOVA, ANCOVA, correlation and regression, and SPM on whole curves. Exports for JASP, SPSS and Python.",
@@ -467,6 +469,13 @@ const EN = {
   "bfb_flashFail": "Update failed: {err}. Close the Arduino IDE / Serial Monitor and try again.",
   "bfb_pulse": "pulse",
   "bfb_anTitle": "Live inputs (A0–A5)",
+  "bfb_lcdTitle": "Screen text (LCD 16×2)",
+  "bfb_lcdNote": "Up to 16 characters per line. The board keeps the text after a power-off.",
+  "bfb_lcdSend": "Show on screen",
+  "bfb_lcdClear": "Clear screen",
+  "bfb_lcdSent": "Sent.",
+  "bfb_lcdConnect": "Connect the Arduino first.",
+  "bfb_lcdOld": "The board's firmware has no screen support yet: press Update board firmware.",
   "bfb_anNote": "Tick the analog inputs to plot live (0–1023). An input with nothing connected floats and shows random values.",
   "bfb_pinsClash": "Two outputs share pin {pin}.",
   "bfb_relayNote": "Relay: an extra output that is on whenever any lamp is on — for a relay module that switches a bigger lamp or buzzer. Give it its own pin.",
@@ -2822,6 +2831,8 @@ const EN = {
 };
 
 const PT = {
+  an_fileFilter: "Só ficheiros que correspondem (ficheiros e pastas)",
+  an_noFileMatch: "Nenhum ficheiro corresponde a {f}.",
   // Analysis (src/analysis.js)
   doorAnalysis: "Análise",
   doorAnalysisNote: "Estatística dos seus resultados: fiabilidade (ICC, SEM, MDC, Bland-Altman, CMC), testes t, ANOVA, ANCOVA, correlação e regressão, e SPM em curvas inteiras. Exporta para JASP, SPSS e Python.",
@@ -3264,6 +3275,13 @@ const PT = {
   "bfb_flashFail": "Falhou a atualização: {err}. Feche o Arduino IDE / Serial Monitor e tente de novo.",
   "bfb_pulse": "pulso",
   "bfb_anTitle": "Entradas ao vivo (A0–A5)",
+  "bfb_lcdTitle": "Texto do ecrã (LCD 16×2)",
+  "bfb_lcdNote": "Até 16 caracteres por linha. A placa guarda o texto depois de desligada.",
+  "bfb_lcdSend": "Mostrar no ecrã",
+  "bfb_lcdClear": "Limpar ecrã",
+  "bfb_lcdSent": "Enviado.",
+  "bfb_lcdConnect": "Ligue primeiro o Arduino.",
+  "bfb_lcdOld": "O firmware da placa ainda não suporta o ecrã: carregue em Atualizar firmware da placa.",
   "bfb_anNote": "Marque as entradas analógicas a mostrar ao vivo (0–1023). Uma entrada sem nada ligado flutua e mostra valores aleatórios.",
   "bfb_pinsClash": "Duas saídas partilham o pino {pin}.",
   "bfb_relayNote": "Relé: uma saída extra ligada sempre que alguma lâmpada está ligada — para um módulo de relé que liga uma lâmpada maior ou um buzzer. Dê-lhe um pino próprio.",
@@ -5616,6 +5634,8 @@ const PT = {
 };
 
 const DE = {
+  an_fileFilter: "Nur passende Dateien (für Dateien und Ordner)",
+  an_noFileMatch: "Keine Datei passt zu {f}.",
   // Analysis (src/analysis.js)
   doorAnalysis: "Analyse",
   doorAnalysisNote: "Statistik für Ihre Ergebnisse: Reliabilität (ICC, SEM, MDC, Bland-Altman, CMC), t-Tests, ANOVA, ANCOVA, Korrelation und Regression sowie SPM für ganze Kurven. Export für JASP, SPSS und Python.",
@@ -6058,6 +6078,13 @@ const DE = {
   "bfb_flashFail": "Aktualisierung fehlgeschlagen: {err}. Arduino IDE / Serial Monitor schließen und erneut versuchen.",
   "bfb_pulse": "Puls",
   "bfb_anTitle": "Live-Eingänge (A0–A5)",
+  "bfb_lcdTitle": "Bildschirmtext (LCD 16×2)",
+  "bfb_lcdNote": "Bis zu 16 Zeichen pro Zeile. Das Board behält den Text nach dem Ausschalten.",
+  "bfb_lcdSend": "Auf dem Bildschirm zeigen",
+  "bfb_lcdClear": "Bildschirm leeren",
+  "bfb_lcdSent": "Gesendet.",
+  "bfb_lcdConnect": "Zuerst das Arduino verbinden.",
+  "bfb_lcdOld": "Die Board-Firmware kann den Bildschirm noch nicht: Board-Firmware aktualisieren drücken.",
   "bfb_anNote": "Analoge Eingänge zum Live-Plotten ankreuzen (0–1023). Ein unbeschalteter Eingang schwebt und zeigt Zufallswerte.",
   "bfb_pinsClash": "Zwei Ausgänge teilen sich Pin {pin}.",
   "bfb_relayNote": "Relais: ein zusätzlicher Ausgang, der an ist, sobald eine Lampe an ist — für ein Relaismodul, das eine größere Lampe oder einen Summer schaltet. Eigenen Pin geben.",

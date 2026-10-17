@@ -1600,6 +1600,17 @@ try {
       <p class="note" data-i18n="bfb_anNote">Tick the analog inputs to plot live (0–1023). An input with nothing connected floats and shows random values.</p>
       <div class="row bfbRow bfbAnPick" id="bfbAnPick"></div>
       <canvas id="bfbAnCv" class="bfbPlot" style="height:110px"></canvas>
+      <h4 style="margin:10px 0 4px" data-i18n="bfb_lcdTitle">Screen text (LCD 16×2)</h4>
+      <p class="note" data-i18n="bfb_lcdNote">Up to 16 characters per line. The board keeps the text after a power-off.</p>
+      <div class="row bfbRow bfbLcd">
+        <input id="bfbLcd1" maxlength="16" size="18" spellcheck="false" autocomplete="off" style="font-family:monospace" aria-label="Line 1">
+        <input id="bfbLcd2" maxlength="16" size="18" spellcheck="false" autocomplete="off" style="font-family:monospace" aria-label="Line 2">
+      </div>
+      <div class="row bfbRow">
+        <button type="button" id="bfbLcdSend" data-i18n="bfb_lcdSend">Show on screen</button>
+        <button type="button" class="ghost" id="bfbLcdClear" data-i18n="bfb_lcdClear">Clear screen</button>
+        <span class="note" id="bfbLcdNote"></span>
+      </div>
 
         </div>
         <div class="row bfbRow" style="justify-content:flex-end;margin-top:12px">
@@ -2052,8 +2063,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 74;
-window.BUILD_AT = "2026-10-16 18:41";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 75;
+window.BUILD_AT = "2026-10-17 08:39";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

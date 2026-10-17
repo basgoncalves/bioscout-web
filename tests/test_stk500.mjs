@@ -9,7 +9,7 @@ const img = parseHex(hex);
 ok(img.length > 1000 && img.length <= 32256, `image ${img.length} bytes fits the Uno (32256 max)`);
 ok(img.length % 128 === 0, "whole 128-byte pages");
 const txt = Buffer.from(img).toString("latin1");
-ok(txt.includes("VERSION 5"), "firmware answers V with VERSION 5 (pin tester)");
+ok(/VERSION [5-9]/.test(txt), "firmware answers V with VERSION 5+ (pin tester)");
 ok(txt.includes("AN_ON"), "firmware has the analog stream (A/a)");
 let threw = false; try { parseHex(":0100000000FE\n"); } catch { threw = true; }
 ok(threw, "a bad checksum is refused");
