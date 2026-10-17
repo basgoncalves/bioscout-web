@@ -904,7 +904,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   };
   /* Sketch editor: the .ino in a window, editable, kept in this browser.
    * The browser cannot compile for the Arduino, so it is downloaded and
-   * uploaded with _private/launchers/flash_arduino.bat or the Arduino IDE. */
+   * uploaded with the Arduino IDE; the bundled .hex goes on with Update board firmware. */
   const SK_KEY = "bioscout.bfb.sketch.v1";
   const withPins = (txt) => txt.replace(/const byte DEF\[5\] = \{[^}]*\};/, `const byte DEF[5] = {${(cfg.pins || [13, 12, 11, 8, 7]).join(", ")}};`);
   async function defaultSketch() {

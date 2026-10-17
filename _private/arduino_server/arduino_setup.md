@@ -38,11 +38,11 @@ a pin the LCD or display uses.
 
 ## 1. Board and sketch
 
-**Upload** (once per sketch change): close BioScout (or press Disconnect), then
-double-click `_private/launchers/flash_arduino.bat` — compiles with arduino-cli,
-uploads, checks the board answers. Or Arduino IDE → open the .ino → Board
-**Arduino Uno**, Port **COMx** → Upload, then **close the Serial Monitor/IDE**
-(only one program can hold the port).
+**Upload the firmware:** connect the board in the app → **Update board firmware**
+(≈10 s, straight from the browser; the button only shows when the board is behind).
+For your own edits: Arduino IDE → open the .ino → Board **Arduino Uno**, Port
+**COMx** → Upload, then **close the IDE** (only one program can hold the port).
+After changing the .ino, the bundled `.hex` must be rebuilt (test_stk500 checks it).
 
 On connect the board prints `BIOSCOUT_LAMP_READY v7 FSR DISP LCD` and its pins.
 The app tells you if the board runs an older sketch.
@@ -51,8 +51,7 @@ The app tells you if the board runs an older sketch.
 sketch…* (kept in your browser) → download → upload as above. A browser cannot
 compile Arduino code.
 
-**Start the app locally:** `_private/launchers/biofeedback.bat` (or
-`pressure.bat` on the pressure-sensor branch) → http://localhost:5173 → BioFeedback
+**Start the app locally:** `_private/launchers/biofeedback.bat` (branch `biofeedback`) → http://localhost:5173 → BioFeedback
 → **Connect external device → Arduino → Choose port…** → pick the Uno.
 
 ---
@@ -359,7 +358,7 @@ points facing *down*, pin 1 is bottom-left, 1–6 along the bottom, 7–12 back
 along the top right-to-left.
 
 ### Use it
-1. Upload sketch v6 (`_private/launchers/flash_arduino.bat`).
+1. **Update board firmware** in the app (sketch v7).
 2. BioFeedback → Arduino panel → Pressure sensor → **4-digit display**:
    **% of range** (needs Set zero/max and **Start stream**) or **Raw 0–1023**
    (the board reads A0 itself; no stream needed). **Off** releases its pins.
@@ -413,7 +412,7 @@ Quick test without the app: Arduino IDE Serial Monitor at 9600 → type `L3`, `L
 | No `←` replies at all | board runs another sketch → upload again |
 | "Could not open the port" | IDE Serial Monitor / another tab still holds it — close it |
 | LED very bright / odd colour | no resistor — add the 220 Ω |
-| App says "older sketch" / firmware | **Update board firmware** in the Arduino window (or `flash_arduino.bat`) |
+| App says "older sketch" / firmware | **Update board firmware** in the Arduino window  |
 | Pin tester / lamp on 2–6, 9, 10 acts strange | 4-digit display is switched on — set it to Off |
 
 ---

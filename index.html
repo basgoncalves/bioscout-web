@@ -1096,6 +1096,7 @@ try {
   .qline { font-size:13px; margin:2px 0 10px; }
   .qsum { margin:8px 0 0; font-size:13px; }
 </style>
+<script data-goatcounter="https://bioscout.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -1620,7 +1621,7 @@ try {
 
       <dialog id="bfbSketchDlg" class="bfbSketchDlg">
         <div class="bfbDlgHead"><b data-i18n="bfb_sketchTitle">Arduino sketch</b><button type="button" class="ghost" id="bfbSketchClose" aria-label="Close">✕</button></div>
-        <p class="note" data-i18n="bfb_sketchNote">Edit the code here; it is kept in this browser. A browser cannot compile for the Arduino: download the .ino and upload it with _private/launchers/flash_arduino.bat or the Arduino IDE. Pins can be changed without uploading (Pins, above).</p>
+        <p class="note" data-i18n="bfb_sketchNote">Edit the code here; it is kept in this browser. A browser cannot compile for the Arduino: download the .ino and upload it with the Arduino IDE (the unchanged sketch: Update board firmware). Pins can be changed without uploading (Pins, above).</p>
         <textarea id="bfbSketchTxt" class="bfbSketchTxt" spellcheck="false"></textarea>
         <div class="row bfbRow">
           <button type="button" id="bfbSketchDl" data-i18n="bfb_sketchDl">Download .ino</button>
@@ -2063,8 +2064,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 75;
-window.BUILD_AT = "2026-10-17 08:39";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 76;
+window.BUILD_AT = "2026-10-17 08:43";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
