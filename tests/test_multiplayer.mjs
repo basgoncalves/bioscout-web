@@ -23,5 +23,16 @@ ok(s.map((r) => r.id).join() === "1,2,3,4", "numbered 1-4");
 ok(s.every((r) => r.distance_m > 0.5), "each moved and it counted distance");
 const swinger = s.find((r) => r.strokes > 0);
 ok(swinger && swinger.strokes === 5 && s.filter((r) => r.strokes).length === 1, "only the swinging player has strokes (5)");
+
+
+// A logo-sized, wrongly stacked "body" in the corner never becomes a player.
+{
+  const { createMultiTracker: mk } = await import("../src/multiplayer.js");
+  const tr = mk();
+  const logo = Array.from({ length: 33 }, (_, k) => ({ x: 0.9 + (k % 3) * 0.01, y: 0.1 + (k % 5) * 0.01, visibility: 0.9 }));
+  for (let i = 0; i < 60; i++) tr.update([logo, body(0.4, i, false)], i * 33.3, 1280, 720);
+  const sm = tr.summary();
+  ok(sm.length === 1 && sm[0].id === 1, "the corner logo is ignored; the player is P1");
+}
 console.log(bad ? `\n${bad} FAILED` : "\nAll checks passed");
 process.exitCode = bad ? 1 : 0;

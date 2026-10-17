@@ -2118,8 +2118,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 99;
-window.BUILD_AT = "2026-10-17 14:50";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 100;
+window.BUILD_AT = "2026-10-17 15:00";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -8474,8 +8474,8 @@ function drawPlayers(ps, X, Y, w) {
 }
 
 /* After a padel / tennis take: one row of metrics per player. */
-function showMultiResults() {
-  const rows = mtrack.summary();
+function showMultiResults(tracker = mtrack) {
+  const rows = tracker.summary();
   const box = $("mpResults");
   if (!rows.length) { box.classList.add("hidden"); return; }
   const f1 = (v) => v.toFixed(1), f2 = (v) => v.toFixed(2);
@@ -9010,12 +9010,18 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   bar(-1);
   /* The pose model in a worker when the browser can run it there; the page's
    * own model only for the paths that need it (seeks, ball tracking). */
-  const needsPage = $("activity").value === "stroke" || $("activity").value === "kick";
+  syncMulti();
+  /* Padel / tennis (or any racket-stroke file): ask for up to four bodies and
+   * keep the real players apart from logos and graphics (src/multiplayer.js).
+   * Player 1 is the body the single-athlete analysis follows. */
+  const fileMulti = multiOn || $("activity").value === "stroke";
+  const ftrack = fileMulti ? createMultiTracker() : null;
+  const needsPage = fileMulti || $("activity").value === "kick";
   const pw = !needsPage && v.requestVideoFrameCallback && window.createImageBitmap && window.__bsNoWorker !== true
     ? await startPoseWorker() : null;
   vidAbort.pw = pw;
   checkAbort();
-  let off = pw ? null : await makeLandmarker();
+  let off = pw ? null : await makeLandmarker(fileMulti ? MAX_PLAYERS : 1);
   checkAbort();
   const seekTo = (t) => new Promise((resolve) => {
     let settled = false;
@@ -9061,6 +9067,10 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
     const src = srcNow();
     const res = off.detectForVideo(src, Math.round(t * 1000));
     stats.detectMs += performance.now() - d0;
+    if (ftrack) {
+      const p1 = ftrack.update(res.landmarks, t * 1000, fw, fh).find((p) => p.id === 1);
+      res.landmarks = p1 ? [p1.lm] : [];
+    }
     const named = res.landmarks && res.landmarks.length
       ? toNamed(res.landmarks[0], fw, fh) : null;
     ballGrab(src, t * 1000, named);
@@ -9266,6 +9276,7 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   stats.missed = missed.length;
   try { v.playbackRate = 1; } catch { /* gone */ }
   if (stats.mode !== "worker") stats.mode = stats.played ? "play" : "seek";
+  if (ftrack) showMultiResults(ftrack);
   stats.totalMs = performance.now() - t0;
   lastTrackStats = stats;
   console.info("video tracking:", JSON.stringify({

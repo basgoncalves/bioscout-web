@@ -35,6 +35,29 @@ function feet(lm) {
   if (!src.length) return null;
   return { x: src.reduce((s, p) => s + p.x, 0) / src.length, y: src.reduce((s, p) => s + p.y, 0) / src.length };
 }
+/** Whether a detected "body" is shaped like a standing or moving person.
+ *  On broadcast and screen-recorded clips the model also finds bodies in
+ *  logos, score boxes and player graphics (Bas's padel clip: a skeleton on the
+ *  energy-drink logo in the corner). Those are small or stacked wrong. */
+export function plausibleBody(lm, w, h) {
+  const y = (i) => (vis(lm[i]) ? lm[i].y * h : null), x = (i) => lm[i].x * w;
+  const sh = [LS, RS].map(y).filter((v) => v != null), hp = [LH, RH].map(y).filter((v) => v != null);
+  const an = [LA, RA].map(y).filter((v) => v != null);
+  if (!sh.length || !hp.length) return false;
+  const shY = sh.reduce((a, b) => a + b) / sh.length, hpY = hp.reduce((a, b) => a + b) / hp.length;
+  const torso = hpY - shY;
+  if (torso < h * 0.03) return false;                       // tiny or upside down
+  if (vis(lm[NOSE]) && y(NOSE) > shY) return false;          // head below the shoulders
+  if (an.length) {
+    const leg = an.reduce((a, b) => a + b) / an.length - hpY;
+    if (leg < torso * 0.5 || leg > torso * 3) return false;  // legs no person has
+  }
+  const shW = vis(lm[LS]) && vis(lm[RS]) ? Math.abs(x(LS) - x(RS)) : 0;
+  if (shW > torso * 2.5) return false;
+  const key = [NOSE, LS, RS, LH, RH, LA, RA].map((i) => lm[i]?.visibility ?? 1);
+  return key.reduce((a, b) => a + b) / key.length >= 0.5;
+}
+
 /** Body height in pixels: nose to ankle midpoint, plus the head above the nose. */
 function bodyPx(lm, w, h) {
   const f = feet(lm), n = lm[NOSE];
@@ -57,7 +80,7 @@ export function createMultiTracker({ heightM = 1.75 } = {}) {
   /** One frame: `list` is the model's landmarks array (normalised), t in ms. */
   function update(list, t, w, h) {
     players = players.filter((p) => t - p.lastT <= LOST_MS);
-    const bodies = (list || []).map((lm) => ({ lm, f: feet(lm) })).filter((b) => b.f);
+    const bodies = (list || []).filter((lm) => plausibleBody(lm, w, h)).map((lm) => ({ lm, f: feet(lm) })).filter((b) => b.f);
     const pairs = [];
     bodies.forEach((b, bi) => players.forEach((p, pi) => {
       const d = Math.hypot(b.f.x - p.last.x, b.f.y - p.last.y);
