@@ -14,6 +14,7 @@
  */
 
 import { flashUno } from "./stk500.js";
+import { makeStepDetector, startMotion } from "./phonemotion.js";
 import { measure as measureSegs, summarise as summariseSegs, constrain as constrainSegs, fromOsim, SEGS } from "./bodyscale.js";
 import { bodyMapHTML, REGIONS } from "./bodymap.js";
 import { loadForceModel, predictForces } from "./forces.js";
@@ -220,6 +221,12 @@ for (const [k, lab] of [["hipJCF"], ["kneeJCF"], ["ankleJCF"], ["quadsF"], ["glu
 export const AN_LIVE = [NaN, NaN, NaN, NaN, NaN, NaN];
 export const AN_KEYS = [0, 1, 2, 3, 4, 5].map((i) => "an" + i);
 for (let i = 0; i < 6; i++) METRICS["an" + i] = { label: "bfb_mAn" + i, unit: "raw", max: 1023, an: i, f: () => AN_LIVE[i] };
+/* Running from the phone's accelerometer (src/phonemotion.js): cadence,
+ * impact peak and step time, filled by the motion loop into PH_LIVE. */
+export const PH_LIVE = { cadence: NaN, impact: NaN, stepTime: NaN };
+METRICS.runCadence = { label: "bfb_m_runCad", unit: "spm", max: 220, phone: true, f: () => PH_LIVE.cadence };
+METRICS.runImpact = { label: "bfb_m_runImp", unit: "g", max: 6, phone: true, f: () => PH_LIVE.impact };
+METRICS.runStepTime = { label: "bfb_m_runStep", unit: "ms", max: 800, phone: true, f: () => PH_LIVE.stepTime };
 export const LOAD_KEYS = ["hipJCF", "kneeJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"];
 
 /* Movement presets: which metrics make sense and a starting threshold. */
@@ -245,19 +252,20 @@ export const MOVES = {
   plank:  { label: "bfb_mv_plank",  metrics: ["hipFlex", "neckFlex"], def: "hipFlex", thr: 15, dir: "above" },
   heelraise:{ label: "bfb_mv_heelraise", wt: true, metrics: ["ankleDF", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "ankleDF", thr: -15, dir: "below" },
   neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "headNod", "neckTilt", "headTurn", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
+  run:    { label: "bfb_mv_run", phone: true, metrics: ["runCadence", "runImpact", "runStepTime"], def: "runCadence", thr: 165, dir: "below" },
   free:   { label: "bfb_mv_free",   metrics: [], def: "kneeFlex", thr: 70, dir: "above" },
 };
 /* Free = every live metric once: a left/right pair is ONE entry (both bars),
  * never its single-side halves again. */
 {
   const halves = new Set(Object.values(METRICS).flatMap((m) => m.pair || []));
-  MOVES.free.metrics = Object.keys(METRICS).filter((k) => !METRICS[k].ev && !METRICS[k].side && !halves.has(k) && !METRICS[k].bar);
+  MOVES.free.metrics = Object.keys(METRICS).filter((k) => !METRICS[k].ev && !METRICS[k].side && !halves.has(k) && !METRICS[k].bar && !METRICS[k].phone);
 }
 /* Movements scored per event (jump / shot): their table rows come from the
  * event detectors only, not from the cycle finder as well. */
 const EVENT_MOVES = new Set(["cmj", "sj", "shot"]);
 /* Hysteresis default per unit: 3 deg is sensible, 3 body weights is not. */
-const HYST = { raw: 10, "°": 3, BW: 0.3, cm: 2, ms: 30, "m/s": 0.05, W: 50, Nm: 3 };
+const HYST = { spm: 3, g: 0.15, raw: 10, "°": 3, BW: 0.3, cm: 2, ms: 30, "m/s": 0.05, W: 50, Nm: 3 };
 
 /* Bar tracker. Scale: nose-to-ankle is ~0.89 of standing height, learnt
  * only while standing tall (knees nearly straight) so a squat does not
@@ -1049,7 +1057,39 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       return true;
     } catch (e) { $("bfbCamNote").textContent = tr("bfb_camFail", { err: e.message }); return false; }
   }
-  const camLabel = () => tr(st.stream ? (isScreen() ? "bfb_scrStop" : "bfb_camStop") : (isScreen() ? "bfb_scrStart" : "bfb_camStart"));
+  const isPhone = () => cfg.src === "phone";
+  const camLabel = () => (isPhone() ? tr(st.motionStop ? "bfb_motStop" : "bfb_motStart")
+    : tr(st.stream ? (isScreen() ? "bfb_scrStop" : "bfb_camStop") : (isScreen() ? "bfb_scrStart" : "bfb_camStart")));
+  /* Phone motion (running): no camera, the accelerometer drives the value,
+   * bars, plot and lamps 10 times a second. */
+  const stepDet = makeStepDetector();
+  async function startPhone() {
+    if (cfg.move !== "run") { $("bfbMove").value = "run"; pickMove("run"); }
+    stepDet.reset(); ema = NaN;
+    try { st.motionStop = await startMotion((t, a) => stepDet.push(t, a)); }
+    catch (e) { st.motionStop = null; $("bfbCamNote").textContent = tr("bfb_motFail", { err: e.message }); renderSrc(); return; }
+    $("bfbCamNote").textContent = tr("bfb_motHint");
+    st.phT = setInterval(phoneTick, 100); renderSrc();
+  }
+  function stopPhone() {
+    if (st.motionStop) st.motionStop(); st.motionStop = null;
+    clearInterval(st.phT); st.phT = 0; Object.assign(PH_LIVE, { cadence: NaN, impact: NaN, stepTime: NaN });
+  }
+  function phoneTick() {
+    const ts = performance.now(), v = stepDet.values(ts);
+    Object.assign(PH_LIVE, { cadence: v.cadence, impact: v.impact, stepTime: v.stepTime });
+    const val = (k) => METRICS[k].f() - ((cfg.zero && cfg.zero[k]) || 0);
+    const x = val(cfg.metric);
+    ema = Number.isFinite(x) ? (Number.isFinite(ema) ? ema + 0.35 * (x - ema) : x) : NaN;
+    if (!Number.isFinite(ema)) { $("bfbValue").textContent = tr("bfb_motWait", { n: v.steps }); plot(ts); return; }
+    showBar(ema); hist.push({ t: ts, a: ema, b: NaN, o: {} }); plot(ts);
+    st.value = ema; $("bfbValue").textContent = fmt(ema);
+    const sts = lampStates(ema, val), lv = sts.filter(Boolean).length, top = sts.lastIndexOf(true);
+    if (lv > lastLv && cfg.sound !== "off") tone([880, 1047, 1319][lv - 1], 140);
+    lastLv = lv; on = lv > 0;
+    $("bfbValue").classList.toggle("hit", on); $("bfbValue").style.color = on ? LVCOL[top] : "";
+    showLamps(sts); if (st.active) sendLamps(sts);
+  }
   /* Phones and tablets have no screen capture at all (no getDisplayMedia):
    * the Screen source is not offered there instead of failing on press. */
   const canScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
@@ -1063,7 +1103,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     renderSrc();
   };
   function renderSrc() {
-    $("bfbFlip").classList.toggle("hidden", isScreen());
+    $("bfbFlip").classList.toggle("hidden", isScreen() || isPhone());
     $("bfbSrc").value = cfg.src;
     $("bfbArea").classList.toggle("hidden", !isScreen() || !st.stream);
     $("bfbAreaClear").classList.toggle("hidden", !isScreen() || !st.stream || !st.crop);
@@ -1074,7 +1114,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   $("bfbSrc").onchange = () => {
     if (st.stream) stopCam();
-    cfg.src = $("bfbSrc").value; save(); renderSrc();
+    stopPhone();
+    cfg.src = $("bfbSrc").value; save();
+    if (isPhone() && cfg.move !== "run") { $("bfbMove").value = "run"; pickMove("run"); }
+    renderSrc();
   };
   /* Area picking: drag on the stage; coordinates mapped from the element to
    * video pixels through object-fit: contain (screen is never mirrored). */
@@ -1473,6 +1516,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }, 500);
   $("bfbCamBtn").onclick = async () => {
     try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume(); } catch { /* no audio */ }
+    if (isPhone()) { if (st.motionStop) { stopPhone(); renderSrc(); } else await startPhone(); return; }
     if (st.stream) { stopCam(); renderSrc(); return; }
     $("bfbCamNote").textContent = tr("bfb_loadingModel");
     if (!st.lm) { st.lm = await getLandmarker(); if (!st.lm) { $("bfbCamNote").textContent = tr("bfb_modelFail"); return; } }

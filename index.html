@@ -1724,7 +1724,7 @@ try {
       <p class="note" id="bfbHint"></p>
       <p class="note" id="bfbCamNote"></p>
       <div class="row bfbRow">
-        <label><span data-i18n="bfb_src">Source</span><select id="bfbSrc"><option value="camera" data-i18n="bfb_srcCam">Camera</option><option value="screen" data-i18n="bfb_srcScr">Screen (video, call)</option></select></label>
+        <label><span data-i18n="bfb_src">Source</span><select id="bfbSrc"><option value="camera" data-i18n="bfb_srcCam">Camera</option><option value="screen" data-i18n="bfb_srcScr">Screen (video, call)</option><option value="phone" data-i18n="bfb_srcPhone">Phone motion (running)</option></select></label>
         <button type="button" class="ghost hidden" id="bfbArea" data-i18n="bfb_area">Select area</button>
         <button type="button" class="ghost hidden" id="bfbAreaClear" data-i18n="bfb_areaClear">Whole screen</button>
       </div>
@@ -2086,8 +2086,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 87;
-window.BUILD_AT = "2026-10-17 10:38";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 88;
+window.BUILD_AT = "2026-10-17 10:42";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
