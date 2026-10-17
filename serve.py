@@ -123,8 +123,14 @@ if other is not None:
 
 # On Windows SO_REUSEADDR lets a SECOND server bind the same port and steal some
 # requests -- which is how an old copy of the app could answer. Only use it elsewhere.
-socketserver.TCPServer.allow_reuse_address = os.name != "nt"
-with socketserver.TCPServer(("127.0.0.1", PORT), Handler) as httpd:
+# One thread per connection: Chrome opens spare connections it may not use
+# for a while, and a one-at-a-time server waits on them while the ~100 app
+# files queue up -- past the page's 6 s start-up net, which then shows the
+# "Who is training?" screen instead of the lab.
+class Server(socketserver.ThreadingTCPServer):
+    daemon_threads = True
+    allow_reuse_address = os.name != "nt"
+with Server(("127.0.0.1", PORT), Handler) as httpd:
     print(f"\n  BioScout, served from this folder, nothing cached")
     print(f"  http://localhost:{PORT}\n")
     print("  Camera works on localhost. For a phone you need an https tunnel;")
