@@ -218,8 +218,15 @@ for (const [k, lab] of [["hipJCF"], ["kneeJCF"], ["ankleJCF"], ["quadsF"], ["glu
 }
 /* Arduino analog inputs A0-A5 as metrics (0-1023, "raw"), so a threshold can
  * watch a sensor. AN_LIVE is filled from the board's "AN ..." / "F ..." lines. */
-export const AN_LIVE = [NaN, NaN, NaN, NaN, NaN, NaN];
+export const AN_LIVE = [NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN];   // 6 = ΔV across the fingers, 7 = pseudo-EMG
 export const AN_KEYS = [0, 1, 2, 3, 4, 5].map((i) => "an" + i);
+/* Two-finger "pseudo-EMG" on the chosen input (default A0): ΔV = 5 V − V(pin),
+ * the drop across the skin between the red (+5 V) and blue (pin) wires; and an
+ * EMG-style envelope: the pin voltage high-passed (slow mean removed), rectified
+ * and smoothed, in mV. Skin contact and pressure, not muscle activity: real EMG
+ * is µV–mV and needs electrodes plus an instrumentation amplifier. */
+METRICS.anDv = { label: "bfb_mAnDv", unit: "V", max: 5, an: 6, f: () => AN_LIVE[6] };
+METRICS.anEmg = { label: "bfb_mAnEmg", unit: "mV", max: 1000, an: 7, f: () => AN_LIVE[7] };
 for (let i = 0; i < 6; i++) METRICS["an" + i] = { label: "bfb_mAn" + i, unit: "raw", max: 1023, an: i, f: () => AN_LIVE[i] };
 /* Running from the phone's accelerometer (src/phonemotion.js): cadence,
  * impact peak and step time, filled by the motion loop into PH_LIVE. */
@@ -519,7 +526,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       if (box) box.innerHTML = `<input type="number" data-lim="min" value="${mn}" title="${esc(tr("bfb_limMin"))}">–<input type="number" data-lim="max" value="${mx}" title="${esc(tr("bfb_limMax"))}"> ${esc(mm.unit)}`;
       if (i > 1) {
         const sel = $("bfbThrMet" + i), live = liveKeys(MOVES[cfg.move] || MOVES.free);
-        const opts = [...new Set([...live, ...AN_KEYS])].filter((x) => x !== cfg.metric);
+        const opts = [...new Set([...live, ...AN_KEYS, "anDv", "anEmg"])].filter((x) => x !== cfg.metric);
         sel.innerHTML = `<option value="">${esc(tr("bfb_sameMetric"))}</option>` + opts.map((x) => `<option value="${x}">${esc(tr(METRICS[x].label))}</option>`).join("");
         sel.value = (cfg.tm || [])[i - 2] && opts.includes(cfg.tm[i - 2]) ? cfg.tm[i - 2] : "";
       }
@@ -761,21 +768,37 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   /* "Pseudo-EMG": the chosen input's voltage on LCD line 2, ~4 times a
    * second (raw 0..1023 → 0..5 V, before the × scale). Line 1 stays the lamp text. */
+  const emgPin = () => (Number.isInteger(cfg.emgPin) ? cfg.emgPin : 0);
+  const emg = { mean: NaN, env: 0 };
+  function emgStep(raw) {
+    const V = raw[emgPin()] / 1023 * 5; if (!Number.isFinite(V)) return;
+    emg.mean = Number.isFinite(emg.mean) ? emg.mean + 0.08 * (V - emg.mean) : V;   // ~0.5 s baseline at 25 Hz
+    emg.env += 0.3 * (Math.abs(V - emg.mean) * 1000 - emg.env);
+    AN_LIVE[6] = 5 - V; AN_LIVE[7] = emg.env;
+  }
+  // Line 2 modes: "" off, "v" pin voltage, "dv" ΔV red−blue, "emg" envelope
+  const lcdMode = () => (["v", "dv", "emg"].includes(cfg.lcdV) ? cfg.lcdV : Number.isInteger(cfg.lcdV) ? "v" : "");
   function lcdVolt(raw) {
-    const i = cfg.lcdV; if (!Number.isInteger(i) || !st.writer || !(st.ver >= 8)) return;
+    const m = lcdMode(); if (!m || !st.writer || !(st.ver >= 8)) return;
     const t = performance.now(); if (t - (st.lcdVT || 0) < 250) return; st.lcdVT = t;
-    writeLine("w2:" + ("A" + i + " " + (raw[i] / 1023 * 5).toFixed(2) + " V").padEnd(16), true);
+    const i = emgPin(), V = raw[i] / 1023 * 5;
+    const txt = m === "v" ? `A${i} ${V.toFixed(2)} V` : m === "dv" ? `dV ${(5 - V).toFixed(2)} V` : `EMG ${Math.round(emg.env)} mV`;
+    writeLine("w2:" + txt.padEnd(16), true);
   }
   function renderLcdV() {
-    $("bfbLcdV").value = Number.isInteger(cfg.lcdV) ? String(cfg.lcdV) : "";
-    $("bfbLcdVNote").textContent = cfg.lcdV > 0 ? tr("bfb_lcdVPin") : "";
+    $("bfbLcdV").value = lcdMode(); $("bfbEmgPin").value = String(emgPin());
+    $("bfbLcdVNote").textContent = emgPin() > 0 ? tr("bfb_lcdVPin") : "";
   }
-  $("bfbLcdV").onchange = () => {
-    const x = $("bfbLcdV").value; cfg.lcdV = x === "" ? null : +x; save(); renderLcdV();
-    if (cfg.lcdV == null) { writeLine("w2:", true); return; }
-    if (!(cfg.an || []).includes(cfg.lcdV)) { cfg.an = [...(cfg.an || []), cfg.lcdV]; save(); renderAnPick(); }
+  const lcdSrcOn = () => {
+    const i = emgPin(); if (!(cfg.an || []).includes(i)) { cfg.an = [...(cfg.an || []), i]; save(); renderAnPick(); }
     if (st.ver >= 5) writeLine("A");
   };
+  $("bfbLcdV").onchange = () => {
+    cfg.lcdV = $("bfbLcdV").value || null; save(); renderLcdV();
+    if (!cfg.lcdV) { writeLine("w2:", true); return; }
+    lcdSrcOn();
+  };
+  $("bfbEmgPin").onchange = () => { cfg.emgPin = +$("bfbEmgPin").value; emg.mean = NaN; emg.env = 0; save(); renderLcdV(); lcdSrcOn(); };
   renderLcdV();
   function onLine(ln) {
     const fm = /^F (\d+)$/.exec(ln);
@@ -787,7 +810,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (/^(STREAM_ON|STREAM_OFF|AN_ON|AN_OFF)$/.test(ln)) return true;
     if (ln.startsWith("AN ")) {
       const v = ln.slice(3).split(",").map(Number); if (v.length !== 6) return true;
-      lcdVolt(v);
+      emgStep(v); lcdVolt(v);
       v.forEach((x, i) => { v[i] = x * anScale(i); AN_LIVE[i] = v[i]; }); anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
       for (const i of cfg.an || []) for (const el of document.querySelectorAll(`[data-anv="${i}"]`)) el.textContent = Math.round(v[i] * 100) / 100;
       return true;                                   // not logged: 25 lines a second
@@ -876,7 +899,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (!st.writer) return;
     if (!(st.ver >= 8)) { $("bfbLcdNote").textContent = tr("bfb_lcdOld"); $("bfbLcdFlash").classList.remove("hidden"); flashHint(); return; }
     await writeLine("w1:" + lcdAscii(txt), true);
-    if (!Number.isInteger(cfg.lcdV)) await writeLine("w2:", true);       // line 2 keeps the live voltage when one is chosen
+    if (!lcdMode()) await writeLine("w2:", true);       // line 2 keeps the live voltage when one is chosen
   }
   const send = (on, force = false) => sendLevel(on ? 1 : 0, force);
   const writeLine = async (txt, quiet = false) => {
@@ -918,7 +941,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     host.innerHTML = Array.from({ length: 12 }, (_, j) => j + 2).map((n) =>
       `<button type="button" class="ghost bfbPinBtn${pinOn.has(n) ? " on" : ""}" data-tpin="${n}"${st.port || assignLamp != null ? "" : " disabled"}
         style="${role[n] ? `box-shadow:inset 0 -3px 0 ${role[n]}` : ""}">${n}</button>`).join("")
-      + `<button type="button" class="ghost bfbPinOff" id="bfbPinAllOff"${st.port ? "" : " disabled"}>${esc(tr("bfb_testOff"))}</button>`;
+;
     /* Pulse > 0: a tap lights the pin for that long; 0: tap on, tap off. */
     for (const b of host.querySelectorAll("[data-tpin]")) b.onclick = () => {
       if (assignLamp != null) { setLampPin(assignLamp, +b.dataset.tpin); return; }
@@ -927,7 +950,6 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       on ? pinOn.add(n) : pinOn.delete(n); writeLine(`T${n}:${on ? 1 : 0}`); renderPinTest();
       if (on && ms > 0) setTimeout(() => { if (pinOn.delete(n)) { writeLine(`T${n}:0`); renderPinTest(); } }, ms);
     };
-    $("bfbPinAllOff").onclick = async () => { for (const n of [...pinOn]) await writeLine(`T${n}:0`); pinOn.clear(); await sendLevel(0, true); renderPinTest(); };
   }
   if (cfg.pulse == null) cfg.pulse = 1000;
   $("bfbPulse").value = cfg.pulse;
@@ -998,7 +1020,9 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbFlash").disabled = false;
   };
   $("bfbTestOn").onclick = () => sendLevel(3, true);
-  $("bfbTestOff").onclick = () => { lampsOff(); sendLevel(0, true); };
+  $("bfbTestOff").onclick = async () => {        // the one "All off": lamps and any pin switched on in "Test each pin"
+    lampsOff(); for (const n of [...pinOn]) await writeLine(`T${n}:0`); pinOn.clear(); await sendLevel(0, true); renderPinTest();
+  };
   /* Lamp 1/2/3 buttons: each switches only its own lamp, on and off.
    * Sketch v5 drives the lamp's pin directly (T<pin>); older sketches only
    * know levels, so there the button shows that level. */
