@@ -1141,10 +1141,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * bars, plot and lamps 10 times a second. */
   const stepDet = makeStepDetector();
   async function startPhone() {
-    stepDet.reset(); ema = NaN;
+    stepDet.reset(); ema = NaN; Object.assign(vert, { t: 0, vz: 0, dz: 0, air: 0, lastAir: 0 });
     accBuf.length = 0; stepTs.length = 0;
     try {
       st.motionStop = await startMotion((t, a, xyz) => {
+        vertPush(t, a);
         const sp = stepDet.push(t, a); if (sp) { stepTs.push(sp.t); if (stepTs.length > 20) stepTs.shift(); }
         const [x, y, z] = Array.isArray(xyz) ? xyz : [NaN, NaN, NaN];   // an older cached phonemotion.js passes no axes
         accBuf.push({ t, a, x, y, z }); while (accBuf.length && t - accBuf[0].t > 6000) accBuf.shift();
@@ -1167,40 +1168,83 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
     const c = cv.getContext("2d"); c.setTransform(d, 0, 0, d, 0, 0); return [c, r.width, r.height];
   }
+  /* Vertical motion estimate for the figure: |a| − 1 g integrated twice with
+   * leaky integrators (drift dies out in ~3 s), plus flight detection (|a| well
+   * below 1 g = free fall). Only drives the drawing, never a metric. */
+  const vert = { t: 0, vz: 0, dz: 0, air: 0, lastAir: 0 };
+  function vertPush(t, a) {
+    const dt = vert.t ? Math.min(0.05, (t - vert.t) / 1000) : 0; vert.t = t;
+    const av = (a - 1) * 9.81; vert.vz = vert.vz * 0.99 + av * dt; vert.dz = vert.dz * 0.99 + vert.vz * dt;
+    if (a < 0.35) { if (!vert.air) vert.air = t; } else if (vert.air) { vert.lastAir = t; vert.air = 0; }
+  }
+  const POSES = { run: "gait", walk: "gait", squat: "squat", slsquat: "slsquat", lunge: "lunge", deadlift: "hinge", hinge: "hinge",
+                  cmj: "jump", sj: "jump", shot: "jump", heelraise: "raise" };
   function drawMotion(ts) {
     const [c, W, H] = fitCv($("bfbMotCv"));
     c.fillStyle = "#0d1117"; c.fillRect(0, 0, W, H);
-    const n = stepTs.length, last = n ? stepTs[n - 1] : NaN;
+    const n = stepTs.length, last = n ? stepTs[n - 1] : NaN, mode = POSES[cfg.move] || "stand";
     const T = Number.isFinite(PH_LIVE.stepTime) ? PH_LIVE.stepTime : 600;
-    const moving = n && ts - last < 2000, cad = PH_LIVE.cadence, run = !Number.isFinite(cad) || cad > 140;
-    // gait phase 0..1 over one stride (two steps); step parity picks the leg
-    const ph = moving ? (((n % 2) + Math.min(1.2, (ts - last) / T)) / 2) % 1 : 0;
-    const w = 2 * Math.PI * ph, amp = moving ? (run ? 1 : 0.6) : 0;
-    const imp = Number.isFinite(PH_LIVE.impact) ? Math.min(3, PH_LIVE.impact) : 1.5;
-    const s = H / 5.2, gx = W / 2, ground = H * 0.88;
-    const bounce = moving ? (run ? 0.12 : 0.05) * s * (0.6 + imp / 3) * Math.abs(Math.sin(w)) : 0;
-    const hip = [gx, ground - 2.0 * s - bounce];
+    const moving = mode === "gait" && n && ts - last < 2000, cad = PH_LIVE.cadence, run = cfg.move === "run" || (cfg.move !== "walk" && Number.isFinite(cad) && cad > 140);
+    const s = H / 5.2, gx = W * 0.42, ground = H * 0.88, pxm = s / 0.45;      // segment ≈ 0.45 m
+    const seg = (a, len, ang) => [a[0] + len * Math.sin(ang), a[1] + len * Math.cos(ang)];
+    // pose: per leg thigh angle (from vertical, + forward) and knee flexion; trunk lean; arms; lift (airborne, px)
+    let L = { th: 0, kn: 0.05 }, R = { th: 0, kn: 0.05 }, lean = 0.05, armL = 0.1, armR = -0.1, elb = 0.3, lift = 0, label = "bfb_motIdle", toe = 0;
+    const depth = Math.max(0, Math.min(1, -vert.dz / 0.35));                  // 0 standing .. 1 deep
+    if (mode === "gait") {
+      const ph = moving ? (((n % 2) + Math.min(1.2, (ts - last) / T)) / 2) % 1 : 0, w = 2 * Math.PI * ph, amp = moving ? (run ? 1 : 0.6) : 0;
+      const legA = (p) => ({ th: amp * 0.55 * Math.sin(w + p), kn: amp * (run ? 1.1 : 0.6) * Math.max(0, Math.sin(w + p + 1.2)) + 0.08 });
+      L = legA(0); R = legA(Math.PI); armL = -amp * 0.5 * Math.sin(w + Math.PI); armR = -amp * 0.5 * Math.sin(w); elb = run ? 1.4 : 0.4;
+      lean = run ? 0.18 : 0.06; lift = moving ? (run ? 0.12 : 0.05) * s * Math.abs(Math.sin(w)) : 0;
+      label = moving ? (run ? "bfb_motRun" : "bfb_motWalk") : "bfb_motIdle";
+    } else if (mode === "squat" || mode === "slsquat" || mode === "lunge") {
+      const q = depth * 1.25;
+      L = { th: q, kn: 1.7 * q + 0.05 }; R = { ...L }; lean = 0.15 + 0.55 * q; armL = armR = 0.2 + 1.2 * depth; elb = 0.1;
+      if (mode === "slsquat") R = { th: 0.9, kn: 1.4 };                       // free leg held forward
+      if (mode === "lunge") { L = { th: 0.5 + 0.6 * depth, kn: 0.1 + 1.4 * depth }; R = { th: -0.45, kn: 0.2 + 1.3 * depth }; lean = 0.05; armL = armR = 0.1; }
+      label = depth > 0.15 ? "bfb_motDown" : "bfb_motUp";
+    } else if (mode === "hinge") {
+      L = { th: 0.15 * depth, kn: 0.35 * depth + 0.05 }; R = { ...L }; lean = 0.1 + 1.2 * depth; armL = armR = -lean + 0.05; elb = 0;
+      label = depth > 0.15 ? "bfb_motDown" : "bfb_motUp";
+    } else if (mode === "jump") {
+      const inAir = vert.air && ts - vert.air < 1500;
+      if (inAir) {
+        const te = (ts - vert.air) / 1000, v0 = 2.6; lift = Math.max(0, v0 * te - 4.905 * te * te) * pxm;
+        L = R = { th: 0.1, kn: 0.15 }; armL = armR = 2.6; elb = 0.1; lean = 0.02; toe = 0.5; label = "bfb_motAir";
+      } else {
+        const q = depth * 1.1; L = { th: q, kn: 1.7 * q + 0.05 }; R = { ...L }; lean = 0.15 + 0.5 * q; armL = armR = -0.6 * depth; elb = 0.1;
+        label = ts - vert.lastAir < 600 ? "bfb_motLand" : depth > 0.15 ? "bfb_motDown" : "bfb_motIdle";
+      }
+    } else if (mode === "raise") {
+      lift = Math.max(0, Math.min(1, vert.dz / 0.08)) * 0.08 * pxm; toe = lift / (0.1 * pxm); label = "bfb_motUp";
+    } else {
+      lift = Math.max(-0.1, Math.min(0.1, vert.dz)) * pxm; label = "bfb_motFree";
+    }
+    // hip height so that the stance foot stays on the ground
+    const legH = (g) => s * (Math.cos(g.th) + Math.cos(g.th - g.kn));
+    const hip = [gx, ground - Math.max(legH(L), legH(R)) - lift];
     c.strokeStyle = "#3a4250"; c.lineWidth = 2; c.beginPath(); c.moveTo(0, ground); c.lineTo(W, ground); c.stroke();
-    // moving ground ticks give the sense of speed
     const off = moving ? ((ts / (run ? 4 : 9)) % 40) : 0;
     for (let x = -off; x < W; x += 40) { c.beginPath(); c.moveTo(x, ground); c.lineTo(x - 10, ground + 8); c.stroke(); }
-    const seg = (a, len, ang) => [a[0] + len * Math.sin(ang), a[1] + len * Math.cos(ang)];
-    const lean = run ? 0.18 : 0.06, sh = seg(hip, -1.5 * s, -lean), head = seg(sh, -0.35 * s, -lean);
-    const leg = (p, col) => {
-      const th = amp * 0.55 * Math.sin(w + p), kn = amp * (run ? 1.1 : 0.6) * Math.max(0, Math.sin(w + p + 1.2)) + 0.08;
-      const k = seg(hip, s, th), a = seg(k, s, th - kn), toe = seg(a, 0.28 * s, th - kn + 1.6);
-      c.strokeStyle = col; c.lineWidth = 6; c.lineCap = "round"; c.beginPath(); c.moveTo(...hip); c.lineTo(...k); c.lineTo(...a); c.lineTo(...toe); c.stroke();
+    const sh = seg(hip, -1.5 * s, -lean), head = seg(sh, -0.35 * s, -lean), pts = { pelvis: hip, trunk: seg(hip, -0.75 * s, -lean) };
+    const leg = (g, col, side) => {
+      const k = seg(hip, s, g.th), a = seg(k, s, g.th - g.kn), t = seg(a, 0.28 * s, g.th - g.kn + 1.6 - toe);
+      c.strokeStyle = col; c.lineWidth = 6; c.lineCap = "round"; c.beginPath(); c.moveTo(...hip); c.lineTo(...k); c.lineTo(...a); c.lineTo(...t); c.stroke();
+      if (side === "R") { pts.thigh = seg(hip, 0.5 * s, g.th); pts.shank = seg(k, 0.5 * s, g.th - g.kn); }
     };
-    const arm = (p, col) => {
-      const th = -amp * 0.5 * Math.sin(w + p), e = seg(sh, 0.75 * s, th), h = seg(e, 0.65 * s, th + (run ? 1.4 : 0.4));
+    const arm = (ang, col, side) => {
+      const e = seg(sh, 0.75 * s, ang), h = seg(e, 0.65 * s, ang + elb);
       c.strokeStyle = col; c.lineWidth = 5; c.beginPath(); c.moveTo(...sh); c.lineTo(...e); c.lineTo(...h); c.stroke();
+      if (side === "R") { pts.upperArm = seg(sh, 0.4 * s, ang); pts.wrist = h; }
     };
-    leg(Math.PI, "#5b6b85"); arm(0, "#5b6b85");
+    leg(L, "#5b6b85", "L"); arm(armL, "#5b6b85", "L");
     c.strokeStyle = "#e6edf3"; c.lineWidth = 7; c.beginPath(); c.moveTo(...hip); c.lineTo(...sh); c.stroke();
     c.fillStyle = "#e6edf3"; c.beginPath(); c.arc(head[0], head[1], 0.24 * s, 0, 7); c.fill();
-    leg(0, "#58a6ff"); arm(Math.PI, "#58a6ff");
+    leg(R, "#58a6ff", "R"); arm(armR, "#58a6ff", "R");
+    // where the phone is worn
+    const pp = pts[cfg.phonePos || "pelvis"];
+    if (pp) { c.fillStyle = "#ffd54a"; c.strokeStyle = "#0d1117"; c.lineWidth = 2; c.beginPath(); c.roundRect(pp[0] - 6, pp[1] - 9, 12, 18, 3); c.fill(); c.stroke(); }
     c.fillStyle = "#8b949e"; c.font = "12px system-ui"; c.textAlign = "left";
-    c.fillText(tr(moving ? (run ? "bfb_motRun" : "bfb_motWalk") : "bfb_motIdle"), 10, H - 52);   // bottom left: the value HUD is top left
+    c.fillText(tr(label), 10, H - 52);   // bottom left: the value HUD is top left
     c.fillText(tr("bfb_motEst"), 10, H - 36);
     // live readout, always shown whatever metric drives the lamps
     const f = (v, d, u) => (Number.isFinite(v) ? v.toFixed(d) + " " + u : "–");
@@ -1275,6 +1319,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbFlip").classList.toggle("hidden", isScreen() || isPhone());
     $("bfbUseCam").classList.toggle("on", !!cfg.src && !isPhone()); $("bfbUsePhone").classList.toggle("on", isPhone());
     $("bfbSrcRow").classList.toggle("hidden", none || isPhone());
+    $("bfbPhPosRow").classList.toggle("hidden", !isPhone()); $("bfbPhPos").value = cfg.phonePos || "pelvis";
     $("bfbSrc").value = cfg.src === "screen" ? "screen" : "camera";
     $("bfbArea").classList.toggle("hidden", !isScreen() || !st.stream);
     $("bfbAreaClear").classList.toggle("hidden", !isScreen() || !st.stream || !st.crop);
@@ -1292,6 +1337,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   $("bfbUseCam").onclick = () => useSource(isScreen() ? "screen" : "camera");
   $("bfbUsePhone").onclick = () => useSource("phone");
+  $("bfbPhPos").onchange = () => { cfg.phonePos = $("bfbPhPos").value; save(); };
   $("bfbSrc").onchange = () => {
     if (st.stream) stopCam();
     stopPhone();

@@ -49,7 +49,7 @@ export function makeStepDetector({ minGap = 240, floor = 1.25, maxGap = 2000 } =
   };
 }
 
-/** Start listening. onSample(t_ms, a_g). Resolves to a stop() function, or throws with a readable message. */
+/** Start listening. onSample(t_ms, a_g, [x,y,z] in g). Resolves to a stop() function, or throws with a readable message. */
 export async function startMotion(onSample) {
   if (!("DeviceMotionEvent" in window)) throw new Error("no motion sensor in this browser");
   if (!window.isSecureContext) throw new Error("needs https (open the live site on the phone)");
@@ -61,7 +61,7 @@ export async function startMotion(onSample) {
   const h = (e) => {
     const a = e.accelerationIncludingGravity; if (!a || a.x == null) return;
     got = true;
-    onSample(performance.now(), Math.hypot(a.x, a.y, a.z) / G);
+    onSample(performance.now(), Math.hypot(a.x, a.y, a.z) / G, [a.x / G, a.y / G, a.z / G]);
   };
   window.addEventListener("devicemotion", h);
   await new Promise((r) => setTimeout(r, 1200));

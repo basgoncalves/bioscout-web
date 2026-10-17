@@ -1750,6 +1750,8 @@ try {
         <button type="button" class="ghost" id="bfbUseCam" data-i18n="bfb_useCam">Use camera</button>
         <button type="button" class="ghost" id="bfbUsePhone" data-i18n="bfb_usePhone">Use phone accelerometer</button>
       </div>
+      <div class="row bfbRow hidden" id="bfbPhPosRow"><label><span data-i18n="bfb_phPos">Phone worn on</span><select id="bfbPhPos"><option value="pelvis" data-i18n="bfb_phPos_pelvis">Pelvis / waist</option><option value="trunk" data-i18n="bfb_phPos_trunk">Chest / trunk</option><option value="thigh" data-i18n="bfb_phPos_thigh">Thigh</option><option value="shank" data-i18n="bfb_phPos_shank">Shank</option><option value="upperArm" data-i18n="bfb_phPos_upperArm">Upper arm</option><option value="wrist" data-i18n="bfb_phPos_wrist">Wrist / hand</option></select></label>
+        <span class="note" data-i18n="bfb_phPosNote">Shown on the figure. Impact values are largest on the shank and smallest on the trunk; cadence works anywhere on the body.</span></div>
       <div class="bfbScale">
         <span class="bfbScaleSt" id="bfbScaleSt"></span>
         <button type="button" class="ghost bfbPinPick" id="bfbScaleGo" data-i18n="bfb_scaleGo">Scale to me</button>
@@ -2159,8 +2161,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 103;
-window.BUILD_AT = "2026-10-17 15:38";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 104;
+window.BUILD_AT = "2026-10-17 16:43";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
