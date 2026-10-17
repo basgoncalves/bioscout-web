@@ -478,6 +478,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   };
   let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, green: "flash", sound: "beep", src: "camera", facing: "user", extra: [], mass: 75, height: 1.75, load: 0, thr2: null, thr3: null, pins: [13, 12, 11, 8, 7] };
   try { cfg = { ...cfg, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch { /* private */ }
+  cfg.src = null;                                      // no source until the user picks camera or phone
   /* Load per movement and side: cfg.wt[move] = { L, R } kg. Only movements
    * marked wt take one; a kick or a jump shot never does. */
   if (!cfg.wt) { cfg.wt = {}; if (cfg.load > 0) for (const mv of ["squat", "deadlift"]) cfg.wt[mv] = { L: cfg.load / 2, R: cfg.load / 2 }; }
@@ -758,6 +759,24 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       anHist.forEach((h, j) => (j ? c.lineTo(X(h.t), Y(h.v[i])) : c.moveTo(X(h.t), Y(h.v[i])))); c.stroke();
     }
   }
+  /* "Pseudo-EMG": the chosen input's voltage on LCD line 2, ~4 times a
+   * second (raw 0..1023 → 0..5 V, before the × scale). Line 1 stays the lamp text. */
+  function lcdVolt(raw) {
+    const i = cfg.lcdV; if (!Number.isInteger(i) || !st.writer || !(st.ver >= 8)) return;
+    const t = performance.now(); if (t - (st.lcdVT || 0) < 250) return; st.lcdVT = t;
+    writeLine("w2:" + ("A" + i + " " + (raw[i] / 1023 * 5).toFixed(2) + " V").padEnd(16), true);
+  }
+  function renderLcdV() {
+    $("bfbLcdV").value = Number.isInteger(cfg.lcdV) ? String(cfg.lcdV) : "";
+    $("bfbLcdVNote").textContent = cfg.lcdV > 0 ? tr("bfb_lcdVPin") : "";
+  }
+  $("bfbLcdV").onchange = () => {
+    const x = $("bfbLcdV").value; cfg.lcdV = x === "" ? null : +x; save(); renderLcdV();
+    if (cfg.lcdV == null) { writeLine("w2:", true); return; }
+    if (!(cfg.an || []).includes(cfg.lcdV)) { cfg.an = [...(cfg.an || []), cfg.lcdV]; save(); renderAnPick(); }
+    if (st.ver >= 5) writeLine("A");
+  };
+  renderLcdV();
   function onLine(ln) {
     const fm = /^F (\d+)$/.exec(ln);
     if (fm) {                                        // v4 board: A0 only, via its "S" stream
@@ -768,6 +787,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (/^(STREAM_ON|STREAM_OFF|AN_ON|AN_OFF)$/.test(ln)) return true;
     if (ln.startsWith("AN ")) {
       const v = ln.slice(3).split(",").map(Number); if (v.length !== 6) return true;
+      lcdVolt(v);
       v.forEach((x, i) => { v[i] = x * anScale(i); AN_LIVE[i] = v[i]; }); anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
       for (const i of cfg.an || []) for (const el of document.querySelectorAll(`[data-anv="${i}"]`)) el.textContent = Math.round(v[i] * 100) / 100;
       return true;                                   // not logged: 25 lines a second
@@ -849,7 +869,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   async function lcdLampText(txt) {
     if (!st.writer) return;
     if (!(st.ver >= 8)) { $("bfbLcdNote").textContent = tr("bfb_lcdOld"); $("bfbLcdFlash").classList.remove("hidden"); flashHint(); return; }
-    await writeLine("w1:" + lcdAscii(txt), true); await writeLine("w2:", true);
+    await writeLine("w1:" + lcdAscii(txt), true);
+    if (!Number.isInteger(cfg.lcdV)) await writeLine("w2:", true);       // line 2 keeps the live voltage when one is chosen
   }
   const send = (on, force = false) => sendLevel(on ? 1 : 0, force);
   const writeLine = async (txt, quiet = false) => {
@@ -1089,10 +1110,86 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const stepDet = makeStepDetector();
   async function startPhone() {
     stepDet.reset(); ema = NaN;
-    try { st.motionStop = await startMotion((t, a) => stepDet.push(t, a)); }
+    accBuf.length = 0; stepTs.length = 0;
+    try {
+      st.motionStop = await startMotion((t, a, xyz) => {
+        const sp = stepDet.push(t, a); if (sp) { stepTs.push(sp.t); if (stepTs.length > 20) stepTs.shift(); }
+        accBuf.push({ t, a, x: xyz[0], y: xyz[1], z: xyz[2] }); while (accBuf.length && t - accBuf[0].t > 6000) accBuf.shift();
+      });
+    }
     catch (e) { st.motionStop = null; $("bfbCamNote").textContent = tr("bfb_motFail", { err: e.message }); renderSrc(); return; }
     $("bfbCamNote").textContent = tr("bfb_motHint");
     st.phT = setInterval(phoneTick, 100); renderSrc();
+    const loop = () => { if (!st.motionStop) return; drawMotion(performance.now()); drawAcc(performance.now()); requestAnimationFrame(loop); };
+    requestAnimationFrame(loop);
+  }
+  /* Phone view: no video. The stage shows a runner/walker animated from the
+   * detected steps (phase between steps, bounce at impact) — an estimate of
+   * the motion, not a measurement of joint angles — and the plot below shows
+   * the raw accelerometer axes and |a| with the detected steps marked. */
+  const accBuf = [], stepTs = [];
+  function fitCv(cv) {
+    const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(r.width * d)), h = Math.max(1, Math.round(r.height * d));
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    const c = cv.getContext("2d"); c.setTransform(d, 0, 0, d, 0, 0); return [c, r.width, r.height];
+  }
+  function drawMotion(ts) {
+    const [c, W, H] = fitCv($("bfbMotCv"));
+    c.fillStyle = "#0d1117"; c.fillRect(0, 0, W, H);
+    const n = stepTs.length, last = n ? stepTs[n - 1] : NaN;
+    const T = Number.isFinite(PH_LIVE.stepTime) ? PH_LIVE.stepTime : 600;
+    const moving = n && ts - last < 2000, cad = PH_LIVE.cadence, run = !Number.isFinite(cad) || cad > 140;
+    // gait phase 0..1 over one stride (two steps); step parity picks the leg
+    const ph = moving ? (((n % 2) + Math.min(1.2, (ts - last) / T)) / 2) % 1 : 0;
+    const w = 2 * Math.PI * ph, amp = moving ? (run ? 1 : 0.6) : 0;
+    const imp = Number.isFinite(PH_LIVE.impact) ? Math.min(3, PH_LIVE.impact) : 1.5;
+    const s = H / 5.2, gx = W / 2, ground = H * 0.88;
+    const bounce = moving ? (run ? 0.12 : 0.05) * s * (0.6 + imp / 3) * Math.abs(Math.sin(w)) : 0;
+    const hip = [gx, ground - 2.0 * s - bounce];
+    c.strokeStyle = "#3a4250"; c.lineWidth = 2; c.beginPath(); c.moveTo(0, ground); c.lineTo(W, ground); c.stroke();
+    // moving ground ticks give the sense of speed
+    const off = moving ? ((ts / (run ? 4 : 9)) % 40) : 0;
+    for (let x = -off; x < W; x += 40) { c.beginPath(); c.moveTo(x, ground); c.lineTo(x - 10, ground + 8); c.stroke(); }
+    const seg = (a, len, ang) => [a[0] + len * Math.sin(ang), a[1] + len * Math.cos(ang)];
+    const lean = run ? 0.18 : 0.06, sh = seg(hip, -1.5 * s, -lean), head = seg(sh, -0.35 * s, -lean);
+    const leg = (p, col) => {
+      const th = amp * 0.55 * Math.sin(w + p), kn = amp * (run ? 1.1 : 0.6) * Math.max(0, Math.sin(w + p + 1.2)) + 0.08;
+      const k = seg(hip, s, th), a = seg(k, s, th - kn), toe = seg(a, 0.28 * s, th - kn + 1.6);
+      c.strokeStyle = col; c.lineWidth = 6; c.lineCap = "round"; c.beginPath(); c.moveTo(...hip); c.lineTo(...k); c.lineTo(...a); c.lineTo(...toe); c.stroke();
+    };
+    const arm = (p, col) => {
+      const th = -amp * 0.5 * Math.sin(w + p), e = seg(sh, 0.75 * s, th), h = seg(e, 0.65 * s, th + (run ? 1.4 : 0.4));
+      c.strokeStyle = col; c.lineWidth = 5; c.beginPath(); c.moveTo(...sh); c.lineTo(...e); c.lineTo(...h); c.stroke();
+    };
+    leg(Math.PI, "#5b6b85"); arm(0, "#5b6b85");
+    c.strokeStyle = "#e6edf3"; c.lineWidth = 7; c.beginPath(); c.moveTo(...hip); c.lineTo(...sh); c.stroke();
+    c.fillStyle = "#e6edf3"; c.beginPath(); c.arc(head[0], head[1], 0.24 * s, 0, 7); c.fill();
+    leg(0, "#58a6ff"); arm(Math.PI, "#58a6ff");
+    c.fillStyle = "#8b949e"; c.font = "12px system-ui"; c.textAlign = "left";
+    c.fillText(tr(moving ? (run ? "bfb_motRun" : "bfb_motWalk") : "bfb_motIdle"), 10, 18);
+    c.fillText(tr("bfb_motEst"), 10, 34);
+  }
+  function drawAcc(ts) {
+    const [c, W, H] = fitCv($("bfbAccCv"));
+    c.clearRect(0, 0, W, H);
+    const span = 6000, X = (t) => 36 + (W - 44) * (1 - (ts - t) / span);
+    let lo = -1.5, hi = 1.5;
+    for (const p of accBuf) { lo = Math.min(lo, p.x, p.y, p.z); hi = Math.max(hi, p.a); }
+    lo = Math.floor(lo); hi = Math.ceil(hi);
+    const Y = (v) => 8 + (H - 22) * (1 - (v - lo) / (hi - lo));
+    c.strokeStyle = "rgba(127,127,127,.25)"; c.fillStyle = "#8b949e"; c.font = "10px system-ui"; c.lineWidth = 1;
+    for (let v = lo; v <= hi; v++) { c.beginPath(); c.moveTo(36, Y(v)); c.lineTo(W - 8, Y(v)); c.stroke(); c.fillText(v + " g", 4, Y(v) + 3); }
+    c.strokeStyle = "rgba(255,213,74,.6)";
+    for (const t of stepTs) if (ts - t < span) { c.beginPath(); c.moveTo(X(t), 8); c.lineTo(X(t), H - 14); c.stroke(); }
+    const lines = [["x", "#ff7b72"], ["y", "#7ee787"], ["z", "#79c0ff"], ["a", "#e6edf3"]];
+    for (const [k, col] of lines) {
+      c.strokeStyle = col; c.lineWidth = k === "a" ? 2 : 1.2; c.beginPath();
+      accBuf.forEach((p, i) => (i ? c.lineTo(X(p.t), Y(p[k])) : c.moveTo(X(p.t), Y(p[k])))); c.stroke();
+    }
+    let lx = 40; c.font = "11px system-ui";
+    for (const [k, col] of lines) { c.fillStyle = col; const t = k === "a" ? "|a|" : k; c.fillText(t, lx, H - 2); lx += 30; }
+    c.fillStyle = "#ffd54a"; c.fillText(tr("bfb_motSteps"), lx, H - 2);
   }
   function stopPhone() {
     if (st.motionStop) st.motionStop(); st.motionStop = null;
@@ -1127,10 +1224,15 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     renderSrc();
   };
   function renderSrc() {
+    const none = !cfg.src;
+    $("bfbLiveWrap").classList.toggle("hidden", none);
+    $("bfbNoSrc").classList.toggle("hidden", !none);
+    $("bfbStage").classList.toggle("phone", isPhone());
+    $("bfbAccWrap").classList.toggle("hidden", !isPhone());
     $("bfbFlip").classList.toggle("hidden", isScreen() || isPhone());
-    $("bfbUseCam").classList.toggle("on", !isPhone()); $("bfbUsePhone").classList.toggle("on", isPhone());
-    $("bfbSrcRow").classList.toggle("hidden", isPhone());
-    $("bfbSrc").value = cfg.src;
+    $("bfbUseCam").classList.toggle("on", !!cfg.src && !isPhone()); $("bfbUsePhone").classList.toggle("on", isPhone());
+    $("bfbSrcRow").classList.toggle("hidden", none || isPhone());
+    $("bfbSrc").value = cfg.src === "screen" ? "screen" : "camera";
     $("bfbArea").classList.toggle("hidden", !isScreen() || !st.stream);
     $("bfbAreaClear").classList.toggle("hidden", !isScreen() || !st.stream || !st.crop);
     $("bfbArea").textContent = tr(st.picking ? "bfb_areaDone" : "bfb_area");
@@ -1311,6 +1413,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   function renderPick() {
     const host = $("bfbPlotPick"); if (!host) return;
+    host.classList.toggle("hidden", cfg.src === "phone");     // phone: the x, y, z plot below replaces these camera metrics
+    if (cfg.src === "phone") return;
     const mv = MOVES[cfg.move] || MOVES.free;
     const keys = mv.metrics.filter((k) => !METRICS[k].ev && k !== cfg.metric);
     host.innerHTML = `<span class="note">${esc(tr("bfb_plotAlso"))}</span> ` + keys.map((k) =>

@@ -1629,6 +1629,10 @@ try {
         <span class="note" id="bfbLcdNote"></span>
         <button type="button" class="hidden" id="bfbLcdFlash" data-i18n="bfb_flash">Update board firmware</button>
       </div>
+      <div class="row bfbRow">
+        <label><span data-i18n="bfb_lcdV">Line 2 during BioFeedback</span><select id="bfbLcdV"><option value="" data-i18n="bfb_lcdVOff">Lamp text only</option><option value="0">A0 (V)</option><option value="1">A1 (V)</option><option value="2">A2 (V)</option><option value="3">A3 (V)</option><option value="4">A4 (V)</option><option value="5">A5 (V)</option></select></label>
+        <span class="note" id="bfbLcdVNote"></span>
+      </div>
       <h4 style="margin:10px 0 4px" data-i18n="bfb_lampTxtTitle">Text per lamp</h4>
       <p class="note" data-i18n="bfb_lampTxtNote">Shown on the screen while that lamp is the highest one lit (e.g. "Move up", "Stay", "Stop"). Empty = the screen is left as it is.</p>
       <div class="bfbLampTxt">
@@ -2112,8 +2116,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 92;
-window.BUILD_AT = "2026-10-17 11:42";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 93;
+window.BUILD_AT = "2026-10-17 11:46";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

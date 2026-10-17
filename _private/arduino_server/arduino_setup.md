@@ -98,7 +98,7 @@ thresholds now light the lamps (press **Activate**). Colours are set in the app
 
 **Parts:** 1 MΩ, 3 wires.
 
-1. Uno **A0** → a free column (purple).
+1. Uno **A0** → a free column (blue).
 2. **1 MΩ** from that column → a column linked to the **− rail**: keeps A0 at 0 when
    nothing touches it.
 3. One wire from the A0 column and one from the **+ rail**, both with a **free end**.
@@ -107,6 +107,13 @@ thresholds now light the lamps (press **Activate**). Colours are set in the app
 plot). Touch both free ends with one fingertip: the value rises, more when you press
 harder. A0 can drive a lamp: Threshold 2 or 3 → *A0 (Arduino input)*. The **×** box
 next to A0 scales the value (e.g. ×0.0049 = volts).
+
+**Voltage on the LCD ("pseudo-EMG"):** Arduino window → *Line 2 during BioFeedback*
+→ pick the input (A0). During BioFeedback the LCD then shows the lamp text on the top
+line and the live voltage of that input on the bottom line (e.g. `A0 2.35 V`, 4 times a
+second). The input is ticked under Live inputs automatically. With the LCD wired as in
+Phase 3, **A1–A5 are the screen's wires**, so A0 is the only free analog input; the
+other choices are for a board without the LCD.
 
 Later, any 0–5 V sensor goes on A0 the same way: a potentiometer (middle leg → A0),
 a photoresistor or a force sensor with a 10 kΩ divider. Never more than 5 V on A0.
