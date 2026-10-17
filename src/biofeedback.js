@@ -215,6 +215,11 @@ for (const [k, lab] of [["hipJCF"], ["kneeJCF"], ["ankleJCF"], ["quadsF"], ["glu
                         f: (w, img, hd, ld) => (ld ? ld[k + sd] : NaN) };
   }
 }
+/* Arduino analog inputs A0-A5 as metrics (0-1023, "raw"), so a threshold can
+ * watch a sensor. AN_LIVE is filled from the board's "AN ..." / "F ..." lines. */
+export const AN_LIVE = [NaN, NaN, NaN, NaN, NaN, NaN];
+export const AN_KEYS = [0, 1, 2, 3, 4, 5].map((i) => "an" + i);
+for (let i = 0; i < 6; i++) METRICS["an" + i] = { label: "bfb_mAn" + i, unit: "raw", max: 1023, an: i, f: () => AN_LIVE[i] };
 export const LOAD_KEYS = ["hipJCF", "kneeJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"];
 
 /* Movement presets: which metrics make sense and a starting threshold. */
@@ -252,7 +257,7 @@ export const MOVES = {
  * event detectors only, not from the cycle finder as well. */
 const EVENT_MOVES = new Set(["cmj", "sj", "shot"]);
 /* Hysteresis default per unit: 3 deg is sensible, 3 body weights is not. */
-const HYST = { "°": 3, BW: 0.3, cm: 2, ms: 30, "m/s": 0.05, W: 50, Nm: 3 };
+const HYST = { raw: 10, "°": 3, BW: 0.3, cm: 2, ms: 30, "m/s": 0.05, W: 50, Nm: 3 };
 
 /* Bar tracker. Scale: nose-to-ankle is ~0.89 of standing height, learnt
  * only while standing tall (knees nearly straight) so a squat does not
@@ -501,8 +506,9 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       if (box) box.innerHTML = `<input type="number" data-lim="min" value="${mn}" title="${esc(tr("bfb_limMin"))}">–<input type="number" data-lim="max" value="${mx}" title="${esc(tr("bfb_limMax"))}"> ${esc(mm.unit)}`;
       if (i > 1) {
         const sel = $("bfbThrMet" + i), live = liveKeys(MOVES[cfg.move] || MOVES.free);
-        sel.innerHTML = `<option value="">${esc(tr("bfb_sameMetric"))}</option>` + live.filter((x) => x !== cfg.metric).map((x) => `<option value="${x}">${esc(tr(METRICS[x].label))}</option>`).join("");
-        sel.value = (cfg.tm || [])[i - 2] && live.includes(cfg.tm[i - 2]) ? cfg.tm[i - 2] : "";
+        const opts = [...new Set([...live, ...AN_KEYS])].filter((x) => x !== cfg.metric);
+        sel.innerHTML = `<option value="">${esc(tr("bfb_sameMetric"))}</option>` + opts.map((x) => `<option value="${x}">${esc(tr(METRICS[x].label))}</option>`).join("");
+        sel.value = (cfg.tm || [])[i - 2] && opts.includes(cfg.tm[i - 2]) ? cfg.tm[i - 2] : "";
       }
     }
     $("bfbUnit").textContent = m.unit;
@@ -563,6 +569,9 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       const [mn, mx] = limOf(metOf(i)); cfg["thr" + i] = Number.isFinite(cfg["thr" + i]) ? Math.max(mn, Math.min(mx, cfg["thr" + i])) : cfg["thr" + i];
       if (el.value && !Number.isFinite(cfg["thr" + i])) cfg["thr" + i] = +(mn + (mx - mn) * 0.5).toFixed(1);
       lampEma[i - 1] = NaN; save(); syncInputs();
+      const an = METRICS[el.value] && METRICS[el.value].an;
+      if (an != null && !(cfg.an || []).includes(an)) { cfg.an = [...(cfg.an || []), an]; save(); renderAnPick(); if (st.ver >= 5) writeLine("A"); }
+      anPlot();
     }
   });
   /* Orange (2) and red (3) thresholds: optional, off = null. Turning one on
@@ -679,8 +688,23 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       anPlot();
     };
   }
+  /* Drawn twice: in the Arduino window and under the main plot on the page
+   * (the page one only while some input is ticked). Thresholds of lamps that
+   * watch an analog input are drawn as dashed lines in the lamp colour. */
+  /* Without the camera running, lamps that watch an analog input still work:
+   * evaluated here on every reading (the camera loop does it when it runs). */
+  function anLamps() {
+    if (st.stream) return;
+    if (![1, 2, 3].some((r) => METRICS[metOf(r)] && METRICS[metOf(r)].an != null)) return;
+    const sts = lampStates(NaN, (k) => (METRICS[k] && METRICS[k].an != null ? AN_LIVE[METRICS[k].an] : NaN));
+    showLamps(sts); if (st.active) sendLamps(sts);
+  }
   function anPlot() {
-    const cv = $("bfbAnCv"); if (!cv || !cv.isConnected) return;
+    const box = $("bfbAnWrap"); if (box) box.classList.toggle("hidden", !(cfg.an || []).length);
+    anPlotOn("bfbAnCv"); anPlotOn("bfbAnCv2");
+  }
+  function anPlotOn(id) {
+    const cv = $(id); if (!cv || !cv.isConnected || !cv.offsetParent) return;
     const W = cv.clientWidth || 400, H = cv.clientHeight || 110, dpr = window.devicePixelRatio || 1;
     if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
     const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
@@ -691,6 +715,13 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       c.fillStyle = "#aaa"; c.font = "12px system-ui, sans-serif";
       c.fillText(st.port ? (st.ver >= 5 ? tr("bfb_anWait") : tr("bfb_anOld")) : tr("bfb_flashConnect"), 40, H / 2);
     }
+    c.setLineDash([5, 4]); c.lineWidth = 1.4;
+    for (const r of [1, 2, 3]) {
+      const k = metOf(r), t = r === 1 ? cfg.thr : cfg["thr" + r];
+      if (!METRICS[k] || METRICS[k].an == null || !Number.isFinite(t)) continue;
+      c.strokeStyle = LVCOL[r - 1]; c.beginPath(); c.moveTo(30, Y(t)); c.lineTo(W - 4, Y(t)); c.stroke();
+    }
+    c.setLineDash([]);
     for (const i of cfg.an || []) {
       c.strokeStyle = AN_COL[i]; c.lineWidth = 1.8; c.beginPath();
       anHist.forEach((h, j) => (j ? c.lineTo(X(h.t), Y(h.v[i])) : c.moveTo(X(h.t), Y(h.v[i])))); c.stroke();
@@ -699,14 +730,14 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function onLine(ln) {
     const fm = /^F (\d+)$/.exec(ln);
     if (fm) {                                        // v4 board: A0 only, via its "S" stream
-      const v = [+fm[1], NaN, NaN, NaN, NaN, NaN]; anHist.push({ t: performance.now(), v }); anPlot();
+      const v = [+fm[1], NaN, NaN, NaN, NaN, NaN]; AN_LIVE[0] = v[0]; anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
       const el = document.querySelector('[data-anv="0"]'); if (el) el.textContent = v[0];
       return true;
     }
     if (/^(STREAM_ON|STREAM_OFF|AN_ON|AN_OFF)$/.test(ln)) return true;
     if (ln.startsWith("AN ")) {
       const v = ln.slice(3).split(",").map(Number); if (v.length !== 6) return true;
-      anHist.push({ t: performance.now(), v }); anPlot();
+      v.forEach((x, i) => { AN_LIVE[i] = x; }); anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
       for (const i of cfg.an || []) { const el = document.querySelector(`[data-anv="${i}"]`); if (el) el.textContent = v[i]; }
       return true;                                   // not logged: 25 lines a second
     }
