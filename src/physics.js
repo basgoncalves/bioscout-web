@@ -33,13 +33,13 @@ export function initPhysics({ $, tr }) {
   const host = $("phHost"), tabs = $("phTabs");
   let sim = "proj", raf = 0, st = null, last = 0, running = false;
   const P = {
-    proj: { v: 8, ang: 45, g: "earth", drag: 0 },
+    proj: { v: 8, ang: 45, g: "earth", drag: 0, h0: 0, lock: { v: true, drag: true, h0: true, ang: false }, goal: "range" },
     spring: { m: 1, k: 40, b: 1, x0: 0.3 },
     pend: { L: 1, amp: 30, g: "earth" },
     coll: { m1: 2, v1: 3, m2: 1, v2: -1, e: 1 },
   };
   const SL = {
-    proj: [["v", 1, 30, 0.5, "m/s", "ph_speed"], ["ang", 5, 85, 1, "°", "ph_angle"], ["drag", 0, 0.1, 0.005, "", "ph_drag"]],
+    proj: [["v", 1, 30, 0.5, "m/s", "ph_speed"], ["ang", 5, 85, 1, "°", "ph_angle"], ["drag", 0, 0.1, 0.005, "", "ph_drag"], ["h0", 0, 3, 0.1, "m", "ph_h0"]],
     spring: [["m", 0.2, 5, 0.1, "kg", "ph_mass"], ["k", 5, 200, 1, "N/m", "ph_stiff"], ["b", 0, 20, 0.1, "N·s/m", "ph_damp"], ["x0", 0.05, 0.5, 0.01, "m", "ph_x0"]],
     pend: [["L", 0.2, 3, 0.05, "m", "ph_len"], ["amp", 5, 170, 1, "°", "ph_amp"]],
     coll: [["m1", 0.5, 10, 0.5, "kg", "ph_m1"], ["v1", -5, 5, 0.5, "m/s", "ph_v1"], ["m2", 0.5, 10, 0.5, "kg", "ph_m2"], ["v2", -5, 5, 0.5, "m/s", "ph_v2"], ["e", 0, 1, 0.05, "", "ph_e"]],
@@ -52,13 +52,16 @@ export function initPhysics({ $, tr }) {
   function renderControls() {
     const p = P[sim];
     const gSel = "g" in p ? `<label>${tr("ph_g")}<select data-pg="g">${Object.keys(G_OPTS).map((k) => `<option value="${k}"${p.g === k ? " selected" : ""}>${tr("ph_g_" + k)} (${G_OPTS[k]} m/s²)</option>`).join("")}</select></label>` : "";
+    const lockBox = (k) => (p.lock ? ` <label class="phLock" title="${tr("ph_lockT")}"><input type="checkbox" data-lock="${k}"${p.lock[k] ? " checked" : ""}> 🔒</label>` : "");
+    const opt = p.lock ? `<div class="phOpt"><label>${tr("ph_goal")}<select data-goal>${["range", "peak", "tf"].map((g) => `<option value="${g}"${p.goal === g ? " selected" : ""}>${tr("ph_goal_" + g)}</option>`).join("")}</select></label>
+      <button type="button" id="phOptBtn">${tr("ph_findOpt")}</button><span class="note" id="phOptOut"></span></div>` : "";
     $("phCtl").innerHTML = SL[sim].map(([k, mn, mx, stp, u, lab]) =>
-      `<label class="phSl"><span>${tr(lab)} <b data-pv="${k}">${p[k]}</b> ${u}</span><input type="range" min="${mn}" max="${mx}" step="${stp}" value="${p[k]}" data-pk="${k}"></label>`).join("") + gSel;
+      `<div class="phSl"><span>${tr(lab)} <b data-pv="${k}">${p[k]}</b> ${u}${lockBox(k)}</span><input type="range" min="${mn}" max="${mx}" step="${stp}" value="${p[k]}" data-pk="${k}"></div>`).join("") + gSel + opt;
     $("phNote").textContent = tr("ph_n_" + sim);
   }
   function reset() {
     const p = P[sim];
-    if (sim === "proj") st = { t: 0, x: 0, y: 0, vx: projectile(p.v, p.ang, 9.81).vx, vy: projectile(p.v, p.ang, 9.81).vy, path: [[0, 0]], done: false };
+    if (sim === "proj") { const a = projectile(p.v, p.ang, 9.81); st = { t: 0, x: 0, y: p.h0, vx: a.vx, vy: a.vy, path: [[0, p.h0]], done: false }; }
     if (sim === "spring") st = { t: 0, x: p.x0, v: 0, hist: [] };
     if (sim === "pend") st = { t: 0, th: p.amp * Math.PI / 180, w: 0, hist: [], cross: [], prevW: 0 };
     if (sim === "coll") st = { t: 0, x1: -1.2, x2: 0.6, v1: p.v1, v2: p.v2, hit: false, after: null };
@@ -89,6 +92,41 @@ export function initPhysics({ $, tr }) {
       }
     }
   }
+  /* Whole flight with drag, no drawing: range, peak and flight time. */
+  function flight(q) {
+    const g = gOf(q.g), a = q.ang * Math.PI / 180, dt = 0.002;
+    let x = 0, y = q.h0, vx = q.v * Math.cos(a), vy = q.v * Math.sin(a), t = 0, peak = y;
+    while (t < 30) {
+      const sp = Math.hypot(vx, vy); vx += -q.drag * sp * vx * dt; vy += (-g - q.drag * sp * vy) * dt;
+      x += vx * dt; y += vy * dt; t += dt; if (y > peak) peak = y; if (y < 0) break;
+    }
+    return { range: x, peak, tf: t };
+  }
+  /* Find optimal: grid search over the unlocked sliders (within their ranges),
+   * then a finer pass around the best point. Locked sliders keep their value. */
+  function optimise() {
+    const p = P.proj, free = SL.proj.filter(([k]) => !p.lock[k]);
+    if (!free.length) { $("phOptOut").textContent = tr("ph_optNone"); return; }
+    const n = free.length === 1 ? 81 : free.length === 2 ? 31 : 13;
+    let best = null, bestV = -Infinity;
+    const search = (lo, hi) => {
+      const rec = (i, q) => {
+        if (i === free.length) { const v = flight(q)[p.goal]; if (v > bestV) { bestV = v; best = { ...q }; } return; }
+        const [k] = free[i];
+        for (let j = 0; j < n; j++) rec(i + 1, { ...q, [k]: lo[k] + (hi[k] - lo[k]) * j / (n - 1) });
+      };
+      rec(0, { ...p });
+    };
+    const lo = {}, hi = {}; for (const [k, mn, mx] of free) { lo[k] = mn; hi[k] = mx; }
+    search(lo, hi);
+    for (const [k, mn, mx] of free) { const w = (mx - mn) / (n - 1); lo[k] = Math.max(mn, best[k] - w); hi[k] = Math.min(mx, best[k] + w); }
+    search(lo, hi);
+    for (const [k, , , stp] of free) p[k] = +(Math.round(best[k] / stp) * stp).toFixed(3);
+    renderControls();
+    const u = { range: "m", peak: "m", tf: "s" }[p.goal];
+    $("phOptOut").textContent = tr("ph_optRes", { what: free.map(([k, , , , un, lab]) => `${tr(lab)} ${p[k]}${un ? " " + un : ""}`).join(", "), val: bestV.toFixed(2) + " " + u });
+    reset(); play(true);
+  }
   function fit(cv) {
     const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.round(r.width * d)), h = Math.max(1, Math.round(r.height * d));
@@ -104,11 +142,11 @@ export function initPhysics({ $, tr }) {
     const [c, W, H] = fit($("phCv")), p = P[sim], ink = css("--ink"), mut = css("--muted"), acc = css("--accent"), line = css("--line");
     c.font = "12px system-ui"; c.fillStyle = mut;
     if (sim === "proj") {
-      const g = gOf(p.g), an = projectile(p.v, p.ang, g);
+      const g = gOf(p.g), an = projectile(p.v, p.ang, g, p.h0);
       const span = Math.max(an.range, 2 * an.peak, 1) * 1.1, sc = Math.min((W - 40) / span, (H - 40) / Math.max(an.peak * 1.25, span * 0.3));
       const X = (x) => 20 + x * sc, Y = (y) => H - 20 - y * sc;
       c.strokeStyle = line; c.beginPath(); c.moveTo(0, Y(0)); c.lineTo(W, Y(0)); c.stroke();
-      const ideal = []; for (let i = 0; i <= 60; i++) { const t = an.tf * i / 60; ideal.push([an.vx * t, an.vy * t - g * t * t / 2]); }
+      const ideal = []; for (let i = 0; i <= 60; i++) { const t = an.tf * i / 60; ideal.push([an.vx * t, p.h0 + an.vy * t - g * t * t / 2]); }
       c.setLineDash([5, 5]); trace(c, ideal, X, Y, mut, 1.5); c.setLineDash([]);
       trace(c, st.path.concat([[st.x, st.y]]), X, Y, acc, 3);
       c.fillStyle = ink; c.beginPath(); c.arc(X(st.x), Y(st.y), 7, 0, 7); c.fill();
@@ -170,10 +208,16 @@ export function initPhysics({ $, tr }) {
   tabs.addEventListener("click", (e) => { const b = e.target.closest("[data-sim]"); if (b) select(b.dataset.sim); });
   $("phCtl").addEventListener("input", (e) => {
     const k = e.target.dataset.pk; if (!k) return;
+    if ($("phOptOut")) $("phOptOut").textContent = "";
     P[sim][k] = +e.target.value; const o = $("phCtl").querySelector(`[data-pv="${k}"]`); if (o) o.textContent = e.target.value;
     reset();
   });
-  $("phCtl").addEventListener("change", (e) => { if (e.target.dataset.pg) { P[sim].g = e.target.value; reset(); } });
+  $("phCtl").addEventListener("change", (e) => {
+    if (e.target.dataset.pg) { P[sim].g = e.target.value; reset(); }
+    if (e.target.dataset.lock) P[sim].lock[e.target.dataset.lock] = e.target.checked;
+    if ("goal" in e.target.dataset) P[sim].goal = e.target.value;
+  });
+  $("phCtl").addEventListener("click", (e) => { if (e.target.id === "phOptBtn") optimise(); });
   $("phPlay").onclick = () => { if (sim === "proj" && st.done) reset(); play(!running); };
   $("phReset").onclick = () => { play(false); reset(); };
   window.addEventListener("resize", () => { if (!$("viewPhysics").classList.contains("hidden")) draw(); });

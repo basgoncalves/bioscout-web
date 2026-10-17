@@ -1202,6 +1202,13 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     c.fillStyle = "#8b949e"; c.font = "12px system-ui"; c.textAlign = "left";
     c.fillText(tr(moving ? (run ? "bfb_motRun" : "bfb_motWalk") : "bfb_motIdle"), 10, H - 52);   // bottom left: the value HUD is top left
     c.fillText(tr("bfb_motEst"), 10, H - 36);
+    // live readout, always shown whatever metric drives the lamps
+    const f = (v, d, u) => (Number.isFinite(v) ? v.toFixed(d) + " " + u : "–");
+    const rows = [[tr("bfb_m_runCad"), f(PH_LIVE.cadence, 0, "spm")], [tr("bfb_m_runStep"), f(PH_LIVE.stepTime, 0, "ms")],
+                  [tr("bfb_m_runImp"), f(PH_LIVE.impact, 2, "g")], [tr("bfb_m_acc"), f(PH_LIVE.acc, 2, "g")], [tr("bfb_motSteps"), String(n)]];
+    c.font = "13px system-ui"; c.textAlign = "right";
+    rows.forEach(([k, v], i) => { c.fillStyle = "#8b949e"; c.fillText(k.replace(/\s*\(.*\)/, ""), W - 80, 56 + i * 20); c.fillStyle = "#e6edf3"; c.fillText(v, W - 10, 56 + i * 20); });
+    c.textAlign = "left";
   }
   function drawAcc(ts) {
     const [c, W, H] = fitCv($("bfbAccCv"));
@@ -1234,7 +1241,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const val = (k) => METRICS[k].f() - ((cfg.zero && cfg.zero[k]) || 0);
     const x = val(cfg.metric);
     ema = Number.isFinite(x) ? (Number.isFinite(ema) ? ema + 0.35 * (x - ema) : x) : NaN;
-    if (!Number.isFinite(ema)) { $("bfbValue").textContent = tr("bfb_motWait", { n: v.steps }); plot(ts); return; }
+    if (!Number.isFinite(ema)) {      // the chosen metric needs steps: show the live acceleration meanwhile
+      $("bfbValue").textContent = Number.isFinite(PH_LIVE.acc) ? `|a| ${PH_LIVE.acc.toFixed(2)} g` : tr("bfb_motWait", { n: v.steps });
+      plot(ts); return;
+    }
     showBar(ema); hist.push({ t: ts, a: ema, b: NaN, o: {} }); plot(ts);
     st.value = ema; $("bfbValue").textContent = fmt(ema);
     const sts = lampStates(ema, val), lv = sts.filter(Boolean).length, top = sts.lastIndexOf(true);
