@@ -91,8 +91,9 @@ for (const coord of ["knee_angle_r", "hip_flexion_r", "ankle_angle_r"]) {
 // Python parity, if a reference is present.
 if (existsSync("data/ref.json")) {
   const ref = JSON.parse(readFileSync("data/ref.json", "utf8"));
+  // parity with the raw Python forward pass: the app smooths afterwards, the reference does not
   const out = predictForces(m, ref.coords, ref.times.length,
-    { massKg: ref.mass, heightM: ref.height, times: ref.times });
+    { massKg: ref.mass, heightM: ref.height, times: ref.times, smoothHz: 0 });
   let worst = 0;
   for (let t = 0; t < ref.times.length; t++)
     for (let i = 0; i < out.muscleNames.length; i++)

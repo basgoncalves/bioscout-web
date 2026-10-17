@@ -1,3 +1,4 @@
+import { lowpass } from "./proc_dsp.js";
 /**
  * forces.js -- the FAIS static-optimisation surrogate, in the browser.
  *
@@ -235,6 +236,26 @@ export function predictForces(m, coords, nFrames, opts = {}) {
     extra.moments.push(Float64Array.from(momI, (i) => y[i] * massKg));      // N.m
     extra.grf.push(Float64Array.from(grfI, (i) => y[i] * bw));              // N
     extra.jrfComp.push(Float64Array.from(compI, (i) => y[i] * bw));         // N
+  }
+  /* Zero-lag low-pass on every output series (default 6 Hz, 4th-order
+   * Butterworth, forward-backward): the surrogate is evaluated frame by frame on
+   * camera kinematics, so frame-to-frame pose jitter showed up as shaky force
+   * curves. opts.smoothHz = 0 turns it off. Short or gappy series stay raw. */
+  const fc = opts.smoothHz ?? 6;
+  if (fc > 0 && nFrames > 30) {
+    const dt = (times[nFrames - 1] - times[0]) / (nFrames - 1), fs = dt > 0 ? 1 / dt : 30;
+    if (fc < 0.45 * fs) {
+      const smoothRows = (rows, clamp01 = false) => {
+        if (!rows || !rows.length || !rows[0]) return;
+        for (let j = 0; j < rows[0].length; j++) {
+          const col = rows.map((r) => r[j]); if (!col.every(Number.isFinite)) continue;
+          let y; try { y = lowpass(col, fs, fc); } catch { continue; }
+          rows.forEach((r, t) => { r[j] = clamp01 ? Math.min(1, Math.max(0, y[t])) : y[t]; });
+        }
+      };
+      smoothRows(forces); smoothRows(jrf); smoothRows(loads);
+      smoothRows(extra.activations, true); smoothRows(extra.moments); smoothRows(extra.grf); smoothRows(extra.jrfComp);
+    }
   }
   return { forces, muscleNames: m.muscles, jrf, jrfNames: m.jrfMagnitudes, missing,
            loads, loadNames: loads ? loadNames : null,

@@ -108,12 +108,15 @@ plot). Touch both free ends with one fingertip: the value rises, more when you p
 harder. A0 can drive a lamp: Threshold 2 or 3 → *A0 (Arduino input)*. The **×** box
 next to A0 scales the value (e.g. ×0.0049 = volts).
 
-**Voltage on the LCD ("pseudo-EMG"):** Arduino window → *Line 2 during BioFeedback*
-→ pick the input (A0). During BioFeedback the LCD then shows the lamp text on the top
-line and the live voltage of that input on the bottom line (e.g. `A0 2.35 V`, 4 times a
-second). The input is ticked under Live inputs automatically. With the LCD wired as in
-Phase 3, **A1–A5 are the screen's wires**, so A0 is the only free analog input; the
-other choices are for a board without the LCD.
+**Pseudo-EMG on the LCD:** Arduino window → *Finger input* (A0) and *Line 2 during
+BioFeedback*: **Input voltage** (V on the blue wire), **ΔV red − blue** (the drop across
+your fingers: 5 V − blue; lower when you press harder) or **Pseudo-EMG** (the blue-wire
+voltage with its slow baseline removed, rectified and smoothed, in mV: it bursts when you
+press, squeeze or tap and falls back when you hold still, like an EMG envelope). The top
+line keeps the lamp text. ΔV and Pseudo-EMG are also metrics for the thresholds and lamps.
+This measures skin contact and pressure, not muscle: real EMG is µV–mV and needs
+electrodes and an instrumentation amplifier. With the LCD wired (Phase 3), A1–A5 are the
+screen's wires, so use A0.
 
 Later, any 0–5 V sensor goes on A0 the same way: a potentiometer (middle leg → A0),
 a photoresistor or a force sensor with a 10 kΩ divider. Never more than 5 V on A0.
