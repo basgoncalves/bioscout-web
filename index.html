@@ -1615,7 +1615,6 @@ try {
         <input id="bfbLcd2" maxlength="16" size="18" spellcheck="false" autocomplete="off" style="font-family:monospace" aria-label="Line 2">
       </div>
       <div class="row bfbRow">
-        <button type="button" id="bfbLcdSend" data-i18n="bfb_lcdSend">Show on screen</button>
         <button type="button" class="ghost" id="bfbLcdClear" data-i18n="bfb_lcdClear">Clear screen</button>
         <span class="note" id="bfbLcdNote"></span>
         <button type="button" class="hidden" id="bfbLcdFlash" data-i18n="bfb_flash">Update board firmware</button>
@@ -2081,8 +2080,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 83;
-window.BUILD_AT = "2026-10-17 10:11";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 84;
+window.BUILD_AT = "2026-10-17 10:16";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

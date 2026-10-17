@@ -747,19 +747,29 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (!st.writer) return;
     try { await st.writer.write(new TextEncoder().encode(lvMsg(lv) + "\n")); log("→ " + lvMsg(lv)); }
     catch (e) { status("bfb_portFail", { err: e.message }, true); }
-    lampText(lv);
   }
   /* Text per lamp (sketch v8): while lamp n is the highest one lit, the LCD
    * shows its text ("Move up", "Stop"...). Sent with lowercase w1:/w2:, which
    * the board shows WITHOUT saving -- a flashing lamp would otherwise wear out
    * the EEPROM. Level 0 shows the "no lamp" text, or the saved screen text. */
-  async function lampText(lv) {
+  /* Called whenever the lamps change (camera, events, pressure). The text of
+   * the highest lamp lit shows when its line is crossed and STAYS until another
+   * line is crossed: going back below every line keeps it, unless a "No lamp
+   * lit" text is set. On the video always; on the LCD while Activate is on. */
+  function lampMsg(sts) {
+    const top = sts.lastIndexOf(true);
+    if (top === st.msgTop) return;
+    st.msgTop = top;
+    const T = cfg.lampTxt || [], txt = top >= 0 ? (T[top + 1] || "") : (T[0] || "");
+    if (!txt) return;                                // nothing set for this lamp: keep what is shown
+    const msg = $("bfbLampMsg");
+    if (msg) { msg.textContent = txt; msg.style.color = top >= 0 ? LVCOL[top] : "#fff"; }
+    if (st.active) lcdLampText(txt);
+  }
+  async function lcdLampText(txt) {
     if (!st.writer) return;
-    if (!(st.ver >= 8)) { if ((cfg.lampTxt || []).some(Boolean)) { $("bfbLcdNote").textContent = tr("bfb_lcdOld"); $("bfbLcdFlash").classList.remove("hidden"); flashHint(); } return; }
-    const T = cfg.lampTxt || [], t = lcdAscii(T[lv] || "");
-    if (lv > 0 && !t) return;                       // nothing set for this lamp: leave the screen alone
-    if (!t) { const L = (cfg.lcd || ["", ""]).map(lcdAscii); await writeLine("w1:" + L[0], true); await writeLine("w2:" + L[1], true); return; }
-    await writeLine("w1:" + t, true); await writeLine("w2:", true);
+    if (!(st.ver >= 8)) { $("bfbLcdNote").textContent = tr("bfb_lcdOld"); $("bfbLcdFlash").classList.remove("hidden"); flashHint(); return; }
+    await writeLine("w1:" + lcdAscii(txt), true); await writeLine("w2:", true);
   }
   const send = (on, force = false) => sendLevel(on ? 1 : 0, force);
   const writeLine = async (txt, quiet = false) => {
@@ -843,7 +853,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     await writeLine("W1:" + L[0]); await writeLine("W2:" + L[1]);
     $("bfbLcdNote").textContent = tr("bfb_lcdSent");
   }
-  $("bfbLcdSend").onclick = () => {
+  const lcdApply = () => {
     cfg.lcd = [$("bfbLcd1").value, $("bfbLcd2").value]; save();
     $("bfbLcd1").value = lcdAscii(cfg.lcd[0]); $("bfbLcd2").value = lcdAscii(cfg.lcd[1]);
     lcdSend(cfg.lcd);
@@ -859,7 +869,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     };
   }
   $("bfbLcdFlash").onclick = () => { $("bfbLcdNote").textContent = ""; $("bfbFlash").click(); };
-  for (const id of ["bfbLcd1", "bfbLcd2"]) $(id).onkeydown = (e) => { if (e.key === "Enter") $("bfbLcdSend").click(); };
+  /* No button: the text goes to the board when a box is left or Enter is pressed. */
+  for (const id of ["bfbLcd1", "bfbLcd2"]) { $(id).onchange = lcdApply; $(id).onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); lcdApply(); } }; }
   $("bfbFlash").onclick = async () => {
     const port = st.port; if (!port) { $("bfbFlashNote").textContent = tr("bfb_flashConnect"); return; }
     $("bfbFlash").disabled = true; $("bfbFlash").classList.remove("pulse");
@@ -1089,6 +1100,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     });
   }
   function showLamps(sts) {
+    lampMsg(sts);
     ["bfbLamp", "bfbLamp2", "bfbLamp3"].forEach((id, i) => {
       const el = $(id), on = !!sts[i], c = LVCOL[i];
       el.classList.toggle("on", on);
@@ -1118,13 +1130,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     return n;
   }
   function showDots(lv) {
-    /* The lamp's own text, big on the video (works without a board and without Activate). */
-    const T = cfg.lampTxt || [], msg = $("bfbLampMsg");
-    if (msg) {
-      const txt = lv > 0 ? (T[lv] || "") : (T[0] || "");
-      if (msg.textContent !== txt) msg.textContent = txt;
-      msg.style.color = lv > 0 ? LVCOL[lv - 1] : "#fff";
-    }
+    lampMsg([lv > 0, lv > 1, lv > 2]);
     ["bfbLamp", "bfbLamp2", "bfbLamp3"].forEach((id, i) => {
       const el = $(id), on = lv > i, c = LVCOL[i];
       el.classList.toggle("on", on);
