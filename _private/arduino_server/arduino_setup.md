@@ -127,7 +127,7 @@ a photoresistor or a force sensor with a 10 kΩ divider. Never more than 5 V on 
 **Parts:** DC motor 3–6 V, **PN2222** transistor, **1 kΩ**, **1N4007** diode.
 **Never wire the motor straight to a pin** — it needs 100–250 mA, a pin gives 20 mA.
 
-1. Uno **pin 9** → a free column (brown) → **1 kΩ** → the transistor's middle leg **B**.
+1. Uno **pin 9** → a free column (white) → **1 kΩ** → the transistor's middle leg **B**.
 2. PN2222 with the **flat side towards you**: legs **E B C** from left to right.
    **E → − rail.**
 3. **C** → motor **black** wire.
