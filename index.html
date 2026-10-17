@@ -706,6 +706,9 @@ try {
   .bfbPinHead { display:flex; align-items:center; gap:12px; }
   .bfbPinHead label { font-weight:400; display:inline-flex; align-items:center; gap:4px; }
   .bfbPinHead input { width:5em; padding:2px 6px; }
+  .bfbLampTxt { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; }
+  .bfbLampTxt label { display:flex; flex-direction:column; gap:4px; font-size:13px; }
+  .bfbLampTxt label > span { display:flex; align-items:center; gap:6px; }
   #bfbFlash.pulse { border-color:#ffd54a; box-shadow:0 0 0 2px rgba(255,213,74,.4); }
   .bfbPinBtn.on, .bfbLvBtn.on { background:#4caf50; color:#fff; border-color:#b9f6ca; }
   .bfbLamp.sm { width:19px; height:19px; border-width:1.5px; }
@@ -1613,6 +1616,14 @@ try {
         <span class="note" id="bfbLcdNote"></span>
         <button type="button" class="hidden" id="bfbLcdFlash" data-i18n="bfb_flash">Update board firmware</button>
       </div>
+      <h4 style="margin:10px 0 4px" data-i18n="bfb_lampTxtTitle">Text per lamp</h4>
+      <p class="note" data-i18n="bfb_lampTxtNote">Shown on the screen while that lamp is the highest one lit (e.g. "Move up", "Stay", "Stop"). Empty = the screen is left as it is.</p>
+      <div class="bfbLampTxt">
+        <label><span><span class="bfbSw" data-sw="0"></span><span data-i18n="bfb_pinY">Lamp 1</span></span><input data-lamptxt="1" maxlength="16" spellcheck="false" autocomplete="off" style="font-family:monospace"></label>
+        <label><span><span class="bfbSw" data-sw="1"></span><span data-i18n="bfb_pinO">Lamp 2</span></span><input data-lamptxt="2" maxlength="16" spellcheck="false" autocomplete="off" style="font-family:monospace"></label>
+        <label><span><span class="bfbSw" data-sw="2"></span><span data-i18n="bfb_pinR">Lamp 3</span></span><input data-lamptxt="3" maxlength="16" spellcheck="false" autocomplete="off" style="font-family:monospace"></label>
+        <label><span data-i18n="bfb_lampTxtNone">No lamp lit</span><input data-lamptxt="0" maxlength="16" spellcheck="false" autocomplete="off" style="font-family:monospace"></label>
+      </div>
 
         </div>
         <div class="row bfbRow" style="justify-content:flex-end;margin-top:12px">
@@ -2065,8 +2076,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 81;
-window.BUILD_AT = "2026-10-17 09:10";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 82;
+window.BUILD_AT = "2026-10-17 09:56";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

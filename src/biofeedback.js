@@ -747,6 +747,18 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (!st.writer) return;
     try { await st.writer.write(new TextEncoder().encode(lvMsg(lv) + "\n")); log("→ " + lvMsg(lv)); }
     catch (e) { status("bfb_portFail", { err: e.message }, true); }
+    lampText(lv);
+  }
+  /* Text per lamp (sketch v8): while lamp n is the highest one lit, the LCD
+   * shows its text ("Move up", "Stop"...). Sent with lowercase w1:/w2:, which
+   * the board shows WITHOUT saving -- a flashing lamp would otherwise wear out
+   * the EEPROM. Level 0 shows the "no lamp" text, or the saved screen text. */
+  async function lampText(lv) {
+    if (!st.writer || !(st.ver >= 8)) return;
+    const T = cfg.lampTxt || [], t = lcdAscii(T[lv] || "");
+    if (lv > 0 && !t) return;                       // nothing set for this lamp: leave the screen alone
+    if (!t) { const L = (cfg.lcd || ["", ""]).map(lcdAscii); await writeLine("w1:" + L[0], true); await writeLine("w2:" + L[1], true); return; }
+    await writeLine("w1:" + t, true); await writeLine("w2:", true);
   }
   const send = (on, force = false) => sendLevel(on ? 1 : 0, force);
   const writeLine = async (txt, quiet = false) => {
@@ -836,6 +848,15 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     lcdSend(cfg.lcd);
   };
   $("bfbLcdClear").onclick = () => lcdSend(["", ""]);
+  cfg.lampTxt = Array.isArray(cfg.lampTxt) ? cfg.lampTxt : ["", "", "", ""];
+  for (const el of document.querySelectorAll("[data-lamptxt]")) {
+    const i = +el.dataset.lamptxt; el.value = cfg.lampTxt[i] || "";
+    el.oninput = () => { cfg.lampTxt[i] = el.value; save(); };
+    el.onchange = () => {
+      el.value = lcdAscii(el.value); cfg.lampTxt[i] = el.value; save();
+      if (st.port && !(st.ver >= 8)) { $("bfbLcdNote").textContent = tr("bfb_lcdOld"); $("bfbLcdFlash").classList.remove("hidden"); flashHint(); }
+    };
+  }
   $("bfbLcdFlash").onclick = () => { $("bfbLcdNote").textContent = ""; $("bfbFlash").click(); };
   for (const id of ["bfbLcd1", "bfbLcd2"]) $(id).onkeydown = (e) => { if (e.key === "Enter") $("bfbLcdSend").click(); };
   $("bfbFlash").onclick = async () => {
@@ -904,7 +925,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbPinsNote").textContent = [dup ? tr("bfb_pinsClash", { pin: dup }) : "", !st.port ? "" : !st.v3 ? tr("bfb_oldSketch")
       : same || !(st.ver >= 5) ? "" : tr("bfb_pinsDiff", { pins: (B || []).slice(0, 3).map((n) => n || "–").join(", ") })].filter(Boolean).join(" ");
     paintColors(); renderAnPick();
-    $("bfbFlash").parentElement.classList.toggle("hidden", !!st.port && st.ver >= 7);   // one button, only while the board is behind the bundled firmware (v7)
+    $("bfbFlash").parentElement.classList.toggle("hidden", !!st.port && st.ver >= 8);   // one button, only while the board is behind the bundled firmware (v8)
     renderPinTest();
   }
   $("bfbDevDone").onclick = () => $("bfbDevDlg").close();
