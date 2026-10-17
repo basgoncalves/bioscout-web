@@ -39,7 +39,7 @@ async function session(port, baud, img, onProgress) {
     const find = () => { for (let i = rx.length - n - 2; i >= 0; i--) if (rx[i] === 0x14 && rx[i + n + 1] === 0x10) return i; return -1; };
     let i;
     while ((i = find()) < 0 && performance.now() - t0 < timeout) await sleep(4);   // INSYNC ... OK, last one wins
-    if (i < 0) throw new Error("no answer from bootloader (" + bytes[0].toString(16) + ")");
+    if (i < 0) throw new Error("no answer from bootloader (" + bytes[0].toString(16) + ", got: " + (rx.slice(-12).map((x) => x.toString(16).padStart(2, "0")).join(" ") || "nothing") + ")");
     return rx.slice(i + 1, i + 1 + n);
   };
   try {
@@ -49,15 +49,15 @@ async function session(port, baud, img, onProgress) {
      * above: a sync answer can come from the first boot just before the second
      * one starts. So: sync until two in a row answer, then read the signature,
      * and if that is lost, sync again (up to 4 rounds) instead of giving up. */
-    let sig = null;
+    let sig = null, lastErr = null;
     for (let round = 0; round < 4 && !sig; round++) {
       let ok = 0;
       for (let k = 0; k < 20 && ok < 2; k++) { try { await cmd([0x30], 0, 150); ok++; } catch { ok = 0; } }
       if (ok < 2) { if (round === 0) throw new Error("no bootloader at " + baud); continue; }
       await sleep(30); rx = [];
-      try { sig = await cmd([0x75], 3, 400); } catch { sig = null; await sleep(120); }
+      try { sig = await cmd([0x75], 3, 400); } catch (e) { lastErr = e; sig = null; await sleep(120); }
     }
-    if (!sig) throw new Error("no answer from bootloader (75)");
+    if (!sig) throw lastErr || new Error("no answer from bootloader (75)");
     if (sig[0] !== 0x1e || sig[1] !== 0x95 || sig[2] !== 0x0f) throw new Error("not an ATmega328P (" + sig.map((x) => x.toString(16)).join(" ") + ")");
     await cmd([0x50]);                                          // enter programming mode
     const pages = img.length / 128;
@@ -86,15 +86,16 @@ async function session(port, baud, img, onProgress) {
 export async function flashUno(port, hexText, { onProgress } = {}) {
   const img = parseHex(hexText);
   let last;
+  let first;
   for (const baud of [115200, 57600]) {
     try { await session(port, baud, img, onProgress); return { baud, bytes: img.length }; }
     catch (e) {                                        // lost contact: one more try at this speed, with a fresh reset
-      last = e; if (!/no bootloader|no answer/.test(e.message)) throw e;
+      last = e; first = first || e; if (!/no bootloader|no answer/.test(e.message)) throw e;
       if (/no answer/.test(e.message)) {
         await sleep(400);
         try { await session(port, baud, img, onProgress); return { baud, bytes: img.length }; } catch (e2) { last = e2; }
       }
     }
   }
-  throw last;
+  throw first && /no answer/.test(first.message) ? first : last;   // the 115200 contact says more than "no bootloader at 57600"
 }
