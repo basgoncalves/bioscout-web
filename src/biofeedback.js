@@ -710,9 +710,9 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       for (const i of cfg.an || []) { const el = document.querySelector(`[data-anv="${i}"]`); if (el) el.textContent = v[i]; }
       return true;                                   // not logged: 25 lines a second
     }
-    if (ln.startsWith("BIOSCOUT_LAMP_READY")) { st.ver = +((/v(\d+)/.exec(ln) || [])[1] || 2); st.v3 = st.ver >= 3; renderPins(); if (st.ver < 5) flashHint(); }
+    if (ln.startsWith("BIOSCOUT_LAMP_READY")) { st.ver = +((/v(\d+)/.exec(ln) || [])[1] || 2); st.v3 = st.ver >= 3; renderPins(); if (st.ver < 5) flashHint(); lcdRetry(); }
     const vm = /^VERSION (\d+)/.exec(ln) || (/^PIN \d+ [01]/.test(ln) ? [0, 5] : null);
-    if (vm && +vm[1] > (st.ver || 0)) { st.ver = +vm[1]; st.v3 = true; renderPins(); $("bfbFlashNote").textContent = ""; $("bfbFlash").classList.remove("pulse"); if ((cfg.an || []).length && st.ver >= 5) writeLine("A"); }
+    if (vm && +vm[1] > (st.ver || 0)) { st.ver = +vm[1]; st.v3 = true; renderPins(); lcdRetry(); $("bfbFlashNote").textContent = ""; $("bfbFlash").classList.remove("pulse"); if ((cfg.an || []).length && st.ver >= 5) writeLine("A"); }
     const m = /^PINS ([\d,]+)/.exec(ln);
     if (m) {
       st.v3 = true; st.boardPins = m[1].split(",").map(Number);
@@ -811,10 +811,17 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const lcdAscii = (s) => String(s || "").replace(/ß/g, "ss").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\x20-\x7e]/g, "?").slice(0, 16);
   cfg.lcd = Array.isArray(cfg.lcd) ? cfg.lcd : ["BioScout", "ready"];
+  let lcdPending = null;
+  /* After a firmware update the board answers "VERSION 7": send the waiting text then. */
+  const lcdRetry = () => { if (lcdPending && st.ver >= 7) lcdSend(lcdPending); };
   $("bfbLcd1").value = cfg.lcd[0] || ""; $("bfbLcd2").value = cfg.lcd[1] || "";
   async function lcdSend(lines) {
     if (!st.port) { $("bfbLcdNote").textContent = tr("bfb_lcdConnect"); return; }
-    if (!(st.ver >= 7)) { $("bfbLcdNote").textContent = tr("bfb_lcdOld"); flashHint(); return; }
+    if (!(st.ver >= 7)) {                         // old firmware: offer the update right here, send once it is on
+      $("bfbLcdNote").textContent = tr("bfb_lcdOld"); flashHint();
+      $("bfbLcdFlash").classList.remove("hidden"); lcdPending = lines; return;
+    }
+    lcdPending = null; $("bfbLcdFlash").classList.add("hidden");
     const L = lines.map(lcdAscii);
     await writeLine("W1:" + L[0]); await writeLine("W2:" + L[1]);
     $("bfbLcdNote").textContent = tr("bfb_lcdSent");
@@ -825,6 +832,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     lcdSend(cfg.lcd);
   };
   $("bfbLcdClear").onclick = () => lcdSend(["", ""]);
+  $("bfbLcdFlash").onclick = () => { $("bfbLcdNote").textContent = ""; $("bfbFlash").click(); };
   for (const id of ["bfbLcd1", "bfbLcd2"]) $(id).onkeydown = (e) => { if (e.key === "Enter") $("bfbLcdSend").click(); };
   $("bfbFlash").onclick = async () => {
     const port = st.port; if (!port) { $("bfbFlashNote").textContent = tr("bfb_flashConnect"); return; }
@@ -835,6 +843,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       $("bfbFlashNote").textContent = tr("bfb_flashing", { p: 0 });
       const r = await flashUno(port, hex, { onProgress: (f) => { $("bfbFlashNote").textContent = tr("bfb_flashing", { p: Math.round(f * 100) }); } });
       $("bfbFlashNote").textContent = tr("bfb_flashDone", { kb: (r.bytes / 1024).toFixed(1) });
+      $("bfbLcdNote").textContent = tr("bfb_flashDone", { kb: (r.bytes / 1024).toFixed(1) });
       await openPort(port);
       setTimeout(async () => { const P = cfg.pins || [13, 12, 11, 8, 7]; for (let i = 0; i < 3; i++) await writeLine(`P${i}:${P[i]}`); }, 2600);
     } catch (e) {
