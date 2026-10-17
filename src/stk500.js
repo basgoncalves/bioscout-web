@@ -45,12 +45,19 @@ async function session(port, baud, img, onProgress) {
   try {
     await port.setSignals({ dataTerminalReady: false, requestToSend: false }); await sleep(250);
     await port.setSignals({ dataTerminalReady: true, requestToSend: true }); await sleep(60);
-    let ok = false;
-    for (let k = 0; k < 12 && !ok; k++) { try { await cmd([0x30], 0, 150); ok = true; } catch { /* keep trying */ } }
-    if (!ok) throw new Error("no bootloader at " + baud);
-    for (let k = 0; k < 3; k++) { try { await cmd([0x30], 0, 100); } catch { /* settle */ } }   // flush late sync replies
-    await sleep(60); rx = [];
-    const sig = await cmd([0x75], 3);
+    /* Opening the port already resets the board (DTR), and so does the toggle
+     * above: a sync answer can come from the first boot just before the second
+     * one starts. So: sync until two in a row answer, then read the signature,
+     * and if that is lost, sync again (up to 4 rounds) instead of giving up. */
+    let sig = null;
+    for (let round = 0; round < 4 && !sig; round++) {
+      let ok = 0;
+      for (let k = 0; k < 20 && ok < 2; k++) { try { await cmd([0x30], 0, 150); ok++; } catch { ok = 0; } }
+      if (ok < 2) { if (round === 0) throw new Error("no bootloader at " + baud); continue; }
+      await sleep(30); rx = [];
+      try { sig = await cmd([0x75], 3, 400); } catch { sig = null; await sleep(120); }
+    }
+    if (!sig) throw new Error("no answer from bootloader (75)");
     if (sig[0] !== 0x1e || sig[1] !== 0x95 || sig[2] !== 0x0f) throw new Error("not an ATmega328P (" + sig.map((x) => x.toString(16)).join(" ") + ")");
     await cmd([0x50]);                                          // enter programming mode
     const pages = img.length / 128;
@@ -81,7 +88,13 @@ export async function flashUno(port, hexText, { onProgress } = {}) {
   let last;
   for (const baud of [115200, 57600]) {
     try { await session(port, baud, img, onProgress); return { baud, bytes: img.length }; }
-    catch (e) { last = e; if (!/no bootloader/.test(e.message)) throw e; }
+    catch (e) {                                        // lost contact: one more try at this speed, with a fresh reset
+      last = e; if (!/no bootloader|no answer/.test(e.message)) throw e;
+      if (/no answer/.test(e.message)) {
+        await sleep(400);
+        try { await session(port, baud, img, onProgress); return { baud, bytes: img.length }; } catch (e2) { last = e2; }
+      }
+    }
   }
   throw last;
 }
