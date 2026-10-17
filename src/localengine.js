@@ -14,6 +14,7 @@ export function makeLocalClient(spec) {
   const files = {};      // "tool:slot" -> File
   const outs = {};       // tool -> {name: text}
   const urls = {};
+  const setups = {};     // tool -> {name: text}: the setup / settings files a run used (BioScout defaults included)
   for (const t of spec.tools) job.tools[t.id] = { state: "idle", inputs: {} };
   let worker = null, seq = 0;
   const snap = () => JSON.parse(JSON.stringify(job));
@@ -82,6 +83,12 @@ export function makeLocalClient(spec) {
         else if (e.data.error) { worker.removeEventListener("message", h); reject(new Error(e.data.error)); }
       };
       worker.addEventListener("message", h);
+      if (cmd !== "bodies") {          // copy the setup XMLs before the buffers are handed to the worker
+        const dec = new TextDecoder(), keep = {};
+        for (const [n, b] of Object.entries(payload)) if (/\.(xml|json)$/i.test(n)) { try { keep[n] = dec.decode(b); } catch { /* binary */ } }
+        keep[`${cmd}_settings.json`] = JSON.stringify(args, null, 2);
+        setups[cmd] = keep;
+      }
       worker.postMessage({ id, cmd, files: payload, args, base: BASE }, Object.values(payload));
     });
   }
@@ -270,6 +277,7 @@ export function makeLocalClient(spec) {
       return snap();
     },
     toolOutputs: async (_id, tool) => ({ files: Object.entries(outs[tool] || {}).map(([path, v]) => ({ path, size: v.size ?? v.length })) }),
+    toolSetups: (_id, tool) => setups[tool] || {},
     toolBlob: (_id, tool, path) => { const v = (outs[tool] || {})[path]; return v == null ? null : v instanceof Blob ? v : new Blob([v], { type: "text/plain" }); },
     /** Every figure again from the result files of a trial folder ({name: text}), nothing re-run except
      *  body_positions.sto when it is missing (model + ik.mot). -> {name: Blob|text} to write back. */

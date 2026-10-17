@@ -209,6 +209,16 @@ export async function runQuick(ctx, hooks) {
         for await (const [n, h] of dir.entries()) if (h.kind === "file" && /_calibrated\.osim$/i.test(n)) { hooks.send("ceinms:model", await h.getFile()); log(`ceinms: using ${n} from the folder`); } }
     }
     await new Promise((r) => setTimeout(r, 400));
+    /* Per analysis: <tool>/ with the setup files it ran with (the BioScout defaults too) and its own out.log. */
+    const stepFiles = async (tool, sp) => {
+      const files = { ...((ctx.client.toolSetups && ctx.client.toolSetups(id, tool)) || {}) };
+      files["out.log"] = [`---- ${tool} (${sp.state}${sp.error ? ": " + sp.error : ""}${sp.seconds != null ? `, ${sp.seconds} s` : ""})`, ...(sp.log || []), ""].join("\n");
+      for (const [n, text] of Object.entries(files)) {
+        if (!dir) { zipFiles.push({ name: `${outName}/${tool}/${n}`, data: text }); continue; }
+        try { await writeText(await dir.getDirectoryHandle(tool, { create: true }), n, text); }
+        catch { zipFiles.push({ name: `${outName}/${tool}/${n}`, data: text }); }
+      }
+    };
     // 3. the steps, in order, each waiting for the last
     const order = ["scale", "ik", ...(ex["grf.mot"] ? ["id", "ma", "rra", "so", "ceinms_cal", "ceinms"] : ["ma"])];   // the order of the sections
     for (const tool of order) {
@@ -217,6 +227,7 @@ export async function runQuick(ctx, hooks) {
       log(`${tool} …`);
       await client.toolRun(id, tool);
       const sp = await wait(tool);
+      try { await stepFiles(tool, sp); } catch (e) { log(`${tool}: setup/log files — ${e.message}`); }
       if (sp.state === "error") { log(`${tool}: failed — ${sp.error}`); if (tool === "scale" || tool === "ik") break; continue; }
       if (dir) { try { await hooks.save(tool); } catch (e) { log(`${tool}: ${e.message} — ${T("sq_zipMode")}`); dir = null; for (const t of STEPS) hooks.setDir(t, null); } }
       if (!dir) for (const o of await hooks.outputs(tool)) zipFiles.push({ name: `${outName}/${o.path}`, data: o.data });
@@ -231,6 +242,7 @@ export async function runQuick(ctx, hooks) {
     }
     if (dir) { Q.done = `${out.name}/${outName}`; log(T("sq_done", { dir: Q.done })); }
     else if (zipFiles.length) {
+      zipFiles.push({ name: `${outName}/out.log`, data: [`BioScout Web — Quick run`, `trial: ${Q.trial}`, `started: ${started.toLocaleString()}`, "", ...Q.log, ""].join("\n") });
       const blob = makeZip(zipFiles), url = URL.createObjectURL(blob), a = document.createElement("a");
       a.href = url; a.download = `${outName}.zip`; document.body.appendChild(a); a.click();
       setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
@@ -329,5 +341,33 @@ export function quickWire(box, ctx, hooks) {
   on("[data-sq-setup]", "onclick", async () => { try { Q.setupDir = await window.showDirectoryPicker({ mode: "read" }); await saveSetupDir(Q.setupDir); hooks.repaint(); } catch { /* cancelled */ } });
   on("[data-sq-setupclear]", "onclick", async () => { Q.setupDir = null; await saveSetupDir(null); hooks.repaint(); });
   on("[data-sq-run]", "onclick", () => runQuick(ctx, hooks));
+  /* Drag and drop onto Simulate: a folder (its c3ds, results written next to them), trial / static .c3d
+   * files ("static" in the name, or dropped on the static field), a generic .osim model. */
+  box._sqHooks = hooks;                 // the drop handler below always uses the latest hooks
+  if (!box.dataset.sqDrop) {
+    box.dataset.sqDrop = "1";
+    box.addEventListener("dragover", (e) => { if (Q.busy) return; e.preventDefault(); box.classList.add("simDrag"); });
+    box.addEventListener("dragleave", (e) => { if (!box.contains(e.relatedTarget)) box.classList.remove("simDrag"); });
+    box.addEventListener("drop", async (e) => {
+      if (Q.busy) return; e.preventDefault(); box.classList.remove("simDrag");
+      const onStatic = !!e.target.closest("[data-sq-static], [data-sq-staticsel]") || !!(e.target.closest(".simOpt") && /static/i.test(e.target.closest(".simOpt").textContent));
+      const items = [...(e.dataTransfer.items || [])];
+      const handles = await Promise.all(items.map((it) => (it.kind === "file" && it.getAsFileSystemHandle ? it.getAsFileSystemHandle().catch(() => null) : null)));
+      const dirH = handles.find((h) => h && h.kind === "directory");
+      if (dirH) {
+        try { if ((await dirH.requestPermission({ mode: "readwrite" })) !== "granted") return; } catch { return; }
+        Q.root = dirH; Q.file = null; Q.staticFile = null; await rememberDir(dirH); await listC3ds(dirH); Q.log = []; box._sqHooks.repaint(); return;
+      }
+      const files = [...(e.dataTransfer.files || [])];
+      const c3ds = files.filter((f) => /\.c3d$/i.test(f.name)), osim = files.find((f) => /\.osim$/i.test(f.name));
+      if (osim && box._sqHooks.setGeneric) box._sqHooks.setGeneric(osim);
+      for (const f of c3ds) {
+        if (onStatic || (/static|statisch/i.test(f.name) && c3ds.length > 1) || (/static|statisch/i.test(f.name) && Q.file)) Q.staticFile = { handle: null, file: f };
+        else { Q.file = { handle: null, file: f }; Q.root = null; Q.c3ds = []; Q.log = []; }
+      }
+      box._sqHooks.repaint();
+      if (c3ds.length && Q.file && !Q.root) { await resultsFolder(); box._sqHooks.repaint(); }
+    });
+  }
   on("[data-sq-figs]", "onclick", () => redoFigures(ctx, hooks));
 }
