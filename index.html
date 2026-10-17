@@ -593,7 +593,7 @@ try {
   .phLock input { width:auto !important; margin:0; }
   .phOpt { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:10px; align-items:end; margin-top:4px; }
   .phOpt button { width:auto; margin:0; } .phOpt label { margin:0; }
-  .labDoors { display:grid; gap:10px; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); }
+  .labDoors { display:grid; gap:10px; grid-template-columns:1fr; }
   .labDoor .doorIco { flex:none; display:grid; place-items:center; width:44px; height:44px; border-radius:12px;
              background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
   .labDoor .doorIco svg { width:26px !important; height:26px !important; }
@@ -2170,8 +2170,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 106;
-window.BUILD_AT = "2026-10-17 17:16";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 107;
+window.BUILD_AT = "2026-10-17 17:18";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
