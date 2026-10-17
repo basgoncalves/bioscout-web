@@ -580,8 +580,19 @@ try {
              max-height:160px; overflow:auto; margin:6px 0 0; padding:6px 8px; border-radius:8px;
              background:var(--bg); border:1px solid var(--line); }
   /* Lab demo home: three doors -- Record, Process, Simulate. */
-  .labDoors { display:grid; gap:12px; }
-  .labDoor { display:flex; gap:14px; align-items:center; text-align:left; margin:0; padding:18px 16px;
+  .phTabs { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; } .phTabs button { width:auto; margin:0; padding:6px 12px; }
+  .phTabs button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .phCv { width:100%; height:300px; display:block; background:var(--card); border:1px solid var(--line); border-radius:10px; }
+  .phOut { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:6px; margin:8px 0; font-size:13px; }
+  .phOut div { border:1px solid var(--line); border-radius:8px; padding:6px 8px; } .phOut span { display:block; color:var(--muted); font-size:11px; }
+  .phCtl { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:8px 16px; }
+  .phSl { display:flex; flex-direction:column; gap:2px; margin:0; font-size:13px; } .phSl input { width:100%; }
+  .labDoors { display:grid; gap:10px; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); }
+  .labDoor .doorIco { flex:none; display:grid; place-items:center; width:44px; height:44px; border-radius:12px;
+             background:color-mix(in srgb, var(--accent) 15%, transparent); color:var(--accent); }
+  .labDoor .doorIco svg { width:26px !important; height:26px !important; }
+  #viewHome .labDoor span, #viewHome .labDoor .doorLinks { display:none; }   /* titles only; the glossary explains each part */
+  .labDoor { display:flex; gap:14px; align-items:center; text-align:left; margin:0; padding:10px 14px; min-height:0;
              border-radius:14px; border:1px solid var(--line); background:var(--card); color:var(--ink);
              box-shadow:var(--shadow); cursor:pointer; font:inherit; }
   .labDoor:hover, .labDoor:focus-visible { border-color:var(--accent); }
@@ -810,7 +821,7 @@ try {
   .bfbResults li { padding:3px 8px; border-radius:6px; background:var(--line, #333); }
   .bfbResults li.ok { background:#ffd54a; color:#222; }
   #bfbPortStatus.bad, #bfbNoSerial { color:#e66; }
-  .labDoor b { display:block; font-size:17px; margin-bottom:2px; }
+  .labDoor b { display:block; font-size:16px; margin:0; }
   .labDoor span { color:var(--muted); font-size:13px; line-height:1.4; }
   .labHead { display:flex; justify-content:space-between; align-items:center; gap:8px; }
   .labHead .labHomeBtn { margin:0; width:auto; padding:6px 12px; }
@@ -1551,11 +1562,12 @@ try {
   <section id="viewHome" class="hidden">
     <p class="note" style="margin:0 4px 12px" data-i18n="labHomeNote">Pick what you want to do. Nothing is uploaded unless you connect to the lab engine in Simulate.</p>
     <div class="labDoors">
-      <button type="button" class="labDoor" id="doorRecord"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/><circle cx="9.5" cy="12" r="2.5"/></svg><div><b data-i18n="doorRecord">Record</b><span data-i18n="doorRecordNote">Film a movement with this device and read its joint angles, moments and estimated loads.</span></div></button>
-      <button type="button" class="labDoor" id="doorProcess"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 20h18"/><path d="M4 16l4-6 4 3 4-8 4 5"/><circle cx="8" cy="10" r="1"/><circle cx="16" cy="5" r="1"/></svg><div><b data-i18n="doorProcess">Process</b><span data-i18n="doorProcessNote">Open lab files (force plates, EMG, motion capture, OpenSim results), filter, plot and analyse them.</span></div></button>
-      <div class="labDoor" id="doorSimulate" role="button" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="4" r="2"/><path d="M12 6v7M8 9h8M12 13l-3 8M12 13l3 8"/><path d="M5 12c-1 2-1 4 0 6M19 12c1 2 1 4 0 6"/></svg><div><b data-i18n="doorSimulate">Simulate</b><span data-i18n="doorSimulateNote">Run OpenSim and CEINMS on a marker and force-plate trial: scaling, IK, ID, static optimisation, muscle and joint contact forces.</span><span class="doorLinks"><a href="https://opensim.stanford.edu/" target="_blank" rel="noopener">OpenSim ↗</a> · <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4655131/" target="_blank" rel="noopener">CEINMS ↗</a></span></div></div>
-      <button type="button" class="labDoor" id="doorAnalysis"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 20h18"/><rect x="5" y="11" width="3" height="7" rx="0.5"/><rect x="10.5" y="7" width="3" height="11" rx="0.5"/><rect x="16" y="13" width="3" height="5" rx="0.5"/><path d="M4 8c3-5 6 2 9-3s5 1 7-1" stroke-dasharray="2 1.6"/></svg><div><b data-i18n="doorAnalysis">Analysis</b><span data-i18n="doorAnalysisNote">Statistics on your results: reliability (ICC, SEM, MDC, Bland-Altman, CMC), t-tests, ANOVA, ANCOVA, correlation and regression, and SPM on whole curves. Exports for JASP, SPSS and Python.</span></div></button>
-      <button type="button" class="labDoor" id="doorBiofeedback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg><div><b data-i18n="doorBiofeedback">BioFeedback (testing)</b><span data-i18n="doorBiofeedbackNote">Watch one joint angle with the camera and switch a lamp on a connected Arduino when it crosses a threshold.</span></div></button>
+      <button type="button" class="labDoor" id="doorRecord"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="13.5" height="12" rx="3"/><path d="M16 10.5l5.5-3v9l-5.5-3z"/><circle cx="9.25" cy="12" r="2.6"/><circle cx="5.5" cy="8.6" r=".6" fill="currentColor"/></svg></i><div><b data-i18n="doorRecord">Record</b><span data-i18n="doorRecordNote">Film a movement with this device and read its joint angles, moments and estimated loads.</span></div></button>
+      <button type="button" class="labDoor" id="doorProcess"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4v16h18"/><path d="M6.5 15.5l3.5-5 3 2.5 3.5-6.5 3 3.5"/><path d="M6.5 19v-1.5M10 19v-2.5M13 19v-1.5M16.5 19v-3"/></svg></i><div><b data-i18n="doorProcess">Process</b><span data-i18n="doorProcessNote">Open lab files (force plates, EMG, motion capture, OpenSim results), filter, plot and analyse them.</span></div></button>
+      <div class="labDoor" id="doorSimulate" role="button" tabindex="0"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4" r="2"/><path d="M12 6.5v6M7.5 9.5L12 8l4.5 1.5M12 12.5l-3 8M12 12.5l3 8"/><path d="M15.5 15.5l2.8 1.6M18.3 17.1l-.4-1.9M18.3 17.1l-1.9.3" /></svg></i><div><b data-i18n="doorSimulate">Simulate</b><span data-i18n="doorSimulateNote">Run OpenSim and CEINMS on a marker and force-plate trial: scaling, IK, ID, static optimisation, muscle and joint contact forces.</span><span class="doorLinks"><a href="https://opensim.stanford.edu/" target="_blank" rel="noopener">OpenSim ↗</a> · <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4655131/" target="_blank" rel="noopener">CEINMS ↗</a></span></div></div>
+      <button type="button" class="labDoor" id="doorAnalysis"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18"/><rect x="5" y="12" width="3" height="6" rx=".8"/><rect x="10.5" y="8" width="3" height="10" rx=".8"/><rect x="16" y="5" width="3" height="13" rx=".8"/><path d="M4.5 9.5l6-4 5 2 4-4"/></svg></i><div><b data-i18n="doorAnalysis">Analysis</b><span data-i18n="doorAnalysisNote">Statistics on your results: reliability (ICC, SEM, MDC, Bland-Altman, CMC), t-tests, ANOVA, ANCOVA, correlation and regression, and SPM on whole curves. Exports for JASP, SPSS and Python.</span></div></button>
+      <button type="button" class="labDoor" id="doorBiofeedback"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/><path d="M10 10.5l1.3 1.3L14 9"/></svg></i><div><b data-i18n="doorBiofeedback">BioFeedback</b><span data-i18n="doorBiofeedbackNote">Watch one joint angle with the camera and switch a lamp on a connected Arduino when it crosses a threshold.</span></div></button>
+      <button type="button" class="labDoor" id="doorPhysics"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18"/><path d="M4 19c2.5-9 7-13 9.5-13S18 11 20 19" stroke-dasharray="2.2 2"/><circle cx="13.5" cy="6" r="2.2" fill="currentColor"/><path d="M6 4l1.5 2.5M4 7.5l2.6.4"/></svg></i><div><b data-i18n="doorPhysics">Physics playground</b><span data-i18n="doorPhysicsNote">Interactive simulations of basic mechanics.</span></div></button>
     </div>
     <div class="devBox">
       <button type="button" class="ghost" id="devModeBtn" data-i18n="devModeBtn">Developer mode</button>
@@ -1569,12 +1581,26 @@ try {
     </div>
   </section>
 
+  <!-- Physics playground: small interactive mechanics simulations (src/physics.js). -->
+  <section id="viewPhysics" class="hidden">
+    <div class="card">
+      <div class="labHead"><b style="font-size:16px" data-i18n="doorPhysics">Physics playground</b>
+        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+      <div class="chips phTabs" id="phTabs"></div>
+      <canvas id="phCv" class="phCv" aria-label="Simulation"></canvas>
+      <div class="row bfbRow"><button type="button" id="phPlay" data-i18n="ph_play">Play</button><button type="button" class="ghost" id="phReset" data-i18n="ph_reset">Reset</button></div>
+      <div class="phOut" id="phOut"></div>
+      <div class="phCtl" id="phCtl"></div>
+      <p class="note" id="phNote"></p>
+    </div>
+  </section>
+
   <!-- BioFeedback (testing): camera / screen pose -> live metrics, threshold -> sound and an
        Arduino lamp over Web Serial; cycle tables, rep reports, zip export. Logic in
        src/biofeedback.js, sketch in assets/arduino/biofeedback_lamp/. -->
   <section id="viewBiofeedback" class="hidden">
     <div class="card">
-      <div class="labHead"><b style="font-size:16px" data-i18n="doorBiofeedback">BioFeedback (testing)</b>
+      <div class="labHead"><b style="font-size:16px" data-i18n="doorBiofeedback">BioFeedback</b>
         <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
       <p class="note hidden bad" id="bfbNoSerial" data-i18n="bfb_noSerial">This browser cannot talk to USB devices. Use Chrome or Edge on a computer; the lamp is still shown on screen.</p>
 
@@ -1866,6 +1892,17 @@ try {
     <div id="strokeBox" class="trainOnly hidden" style="margin-bottom:11px">
       <label for="wallDist" data-i18n="wallDist">Distance from you to the wall (m) — optional</label>
       <input id="wallDist" type="number" step="0.5" min="1" max="30" inputmode="decimal" placeholder="e.g. 8">
+      <!-- How many players to follow, and optional areas drawn on the picture
+           (src/playerzones.js): the body inside area k is player k. -->
+      <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-top:10px">
+        <label style="flex:0 0 auto"><span data-i18n="mpCount">Players to track</span>
+          <select id="mpCount" style="width:auto"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink);flex:1 1 200px">
+          <input type="checkbox" id="mpUseZones" style="width:auto;margin:0">
+          <span data-i18n="mpUseZones">Each player in an area I draw on the picture</span></label>
+        <button type="button" class="ghost" id="mpZonesBtn" style="width:auto" data-i18n="mpZonesBtn">Draw areas</button>
+      </div>
+      <p class="note" id="mpZonesState" style="margin:6px 0 0"></p>
       <p class="note" style="margin:6px 0 0" data-i18n="strokeSetupNote">Fix the phone so it does not move, with you and the wall (or the court) both in the picture. Strokes are counted from your body; the ball is followed by its colour, so a yellow ball against a plain background works best. With the wall distance filled in, ball speed is the distance divided by the flight time.</p>
     </div>
     <!-- Added load, assistance and their direction live in #loadDlg; this
@@ -2118,8 +2155,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 100;
-window.BUILD_AT = "2026-10-17 15:00";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 101;
+window.BUILD_AT = "2026-10-17 15:28";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2224,6 +2261,7 @@ import { foreperiod, classify as rtClassify, summarise as rtSummarise,
          reactionTrend, sequence, GAMES, GAME_IDS, gameOf } from "./src/reaction.js";
 import { SPORT_IDS, allowedIn, sportActivities, MULTI_PLAYER_SPORTS } from "./src/sports.js";
 import { createMultiTracker, MAX_PLAYERS } from "./src/multiplayer.js";
+import { askZones, loadZoneSettings, saveZoneSettings } from "./src/playerzones.js";
 import { makeBallTracker, ballAfterStrokes, bodyBox, strokeSummary } from "./src/balltrack.js";
 import { loadSpec as loadSimSpec, simHTML, simWire } from "./src/simtools.js";
 import { makeLocalClient } from "./src/localengine.js";
@@ -2248,6 +2286,7 @@ import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 // called the array.
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
 import { initBiofeedback } from "./src/biofeedback.js";
+import { initPhysics } from "./src/physics.js";
 import { startPresence } from "./src/presence.js";
 import { createPreview, openReview } from "./src/lmreview.js";
 import { ensembleRep, mergeSides } from "./src/ensemble.js";
@@ -2334,6 +2373,8 @@ let biofeedback = null;
 /* Presence: every open page joins the "online" channel with a random key, so
  * the BioFeedback page can light the green lamp (src/presence.js; privacy.html). */
 queueMicrotask(() => { try { if (CLOUD && CLOUD.url) startPresence({ url: CLOUD.url, key: CLOUD.key }); } catch { /* no realtime */ } });
+let physics = null;
+queueMicrotask(() => { physics = initPhysics({ $, tr }); });
 queueMicrotask(() => { biofeedback = initBiofeedback({ $, tr, getLandmarker: async () => ((await loadMediaPipe()) ? makeLandmarker() : null) }); });
 const statusEl = $("status");
 const say = (t, warn) => {
@@ -2428,16 +2469,45 @@ let landmarker = null, stream = null, running = false, recording = false;
  * (src/multiplayer.js). A second model asked for four bodies, built the first
  * time such a session opens the camera; the single-body one stays for the rest. */
 let multiLM = null, multiOn = false, multiLoading = false;
-const mtrack = createMultiTracker();
+let mtrack = createMultiTracker();
+/* Players to follow and their drawn areas, from the stroke box (remembered). */
+let mpSet = loadZoneSettings();
+const newTracker = () => createMultiTracker({ heightM: parseFloat($("height")?.value) || 1.75,
+  maxPlayers: mpSet.n, zones: mpSet.use ? mpSet.zones : null });
+function paintMpZones() {
+  $("mpCount").value = String(mpSet.n);
+  $("mpUseZones").checked = mpSet.use;
+  $("mpZonesBtn").classList.toggle("hidden", !mpSet.use);
+  $("mpZonesState").textContent = !mpSet.use ? "" : mpSet.zones.length
+    ? tr("mpZonesSet", { k: mpSet.zones.length, n: mpSet.n }) : tr("mpZonesNone");
+}
+/** Draw the areas on `src` (video or canvas); true when the user finished. */
+async function drawMpZones(src) {
+  const z = await askZones({ src, n: mpSet.n, zones: mpSet.zones, tr });
+  if (!z) return false;
+  mpSet.zones = z; saveZoneSettings(mpSet); paintMpZones();
+  return true;
+}
+queueMicrotask(() => {
+  paintMpZones();
+  $("mpCount").onchange = (e) => { mpSet.n = +e.target.value; mpSet.zones = mpSet.zones.slice(0, mpSet.n); saveZoneSettings(mpSet); paintMpZones(); mtrack = newTracker(); };
+  $("mpUseZones").onchange = (e) => { mpSet.use = e.target.checked; saveZoneSettings(mpSet); paintMpZones(); mtrack = newTracker(); };
+  // On the live picture when the camera is on; a file asks for them after its range is chosen.
+  $("mpZonesBtn").onclick = async () => {
+    if (!running || !video.videoWidth) { say(tr("mpZonesNeedPicture")); return; }
+    if (await drawMpZones(video)) mtrack = newTracker();
+  };
+});
 function syncMulti() {
   const sess = getSession();
-  multiOn = !!sess && MULTI_PLAYER_SPORTS.includes(sess.sport) && !assessStep;
+  multiOn = ((!!sess && MULTI_PLAYER_SPORTS.includes(sess.sport)) || $("activity").value === "stroke") && !assessStep;
   if (multiOn && !multiLM && !multiLoading && PoseLandmarker) {
     multiLoading = true;
     makeLandmarker(MAX_PLAYERS).then((m) => { multiLM = m; }).catch((e) => console.warn("multi-player model failed:", e))
       .finally(() => { multiLoading = false; });
   }
   if (!multiOn) mtrack.reset();
+  else if (!recording) mtrack = newTracker();
 }
 let muscleJoints = null;   // { muscleJoints: {name:[joints]}, byJoint: {joint:[names]} }
 let avatar = null, avatarBusy = false;
@@ -5606,9 +5676,9 @@ $("mealShotFile").onchange = (e) => {
  * there is still exactly one source of truth for the athlete.
  */
 const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat", "viewSummary",
-               "viewHome", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback"];
+               "viewHome", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback", "viewPhysics"];
 /* The lab demo's screens: a home with three doors, and what they open. */
-const LAB_VIEWS = ["viewHome", "viewRecord", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback"];
+const LAB_VIEWS = ["viewHome", "viewRecord", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback", "viewPhysics"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -5637,6 +5707,7 @@ function showView(id, push = true) {
   document.documentElement.classList.remove("booting");
   if (id !== "viewRecord") leaveRecorder();
   if (id !== "viewBiofeedback" && biofeedback) biofeedback.leave();
+  if (id !== "viewPhysics" && physics) physics.leave();
   if (id !== "viewRecord" && assessStep) exitAssessMode();
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
   $("navBar").classList.toggle("hidden", id === "viewLogin" || id === "viewDash");
@@ -5660,6 +5731,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewSimulate") openSimulate();
   if (id === "viewAnalysis") openAnalysis();
   if (id === "viewBiofeedback") biofeedback.open();
+  if (id === "viewPhysics" && physics) physics.open();
 });
 
 $("navBack").onclick = () => history.back();
@@ -7984,6 +8056,7 @@ function enterLab() {
   $("doorProcess").onclick = () => { showView("viewProcess"); openProcess(); };
   $("doorAnalysis").onclick = () => { showView("viewAnalysis"); openAnalysis(); };
   $("doorBiofeedback").onclick = () => { showView("viewBiofeedback"); biofeedback.open(); };
+  $("doorPhysics").onclick = () => { showView("viewPhysics"); physics && physics.open(); };
   $("doorSimulate").onclick = (e) => { if (e.target.closest("a")) return; showView("viewSimulate"); openSimulate(); };
   $("doorSimulate").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("doorSimulate").click(); } };
   $("devModeBtn").onclick = () => { $("devForm").classList.toggle("hidden"); $("devPw").focus(); };
@@ -8000,6 +8073,7 @@ function enterLab() {
   if (land === "viewProcess") openProcess();
   if (land === "viewAnalysis") openAnalysis();
   if (land === "viewBiofeedback") queueMicrotask(() => biofeedback && biofeedback.open());
+  if (land === "viewPhysics") queueMicrotask(() => physics && physics.open());
 }
 
 if (LAB) {
@@ -8585,7 +8659,7 @@ $("recBtn").onclick = () => {
       }
     }
     frames = []; pf0 = null; recording = true;
-    syncMulti(); mtrack.reset(); $("mpResults").classList.add("hidden");
+    syncMulti(); mtrack = newTracker(); $("mpResults").classList.add("hidden");
     ballTracker.reset();
     leadDone = false;
     framing.reset();
@@ -9015,7 +9089,7 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
    * keep the real players apart from logos and graphics (src/multiplayer.js).
    * Player 1 is the body the single-athlete analysis follows. */
   const fileMulti = multiOn || $("activity").value === "stroke";
-  const ftrack = fileMulti ? createMultiTracker() : null;
+  let ftrack = fileMulti ? newTracker() : null;
   const needsPage = fileMulti || $("activity").value === "kick";
   const pw = !needsPage && v.requestVideoFrameCallback && window.createImageBitmap && window.__bsNoWorker !== true
     ? await startPoseWorker() : null;
@@ -9053,6 +9127,15 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   let cropCv = null, cropCx = null;
   if (cr) { cropCv = document.createElement("canvas"); cropCv.width = fw; cropCv.height = fh; cropCx = cropCv.getContext("2d"); }
   const srcNow = () => { if (!cr) return v; cropCx.drawImage(v, cr.x, cr.y, cr.w, cr.h, 0, 0, fw, fh); return cropCv; };
+  /* Player areas on this clip: drawn on its first frame (after any crop), when
+   * the user asked for areas -- the view of a file is rarely the camera's. */
+  if (ftrack && mpSet.use) {
+    await seekTo(seekOf(0));
+    say(tr("mpZonesAsk"));
+    await drawMpZones(srcNow());
+    ftrack = newTracker();
+    checkAbort();
+  }
   // A few frames of the tracking, with their skeleton, so it can be watched (lmreview.js).
   const preview = createPreview($("status"), tr);
   preview.show();

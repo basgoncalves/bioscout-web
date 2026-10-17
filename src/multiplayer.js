@@ -46,7 +46,7 @@ export function plausibleBody(lm, w, h) {
   if (!sh.length || !hp.length) return false;
   const shY = sh.reduce((a, b) => a + b) / sh.length, hpY = hp.reduce((a, b) => a + b) / hp.length;
   const torso = hpY - shY;
-  if (torso < h * 0.03) return false;                       // tiny or upside down
+  if (torso < h * 0.015) return false;                       // tiny or upside down
   if (vis(lm[NOSE]) && y(NOSE) > shY) return false;          // head below the shoulders
   if (an.length) {
     const leg = an.reduce((a, b) => a + b) / an.length - hpY;
@@ -54,7 +54,7 @@ export function plausibleBody(lm, w, h) {
   }
   const shW = vis(lm[LS]) && vis(lm[RS]) ? Math.abs(x(LS) - x(RS)) : 0;
   if (shW > torso * 2.5) return false;
-  const key = [NOSE, LS, RS, LH, RH, LA, RA].map((i) => lm[i]?.visibility ?? 1);
+  const key = [NOSE, LS, RS, LH, RH].map((i) => lm[i]?.visibility ?? 1);   // far players' feet are faint
   return key.reduce((a, b) => a + b) / key.length >= 0.5;
 }
 
@@ -73,14 +73,39 @@ function newPlayer(id) {
     prevW: null, prevWT: null, wPeak: null, grid: new Array(9).fill(0), hand: { l: 0, r: 0 } };
 }
 
-export function createMultiTracker({ heightM = 1.75 } = {}) {
+/* Player areas: optional rectangles {x, y, w, h} as fractions of the picture,
+ * one per player, drawn by the user (court halves, a doubles side each). With
+ * areas set, the body whose feet are inside area k is player k+1 -- the one
+ * nearest that player's last position, else the biggest -- and bodies outside
+ * every area (crowd, umpire, ball kids, graphics) are ignored. */
+export const inZone = (z, f) => f.x >= z.x && f.x <= z.x + z.w && f.y >= z.y && f.y <= z.y + z.h;
+
+export function createMultiTracker({ heightM = 1.75, maxPlayers = MAX_PLAYERS, zones = null } = {}) {
+  const nMax = Math.max(1, Math.min(MAX_PLAYERS, maxPlayers | 0 || MAX_PLAYERS));
+  const Z = Array.isArray(zones) && zones.length ? zones.slice(0, nMax) : null;
   let players = [];
-  const free = () => { for (let i = 1; i <= MAX_PLAYERS; i++) if (!players.some((p) => p.id === i)) return i; return null; };
+  const free = () => { for (let i = 1; i <= nMax; i++) if (!players.some((p) => p.id === i)) return i; return null; };
 
   /** One frame: `list` is the model's landmarks array (normalised), t in ms. */
   function update(list, t, w, h) {
     players = players.filter((p) => t - p.lastT <= LOST_MS);
-    const bodies = (list || []).filter((lm) => plausibleBody(lm, w, h)).map((lm) => ({ lm, f: feet(lm) })).filter((b) => b.f);
+    const bodies = (list || []).filter((lm) => plausibleBody(lm, w, h)).map((lm) => ({ lm, f: feet(lm), px: bodyPx(lm, w, h) || 0 })).filter((b) => b.f);
+    if (Z) {
+      const used = new Set();
+      Z.forEach((z, k) => {
+        const id = k + 1, cand = bodies.filter((b) => !used.has(b) && inZone(z, b.f));
+        if (!cand.length) return;
+        let p = players.find((q) => q.id === id);
+        const pick = p
+          ? cand.reduce((a, b) => (Math.hypot(b.f.x - p.last.x, b.f.y - p.last.y) < Math.hypot(a.f.x - p.last.x, a.f.y - p.last.y) ? b : a))
+          : cand.reduce((a, b) => (b.px > a.px ? b : a));
+        used.add(pick);
+        if (!p) { p = newPlayer(id); players.push(p); }
+        step(p, pick, t, w, h);
+      });
+      players.sort((a, b) => a.id - b.id);
+      return players.filter((p) => p.lastT === t);
+    }
     const pairs = [];
     bodies.forEach((b, bi) => players.forEach((p, pi) => {
       const d = Math.hypot(b.f.x - p.last.x, b.f.y - p.last.y);

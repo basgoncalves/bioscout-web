@@ -34,5 +34,13 @@ ok(swinger && swinger.strokes === 5 && s.filter((r) => r.strokes).length === 1, 
   const sm = tr.summary();
   ok(sm.length === 1 && sm[0].id === 1, "the corner logo is ignored; the player is P1");
 }
+// Drawn areas: the body inside area k is player k+1, others ignored, whatever the model's order.
+{
+  const { createMultiTracker: mk } = await import("../src/multiplayer.js");
+  const tz = mk({ maxPlayers: 2, zones: [{ x: 0.6, y: 0, w: 0.4, h: 1 }, { x: 0, y: 0, w: 0.4, h: 1 }] });
+  for (let i = 0; i < 60; i++) tz.update([body(0.1, 0, false), body(0.5, 0, false), body(0.8, 0, false)], i * 33.3, 1280, 720);
+  const ps = tz.players.map((p) => [p.id, +p.last.x.toFixed(2)]);
+  ok(JSON.stringify(ps) === JSON.stringify([[1, 0.8], [2, 0.1]]), "P1 is the right area's body, P2 the left's, the middle one ignored");
+}
 console.log(bad ? `\n${bad} FAILED` : "\nAll checks passed");
 process.exitCode = bad ? 1 : 0;
