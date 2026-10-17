@@ -240,6 +240,8 @@ export const MOVES = {
   slsquat:{ label: "bfb_mv_slsquat", wt: true, metrics: ["kneeFlex", "valgus", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 60, dir: "above" },
   sj:     { label: "bfb_mv_sj",     metrics: ["jumpHeight", "flightTime", "cmKnee", "cmHip", "cmAnkle", "landKnee", "kneeFlex", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 90, dir: "above" },
   cmj:    { label: "bfb_mv_cmj",    metrics: ["jumpHeight", "flightTime", "cmKnee", "cmHip", "cmAnkle", "landKnee", "kneeFlex", "hipFlex", "ankleDF", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 90, dir: "above" },
+  run:    { label: "bfb_mv_run",    metrics: ["kneeFlex", "hipFlex", "ankleDF", "trunkLean", "runCadence", "runImpact", "runStepTime"], def: "kneeFlex", thr: 90, dir: "above" },
+  walk:   { label: "bfb_mv_walk",   metrics: ["kneeFlex", "hipFlex", "ankleDF", "trunkLean", "runCadence", "runImpact", "runStepTime"], def: "kneeFlex", thr: 60, dir: "above" },
   shot:   { label: "bfb_mv_shot",   metrics: ["shotElbow", "shotShoulder", "shotKnee", "shotTrunk", "shotJump", "elbowFlex", "shAbd", "kneeFlex", "trunkLean"], def: "elbowFlex", thr: 20, dir: "below" },
   kick:   { label: "bfb_mv_kick",   metrics: ["hipFlex", "kneeFlex", "trunkLean", "ankleDF", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "hipFlex", thr: 60, dir: "above" },
   stroke: { label: "bfb_mv_stroke", metrics: ["shAbd", "elbowFlex", "trunkLean", "kneeFlex", "hipFlex"], def: "shAbd", thr: 90, dir: "above" },
@@ -531,6 +533,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbZeroNote").textContent = z ? tr("bfb_zeroed", { v: z.toFixed(0) }) : "";
     $("bfbValue").textContent = "–"; $("bfbResults").innerHTML = ""; ema = emaL = emaR = NaN; buildBars();
     $("bfbThr").value = cfg.thr; $("bfbThrN").value = cfg.thr;
+    $("bfbThrOn1").checked = !cfg.thr1Off; $("bfbThr").disabled = $("bfbThrN").disabled = !!cfg.thr1Off;
     for (const i of [2, 3]) {
       const t = cfg["thr" + i], on = Number.isFinite(t);
       $("bfbThrOn" + i).checked = on; $("bfbThr" + i).disabled = $("bfbThrN" + i).disabled = !on;
@@ -600,6 +603,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbThr" + i).oninput = () => { cfg["thr" + i] = +$("bfbThr" + i).value; $("bfbThrN" + i).value = cfg["thr" + i]; save(); };
     $("bfbThrN" + i).onchange = () => { cfg["thr" + i] = clamp(+$("bfbThrN" + i).value || 0); $("bfbThr" + i).value = cfg["thr" + i]; save(); };
   }
+  $("bfbThrOn1").onchange = () => { cfg.thr1Off = !$("bfbThrOn1").checked; save(); syncInputs(); };
   $("bfbThr").oninput = () => { cfg.thr = +$("bfbThr").value; $("bfbThrN").value = cfg.thr; save(); };
   $("bfbThrN").onchange = () => { cfg.thr = Math.max(+$("bfbThr").min || 0, Math.min(+$("bfbThr").max || 180, +$("bfbThrN").value || 0)); $("bfbThr").value = cfg.thr; save(); };
   $("bfbDir").onchange = () => { cfg.dir = $("bfbDir").value; save(); };
@@ -1111,7 +1115,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   /* Phones and tablets have no screen capture at all (no getDisplayMedia):
    * the Screen source is not offered there instead of failing on press. */
-  if (!MOVES[cfg.move]) cfg.move = "squat";              // e.g. the short-lived "run" movement
+  if (!MOVES[cfg.move]) cfg.move = "squat";
   const canScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
   if (!canScreen) {
     const o = $("bfbSrc").querySelector('option[value="screen"]'); if (o) o.remove();
@@ -1199,13 +1203,13 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const LVDEF = ["#4caf50", "#ffd54a", "#ff4d4d"];
   if (!Array.isArray(cfg.colors) || cfg.colors.length !== 3) cfg.colors = [...LVDEF];
   const LVCOL = cfg.colors;
-  const thrs = () => [cfg.thr, cfg.thr2, cfg.thr3].map((t, i) => (Number.isFinite(t) && metOf(i + 1) === cfg.metric ? t : NaN));
+  const thrs = () => [cfg.thr1Off ? NaN : cfg.thr, cfg.thr2, cfg.thr3].map((t, i) => (Number.isFinite(t) && metOf(i + 1) === cfg.metric ? t : NaN));
   /* Each lamp i: its own metric's value against its own threshold, with
    * hysteresis in that metric's unit. Lamps are independent now. */
   const lampEma = [NaN, NaN, NaN], lampOnSt = [false, false, false];
   function lampStates(mainV, val) {
     return [1, 2, 3].map((i) => {
-      const t = i === 1 ? cfg.thr : cfg["thr" + i], k = metOf(i);
+      const t = i === 1 ? (cfg.thr1Off ? NaN : cfg.thr) : cfg["thr" + i], k = metOf(i);
       if (!Number.isFinite(t)) return (lampOnSt[i - 1] = false);
       let v = mainV;
       if (k !== cfg.metric) {

@@ -684,14 +684,18 @@ try {
   .bfbPinPick { width:auto !important; flex:none !important; min-height:0 !important; padding:3px 10px !important; font-size:12px !important; margin:0 !important; }
   /* compact settings: no stretched checkboxes / buttons, tighter rows */
   /* one line per threshold: [tick][colour][name] [slider] [value] */
-  #viewBiofeedback .bfbThrRow { display:flex; align-items:center; gap:8px; margin:2px 0; flex-wrap:wrap; }
-  #viewBiofeedback .bfbThrRow .bfbThrCtl { flex:1 1 140px; }
+  #viewBiofeedback .bfbThrRow { display:flex; align-items:center; column-gap:12px; row-gap:6px; margin:10px 0 14px; flex-wrap:wrap; padding:8px 10px; border:1px solid rgba(127,127,127,.25); border-radius:8px; }
+  #viewBiofeedback .bfbThrRow .bfbThrMeta { display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; margin-left:auto; }
+  #viewBiofeedback .bfbThrRow .bfbThrCtl { flex:1 1 100%; display:flex; align-items:center; gap:10px; }
+  #viewBiofeedback .bfbThrRow .bfbThrCtl input[type=range] { flex:1; min-width:0; }
+  #viewBiofeedback .bfbThrRow .bfbThrCtl input[type=number] { width:5.5em; flex:none; }
+  #viewBiofeedback .bfbThrRow .bfbLim { gap:4px; font-size:12px; }
+  #viewBiofeedback .bfbThrRow .bfbLim input { width:4.5em !important; padding:2px 6px !important; font-size:12px !important; }
   .bfbThrMeta { display:inline-flex; align-items:center; gap:4px; }
   .bfbThrMet { width:auto !important; max-width:9.5em; padding:2px 6px !important; font-size:12px !important; min-height:0 !important; margin:0 !important; }
   .bfbLim { display:inline-flex; align-items:center; gap:2px; font-size:11px; opacity:.85; }
   .bfbLim input { width:3.6em !important; padding:1px 4px !important; font-size:11px !important; min-height:0 !important; margin:0 !important; }
   #viewBiofeedback .bfbThrRow .bfbThrLbl { margin:0; flex-wrap:nowrap; white-space:nowrap; overflow:hidden; font-size:13px; }
-  #viewBiofeedback .bfbThrRow .bfbThrCtl { gap:8px; }
   #viewBiofeedback .bfbThrRow input[type=number] { padding-top:4px; padding-bottom:4px; }
   @media (max-width:520px) { #viewBiofeedback .bfbThrRow { grid-template-columns:1fr; gap:2px; } }
   #viewBiofeedback .bfbThrLbl { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:2px; }
@@ -753,7 +757,6 @@ try {
   dialog.bfbDevDlg .lmX { width:auto; margin:0; padding:4px 10px; }
   .bfbDevPick { width:auto; margin:0; padding:10px 18px; }
   .bfbDevPick.on { border-color:var(--accent); color:var(--accent); }
-  .bfbThrRow { margin:8px 0 10px; }
   .bfbThrLbl { font-size:13px; display:block; margin-bottom:4px; }
   .bfbThrCtl { display:flex; align-items:center; gap:12px; }
   .bfbThrCtl input[type=range] { flex:1; width:100%; height:36px; margin:0; accent-color:var(--accent); }
@@ -1680,7 +1683,8 @@ try {
         <label><span data-i18n="bfb_sound">Sound</span><select id="bfbSound"><option value="off" data-i18n="bfb_soundOff">Off</option><option value="beep" data-i18n="bfb_soundBeep">Beep when crossed</option><option value="repeat" data-i18n="bfb_soundRepeat">Beep while over</option></select></label>
       </div>
       <div class="bfbThrRow">
-        <span class="bfbThrLbl"><input type="color" class="bfbCol" data-col="0" aria-label="Colour 1"> <span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>) <span class="bfbLim" data-row="1"></span> <button type="button" class="ghost bfbColReset" data-colreset data-i18n-title="bfb_colReset" title="Default colours" aria-label="Default colours">↺</button></span>
+        <label class="bfbThrLbl"><input type="checkbox" id="bfbThrOn1"> <input type="color" class="bfbCol" data-col="0" aria-label="Colour 1"> <span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>)</label>
+        <span class="bfbThrMeta"><span class="bfbLim" data-row="1"></span> <button type="button" class="ghost bfbColReset" data-colreset data-i18n-title="bfb_colReset" title="Default colours" aria-label="Default colours">↺</button></span>
         <div class="bfbThrCtl">
           <input type="range" id="bfbThr" min="0" max="180" step="1" aria-label="Threshold">
           <input type="number" id="bfbThrN" min="0" max="180" step="1" aria-label="Threshold">
@@ -2099,8 +2103,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 90;
-window.BUILD_AT = "2026-10-17 11:07";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 91;
+window.BUILD_AT = "2026-10-17 11:24";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
