@@ -231,13 +231,15 @@ METRICS.anEmg = { label: "bfb_mAnEmg", unit: "mV", max: 1000, an: 7, f: () => AN
 for (let i = 0; i < 6; i++) METRICS["an" + i] = { label: "bfb_mAn" + i, unit: "V", max: 5, an: i, f: () => AN_LIVE[i] };
 /* Running from the phone's accelerometer (src/phonemotion.js): cadence,
  * impact peak and step time, filled by the motion loop into PH_LIVE. */
-export const PH_LIVE = { cadence: NaN, impact: NaN, stepTime: NaN, acc: NaN };
+export const PH_LIVE = { cadence: NaN, impact: NaN, stepTime: NaN, acc: NaN, sag: NaN, fr: NaN };   // sag/fr: segment angles, rad
 METRICS.runCadence = { label: "bfb_m_runCad", unit: "spm", max: 220, phone: true, f: () => PH_LIVE.cadence };
 METRICS.runImpact = { label: "bfb_m_runImp", unit: "g", max: 6, phone: true, f: () => PH_LIVE.impact };
 METRICS.runStepTime = { label: "bfb_m_runStep", unit: "ms", max: 800, phone: true, f: () => PH_LIVE.stepTime };
+METRICS.phSag = { label: "bfb_m_phSag", unit: DEG, phone: true, f: () => PH_LIVE.sag * 180 / Math.PI };
+METRICS.phFront = { label: "bfb_m_phFront", unit: DEG, phone: true, f: () => PH_LIVE.fr * 180 / Math.PI };
 METRICS.accMag = { label: "bfb_m_acc", unit: "g", max: 4, phone: true, f: () => PH_LIVE.acc };
 /* With "Use phone accelerometer" these are the metrics, whatever the movement. */
-export const PHONE_KEYS = ["runCadence", "runImpact", "runStepTime", "accMag"];
+export const PHONE_KEYS = ["phSag", "phFront", "runCadence", "runImpact", "runStepTime", "accMag"];
 export const LOAD_KEYS = ["hipJCF", "kneeJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"];
 
 /* Movement presets: which metrics make sense and a starting threshold. */
@@ -1145,16 +1147,16 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     accBuf.length = 0; stepTs.length = 0;
     try {
       st.motionStop = await startMotion((t, a, xyz) => {
-        vertPush(t, a);
+        vertPush(t, a); if (Array.isArray(xyz)) orientPush(xyz);
         const sp = stepDet.push(t, a); if (sp) { stepTs.push(sp.t); if (stepTs.length > 20) stepTs.shift(); }
         const [x, y, z] = Array.isArray(xyz) ? xyz : [NaN, NaN, NaN];   // an older cached phonemotion.js passes no axes
-        accBuf.push({ t, a, x, y, z }); while (accBuf.length && t - accBuf[0].t > 6000) accBuf.shift();
+        accBuf.push({ t, a, x, y, z, sag: PH_LIVE.sag * 180 / Math.PI, fr: PH_LIVE.fr * 180 / Math.PI }); while (accBuf.length && t - accBuf[0].t > 6000) accBuf.shift();
       });
     }
     catch (e) { st.motionStop = null; $("bfbCamNote").textContent = tr("bfb_motFail", { err: e.message }); renderSrc(); return; }
     $("bfbCamNote").textContent = tr("bfb_motHint");
     st.phT = setInterval(phoneTick, 100); renderSrc();
-    const loop = () => { if (!st.motionStop) return; drawMotion(performance.now()); drawAcc(performance.now()); requestAnimationFrame(loop); };
+    const loop = () => { if (!st.motionStop) return; drawMotion(performance.now()); drawAcc(performance.now()); drawAng(performance.now()); requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   }
   /* Phone view: no video. The stage shows a runner/walker animated from the
@@ -1176,6 +1178,46 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const dt = vert.t ? Math.min(0.05, (t - vert.t) / 1000) : 0; vert.t = t;
     const av = (a - 1) * 9.81; vert.vz = vert.vz * 0.99 + av * dt; vert.dz = vert.dz * 0.99 + vert.vz * dt;
     if (a < 0.35) { if (!vert.air) vert.air = t; } else if (vert.air) { vert.lastAir = t; vert.air = 0; }
+  }
+  /* Segment orientation from gravity. The phone's acceleration low-passed
+   * (~1.5 Hz) is mostly gravity, so its direction gives the segment's tilt.
+   * Calibration per placement: g0 = neutral (standing still), then a
+   * forward movement of the segment gives the medio-lateral axis
+   * ml = g0 × g1. Sagittal angle = rotation of gravity about ml (forward +),
+   * frontal angle = rotation about the antero-posterior axis ap = ml × g0.
+   * Without the forward step only the total tilt from neutral is known. */
+  const gLp = [NaN, NaN, NaN];
+  const v3 = { dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+               norm: (a) => { const n = Math.hypot(...a) || 1; return a.map((x) => x / n); } };
+  const sAng = (u, w, ax) => {           // signed angle u -> w about axis ax, both projected onto the plane normal to ax
+    const pu = v3.norm(u.map((x, i) => x - v3.dot(u, ax) * ax[i])), pw = v3.norm(w.map((x, i) => x - v3.dot(w, ax) * ax[i]));
+    return Math.atan2(v3.dot(ax, v3.cross(pu, pw)), v3.dot(pu, pw));
+  };
+  const calOf = () => ((cfg.phCal || {})[cfg.phonePos || "pelvis"]) || null;
+  function orientPush(xyz) {
+    if (!xyz.every(Number.isFinite)) return;
+    for (let i = 0; i < 3; i++) gLp[i] = Number.isFinite(gLp[i]) ? gLp[i] + 0.08 * (xyz[i] - gLp[i]) : xyz[i];
+    const g = v3.norm(gLp), cal = calOf();
+    if (!cal || !cal.g0) { PH_LIVE.sag = PH_LIVE.fr = NaN; return; }
+    if (cal.ml) { const ap = v3.norm(v3.cross(cal.ml, cal.g0)); PH_LIVE.sag = sAng(cal.g0, g, cal.ml); PH_LIVE.fr = sAng(cal.g0, g, ap); }
+    else { PH_LIVE.sag = Math.acos(Math.max(-1, Math.min(1, v3.dot(cal.g0, g)))); PH_LIVE.fr = NaN; }
+  }
+  function calStep(which) {
+    const n = $("bfbPhCalNote");
+    if (!st.motionStop || !gLp.every(Number.isFinite)) { n.textContent = tr("bfb_phCalStart"); return; }
+    const g = v3.norm(gLp), pos = cfg.phonePos || "pelvis"; cfg.phCal = cfg.phCal || {};
+    if (which === 0) { cfg.phCal[pos] = { g0: g }; n.textContent = tr("bfb_phCal0ok"); }
+    else {
+      const cal = cfg.phCal[pos]; if (!cal || !cal.g0) { n.textContent = tr("bfb_phCalNeed0"); return; }
+      const ang = Math.acos(Math.max(-1, Math.min(1, v3.dot(cal.g0, g))));
+      if (ang < 0.17) { n.textContent = tr("bfb_phCalSmall"); return; }
+      cal.ml = v3.norm(v3.cross(cal.g0, g)); n.textContent = tr("bfb_phCal1ok", { a: Math.round(ang * 180 / Math.PI) });
+    }
+    save(); renderCal();
+  }
+  function renderCal() {
+    const cal = calOf();
+    $("bfbPhCalSt").textContent = tr(cal && cal.ml ? "bfb_phCalFull" : cal && cal.g0 ? "bfb_phCalHalf" : "bfb_phCalNone");
   }
   const POSES = { run: "gait", walk: "gait", squat: "squat", slsquat: "slsquat", lunge: "lunge", deadlift: "hinge", hinge: "hinge",
                   cmj: "jump", sj: "jump", shot: "jump", heelraise: "raise" };
@@ -1219,6 +1261,16 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     } else {
       lift = Math.max(-0.1, Math.min(0.1, vert.dz)) * pxm; label = "bfb_motFree";
     }
+    // the segment wearing the phone follows its measured angle (calibrated); the rest is the task template
+    const A = PH_LIVE.sag, pos = cfg.phonePos || "pelvis", meas = Number.isFinite(A);
+    if (meas) {
+      if (pos === "pelvis" || pos === "trunk") lean = A;
+      else if (pos === "thigh") R = { th: A, kn: Math.max(0, R.kn + A - R.th) };
+      else if (pos === "shank") R = { th: R.th, kn: R.th - A };
+      else if (pos === "upperArm") armR = A;
+      else if (pos === "wrist") { armR = A; elb = 0.1; }
+    }
+    if (cfg.phView === "front") { drawFront(c, W, H, { L, R, lift, ground, s, gx: W * 0.42, label, n }); return; }
     // hip height so that the stance foot stays on the ground
     const legH = (g) => s * (Math.cos(g.th) + Math.cos(g.th - g.kn));
     const hip = [gx, ground - Math.max(legH(L), legH(R)) - lift];
@@ -1243,16 +1295,68 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     // where the phone is worn
     const pp = pts[cfg.phonePos || "pelvis"];
     if (pp) { c.fillStyle = "#ffd54a"; c.strokeStyle = "#0d1117"; c.lineWidth = 2; c.beginPath(); c.roundRect(pp[0] - 6, pp[1] - 9, 12, 18, 3); c.fill(); c.stroke(); }
+    motText(c, W, H, label, n);
+  }
+  function motText(c, W, H, label, n) {
     c.fillStyle = "#8b949e"; c.font = "12px system-ui"; c.textAlign = "left";
     c.fillText(tr(label), 10, H - 52);   // bottom left: the value HUD is top left
-    c.fillText(tr("bfb_motEst"), 10, H - 36);
+    c.fillText(tr(Number.isFinite(PH_LIVE.sag) ? "bfb_motEstSeg" : "bfb_motEst"), 10, H - 36);
     // live readout, always shown whatever metric drives the lamps
-    const f = (v, d, u) => (Number.isFinite(v) ? v.toFixed(d) + " " + u : "–");
-    const rows = [[tr("bfb_m_runCad"), f(PH_LIVE.cadence, 0, "spm")], [tr("bfb_m_runStep"), f(PH_LIVE.stepTime, 0, "ms")],
+    const f = (v, d, u) => (Number.isFinite(v) ? v.toFixed(d) + " " + u : "–"), dg = (r) => (Number.isFinite(r) ? Math.round(r * 180 / Math.PI) + "°" : "–");
+    const rows = [[tr("bfb_m_phSag"), dg(PH_LIVE.sag)], [tr("bfb_m_phFront"), dg(PH_LIVE.fr)],
+                  [tr("bfb_m_runCad"), f(PH_LIVE.cadence, 0, "spm")], [tr("bfb_m_runStep"), f(PH_LIVE.stepTime, 0, "ms")],
                   [tr("bfb_m_runImp"), f(PH_LIVE.impact, 2, "g")], [tr("bfb_m_acc"), f(PH_LIVE.acc, 2, "g")], [tr("bfb_motSteps"), String(n)]];
     c.font = "13px system-ui"; c.textAlign = "right";
-    rows.forEach(([k, v], i) => { c.fillStyle = "#8b949e"; c.fillText(k.replace(/\s*\(.*\)/, ""), W - 80, 56 + i * 20); c.fillStyle = "#e6edf3"; c.fillText(v, W - 10, 56 + i * 20); });
+    rows.forEach(([k, v], i) => { c.fillStyle = "#8b949e"; c.fillText(k.replace(/\s*\(.*\)/, ""), W - 70, 56 + i * 19); c.fillStyle = "#e6edf3"; c.fillText(v, W - 10, 56 + i * 19); });
     c.textAlign = "left";
+  }
+  /* Front view: legs side by side (their visible length shortens with knee
+   * bend), the phone segment tilted by its measured frontal angle. */
+  function drawFront(c, W, H, o) {
+    const { L, R, lift, ground, s, gx, label, n } = o, F = Number.isFinite(PH_LIVE.fr) ? PH_LIVE.fr : 0, pos = cfg.phonePos || "pelvis";
+    const legH = (g) => s * (Math.cos(g.th) + Math.cos(g.th - g.kn)), hipY = ground - Math.max(legH(L), legH(R)) - lift, hw = 0.32 * s;
+    c.strokeStyle = "#3a4250"; c.lineWidth = 2; c.beginPath(); c.moveTo(0, ground); c.lineTo(W, ground); c.stroke();
+    const rot = (o2, len, ang) => [o2[0] + len * Math.sin(ang), o2[1] - len * Math.cos(ang)];   // ang from vertical up, + = to viewer's right
+    const tilt = pos === "pelvis" || pos === "trunk" ? F : 0, hipC = [gx, hipY], sh = rot(hipC, 1.5 * s, tilt), head = rot(sh, 0.35 * s, tilt);
+    const hipL = [gx - hw, hipY], hipR = [gx + hw, hipY], pts = { pelvis: hipC, trunk: rot(hipC, 0.75 * s, tilt) };
+    const leg = (hp, g, col, ab, right) => {
+      const th = Math.cos(g.th) * s, sk = Math.cos(g.th - g.kn) * s;
+      const k = [hp[0] + th * Math.sin(ab), hp[1] + th * Math.cos(ab)], a = [k[0] + sk * Math.sin(right && pos === "shank" ? F : ab), k[1] + sk * Math.cos(right && pos === "shank" ? F : ab)];
+      c.strokeStyle = col; c.lineWidth = 6; c.lineCap = "round"; c.beginPath(); c.moveTo(...hp); c.lineTo(...k); c.lineTo(...a); c.lineTo(a[0] + (right ? 10 : -10), a[1]); c.stroke();
+      if (right) { pts.thigh = [(hp[0] + k[0]) / 2, (hp[1] + k[1]) / 2]; pts.shank = [(k[0] + a[0]) / 2, (k[1] + a[1]) / 2]; }
+    };
+    leg(hipL, L, "#5b6b85", 0, false); leg(hipR, R, "#58a6ff", pos === "thigh" ? F : 0, true);
+    c.strokeStyle = "#e6edf3"; c.lineWidth = 7; c.beginPath(); c.moveTo(...hipL); c.lineTo(...hipR); c.moveTo(...hipC); c.lineTo(...sh); c.stroke();
+    c.fillStyle = "#e6edf3"; c.beginPath(); c.arc(head[0], head[1], 0.24 * s, 0, 7); c.fill();
+    const shL = [sh[0] - 0.4 * s, sh[1]], shR = [sh[0] + 0.4 * s, sh[1]];
+    c.beginPath(); c.moveTo(...shL); c.lineTo(...shR); c.stroke();
+    const armAb = pos === "upperArm" || pos === "wrist" ? Math.abs(F) : 0.12;
+    const arm = (o2, ab, col, right) => {
+      const e = [o2[0] + 0.75 * s * Math.sin(ab), o2[1] + 0.75 * s * Math.cos(ab)], h = [e[0] + 0.65 * s * Math.sin(ab), e[1] + 0.65 * s * Math.cos(ab)];
+      c.strokeStyle = col; c.lineWidth = 5; c.beginPath(); c.moveTo(...o2); c.lineTo(...e); c.lineTo(...h); c.stroke();
+      if (right) { pts.upperArm = [(o2[0] + e[0]) / 2, (o2[1] + e[1]) / 2]; pts.wrist = h; }
+    };
+    arm(shL, -0.12, "#5b6b85", false); arm(shR, armAb, "#58a6ff", true);
+    const pp = pts[pos];
+    if (pp) { c.fillStyle = "#ffd54a"; c.strokeStyle = "#0d1117"; c.lineWidth = 2; c.beginPath(); c.roundRect(pp[0] - 6, pp[1] - 9, 12, 18, 3); c.fill(); c.stroke(); }
+    motText(c, W, H, label, n);
+  }
+  function drawAng(ts) {
+    const cv = $("bfbAngCv"); if (!cv) return;
+    const [c, W, H] = fitCv(cv); c.clearRect(0, 0, W, H);
+    const span = 6000, X = (t) => 40 + (W - 48) * (1 - (ts - t) / span);
+    let lo = -30, hi = 30; for (const p of accBuf) for (const v of [p.sag, p.fr]) if (Number.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    lo = Math.floor(lo / 15) * 15; hi = Math.ceil(hi / 15) * 15;
+    const Y = (v) => 8 + (H - 22) * (1 - (v - lo) / (hi - lo));
+    c.strokeStyle = "rgba(127,127,127,.25)"; c.fillStyle = "#8b949e"; c.font = "10px system-ui"; c.lineWidth = 1;
+    for (let v = lo; v <= hi; v += 15) { c.beginPath(); c.moveTo(40, Y(v)); c.lineTo(W - 8, Y(v)); c.stroke(); c.fillText(v + "°", 4, Y(v) + 3); }
+    for (const [k, col] of [["sag", "#58a6ff"], ["fr", "#f4a261"]]) {
+      c.strokeStyle = col; c.lineWidth = 2; c.beginPath(); let on = false;
+      for (const p of accBuf) { if (!Number.isFinite(p[k])) { on = false; continue; } on ? c.lineTo(X(p.t), Y(p[k])) : c.moveTo(X(p.t), Y(p[k])); on = true; }
+      c.stroke();
+    }
+    c.font = "11px system-ui"; c.fillStyle = "#58a6ff"; c.fillText(tr("bfb_m_phSag"), 44, H - 2); c.fillStyle = "#f4a261"; c.fillText(tr("bfb_m_phFront"), 170, H - 2);
+    if (!accBuf.some((p) => Number.isFinite(p.sag))) { c.fillStyle = "#8b949e"; c.font = "12px system-ui"; c.fillText(tr("bfb_phCalNone"), 48, H / 2); }
   }
   function drawAcc(ts) {
     const [c, W, H] = fitCv($("bfbAccCv"));
@@ -1319,7 +1423,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbFlip").classList.toggle("hidden", isScreen() || isPhone());
     $("bfbUseCam").classList.toggle("on", !!cfg.src && !isPhone()); $("bfbUsePhone").classList.toggle("on", isPhone());
     $("bfbSrcRow").classList.toggle("hidden", none || isPhone());
-    $("bfbPhPosRow").classList.toggle("hidden", !isPhone()); $("bfbPhPos").value = cfg.phonePos || "pelvis";
+    $("bfbPhPosRow").classList.toggle("hidden", !isPhone()); $("bfbPhPos").value = cfg.phonePos || "pelvis"; $("bfbPhView").value = cfg.phView || "side"; renderCal();
     $("bfbSrc").value = cfg.src === "screen" ? "screen" : "camera";
     $("bfbArea").classList.toggle("hidden", !isScreen() || !st.stream);
     $("bfbAreaClear").classList.toggle("hidden", !isScreen() || !st.stream || !st.crop);
@@ -1337,7 +1441,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   $("bfbUseCam").onclick = () => useSource(isScreen() ? "screen" : "camera");
   $("bfbUsePhone").onclick = () => useSource("phone");
-  $("bfbPhPos").onchange = () => { cfg.phonePos = $("bfbPhPos").value; save(); };
+  $("bfbPhPos").onchange = () => { cfg.phonePos = $("bfbPhPos").value; save(); renderCal(); };
+  $("bfbPhView").onchange = () => { cfg.phView = $("bfbPhView").value; save(); };
+  $("bfbPhCal0").onclick = () => calStep(0);
+  $("bfbPhCal1").onclick = () => calStep(1);
   $("bfbSrc").onchange = () => {
     if (st.stream) stopCam();
     stopPhone();

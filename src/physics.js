@@ -12,7 +12,7 @@ import { butter, filtfilt, lfilter, lfilterZi, movingAverage } from "./proc_dsp.
 
 const G_OPTS = { earth: 9.81, moon: 1.62, mars: 3.71 };
 
-export const SIMS = ["proj", "spring", "pend", "coll", "filt"];
+export const SIMS = ["proj", "spring", "pend", "multi", "coll", "filt", "robot"];
 
 /** Projectile without drag: range, peak and flight time for v (m/s), angle (deg), g. */
 export function projectile(v, deg, g, h0 = 0) {
@@ -24,6 +24,58 @@ export function projectile(v, deg, g, h0 = 0) {
 export function springInfo(m, k, b) {
   const wn = Math.sqrt(k / m);
   return { fn: wn / (2 * Math.PI), zeta: b / (2 * Math.sqrt(k * m)), T: 2 * Math.PI / wn };
+}
+/** N-link pendulum (equal point masses m, links l), angles from vertical: th'' from M th'' = f.
+ *  M_ij = (n - max(i,j)) cos(th_i - th_j); f_i = -sum_j (n - max(i,j)) sin(th_i - th_j) w_j^2 - (n - i) (g/l) sin th_i. */
+export function multiAcc(th, w, gl, damp = 0) {
+  const n = th.length, M = Array.from({ length: n }, () => new Float64Array(n + 1));
+  for (let i = 0; i < n; i++) {
+    let f = -(n - i) * gl * Math.sin(th[i]) - damp * w[i];
+    for (let j = 0; j < n; j++) { const c = n - Math.max(i, j), d = th[i] - th[j]; M[i][j] = c * Math.cos(d); f -= c * Math.sin(d) * w[j] * w[j]; }
+    M[i][n] = f;
+  }
+  for (let k = 0; k < n; k++) {                    // Gaussian elimination with partial pivoting
+    let p = k; for (let r = k + 1; r < n; r++) if (Math.abs(M[r][k]) > Math.abs(M[p][k])) p = r;
+    [M[k], M[p]] = [M[p], M[k]];
+    for (let r = k + 1; r < n; r++) { const q = M[r][k] / M[k][k]; for (let c = k; c <= n; c++) M[r][c] -= q * M[k][c]; }
+  }
+  const a = new Float64Array(n);
+  for (let k = n - 1; k >= 0; k--) { let v = M[k][n]; for (let c = k + 1; c < n; c++) v -= M[k][c] * a[c]; a[k] = v / M[k][k]; }
+  return a;
+}
+function multiRK4(st, dt, gl, damp) {
+  const n = st.th.length, add = (x, k, h) => x.map((v, i) => v + h * k[i]);
+  const k1t = st.w, k1w = multiAcc(st.th, st.w, gl, damp);
+  const k2t = add(st.w, k1w, dt / 2), k2w = multiAcc(add(st.th, k1t, dt / 2), k2t, gl, damp);
+  const k3t = add(st.w, k2w, dt / 2), k3w = multiAcc(add(st.th, k2t, dt / 2), k3t, gl, damp);
+  const k4t = add(st.w, k3w, dt), k4w = multiAcc(add(st.th, k3t, dt), k4t, gl, damp);
+  for (let i = 0; i < n; i++) {
+    st.th[i] += dt / 6 * (k1t[i] + 2 * k2t[i] + 2 * k3t[i] + k4t[i]);
+    st.w[i] += dt / 6 * (k1w[i] + 2 * k2w[i] + 2 * k3w[i] + k4w[i]);
+  }
+}
+/** Total energy per unit (m l^2): kinetic + potential (zero at the pivot height). */
+export function multiEnergy(th, w, gl) {
+  const n = th.length; let T = 0, V = 0;
+  for (let i = 0; i < n; i++) { V -= (n - i) * gl * Math.cos(th[i]); for (let j = 0; j < n; j++) T += 0.5 * (n - Math.max(i, j)) * Math.cos(th[i] - th[j]) * w[i] * w[j]; }
+  return T + V;
+}
+/** Two-link planar arm (point masses at the link ends, angles from the +x axis, q2 relative). */
+export function armIK(x, y, l1, l2, elbowUp = true) {
+  const c2 = Math.max(-1, Math.min(1, (x * x + y * y - l1 * l1 - l2 * l2) / (2 * l1 * l2)));
+  const q2 = (elbowUp ? 1 : -1) * Math.acos(c2);
+  return [Math.atan2(y, x) - Math.atan2(l2 * Math.sin(q2), l1 + l2 * Math.cos(q2)), q2];
+}
+export function armFK(q, l1, l2) {
+  const e = [l1 * Math.cos(q[0]), l1 * Math.sin(q[0])];
+  return [e, [e[0] + l2 * Math.cos(q[0] + q[1]), e[1] + l2 * Math.sin(q[0] + q[1])]];
+}
+function armDyn(q, w, tau, m1, m2, l1, l2, g) {
+  const c2 = Math.cos(q[1]), s2 = Math.sin(q[1]), h = m2 * l1 * l2 * s2;
+  const M11 = (m1 + m2) * l1 * l1 + m2 * l2 * l2 + 2 * m2 * l1 * l2 * c2, M12 = m2 * l2 * l2 + m2 * l1 * l2 * c2, M22 = m2 * l2 * l2;
+  const G1 = (m1 + m2) * g * l1 * Math.cos(q[0]) + m2 * g * l2 * Math.cos(q[0] + q[1]), G2 = m2 * g * l2 * Math.cos(q[0] + q[1]);
+  const r1 = tau[0] + h * (2 * w[0] * w[1] + w[1] * w[1]) - G1, r2 = tau[1] - h * w[0] * w[0] - G2, det = M11 * M22 - M12 * M12;
+  return [(M22 * r1 - M12 * r2) / det, (M11 * r2 - M12 * r1) / det, G1, G2];
 }
 /** 1D collision with restitution e: velocities after. */
 export function collide(m1, v1, m2, v2, e) {
@@ -39,12 +91,17 @@ export function initPhysics({ $, tr }) {
     spring: { m: 1, k: 40, b: 1, x0: 0.3 },
     pend: { L: 1, amp: 30, g: "earth" },
     coll: { m1: 2, v1: 3, m2: 1, v2: -1, e: 1 },
+    multi: { n: 3, amp: 120, damp: 0, ghost: 0.001, L: 2 },
+    robot: { kp: 60, kd: 10, grav: 1, comp: 1, mass: 1, tmax: 60, tx: 1.2, ty: 0.8 },
     filt: { f: 1, noise: 0.3, hf: 0.3, fc: 6, ord: 2, type: "zero" },
   };
   const SL = {
     proj: [["v", 1, 30, 0.5, "m/s", "ph_speed"], ["ang", 5, 85, 1, "°", "ph_angle"], ["drag", 0, 0.1, 0.005, "", "ph_drag"], ["h0", 0, 3, 0.1, "m", "ph_h0"]],
     spring: [["m", 0.2, 5, 0.1, "kg", "ph_mass"], ["k", 5, 200, 1, "N/m", "ph_stiff"], ["b", 0, 20, 0.1, "N·s/m", "ph_damp"], ["x0", 0.05, 0.5, 0.01, "m", "ph_x0"]],
     pend: [["L", 0.2, 3, 0.05, "m", "ph_len"], ["amp", 5, 170, 1, "°", "ph_amp"]],
+    multi: [["n", 1, 15, 1, "", "ph_links"], ["amp", 0, 180, 1, "°", "ph_amp"], ["L", 0.5, 4, 0.1, "m", "ph_totLen"], ["damp", 0, 0.5, 0.01, "", "ph_damp"], ["ghost", 0, 1, 0.001, "°", "ph_ghost"]],
+    robot: [["kp", 0, 200, 1, "N·m/rad", "ph_kp"], ["kd", 0, 40, 0.5, "N·m·s/rad", "ph_kd"], ["mass", 0.2, 5, 0.1, "kg", "ph_load"],
+            ["grav", 0, 1, 1, "", "ph_gravOn"], ["comp", 0, 1, 1, "", "ph_comp"], ["tmax", 5, 200, 5, "N·m", "ph_tmax"]],
     filt: [["f", 0.5, 5, 0.1, "Hz", "ph_sigF"], ["noise", 0, 1, 0.05, "", "ph_noise"], ["hf", 0, 1, 0.05, "", "ph_hf"], ["fc", 0.5, 45, 0.5, "Hz", "ph_fc"], ["ord", 1, 4, 1, "", "ph_ord"]],
     coll: [["m1", 0.5, 10, 0.5, "kg", "ph_m1"], ["v1", -5, 5, 0.5, "m/s", "ph_v1"], ["m2", 0.5, 10, 0.5, "kg", "ph_m2"], ["v2", -5, 5, 0.5, "m/s", "ph_v2"], ["e", 0, 1, 0.05, "", "ph_e"]],
   };
@@ -70,6 +127,11 @@ export function initPhysics({ $, tr }) {
     if (sim === "spring") st = { t: 0, x: p.x0, v: 0, hist: [] };
     if (sim === "pend") st = { t: 0, th: p.amp * Math.PI / 180, w: 0, hist: [], cross: [], prevW: 0 };
     if (sim === "filt") st = { t: 0, ...filtData(p) };
+    if (sim === "robot") st = { t: 0, q: [-0.3, 1.2], w: [0, 0], tau: [0, 0], path: [], err: [] };
+    if (sim === "multi") {
+      const mk = (off) => ({ th: Float64Array.from({ length: p.n }, (_, i) => (p.amp + (i === p.n - 1 ? off : 0)) * Math.PI / 180), w: new Float64Array(p.n) });
+      st = { t: 0, a: mk(0), b: p.ghost > 0 ? mk(p.ghost) : null, trail: [], E0: NaN };
+    }
     if (sim === "coll") st = { t: 0, x1: -1.2, x2: 0.6, v1: p.v1, v2: p.v2, hit: false, after: null };
     last = 0; draw();
   }
@@ -91,6 +153,17 @@ export function initPhysics({ $, tr }) {
       if (st.prevW > 0 && st.w <= 0) st.cross.push(st.t); st.prevW = st.w;   // turning points, one per period on this side
       if (!st.hist.length || st.t - st.hist[st.hist.length - 1][0] > 0.02) st.hist.push([st.t, st.th]);
       while (st.hist.length && st.t - st.hist[0][0] > 10) st.hist.shift();
+    } else if (sim === "robot") {
+      const l1 = 1, l2 = 0.8, qd = armIK(p.tx, p.ty, l1, l2), g = p.grav ? 9.81 : 0;
+      const G = armDyn(st.q, st.w, [0, 0], 1, p.mass, l1, l2, g).slice(2);
+      const lim = (v) => Math.max(-p.tmax, Math.min(p.tmax, v));
+      st.tau = [0, 1].map((i) => lim(p.kp * (qd[i] - st.q[i]) - p.kd * st.w[i] + (p.comp ? G[i] : 0)));
+      const a = armDyn(st.q, st.w, st.tau, 1, p.mass, l1, l2, g);
+      for (let i = 0; i < 2; i++) { st.w[i] += a[i] * dt; st.w[i] *= 0.9995; st.q[i] += st.w[i] * dt; }
+      st.t += dt;
+    } else if (sim === "multi") {
+      const gl = 9.81 / (p.L / p.n);
+      multiRK4(st.a, dt, gl, p.damp); if (st.b) multiRK4(st.b, dt, gl, p.damp); st.t += dt;
     } else if (sim === "filt") {
       st.t += dt; if (st.t > 1) { Object.assign(st, filtData(p)); st.t = 0; }   // new noise every second while playing
     } else if (sim === "coll") {
@@ -215,6 +288,47 @@ export function initPhysics({ $, tr }) {
       trace(c, st.hist, X, Yp, acc, 2); c.fillStyle = mut; c.fillText("θ(t)", px0 + 4, 16);
       const g = gOf(p.g), Ts = 2 * Math.PI * Math.sqrt(p.L / g), cr = st.cross, Tm = cr.length > 1 ? cr[cr.length - 1] - cr[cr.length - 2] : NaN;
       info([[tr("ph_Tsmall"), f2(Ts) + " s"], [tr("ph_Tsim"), f2(Tm) + " s"], [tr("ph_diff"), Number.isFinite(Tm) ? f2((Tm / Ts - 1) * 100, 1) + " %" : "–"]]);
+    } else if (sim === "robot") {
+      const l1 = 1, l2 = 0.8, sc = Math.min(W, H * 1.6) / 4.4, ox = W / 2, oy = H * 0.62, X = (x) => ox + x * sc, Y = (y) => oy - y * sc;
+      st.scale = { ox, oy, sc };
+      c.strokeStyle = line; c.setLineDash([3, 5]); c.beginPath(); c.arc(ox, oy, (l1 + l2) * sc, 0, 7); c.stroke(); c.beginPath(); c.arc(ox, oy, (l1 - l2) * sc, 0, 7); c.stroke(); c.setLineDash([]);
+      c.beginPath(); c.moveTo(0, oy + 30); c.lineTo(W, oy + 30); c.stroke();
+      const qd = armIK(p.tx, p.ty, l1, l2), [ed, td] = armFK(qd, l1, l2), [e, tip] = armFK(st.q, l1, l2);
+      c.strokeStyle = mut; c.setLineDash([6, 5]); c.lineWidth = 2; c.beginPath(); c.moveTo(ox, oy); c.lineTo(X(ed[0]), Y(ed[1])); c.lineTo(X(td[0]), Y(td[1])); c.stroke(); c.setLineDash([]);
+      st.path.push([tip[0], tip[1]]); if (st.path.length > 300) st.path.shift();
+      c.strokeStyle = "rgba(127,127,127,.4)"; c.lineWidth = 1; c.beginPath(); st.path.forEach(([a, b], i) => (i ? c.lineTo(X(a), Y(b)) : c.moveTo(X(a), Y(b)))); c.stroke();
+      c.fillStyle = ink; c.fillRect(ox - 22, oy, 44, 30);
+      c.lineCap = "round"; c.strokeStyle = acc; c.lineWidth = 12; c.beginPath(); c.moveTo(ox, oy); c.lineTo(X(e[0]), Y(e[1])); c.stroke();
+      c.strokeStyle = css("--muted"); c.lineWidth = 9; c.beginPath(); c.moveTo(X(e[0]), Y(e[1])); c.lineTo(X(tip[0]), Y(tip[1])); c.stroke();
+      for (const [a, b, r] of [[0, 0, 8], [e[0], e[1], 7], [tip[0], tip[1], 6 + 3 * p.mass]]) { c.fillStyle = ink; c.beginPath(); c.arc(X(a), Y(b), r, 0, 7); c.fill(); }
+      c.strokeStyle = "#e76f51"; c.lineWidth = 2; c.beginPath(); c.arc(X(p.tx), Y(p.ty), 9, 0, 7); c.moveTo(X(p.tx) - 13, Y(p.ty)); c.lineTo(X(p.tx) + 13, Y(p.ty)); c.moveTo(X(p.tx), Y(p.ty) - 13); c.lineTo(X(p.tx), Y(p.ty) + 13); c.stroke();
+      // end-effector frame: x axis along link 2, rotation matrix R(q1+q2)
+      const ang = st.q[0] + st.q[1], ca = Math.cos(ang), sa = Math.sin(ang);
+      c.strokeStyle = "#e76f51"; c.lineWidth = 2; c.beginPath(); c.moveTo(X(tip[0]), Y(tip[1])); c.lineTo(X(tip[0]) + 30 * ca, Y(tip[1]) - 30 * sa); c.stroke();
+      c.strokeStyle = "#7ee787"; c.beginPath(); c.moveTo(X(tip[0]), Y(tip[1])); c.lineTo(X(tip[0]) - 30 * sa, Y(tip[1]) - 30 * ca); c.stroke();
+      c.fillStyle = mut; c.fillText(tr("ph_robotTap"), 10, 16);
+      c.font = "12px ui-monospace, monospace"; c.fillStyle = ink;
+      c.fillText(`R(θ1+θ2) = [ ${f2(ca)} ${f2(-sa)} ]`, 10, H - 26); c.fillText(`            [ ${f2(sa)}  ${f2(ca)} ]`, 10, H - 10);
+      const deg = (r) => Math.round(r * 180 / Math.PI) + "°", err = Math.hypot(tip[0] - p.tx, tip[1] - p.ty);
+      info([[tr("ph_joints"), `θ1 ${deg(st.q[0])} · θ2 ${deg(st.q[1])}`], [tr("ph_target"), `θ1 ${deg(qd[0])} · θ2 ${deg(qd[1])}`],
+            [tr("ph_tipErr"), f2(err * 100, 1) + " cm"], [tr("ph_torque"), `${f2(st.tau[0], 1)} · ${f2(st.tau[1], 1)} N·m`]]);
+    } else if (sim === "multi") {
+      const l = p.L / p.n, sc = (Math.min(W, H * 2) * 0.45) / p.L, ox = W / 2, oy = H / 2;
+      const pts = (s2) => { const out = [[ox, oy]]; let x = ox, y = oy; for (const t of s2.th) { x += Math.sin(t) * l * sc; y += Math.cos(t) * l * sc; out.push([x, y]); } return out; };
+      c.strokeStyle = line; c.lineWidth = 2; c.beginPath(); c.moveTo(ox - 40, oy); c.lineTo(ox + 40, oy); c.stroke();
+      const A = pts(st.a), tip = A[A.length - 1];
+      st.trail.push(tip); if (st.trail.length > 400) st.trail.shift();
+      c.strokeStyle = "rgba(127,127,127,.35)"; c.lineWidth = 1; c.beginPath(); st.trail.forEach((q, i) => (i ? c.lineTo(...q) : c.moveTo(...q))); c.stroke();
+      if (st.b) { const B = pts(st.b); c.strokeStyle = "rgba(160,160,160,.45)"; c.lineWidth = 2; c.beginPath(); B.forEach((q, i) => (i ? c.lineTo(...q) : c.moveTo(...q))); c.stroke(); }
+      for (let i = 1; i < A.length; i++) {
+        c.strokeStyle = `hsl(${(i - 1) * 300 / Math.max(1, p.n - 1)}, 80%, 65%)`; c.lineWidth = 4; c.lineCap = "round";
+        c.beginPath(); c.moveTo(...A[i - 1]); c.lineTo(...A[i]); c.stroke();
+        c.fillStyle = ink; c.beginPath(); c.arc(A[i][0], A[i][1], 3.5, 0, 7); c.fill();
+      }
+      const gl = 9.81 / l, E = multiEnergy(st.a.th, st.a.w, gl); if (!Number.isFinite(st.E0)) st.E0 = E;
+      let dev = NaN; if (st.b) { dev = 0; for (let i = 0; i < p.n; i++) { const d = st.a.th[i] - st.b.th[i]; dev = Math.max(dev, Math.abs(Math.atan2(Math.sin(d), Math.cos(d)))); } }
+      info([[tr("ph_links"), String(p.n)], [tr("ph_time"), f2(st.t, 1) + " s"], [tr("ph_eDrift"), Number.isFinite(st.E0) && st.E0 !== 0 ? f2((E - st.E0) / Math.abs(st.E0) * 100, 2) + " %" : "–"],
+            [tr("ph_split"), st.b ? f2(dev * 180 / Math.PI, 1) + "°" : "–"]]);
     } else if (sim === "filt") {
       const n = st.raw.length, h1 = H * 0.66, X = (i) => 40 + (W - 50) * i / (n - 1), Y = (v) => h1 / 2 - v * (h1 / 2 - 12) / 2.2;
       c.strokeStyle = line; c.beginPath(); c.moveTo(40, Y(0)); c.lineTo(W, Y(0)); c.stroke();
@@ -265,6 +379,13 @@ export function initPhysics({ $, tr }) {
   }
   function select(s) { sim = s; play(false); renderTabs(); renderControls(); reset(); }
 
+  $("phCv").addEventListener("pointerdown", (e) => {
+    if (sim !== "robot" || !st || !st.scale) return;
+    const r = $("phCv").getBoundingClientRect(), { ox, oy, sc } = st.scale;
+    let x = (e.clientX - r.left - ox) / sc, y = (oy - (e.clientY - r.top)) / sc;
+    const d = Math.hypot(x, y), mx = 1.79, mn = 0.21; if (d > mx) { x *= mx / d; y *= mx / d; } if (d < mn && d > 0) { x *= mn / d; y *= mn / d; }
+    P.robot.tx = x; P.robot.ty = y; if (!running) play(true);
+  });
   tabs.addEventListener("click", (e) => { const b = e.target.closest("[data-sim]"); if (b) select(b.dataset.sim); });
   $("phCtl").addEventListener("input", (e) => {
     const k = e.target.dataset.pk; if (!k) return;

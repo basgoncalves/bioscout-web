@@ -188,7 +188,7 @@ export function mountAnalysis(root, { t, download }) {
     tab: "stats",
     rel: { mode: "discrete", table: null, type: "A-1", zero: false, sep: "-", idCol: "", result: null, session: "B" },
     stats: { table: null, kind: "descriptives", roles: {}, nonpar: true, result: null },
-    spm: { curves: [], cols: [], variable: "", Q: 101, pattern: "{subject}_{group}_{condition}", names: { A: "Group", B: "Condition" }, test: "", alpha: 0.05, two: true, perm: false, iters: 1000, mu: 0, ylabel: "", result: null, raw: [] },
+    spm: { curves: [], cols: [], variable: "", Q: 101, pattern: "{subject}_{group}_{condition}", filter: "", names: { A: "Group", B: "Condition" }, test: "", alpha: 0.05, two: true, perm: false, iters: 1000, mu: 0, ylabel: "", result: null, raw: [] },
     msg: "", busy: false,
   };
   const say = (m) => { st.msg = m; render(); };
@@ -660,6 +660,7 @@ print(t)
         <label class="ghost anSmall anFileBtn"><input type="file" id="anCurveTable" accept=".csv,.tsv,.txt,.xlsx" hidden>${L("addTable")}</label>
         ${n ? `<button type="button" class="ghost anSmall" id="anCurveClear">${L("clear")}</button>` : ""}
       </div>
+      <label class="anRole"><span>${L("fileFilter")}</span><input type="text" id="anCurveFilter" value="${esc(sp.filter)}" placeholder="*force*.sto" spellcheck="false"></label>
       <p class="note">${L("curvesIntro")}</p>
       ${n ? `<div class="anRoles">
         ${sp.cols.length ? `<label class="anRole"><span>${L("variable")}</span>${sel("anCurveVar", sp.cols.map((c) => [c, c]), sp.variable)}</label>` : ""}
@@ -716,7 +717,9 @@ print(t)
   }
 
   async function addCurveFiles(fileList) {
-    const sp = st.spm, files = [...fileList].filter((f) => /\.(csv|tsv|txt|mot|sto|trc|c3d|xlsx)$/i.test(f.name));
+    const sp = st.spm, re = globRe(sp.filter);
+    const files = [...fileList].filter((f) => /\.(csv|tsv|txt|mot|sto|trc|c3d|xlsx)$/i.test(f.name) && (!re || re.test(f.webkitRelativePath || f.name) || re.test(f.name)));
+    if (fileList.length && !files.length) { st.msg = L("noFileMatch", { f: sp.filter || "*" }); return; }
     let bad = 0;
     for (const f of files) {
       try {
@@ -732,6 +735,14 @@ print(t)
     if (!sp.cols.includes(sp.variable)) sp.variable = sp.cols[0] || "";
     applyPattern(); rebuildCurves();
     st.msg = bad ? L("filesSkipped", { n: bad }) : "";
+  }
+
+  /** "*force*.sto" or "force; .mot" -> a regex over the file path (no wildcard = "contains"). */
+  function globRe(f) {
+    const parts = String(f || "").split(/[;,]/).map((x) => x.trim()).filter(Boolean);
+    if (!parts.length) return null;
+    const one = (g) => (/[*?]/.test(g) ? "(^|/)" + g.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]") + "$" : g.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    return new RegExp(parts.map(one).join("|"), "i");
   }
 
   /** One table: rows are curves when it has label columns before the numbers, else columns are curves. */
@@ -980,6 +991,7 @@ meta = d[["file", "subject", "group", "condition", "covariate"]].fillna("")
       case "anNameA": sp.names.A = el.value || "Group"; render(); break;
       case "anNameB": sp.names.B = el.value || "Condition"; render(); break;
       case "anPattern": sp.pattern = el.value; break;
+      case "anCurveFilter": sp.filter = el.value.trim(); break;
       case "anSpmTest": sp.test = el.value; sp.result = null; render(); break;
       case "anSpmAlpha": sp.alpha = +el.value || 0.05; break;
       case "anSpmMu": sp.mu = +el.value || 0; break;
