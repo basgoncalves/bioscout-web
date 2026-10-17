@@ -116,7 +116,15 @@ and the pressure sensor (A0) are untouched.
 
 ### Parts
 - LCD1602 module (kit) — push its 16 pins into one row of the breadboard
-- 10 kΩ potentiometer (kit) — **contrast**; without it the screen looks blank
+- **Contrast on pin 3 (V0)** — without it the screen is plain blue or shows only boxes.
+  Drawn: a fixed **divider**, 1 kΩ from pin 3 → − rail and **4.7 kΩ** from pin 3 → + rail
+  (≈0.9 V). Still boxes behind the letters from the front → 2.2 kΩ to + (≈1.6 V);
+  text too faint → 10 kΩ to + (≈0.45 V). A resistor to − **alone** does nothing
+  useful (pin 3 draws no current, so it stays at 0 V = maximum contrast = all boxes).
+  The kit's blue resistors have **5 bands**: 1 kΩ brown-black-black-brown-brown,
+  4.7 kΩ yellow-violet-black-brown-brown, 10 kΩ brown-black-black-red-brown —
+  or read the label on the paper strip.
+- Or the 10 kΩ potentiometer (kit, B103) instead of the divider — adjustable:
   - The kit pot (black, "B103", push-on knob) has its 3 legs in a **triangle**
     (2 on one side, 1 on the other), not in a line as drawn, and its body covers
     the holes around it. Two easy ways:
@@ -135,7 +143,7 @@ and the pressure sensor (A0) are untouched.
 |---|---|---|---|
 | 1 | VSS | GND (− rail) | ground |
 | 2 | VDD | 5V (+ rail) | power |
-| 3 | V0 | **pot middle leg** | contrast; pot outer legs → 5V and GND |
+| 3 | V0 | **1 kΩ → GND and 4.7 kΩ → 5V** (or pot middle leg) | contrast ≈0.9 V; see Parts |
 | 4 | RS | **A1** | register select |
 | 5 | RW | GND | always write |
 | 6 | E | **A2** | enable |
@@ -172,15 +180,19 @@ void setup() { lcd.begin(16, 2); lcd.print("BioScout"); }
 ### Things to know
 - **4-digit display and LCD share pin 10** (digit D4 vs LCD D7): fit one or the
   other, not both. The LCD is the better choice — more information, fewer wires.
-- **First power-up:** you should see the backlight and, with the contrast pot
-  turned, a row of solid boxes on line 1 even before any code — that proves
-  power and contrast are right.
+- **First power-up:** with power and contrast right, line 1 shows solid boxes
+  before any code runs. After the sketch starts they are replaced by the text.
+- **Backlight on but plain blue, no boxes:** VSS (1) / VDD (2) not powered —
+  the backlight (15/16) has its own pins and lights anyway.
+- **Text only readable at an angle, boxes from the front:** contrast too high
+  (V0 too close to 0 V) — raise V0 (smaller resistor to +).
 
 ### LCD troubleshooting
 | Symptom | Check |
 |---|---|
 | No backlight | pin 15 → 220 Ω → 5V, pin 16 → GND |
-| Backlight, but nothing / all black boxes | turn the contrast pot (V0) slowly end to end |
+| Backlight, plain blue, no boxes | VSS (pin 1) → GND and VDD (pin 2) → 5V missing |
+| Text faint, or only at an angle / boxes behind it | adjust V0: resistor to + smaller (10k → 4.7k → 2.2k) or turn the pot |
 | Boxes on line 1 only, never text | RS/E/D4–D7 wiring, or RW (pin 5) not to GND |
 | Garbled characters | a D4–D7 wire swapped, or a loose header pin |
 
