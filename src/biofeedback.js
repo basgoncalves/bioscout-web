@@ -764,7 +764,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (!txt) return;                                // nothing set for this lamp: keep what is shown
     const msg = $("bfbLampMsg");
     if (msg) { msg.textContent = txt; msg.style.color = top >= 0 ? LVCOL[top] : "#fff"; }
-    if (st.active) lcdLampText(txt);
+    lcdLampText(txt);                                // the LCD follows as soon as a board is connected
   }
   async function lcdLampText(txt) {
     if (!st.writer) return;

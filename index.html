@@ -648,8 +648,8 @@ try {
   .bfbStage.noMirror video, .bfbStage.noMirror canvas { transform:none; }
   .bfbStage canvas.hidden { display:none; }
   .bfbStage { touch-action:none; }
-  .bfbLampMsg { position:absolute; left:0; right:0; bottom:64px; text-align:center; pointer-events:none;
-    font-size:clamp(28px,6vw,64px); font-weight:800; color:#fff; letter-spacing:.02em;
+  .bfbLampMsg { position:absolute; top:8px; right:120px; max-width:55%; text-align:right; pointer-events:none; z-index:2;
+    font-size:clamp(22px,3.6vw,40px); line-height:1.1; font-weight:800; color:#fff; letter-spacing:.02em;
     text-shadow:0 2px 6px rgba(0,0,0,.85), 0 0 2px #000; }
   .bfbLampMsg:empty { display:none; }
   .bfbHud { position:absolute; top:10px; left:12px; right:12px; display:flex; justify-content:space-between; align-items:center; pointer-events:none; }
@@ -2080,8 +2080,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 84;
-window.BUILD_AT = "2026-10-17 10:16";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 85;
+window.BUILD_AT = "2026-10-17 10:21";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

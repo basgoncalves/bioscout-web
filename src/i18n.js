@@ -472,7 +472,7 @@ const EN = {
   "bfb_anTitle": "Live inputs (A0–A5)",
   "bfb_lcdTitle": "Screen text (LCD 16×2)",
   "bfb_lampTxtTitle": "Text per lamp",
-  "bfb_lampTxtNote": "Shown on the video (and on the LCD while Activate is on) when that lamp's line is crossed, and kept until another line is crossed (e.g. \"Move up\", \"Stay\", \"Stop\"). Empty = keep what is shown.",
+  "bfb_lampTxtNote": "Shown on the video and on the LCD when that lamp's line is crossed, and kept until another line is crossed (e.g. \"Move up\", \"Stay\", \"Stop\"). Empty = keep what is shown.",
   "bfb_lampTxtNone": "No lamp lit",
   "bfb_lcdNote": "Up to 16 characters per line. Sent to the board when you press Enter or leave the box; it keeps the text after a power-off.",
   "bfb_lcdSend": "Show on screen",
