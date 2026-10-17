@@ -804,6 +804,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   $("bfbPulse").onchange = () => { cfg.pulse = Math.max(0, Math.min(10000, +$("bfbPulse").value || 0)); $("bfbPulse").value = cfg.pulse; save(); };
   /* Update board firmware: writes the bundled sketch (.hex, built from the
    * .ino in the repo) through this same port. Fixes "old sketch" for good. */
+  /* Flash progress / result, shown at the top AND next to the screen-text button (the user may be scrolled down there). */
+  const flashMsg = (m) => { $("bfbFlashNote").textContent = m; if (!$("bfbLcdFlash").classList.contains("hidden")) $("bfbLcdNote").textContent = m; };
+  /* The text inside an Intel HEX image (to read the firmware version it carries). */
+  const hexText = (hex) => { let o = ""; for (const l of hex.split(/\r?\n/)) if (l.slice(7, 9) === "00") for (let i = 9; i < l.length - 2; i += 2) o += String.fromCharCode(parseInt(l.slice(i, i + 2), 16)); return o; };
   function flashHint() { $("bfbFlashNote").textContent = tr("bfb_flashNeed"); $("bfbFlash").classList.add("pulse"); }
   /* LCD 1602 text (sketch v7): "W1:<text>" / "W2:<text>", 16 characters a
    * line, ASCII only (the LCD has no accents: "Übung" -> "Ubung"). The board
@@ -838,16 +842,17 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const port = st.port; if (!port) { $("bfbFlashNote").textContent = tr("bfb_flashConnect"); return; }
     $("bfbFlash").disabled = true; $("bfbFlash").classList.remove("pulse");
     try {
-      const hex = await (await fetch(new URL("../assets/arduino/biofeedback_lamp/biofeedback_lamp.hex", import.meta.url), { cache: "no-cache" })).text();
+      // "?check" makes the service worker go to the network: a cached older .hex would flash the old firmware again
+      const hex = await (await fetch(new URL("../assets/arduino/biofeedback_lamp/biofeedback_lamp.hex?check=" + Date.now(), import.meta.url), { cache: "no-store" })).text();
+      const hv = (/BIOSCOUT_LAMP_READY v(\d+)/.exec(hexText(hex)) || [])[1];
+      flashMsg(tr("bfb_flashing", { p: 0 }) + (hv ? ` (v${hv})` : ""));
       await closePort();
-      $("bfbFlashNote").textContent = tr("bfb_flashing", { p: 0 });
-      const r = await flashUno(port, hex, { onProgress: (f) => { $("bfbFlashNote").textContent = tr("bfb_flashing", { p: Math.round(f * 100) }); } });
-      $("bfbFlashNote").textContent = tr("bfb_flashDone", { kb: (r.bytes / 1024).toFixed(1) });
-      $("bfbLcdNote").textContent = tr("bfb_flashDone", { kb: (r.bytes / 1024).toFixed(1) });
+      const r = await flashUno(port, hex, { onProgress: (f) => flashMsg(tr("bfb_flashing", { p: Math.round(f * 100) })) });
+      flashMsg(tr("bfb_flashDone", { kb: (r.bytes / 1024).toFixed(1) }));
       await openPort(port);
       setTimeout(async () => { const P = cfg.pins || [13, 12, 11, 8, 7]; for (let i = 0; i < 3; i++) await writeLine(`P${i}:${P[i]}`); }, 2600);
     } catch (e) {
-      $("bfbFlashNote").textContent = tr("bfb_flashFail", { err: e.message });
+      flashMsg(tr("bfb_flashFail", { err: e.message }));
       try { await openPort(port); } catch { /* leave it */ }
     }
     $("bfbFlash").disabled = false;
