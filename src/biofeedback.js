@@ -223,10 +223,13 @@ export const AN_KEYS = [0, 1, 2, 3, 4, 5].map((i) => "an" + i);
 for (let i = 0; i < 6; i++) METRICS["an" + i] = { label: "bfb_mAn" + i, unit: "raw", max: 1023, an: i, f: () => AN_LIVE[i] };
 /* Running from the phone's accelerometer (src/phonemotion.js): cadence,
  * impact peak and step time, filled by the motion loop into PH_LIVE. */
-export const PH_LIVE = { cadence: NaN, impact: NaN, stepTime: NaN };
+export const PH_LIVE = { cadence: NaN, impact: NaN, stepTime: NaN, acc: NaN };
 METRICS.runCadence = { label: "bfb_m_runCad", unit: "spm", max: 220, phone: true, f: () => PH_LIVE.cadence };
 METRICS.runImpact = { label: "bfb_m_runImp", unit: "g", max: 6, phone: true, f: () => PH_LIVE.impact };
 METRICS.runStepTime = { label: "bfb_m_runStep", unit: "ms", max: 800, phone: true, f: () => PH_LIVE.stepTime };
+METRICS.accMag = { label: "bfb_m_acc", unit: "g", max: 4, phone: true, f: () => PH_LIVE.acc };
+/* With "Use phone accelerometer" these are the metrics, whatever the movement. */
+export const PHONE_KEYS = ["runCadence", "runImpact", "runStepTime", "accMag"];
 export const LOAD_KEYS = ["hipJCF", "kneeJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"];
 
 /* Movement presets: which metrics make sense and a starting threshold. */
@@ -252,7 +255,6 @@ export const MOVES = {
   plank:  { label: "bfb_mv_plank",  metrics: ["hipFlex", "neckFlex"], def: "hipFlex", thr: 15, dir: "above" },
   heelraise:{ label: "bfb_mv_heelraise", wt: true, metrics: ["ankleDF", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "ankleDF", thr: -15, dir: "below" },
   neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "headNod", "neckTilt", "headTurn", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
-  run:    { label: "bfb_mv_run", phone: true, metrics: ["runCadence", "runImpact", "runStepTime"], def: "runCadence", thr: 165, dir: "below" },
   free:   { label: "bfb_mv_free",   metrics: [], def: "kneeFlex", thr: 70, dir: "above" },
 };
 /* Free = every live metric once: a left/right pair is ONE entry (both bars),
@@ -500,8 +502,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const mv = MOVES[cfg.move] || MOVES.free;
     // Only time-varying metrics drive the lamp and the plot; per-jump / per-shot
     // values (jump height, release angles...) go to the table, one row each.
-    const live = mv.metrics.filter((k) => !METRICS[k].ev);
-    if (!live.includes(cfg.metric)) cfg.metric = live.includes(mv.def) ? mv.def : live[0];
+    const live = cfg.src === "phone" ? PHONE_KEYS : mv.metrics.filter((k) => !METRICS[k].ev);
+    if (!live.includes(cfg.metric)) cfg.metric = cfg.src === "phone" ? "runCadence" : live.includes(mv.def) ? mv.def : live[0];
     $("bfbMetric").innerHTML = live.map((k) => `<option value="${k}">${tr(METRICS[k].label)}</option>`).join("");
     $("bfbMetric").value = cfg.metric;
   }
@@ -1064,7 +1066,6 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * bars, plot and lamps 10 times a second. */
   const stepDet = makeStepDetector();
   async function startPhone() {
-    if (cfg.move !== "run") { $("bfbMove").value = "run"; pickMove("run"); }
     stepDet.reset(); ema = NaN;
     try { st.motionStop = await startMotion((t, a) => stepDet.push(t, a)); }
     catch (e) { st.motionStop = null; $("bfbCamNote").textContent = tr("bfb_motFail", { err: e.message }); renderSrc(); return; }
@@ -1073,11 +1074,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   function stopPhone() {
     if (st.motionStop) st.motionStop(); st.motionStop = null;
-    clearInterval(st.phT); st.phT = 0; Object.assign(PH_LIVE, { cadence: NaN, impact: NaN, stepTime: NaN });
+    clearInterval(st.phT); st.phT = 0; Object.assign(PH_LIVE, { cadence: NaN, impact: NaN, stepTime: NaN, acc: NaN });
   }
   function phoneTick() {
     const ts = performance.now(), v = stepDet.values(ts);
-    Object.assign(PH_LIVE, { cadence: v.cadence, impact: v.impact, stepTime: v.stepTime });
+    Object.assign(PH_LIVE, { cadence: v.cadence, impact: v.impact, stepTime: v.stepTime, acc: stepDet.level() });
     const val = (k) => METRICS[k].f() - ((cfg.zero && cfg.zero[k]) || 0);
     const x = val(cfg.metric);
     ema = Number.isFinite(x) ? (Number.isFinite(ema) ? ema + 0.35 * (x - ema) : x) : NaN;
@@ -1092,6 +1093,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   /* Phones and tablets have no screen capture at all (no getDisplayMedia):
    * the Screen source is not offered there instead of failing on press. */
+  if (!MOVES[cfg.move]) cfg.move = "squat";              // e.g. the short-lived "run" movement
   const canScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
   if (!canScreen) {
     const o = $("bfbSrc").querySelector('option[value="screen"]'); if (o) o.remove();
@@ -1104,6 +1106,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   };
   function renderSrc() {
     $("bfbFlip").classList.toggle("hidden", isScreen() || isPhone());
+    $("bfbUseCam").classList.toggle("on", !isPhone()); $("bfbUsePhone").classList.toggle("on", isPhone());
+    $("bfbSrcRow").classList.toggle("hidden", isPhone());
     $("bfbSrc").value = cfg.src;
     $("bfbArea").classList.toggle("hidden", !isScreen() || !st.stream);
     $("bfbAreaClear").classList.toggle("hidden", !isScreen() || !st.stream || !st.crop);
@@ -1112,12 +1116,19 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbSrcCv").classList.toggle("hidden", !(st.crop && !st.picking));
     $("bfbVideo").style.visibility = st.crop && !st.picking ? "hidden" : "";
   }
+  /* Use camera / Use phone accelerometer: chosen before starting, for any task.
+   * The phone gives its own metrics (cadence, impact, step time, acceleration). */
+  function useSource(src) {
+    if (st.stream) stopCam();
+    stopPhone();
+    cfg.src = src; save(); fillMetrics(); syncInputs(); renderSrc();
+  }
+  $("bfbUseCam").onclick = () => useSource(isScreen() ? "screen" : "camera");
+  $("bfbUsePhone").onclick = () => useSource("phone");
   $("bfbSrc").onchange = () => {
     if (st.stream) stopCam();
     stopPhone();
-    cfg.src = $("bfbSrc").value; save();
-    if (isPhone() && cfg.move !== "run") { $("bfbMove").value = "run"; pickMove("run"); }
-    renderSrc();
+    cfg.src = $("bfbSrc").value; save(); renderSrc();
   };
   /* Area picking: drag on the stage; coordinates mapped from the element to
    * video pixels through object-fit: contain (screen is never mirrored). */
@@ -1573,7 +1584,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const rec = { t0: null, samples: [], rows: {}, cyc: null };
     const EXC = { "°": 15, BW: 0.5, cm: 5, ms: 100, "m/s": 0.3, W: 200 };
   const mainKey = (mv) => (cfg.move === "free" ? cfg.metric : mv.def);
-  const liveKeys = (mv) => (cfg.move === "free" ? [cfg.metric, ...(cfg.extra || []).filter((k) => MOVES.free.metrics.includes(k))] : mv.metrics).filter((k) => METRICS[k] && !METRICS[k].ev);
+  const liveKeys = (mv) => (cfg.src === "phone" ? PHONE_KEYS : cfg.move === "free" ? [cfg.metric, ...(cfg.extra || []).filter((k) => MOVES.free.metrics.includes(k))] : mv.metrics).filter((k) => METRICS[k] && !METRICS[k].ev);
   function readAll(val, keys) {
     const o = {};
     for (const k of keys) {

@@ -648,6 +648,7 @@ try {
   .bfbStage.noMirror video, .bfbStage.noMirror canvas { transform:none; }
   .bfbStage canvas.hidden { display:none; }
   .bfbStage { touch-action:none; }
+  .bfbUseSrc button.on { background:var(--accent,#4fb3a0); color:#fff; border-color:transparent; }
   .bfbAnPickRow { display:flex; flex-wrap:wrap; gap:6px 14px; }
   .bfbAnPickRow label { display:inline-flex !important; flex-direction:row !important; align-items:center; gap:5px; }
   .bfbAnScale { width:4.2em !important; padding:2px 4px !important; min-height:0 !important; font-size:12px !important; }
@@ -1695,6 +1696,10 @@ try {
       </div>
 
       <h4 data-i18n="bfb_step3">3. Camera and go</h4>
+      <div class="row bfbRow bfbUseSrc">
+        <button type="button" class="ghost" id="bfbUseCam" data-i18n="bfb_useCam">Use camera</button>
+        <button type="button" class="ghost" id="bfbUsePhone" data-i18n="bfb_usePhone">Use phone accelerometer</button>
+      </div>
       <div class="bfbScale">
         <span class="bfbScaleSt" id="bfbScaleSt"></span>
         <button type="button" class="ghost bfbPinPick" id="bfbScaleGo" data-i18n="bfb_scaleGo">Scale to me</button>
@@ -1723,8 +1728,8 @@ try {
       <div class="row bfbRow bfbAnPick bfbAnPickRow" id="bfbAnPick2"></div></div>
       <p class="note" id="bfbHint"></p>
       <p class="note" id="bfbCamNote"></p>
-      <div class="row bfbRow">
-        <label><span data-i18n="bfb_src">Source</span><select id="bfbSrc"><option value="camera" data-i18n="bfb_srcCam">Camera</option><option value="screen" data-i18n="bfb_srcScr">Screen (video, call)</option><option value="phone" data-i18n="bfb_srcPhone">Phone motion (running)</option></select></label>
+      <div class="row bfbRow" id="bfbSrcRow">
+        <label><span data-i18n="bfb_src">Source</span><select id="bfbSrc"><option value="camera" data-i18n="bfb_srcCam">Camera</option><option value="screen" data-i18n="bfb_srcScr">Screen (video, call)</option></select></label>
         <button type="button" class="ghost hidden" id="bfbArea" data-i18n="bfb_area">Select area</button>
         <button type="button" class="ghost hidden" id="bfbAreaClear" data-i18n="bfb_areaClear">Whole screen</button>
       </div>
@@ -2086,8 +2091,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 88;
-window.BUILD_AT = "2026-10-17 10:42";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 89;
+window.BUILD_AT = "2026-10-17 10:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

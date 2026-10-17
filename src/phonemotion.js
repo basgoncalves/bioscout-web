@@ -35,6 +35,8 @@ export function makeStepDetector({ minGap = 240, floor = 1.25, maxGap = 2000 } =
       return step;
     },
     /** Current values at time t (ms): NaN when no steps for maxGap ms. */
+    /** Current low-passed |a| in g (the live acceleration). */
+    level() { return lp; },
     values(t) {
       if (!steps.length || t - steps[steps.length - 1].t > maxGap) return { cadence: NaN, impact: NaN, stepTime: NaN, steps: steps.length };
       const s = steps.slice(-7), gaps = [];
