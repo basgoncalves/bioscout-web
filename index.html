@@ -781,6 +781,8 @@ try {
   .bfbQuick tr { cursor:pointer; }
   .bfbQuick tr:hover td { background:color-mix(in srgb, var(--accent) 14%, transparent); }
   .bfbQuick tr.hit td { background:color-mix(in srgb, #ffd54a 18%, transparent); }
+  .bfbQuick tr[style*="--lv"] td { background:color-mix(in srgb, var(--lv) 30%, transparent); }
+  .bfbQuick tr[style*="--lv"] td:first-child { box-shadow:inset 4px 0 0 var(--lv); }
   .bfbLoadWrap.hidden { display:none; }
   .bfbLoadWrap .note { flex-basis:100%; margin:0; }
   .bfbTbl { margin:10px 0; }
@@ -1617,7 +1619,7 @@ try {
         <a href="./assets/arduino/biofeedback_lamp/biofeedback_lamp.ino" download data-i18n="bfb_sketch">Arduino sketch (.ino)</a>
       </div>
       <h4 style="margin:10px 0 4px" data-i18n="bfb_anTitle">Live inputs (A0–A5)</h4>
-      <p class="note" data-i18n="bfb_anNote">Tick the analog inputs to plot live (0–1023). An input with nothing connected floats and shows random values.</p>
+      <p class="note" data-i18n="bfb_anNote">Tick the analog inputs to plot live, in volts (0–5 V). An input with nothing connected floats and shows random values.</p>
       <div class="row bfbRow bfbAnPick" id="bfbAnPick"></div>
       <canvas id="bfbAnCv" class="bfbPlot" style="height:110px"></canvas>
       <h4 style="margin:10px 0 4px" data-i18n="bfb_lcdTitle">Screen text (LCD 16×2)</h4>
@@ -1712,8 +1714,6 @@ try {
           <input type="number" id="bfbThrN3" min="0" max="180" step="1" aria-label="Red threshold">
         </div>
       </div>
-      <div class="row bfbRow bfbThrNone"><label><span data-i18n="bfb_lampTxtNone">No lamp lit</span> <input class="bfbThrTxt" data-lamptxt="0" maxlength="16" spellcheck="false" autocomplete="off" data-i18n-placeholder="bfb_thrTxtPh" placeholder="Text on screen" aria-label="Text on screen"></label>
-        <span class="note" data-i18n="bfb_thrTxtNote">Text shown on the video and the LCD when that line is crossed; it stays until another line is crossed.</span></div>
 
       <h4 data-i18n="bfb_step3">3. Camera and go</h4>
       <div class="row bfbRow bfbUseSrc">
@@ -2117,8 +2117,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 97;
-window.BUILD_AT = "2026-10-17 12:41";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 98;
+window.BUILD_AT = "2026-10-17 13:56";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

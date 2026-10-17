@@ -219,6 +219,7 @@ for (const [k, lab] of [["hipJCF"], ["kneeJCF"], ["ankleJCF"], ["quadsF"], ["glu
 /* Arduino analog inputs A0-A5 as metrics (0-1023, "raw"), so a threshold can
  * watch a sensor. AN_LIVE is filled from the board's "AN ..." / "F ..." lines. */
 export const AN_LIVE = [NaN, NaN, NaN, NaN, NaN, NaN, NaN, NaN];   // 6 = ΔV across the fingers, 7 = pseudo-EMG
+export const AN_V = 5 / 1023;                          // Uno ADC: 0-1023 = 0-5 V
 export const AN_KEYS = [0, 1, 2, 3, 4, 5].map((i) => "an" + i);
 /* Two-finger "pseudo-EMG" on the chosen input (default A0): ΔV = 5 V − V(pin),
  * the drop across the skin between the red (+5 V) and blue (pin) wires; and an
@@ -227,7 +228,7 @@ export const AN_KEYS = [0, 1, 2, 3, 4, 5].map((i) => "an" + i);
  * is µV–mV and needs electrodes plus an instrumentation amplifier. */
 METRICS.anDv = { label: "bfb_mAnDv", unit: "V", max: 5, an: 6, f: () => AN_LIVE[6] };
 METRICS.anEmg = { label: "bfb_mAnEmg", unit: "mV", max: 1000, an: 7, f: () => AN_LIVE[7] };
-for (let i = 0; i < 6; i++) METRICS["an" + i] = { label: "bfb_mAn" + i, unit: "raw", max: 1023, an: i, f: () => AN_LIVE[i] };
+for (let i = 0; i < 6; i++) METRICS["an" + i] = { label: "bfb_mAn" + i, unit: "V", max: 5, an: i, f: () => AN_LIVE[i] };
 /* Running from the phone's accelerometer (src/phonemotion.js): cadence,
  * impact peak and step time, filled by the motion loop into PH_LIVE. */
 export const PH_LIVE = { cadence: NaN, impact: NaN, stepTime: NaN, acc: NaN };
@@ -700,7 +701,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   /* Scaling factor per input (Arduino window): value shown/used = raw 0-1023 x factor. */
   const anScale = (i) => { const f = +((cfg.anScale || [])[i]); return Number.isFinite(f) && f !== 0 ? f : 1; };
   function applyAnScale() {
-    for (let i = 0; i < 6; i++) { const m = METRICS["an" + i]; m.max = Math.round(1023 * Math.abs(anScale(i)) * 100) / 100; m.unit = anScale(i) === 1 ? "raw" : "×" + anScale(i); }
+    for (let i = 0; i < 6; i++) { const m = METRICS["an" + i]; m.max = Math.round(5 * Math.abs(anScale(i)) * 100) / 100; m.unit = anScale(i) === 1 ? "V" : "V×" + anScale(i); }
   }
   applyAnScale();
   function renderAnPick() {
@@ -745,7 +746,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
     const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
     const now = performance.now(); while (anHist.length && anHist[0].t < now - 10000) anHist.shift();
-    const ends = (cfg.an || []).length ? cfg.an.map((i) => 1023 * anScale(i)) : [1023];
+    const ends = (cfg.an || []).length ? cfg.an.map((i) => 5 * anScale(i)) : [5];
     const hi = Math.max(0, ...ends), lo = Math.min(0, ...ends), span = hi - lo || 1;
     const X = (t) => 30 + ((t - (now - 10000)) / 10000) * (W - 34), Y = (v) => 6 + (1 - (v - lo) / span) * (H - 16);
     const lab = (x) => String(Math.round(x * 100) / 100);
@@ -803,7 +804,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function onLine(ln) {
     const fm = /^F (\d+)$/.exec(ln);
     if (fm) {                                        // v4 board: A0 only, via its "S" stream
-      const v = [+fm[1] * anScale(0), NaN, NaN, NaN, NaN, NaN]; AN_LIVE[0] = v[0]; anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
+      const v = [+fm[1] * AN_V * anScale(0), NaN, NaN, NaN, NaN, NaN]; AN_LIVE[0] = v[0]; anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
       for (const el of document.querySelectorAll('[data-anv="0"]')) el.textContent = Math.round(v[0] * 100) / 100;
       return true;
     }
@@ -811,7 +812,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (ln.startsWith("AN ")) {
       const v = ln.slice(3).split(",").map(Number); if (v.length !== 6) return true;
       emgStep(v); lcdVolt(v);
-      v.forEach((x, i) => { v[i] = x * anScale(i); AN_LIVE[i] = v[i]; }); anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
+      v.forEach((x, i) => { v[i] = x * AN_V * anScale(i); AN_LIVE[i] = v[i]; });   // volts (0-5 V) x factor anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
       for (const i of cfg.an || []) for (const el of document.querySelectorAll(`[data-anv="${i}"]`)) el.textContent = Math.round(v[i] * 100) / 100;
       return true;                                   // not logged: 25 lines a second
     }
@@ -1144,7 +1145,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     try {
       st.motionStop = await startMotion((t, a, xyz) => {
         const sp = stepDet.push(t, a); if (sp) { stepTs.push(sp.t); if (stepTs.length > 20) stepTs.shift(); }
-        accBuf.push({ t, a, x: xyz[0], y: xyz[1], z: xyz[2] }); while (accBuf.length && t - accBuf[0].t > 6000) accBuf.shift();
+        const [x, y, z] = Array.isArray(xyz) ? xyz : [NaN, NaN, NaN];   // an older cached phonemotion.js passes no axes
+        accBuf.push({ t, a, x, y, z }); while (accBuf.length && t - accBuf[0].t > 6000) accBuf.shift();
       });
     }
     catch (e) { st.motionStop = null; $("bfbCamNote").textContent = tr("bfb_motFail", { err: e.message }); renderSrc(); return; }
@@ -1197,15 +1199,15 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     c.fillStyle = "#e6edf3"; c.beginPath(); c.arc(head[0], head[1], 0.24 * s, 0, 7); c.fill();
     leg(0, "#58a6ff"); arm(Math.PI, "#58a6ff");
     c.fillStyle = "#8b949e"; c.font = "12px system-ui"; c.textAlign = "left";
-    c.fillText(tr(moving ? (run ? "bfb_motRun" : "bfb_motWalk") : "bfb_motIdle"), 10, 18);
-    c.fillText(tr("bfb_motEst"), 10, 34);
+    c.fillText(tr(moving ? (run ? "bfb_motRun" : "bfb_motWalk") : "bfb_motIdle"), 10, H - 52);   // bottom left: the value HUD is top left
+    c.fillText(tr("bfb_motEst"), 10, H - 36);
   }
   function drawAcc(ts) {
     const [c, W, H] = fitCv($("bfbAccCv"));
     c.clearRect(0, 0, W, H);
     const span = 6000, X = (t) => 36 + (W - 44) * (1 - (ts - t) / span);
     let lo = -1.5, hi = 1.5;
-    for (const p of accBuf) { lo = Math.min(lo, p.x, p.y, p.z); hi = Math.max(hi, p.a); }
+    for (const p of accBuf) { for (const v of [p.x, p.y, p.z, p.a]) if (Number.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }
     lo = Math.floor(lo); hi = Math.ceil(hi);
     const Y = (v) => 8 + (H - 22) * (1 - (v - lo) / (hi - lo));
     c.strokeStyle = "rgba(127,127,127,.25)"; c.fillStyle = "#8b949e"; c.font = "10px system-ui"; c.lineWidth = 1;
@@ -1318,7 +1320,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     return { el: cv, w: cv.width, h: cv.height };
   }
   function stopCam() {
-    window.cancelAnimationFrame(st.raf); st.raf = 0;
+    window.cancelAnimationFrame(st.raf); st.raf = 0; clearTimeout(st.bgT); keepAlive(false);
     if (st.stream) st.stream.getTracks().forEach((t) => t.stop());
     st.stream = null;
   }
@@ -1563,8 +1565,29 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     };
     tick();
   };
+  /* Keep going when another window covers the browser or the tab is in the
+   * background: rAF stops there, so the loop falls back to a timer, and a
+   * silent audio node keeps the browser from throttling that timer to 1 per
+   * second. (A phone suspends the whole page when another app is in front;
+   * no web page can record there.) */
+  const nextFrame = () => {
+    if (document.hidden) { clearTimeout(st.bgT); st.bgT = setTimeout(frame, 40); }
+    else st.raf = requestAnimationFrame(frame);
+  };
+  function keepAlive(on) {
+    try {
+      if (on && !st.ka && actx) { const o = actx.createOscillator(), g = actx.createGain(); g.gain.value = 0.0001; o.connect(g).connect(actx.destination); o.start(); st.ka = o; actx.resume(); }
+      if (!on && st.ka) { st.ka.stop(); st.ka = null; }
+    } catch { /* no audio */ }
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (!st.stream) return;
+    keepAlive(document.hidden);
+    if (document.hidden) { window.cancelAnimationFrame(st.raf); nextFrame(); }
+    else { clearTimeout(st.bgT); window.cancelAnimationFrame(st.raf); st.raf = requestAnimationFrame(frame); }
+  });
   function frame() {
-    st.raf = requestAnimationFrame(frame);
+    nextFrame();
     const v = $("bfbVideo"); if (!st.lm || v.readyState < 2) return;
     let ts = performance.now(); if (ts <= st.lastTs) ts = st.lastTs + 1; st.lastTs = ts;
     const cv = $("bfbCanvas"), ctx = cv.getContext("2d");
@@ -1806,6 +1829,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const p = METRICS[c.key];
     const main = p.pair ? [row[c.key + "_L"], row[c.key + "_R"]].filter(Number.isFinite) : [row[c.key]];
     row.hit = main.some((v) => meets(v));
+    // highest lamp this rep reached (0 = none): the quick table colours the rep with it
+    row.lv = Math.max(0, ...main.map((v) => thrs().filter((t) => Number.isFinite(t) && (cfg.dir === "above" ? v > t : v < t)).length));
     pushRow(cfg.move, row);
   }
   function recordEvent(vals) {
@@ -2015,7 +2040,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       return METRICS[k].pair ? `${cell(r[k + "_L"], u)} / ${cell(r[k + "_R"], u)}` : cell(r[k], u) + " " + u;
     };
     const body = rows.map((r, i) => [r, i]).reverse().map(([r, i]) =>
-      `<tr data-move="${move}" data-row="${i}" class="${r.hit ? "hit" : ""}" title="${esc(tr("bfb_repOpen"))}"><td>${i + 1}</td><td>${val(r)}</td></tr>`).join("");
+      `<tr data-move="${move}" data-row="${i}" class="${r.hit ? "hit" : ""}" style="${r.lv > 0 ? `--lv:${LVCOL[r.lv - 1]}` : ""}" title="${esc(tr("bfb_repOpen"))}"><td>${i + 1}</td><td>${val(r)}</td></tr>`).join("");
     host.innerHTML = `<div class="qh"><span>${esc(tr(MOVES[move].label))}</span><b>${rows.length}</b></div>
       <select aria-label="${esc(tr("bfb_quickCol"))}">${opts.map(([v, l]) => `<option value="${v}"${v === pick ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
       <div class="qs"><table><tbody>${body}</tbody></table></div>`;
