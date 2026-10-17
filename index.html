@@ -1994,6 +1994,7 @@ try {
 
   <div class="card hidden" id="trainingCard"></div>
   <div class="card hidden" id="results"></div>
+  <div class="card hidden" id="mpResults"></div>
   <!-- Only for the take just analysed: its stills and video are in memory. -->
   <button class="hidden" id="shareSetBtn" style="margin:0 0 14px" data-i18n="shareSet">Share this set</button>
   </section>
@@ -2117,8 +2118,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 98;
-window.BUILD_AT = "2026-10-17 13:56";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 99;
+window.BUILD_AT = "2026-10-17 14:50";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2221,7 +2222,8 @@ import { collectCups } from "./src/water.js";
 import { groupFriends, relationTo, searchTerm } from "./src/friends.js";
 import { foreperiod, classify as rtClassify, summarise as rtSummarise,
          reactionTrend, sequence, GAMES, GAME_IDS, gameOf } from "./src/reaction.js";
-import { SPORT_IDS, allowedIn, sportActivities } from "./src/sports.js";
+import { SPORT_IDS, allowedIn, sportActivities, MULTI_PLAYER_SPORTS } from "./src/sports.js";
+import { createMultiTracker, MAX_PLAYERS } from "./src/multiplayer.js";
 import { makeBallTracker, ballAfterStrokes, bodyBox, strokeSummary } from "./src/balltrack.js";
 import { loadSpec as loadSimSpec, simHTML, simWire } from "./src/simtools.js";
 import { makeLocalClient } from "./src/localengine.js";
@@ -2293,11 +2295,11 @@ async function loadMediaPipe() {
  * sessions -- and that rejection used to take the whole analysis down without
  * a word (Bas, 2026-09-19). CPU is slower and complete; a slow analysis beats
  * a page that stops. */
-async function makeLandmarker() {
+async function makeLandmarker(numPoses = 1) {
   const fileset = await FilesetResolver.forVisionTasks("./assets/vendor/wasm");
   const opts = (delegate) => ({
     baseOptions: { modelAssetPath: "assets/pose_landmarker_full.task", delegate },
-    runningMode: "VIDEO", numPoses: 1,
+    runningMode: "VIDEO", numPoses,
     minPoseDetectionConfidence: 0.3, minPosePresenceConfidence: 0.3,
     minTrackingConfidence: 0.3,
   });
@@ -2422,6 +2424,21 @@ const bar = (frac) => {
 
 document.addEventListener("click", (e) => { if (e.target && e.target.id === "cancelAnalysis") cancelVideoAnalysis(); });
 let landmarker = null, stream = null, running = false, recording = false;
+/* Padel and tennis sessions: up to four players in one picture
+ * (src/multiplayer.js). A second model asked for four bodies, built the first
+ * time such a session opens the camera; the single-body one stays for the rest. */
+let multiLM = null, multiOn = false, multiLoading = false;
+const mtrack = createMultiTracker();
+function syncMulti() {
+  const sess = getSession();
+  multiOn = !!sess && MULTI_PLAYER_SPORTS.includes(sess.sport) && !assessStep;
+  if (multiOn && !multiLM && !multiLoading && PoseLandmarker) {
+    multiLoading = true;
+    makeLandmarker(MAX_PLAYERS).then((m) => { multiLM = m; }).catch((e) => console.warn("multi-player model failed:", e))
+      .finally(() => { multiLoading = false; });
+  }
+  if (!multiOn) mtrack.reset();
+}
 let muscleJoints = null;   // { muscleJoints: {name:[joints]}, byJoint: {joint:[names]} }
 let avatar = null, avatarBusy = false;
 let recorder = null, videoChunks = [], videoBlob = null;
@@ -8211,6 +8228,7 @@ async function listLenses() {
 }
 
 async function startCamera() {
+  syncMulti();
   if (!window.isSecureContext) {
     say(tr("sayNeedsHttps"), true);
     return;
@@ -8299,7 +8317,16 @@ function loop(now, meta) {
     if (due) {
       lastTs = ts;
       lastDetect = ts;
-      const res = landmarker.detectForVideo(video, ts);
+      const multi = multiOn && multiLM;
+      const res = (multi ? multiLM : landmarker).detectForVideo(video, ts);
+      if (multi) {
+        // Player 1 goes first, so everything that reads one body (the take,
+        // the stroke analysis, the avatar) follows the same person throughout.
+        const ps = mtrack.update(res.landmarks, ts, video.videoWidth, video.videoHeight);
+        res.players = ps;
+        const p1 = ps.find((p) => p.id === 1);
+        if (p1) res.landmarks = [p1.lm, ...(res.landmarks || []).filter((l) => l !== p1.lm)];
+      }
       draw(res);
       if (avatar && avatar.setName) {
         avatar.update(res.landmarks?.[0], res.worldLandmarks?.[0],
@@ -8416,6 +8443,67 @@ function draw(res) {
   for (const p of lm) {
     ctx.beginPath(); ctx.arc(X(p), Y(p), Math.max(2.5, w / 330), 0, 7); ctx.fill();
   }
+  if (res.players) drawPlayers(res.players, X, Y, w);
+}
+
+/* Each tracked player in their own colour, with a label over the head:
+ * number, speed now, strokes so far. Player 1 was drawn above in blue. */
+function drawPlayers(ps, X, Y, w) {
+  const fs = Math.max(12, Math.round(w / 55));
+  ctx.font = `600 ${fs}px system-ui, sans-serif`;
+  for (const p of ps) {
+    const lm = p.lm;
+    if (p.id !== 1) {
+      ctx.strokeStyle = p.colour; ctx.lineWidth = Math.max(2, w / 260);
+      for (const [a, b] of BONES) {
+        if (!lm[a] || !lm[b]) continue;
+        ctx.beginPath(); ctx.moveTo(X(lm[a]), Y(lm[a])); ctx.lineTo(X(lm[b]), Y(lm[b])); ctx.stroke();
+      }
+    }
+    const top = Math.min(...lm.map((q) => Y(q))), xs = lm.map((q) => X(q));
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const txt = `P${p.id} · ${p.vel.toFixed(1)} m/s · ${p.strokes}`;
+    const tw = ctx.measureText(txt).width + fs * 0.8;
+    ctx.fillStyle = p.colour;
+    ctx.fillRect(cx - tw / 2, top - fs * 2, tw, fs * 1.5);
+    ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(txt, cx, top - fs * 1.25);
+  }
+  ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
+  $("hudRight").textContent = tr("mpHudPlayers", { n: ps.length });
+}
+
+/* After a padel / tennis take: one row of metrics per player. */
+function showMultiResults() {
+  const rows = mtrack.summary();
+  const box = $("mpResults");
+  if (!rows.length) { box.classList.add("hidden"); return; }
+  const f1 = (v) => v.toFixed(1), f2 = (v) => v.toFixed(2);
+  const zone = (z) => {
+    const cells = z.map((v) => `<span style="display:inline-block;width:12px;height:12px;margin:1px;border-radius:2px;background:color-mix(in srgb, var(--accent, #5b93f5) ${Math.round(v * 100)}%, transparent);outline:1px solid var(--line, #ccc)"></span>`);
+    return `<span style="display:inline-grid;grid-template-columns:repeat(3,auto)">${cells.join("")}</span>`;
+  };
+  box.innerHTML = `<h2>${esc(tr("mpTitle"))}</h2>
+    <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+      <th>${esc(tr("mpPlayer"))}</th><th>${esc(tr("mpTime"))}</th><th>${esc(tr("mpDistance"))}</th>
+      <th>${esc(tr("mpMeanSpeed"))}</th><th>${esc(tr("mpMaxSpeed"))}</th><th>${esc(tr("mpSprints"))}</th>
+      <th>${esc(tr("mpStrokes"))}</th><th>${esc(tr("mpForeBack"))}</th><th>${esc(tr("mpHandSpeed"))}</th><th>${esc(tr("mpZones"))}</th>
+    </tr></thead><tbody>${rows.map((r) => `<tr>
+      <td><b style="color:${r.colour}">P${r.id}</b></td><td>${f1(r.time_s)} s</td><td>${f1(r.distance_m)} m</td>
+      <td>${f2(r.mean_speed_ms)} m/s</td><td>${f2(r.max_speed_ms)} m/s</td><td>${r.sprints}</td>
+      <td>${r.strokes}</td><td>${r.forehand} / ${r.backhand}</td><td>${f1(r.max_hand_speed_ms)} m/s</td><td>${zone(r.zones)}</td>
+    </tr>`).join("")}</tbody></table></div>
+    <p class="note">${esc(tr("mpNote"))}</p>
+    <button type="button" class="ghost" id="mpCsv">${esc(tr("mpCsv"))}</button>`;
+  box.classList.remove("hidden");
+  $("mpCsv").onclick = () => {
+    const head = "player,time_s,distance_m,mean_speed_ms,max_speed_ms,sprints,strokes,forehand,backhand,max_hand_speed_ms,hand";
+    const csv = [head, ...rows.map((r) => [r.id, f2(r.time_s), f2(r.distance_m), f2(r.mean_speed_ms), f2(r.max_speed_ms),
+      r.sprints, r.strokes, r.forehand, r.backhand, f2(r.max_hand_speed_ms), r.hand].join(","))].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = "players.csv"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
 }
 
 // --- recording -------------------------------------------------------------
@@ -8497,6 +8585,7 @@ $("recBtn").onclick = () => {
       }
     }
     frames = []; pf0 = null; recording = true;
+    syncMulti(); mtrack.reset(); $("mpResults").classList.add("hidden");
     ballTracker.reset();
     leadDone = false;
     framing.reset();
@@ -8570,6 +8659,7 @@ $("recBtn").onclick = () => {
     liveHudStop();
     $("recBtn").textContent = assessStep ? tr("assessStartTest") : tr("startRecording");
     $("hudRight").textContent = "";
+    if (multiOn) showMultiResults();
     if (recorder && recorder.state !== "inactive") {
       const take = takeNo;
       recorder.onstop = () => {

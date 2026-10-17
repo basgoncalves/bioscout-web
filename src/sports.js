@@ -15,7 +15,11 @@
 export const SPORTS = {
   strength: ["squat", "slsquat", "pullup", "dip", "pushup", "kickback", "heelraise", "cmj", "sj", "neck",
     "deadlift", "lunge", "bridge", "ohpress", "curl", "row", "raise", "plank", "sideplank", "wallsit"],
-  basketball: ["jumpshot", "stroke", "kick", "cmj", "sj", "sidestep", "run", "walk"],
+  basketball: ["jumpshot", "kick", "cmj", "sj", "sidestep", "run", "walk"],
+  /* Racket sports, one each (Bas, 2026-10-17). Both track up to four players
+   * in the picture (src/multiplayer.js) -- doubles is the normal game. */
+  padel: ["stroke", "sidestep", "run", "cmj", "walk"],
+  tennis: ["stroke", "sidestep", "run", "cmj", "walk"],
   /* The two scripted sessions (protocol.js). Their movement lists are what
    * the session may contain: the circuit's three for the first, anything the
    * app counts rep for rep for the second. The recorder picks the movement
@@ -41,3 +45,6 @@ export function allowedIn(sport, activity) {
   const list = SPORTS[sport];
   return !list || list.includes(activity);
 }
+
+/** Sports whose recorder follows up to four players at once. */
+export const MULTI_PLAYER_SPORTS = ["padel", "tennis"];

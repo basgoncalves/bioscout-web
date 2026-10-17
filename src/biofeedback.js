@@ -252,7 +252,8 @@ export const MOVES = {
   walk:   { label: "bfb_mv_walk",   metrics: ["kneeFlex", "hipFlex", "ankleDF", "trunkLean", "runCadence", "runImpact", "runStepTime"], def: "kneeFlex", thr: 60, dir: "above" },
   shot:   { label: "bfb_mv_shot",   metrics: ["shotElbow", "shotShoulder", "shotKnee", "shotTrunk", "shotJump", "elbowFlex", "shAbd", "kneeFlex", "trunkLean"], def: "elbowFlex", thr: 20, dir: "below" },
   kick:   { label: "bfb_mv_kick",   metrics: ["hipFlex", "kneeFlex", "trunkLean", "ankleDF", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "hipFlex", thr: 60, dir: "above" },
-  stroke: { label: "bfb_mv_stroke", metrics: ["shAbd", "elbowFlex", "trunkLean", "kneeFlex", "hipFlex"], def: "shAbd", thr: 90, dir: "above" },
+  padel:  { label: "bfb_mv_padel", metrics: ["shAbd", "elbowFlex", "trunkLean", "kneeFlex", "hipFlex"], def: "shAbd", thr: 90, dir: "above" },
+  tennis: { label: "bfb_mv_tennis", metrics: ["shAbd", "elbowFlex", "trunkLean", "kneeFlex", "hipFlex"], def: "shAbd", thr: 90, dir: "above" },
   lunge:  { label: "bfb_mv_lunge", wt: true, metrics: ["kneeFlex", "valgus", "hipFlex", "trunkLean", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "kneeFlex", thr: 80, dir: "above" },
   hinge:  { label: "bfb_mv_hinge", wt: true, metrics: ["trunkLean", "hipFlex", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "trunkLean", thr: 45, dir: "above" },
   pushup: { label: "bfb_mv_pushup", metrics: ["elbowFlex", "hipFlex"], def: "elbowFlex", thr: 90, dir: "above" },
@@ -321,16 +322,16 @@ const PULSE_MS = 1500;
  * glutes, shoulders and triceps), so tapping calves offers it too. */
 export const REGION_MOVES = {
   neck: ["neck"],
-  shoulders: ["ohpress", "raise", "pushup", "dip", "shot", "stroke"],
+  shoulders: ["ohpress", "raise", "pushup", "dip", "shot", "padel", "tennis"],
   chest: ["pushup", "dip"],
-  back: ["deadlift", "pullup", "row", "hinge", "stroke"],
+  back: ["deadlift", "pullup", "row", "hinge", "padel", "tennis"],
   biceps: ["curl", "pullup", "row"],
   triceps: ["pushup", "dip", "ohpress", "shot"],
-  core: ["plank", "deadlift", "bridge", "hinge", "stroke", "kick"],
-  glutes: ["squat", "deadlift", "slsquat", "sj", "cmj", "shot", "kick", "lunge", "bridge", "hinge"],
-  quads: ["squat", "slsquat", "sj", "cmj", "shot", "kick", "lunge"],
-  hamstrings: ["deadlift", "hinge", "bridge", "cmj", "sj", "kick"],
-  calves: ["heelraise", "sj", "cmj", "shot"],
+  core: ["plank", "deadlift", "bridge", "hinge", "padel", "tennis", "kick"],
+  glutes: ["squat", "deadlift", "slsquat", "sj", "cmj", "run", "walk", "shot", "kick", "lunge", "bridge", "hinge"],
+  quads: ["squat", "slsquat", "sj", "cmj", "run", "walk", "shot", "kick", "lunge"],
+  hamstrings: ["deadlift", "hinge", "bridge", "cmj", "sj", "run", "walk", "kick"],
+  calves: ["heelraise", "sj", "cmj", "run", "walk", "shot"],
 };
 export const regionsOfMove = (mv) => REGIONS.filter((r) => (REGION_MOVES[r] || []).includes(mv));
 
@@ -1586,6 +1587,20 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (document.hidden) { window.cancelAnimationFrame(st.raf); nextFrame(); }
     else { clearTimeout(st.bgT); window.cancelAnimationFrame(st.raf); st.raf = requestAnimationFrame(frame); }
   });
+  /* Live forces: time-based low-pass (~0.15 s) per value, on top of the
+   * display smoothing, so the force numbers, bars and lamps stop jittering. */
+  const ldSm = {}; let ldT = 0;
+  function smoothLoads(ld, ts) {
+    if (!ld) return ld;
+    const k = 1 - Math.exp(-Math.max(1, ts - ldT) / 150); ldT = ts;
+    const out = { ...ld };
+    for (const key of Object.keys(ld)) {
+      const x = ld[key]; if (typeof x !== "number") continue;
+      if (!Number.isFinite(x)) { out[key] = x; continue; }
+      const p = ldSm[key]; out[key] = ldSm[key] = Number.isFinite(p) ? p + k * (x - p) : x;
+    }
+    return out;
+  }
   function frame() {
     nextFrame();
     const v = $("bfbVideo"); if (!st.lm || v.readyState < 2) return;
@@ -1652,6 +1667,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       if (!loadEst.ready()) loadEst.load().then(() => { $("bfbCamNote").textContent = ""; })
         .catch(() => { $("bfbCamNote").textContent = tr("bfb_loadFail"); });
       ld = loadEst.push(ts, w, cfg.mass || 75, loadOf(cfg.move), cfg.height || 1.75, wtOf(cfg.move));
+      ld = smoothLoads(ld, ts);
       if (!ld) $("bfbCamNote").textContent = tr("bfb_loadLoading");
     }
     let bb = null;
