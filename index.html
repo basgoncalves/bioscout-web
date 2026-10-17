@@ -648,6 +648,10 @@ try {
   .bfbStage.noMirror video, .bfbStage.noMirror canvas { transform:none; }
   .bfbStage canvas.hidden { display:none; }
   .bfbStage { touch-action:none; }
+  .bfbLampMsg { position:absolute; left:0; right:0; bottom:64px; text-align:center; pointer-events:none;
+    font-size:clamp(28px,6vw,64px); font-weight:800; color:#fff; letter-spacing:.02em;
+    text-shadow:0 2px 6px rgba(0,0,0,.85), 0 0 2px #000; }
+  .bfbLampMsg:empty { display:none; }
   .bfbHud { position:absolute; top:10px; left:12px; right:12px; display:flex; justify-content:space-between; align-items:center; pointer-events:none; }
   #bfbValue { font:700 42px/1 system-ui, sans-serif; color:#fff; text-shadow:0 2px 6px #000; }
   #bfbValue.hit { color:#ffd54a; }
@@ -1704,6 +1708,7 @@ try {
         <canvas id="bfbCanvas"></canvas>
         <div class="bfbCamBar"><button type="button" class="bfbCamCtl" id="bfbCamBtn" data-i18n="bfb_camStart">Start camera</button><button type="button" class="bfbCamCtl" id="bfbFlip" data-i18n="bfb_flip">Flip camera</button><button type="button" class="bfbCamCtl" id="bfbZero" data-i18n="bfb_zero">Zero (neutral posture)</button><button type="button" class="bfbCamCtl" id="bfbZeroReset" data-i18n="bfb_zeroReset">Clear zero</button></div>
         <div class="bfbGuide hidden" id="bfbGuide"><b id="bfbGuideTxt"></b><div class="bfbGuideBar"><i id="bfbGuideFill"></i></div></div>
+        <div class="bfbLampMsg" id="bfbLampMsg" aria-live="polite"></div>
         <div class="bfbHud"><span id="bfbValue">–</span><span class="bfbDots"><span id="bfbLamp" class="bfbLamp sm l1" title="Yellow"></span><span id="bfbLamp2" class="bfbLamp sm l2" title="Orange"></span><span id="bfbLamp3" class="bfbLamp sm l3" title="Red"></span></span></div>
       </div>
       <aside id="bfbQuick" class="bfbQuick" aria-label="Trials"></aside>
@@ -2076,8 +2081,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 82;
-window.BUILD_AT = "2026-10-17 09:56";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 83;
+window.BUILD_AT = "2026-10-17 10:11";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

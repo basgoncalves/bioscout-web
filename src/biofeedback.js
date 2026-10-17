@@ -754,7 +754,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * the board shows WITHOUT saving -- a flashing lamp would otherwise wear out
    * the EEPROM. Level 0 shows the "no lamp" text, or the saved screen text. */
   async function lampText(lv) {
-    if (!st.writer || !(st.ver >= 8)) return;
+    if (!st.writer) return;
+    if (!(st.ver >= 8)) { if ((cfg.lampTxt || []).some(Boolean)) { $("bfbLcdNote").textContent = tr("bfb_lcdOld"); $("bfbLcdFlash").classList.remove("hidden"); flashHint(); } return; }
     const T = cfg.lampTxt || [], t = lcdAscii(T[lv] || "");
     if (lv > 0 && !t) return;                       // nothing set for this lamp: leave the screen alone
     if (!t) { const L = (cfg.lcd || ["", ""]).map(lcdAscii); await writeLine("w1:" + L[0], true); await writeLine("w2:" + L[1], true); return; }
@@ -1117,6 +1118,13 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     return n;
   }
   function showDots(lv) {
+    /* The lamp's own text, big on the video (works without a board and without Activate). */
+    const T = cfg.lampTxt || [], msg = $("bfbLampMsg");
+    if (msg) {
+      const txt = lv > 0 ? (T[lv] || "") : (T[0] || "");
+      if (msg.textContent !== txt) msg.textContent = txt;
+      msg.style.color = lv > 0 ? LVCOL[lv - 1] : "#fff";
+    }
     ["bfbLamp", "bfbLamp2", "bfbLamp3"].forEach((id, i) => {
       const el = $(id), on = lv > i, c = LVCOL[i];
       el.classList.toggle("on", on);
