@@ -675,17 +675,31 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   /* Live analog inputs A0-A5 (sketch v5 "A"/"a" -> "AN v0,...,v5" at 25 Hz). */
   const AN_COL = ["#4fb3a0", "#7aa2f7", "#e8823a", "#c678dd", "#e5c07b", "#f7768e"], anHist = [];
+  /* Scaling factor per input (Arduino window): value shown/used = raw 0-1023 x factor. */
+  const anScale = (i) => { const f = +((cfg.anScale || [])[i]); return Number.isFinite(f) && f !== 0 ? f : 1; };
+  function applyAnScale() {
+    for (let i = 0; i < 6; i++) { const m = METRICS["an" + i]; m.max = Math.round(1023 * Math.abs(anScale(i)) * 100) / 100; m.unit = anScale(i) === 1 ? "raw" : "×" + anScale(i); }
+  }
+  applyAnScale();
   function renderAnPick() {
-    const host = $("bfbAnPick"); if (!host) return;
     const sel = cfg.an || [];
-    host.innerHTML = [0, 1, 2, 3, 4, 5].map((i) => `<label><input type="checkbox" data-an="${i}"${sel.includes(i) ? " checked" : ""}${st.port ? "" : " disabled"}>
-      <span class="bfbSw" style="background:${AN_COL[i]}"></span>A${i} <span class="note" data-anv="${i}"></span></label>`).join("");
-    for (const cb of host.querySelectorAll("[data-an]")) cb.onchange = () => {
+    for (const [hostId, withScale] of [["bfbAnPick", true], ["bfbAnPick2", false]]) {
+      const host = $(hostId); if (!host) continue;
+      host.innerHTML = [0, 1, 2, 3, 4, 5].map((i) => `<label><input type="checkbox" data-an="${i}"${sel.includes(i) ? " checked" : ""}${st.port ? "" : " disabled"}>
+        <span class="bfbSw" style="background:${AN_COL[i]}"></span>A${i}${withScale ? ` <span class="note">×</span><input type="number" class="bfbAnScale" data-anscale="${i}" step="any" value="${anScale(i)}" title="${esc(tr("bfb_anScale"))}">` : ""} <span class="note" data-anv="${i}"></span></label>`).join("");
+      for (const inp of host.querySelectorAll("[data-anscale]")) inp.onchange = () => {
+        const i = +inp.dataset.anscale, f = +inp.value;
+        cfg.anScale = [...(cfg.anScale || [1, 1, 1, 1, 1, 1])]; cfg.anScale[i] = Number.isFinite(f) && f !== 0 ? f : 1; save();
+        applyAnScale(); renderAnPick(); syncInputs(); anPlot();
+      };
+    }
+    $("bfbAnWrap") && $("bfbAnWrap").classList.toggle("hidden", !st.port && !sel.length);
+    for (const cb of document.querySelectorAll("#bfbAnPick [data-an], #bfbAnPick2 [data-an]")) cb.onchange = () => {
       const i = +cb.dataset.an; cfg.an = cb.checked ? [...new Set([...(cfg.an || []), i])] : (cfg.an || []).filter((x) => x !== i); save();
       anHist.length = 0;
       if (st.ver >= 5) writeLine(cfg.an.length ? "A" : "a");
       else { flashHint(); writeLine(cfg.an.includes(0) ? "S" : "s"); }   // old board: only A0 can be previewed
-      anPlot();
+      renderAnPick(); anPlot();
     };
   }
   /* Drawn twice: in the Arduino window and under the main plot on the page
@@ -700,7 +714,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     showLamps(sts); if (st.active) sendLamps(sts);
   }
   function anPlot() {
-    const box = $("bfbAnWrap"); if (box) box.classList.toggle("hidden", !(cfg.an || []).length);
+    const box = $("bfbAnWrap"); if (box) box.classList.toggle("hidden", !st.port && !(cfg.an || []).length);
     anPlotOn("bfbAnCv"); anPlotOn("bfbAnCv2");
   }
   function anPlotOn(id) {
@@ -709,8 +723,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
     const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
     const now = performance.now(); while (anHist.length && anHist[0].t < now - 10000) anHist.shift();
-    const X = (t) => 30 + ((t - (now - 10000)) / 10000) * (W - 34), Y = (v) => 6 + (1 - v / 1023) * (H - 16);
-    c.font = "10px system-ui, sans-serif"; c.fillStyle = "#888"; c.fillText("1023", 0, 12); c.fillText("0", 18, H - 8);
+    const ends = (cfg.an || []).length ? cfg.an.map((i) => 1023 * anScale(i)) : [1023];
+    const hi = Math.max(0, ...ends), lo = Math.min(0, ...ends), span = hi - lo || 1;
+    const X = (t) => 30 + ((t - (now - 10000)) / 10000) * (W - 34), Y = (v) => 6 + (1 - (v - lo) / span) * (H - 16);
+    const lab = (x) => String(Math.round(x * 100) / 100);
+    c.font = "10px system-ui, sans-serif"; c.fillStyle = "#888"; c.fillText(lab(hi), 0, 12); c.fillText(lab(lo), 0, H - 8);
     if ((cfg.an || []).length && !anHist.length) {
       c.fillStyle = "#aaa"; c.font = "12px system-ui, sans-serif";
       c.fillText(st.port ? (st.ver >= 5 ? tr("bfb_anWait") : tr("bfb_anOld")) : tr("bfb_flashConnect"), 40, H / 2);
@@ -730,15 +747,15 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function onLine(ln) {
     const fm = /^F (\d+)$/.exec(ln);
     if (fm) {                                        // v4 board: A0 only, via its "S" stream
-      const v = [+fm[1], NaN, NaN, NaN, NaN, NaN]; AN_LIVE[0] = v[0]; anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
-      const el = document.querySelector('[data-anv="0"]'); if (el) el.textContent = v[0];
+      const v = [+fm[1] * anScale(0), NaN, NaN, NaN, NaN, NaN]; AN_LIVE[0] = v[0]; anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
+      for (const el of document.querySelectorAll('[data-anv="0"]')) el.textContent = Math.round(v[0] * 100) / 100;
       return true;
     }
     if (/^(STREAM_ON|STREAM_OFF|AN_ON|AN_OFF)$/.test(ln)) return true;
     if (ln.startsWith("AN ")) {
       const v = ln.slice(3).split(",").map(Number); if (v.length !== 6) return true;
-      v.forEach((x, i) => { AN_LIVE[i] = x; }); anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
-      for (const i of cfg.an || []) { const el = document.querySelector(`[data-anv="${i}"]`); if (el) el.textContent = v[i]; }
+      v.forEach((x, i) => { v[i] = x * anScale(i); AN_LIVE[i] = v[i]; }); anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
+      for (const i of cfg.an || []) for (const el of document.querySelectorAll(`[data-anv="${i}"]`)) el.textContent = Math.round(v[i] * 100) / 100;
       return true;                                   // not logged: 25 lines a second
     }
     if (ln.startsWith("BIOSCOUT_LAMP_READY")) { st.ver = +((/v(\d+)/.exec(ln) || [])[1] || 2); st.v3 = st.ver >= 3; renderPins(); if (st.ver < 5) flashHint(); lcdRetry(); }

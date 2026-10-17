@@ -648,6 +648,9 @@ try {
   .bfbStage.noMirror video, .bfbStage.noMirror canvas { transform:none; }
   .bfbStage canvas.hidden { display:none; }
   .bfbStage { touch-action:none; }
+  .bfbAnPickRow { display:flex; flex-wrap:wrap; gap:6px 14px; }
+  .bfbAnPickRow label { display:inline-flex !important; flex-direction:row !important; align-items:center; gap:5px; }
+  .bfbAnScale { width:4.2em !important; padding:2px 4px !important; min-height:0 !important; font-size:12px !important; }
   .bfbLampMsg { position:absolute; top:8px; right:120px; max-width:55%; text-align:right; pointer-events:none; z-index:2;
     font-size:clamp(22px,3.6vw,40px); line-height:1.1; font-weight:800; color:#fff; letter-spacing:.02em;
     text-shadow:0 2px 6px rgba(0,0,0,.85), 0 0 2px #000; }
@@ -1714,9 +1717,10 @@ try {
       </div>
       <div id="bfbBars"></div>
       <canvas id="bfbPlot" class="bfbPlot" aria-label="Live plot"></canvas>
-      <div id="bfbAnWrap" class="hidden"><p class="note" style="margin:6px 0 2px" data-i18n="bfb_anTitle">Live inputs (A0–A5)</p>
-      <canvas id="bfbAnCv2" class="bfbPlot" style="height:110px" aria-label="Arduino inputs"></canvas></div>
       <div id="bfbPlotPick" class="bfbChips"></div>
+      <div id="bfbAnWrap" class="hidden"><p class="note" style="margin:10px 0 2px" data-i18n="bfb_anTitle">Live inputs (A0–A5)</p>
+      <canvas id="bfbAnCv2" class="bfbPlot" style="height:110px" aria-label="Arduino inputs"></canvas>
+      <div class="row bfbRow bfbAnPick bfbAnPickRow" id="bfbAnPick2"></div></div>
       <p class="note" id="bfbHint"></p>
       <p class="note" id="bfbCamNote"></p>
       <div class="row bfbRow">
@@ -2082,8 +2086,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 86;
-window.BUILD_AT = "2026-10-17 10:34";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 87;
+window.BUILD_AT = "2026-10-17 10:38";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
