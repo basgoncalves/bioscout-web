@@ -119,7 +119,7 @@ export function butter(order, Wn, btype = "low") {
   return { b: poly(zz).map((v) => v * kz), a: poly(pz) };
 }
 
-function lfilter(b, a, x, zi) {
+export function lfilter(b, a, x, zi) {
   const n = Math.max(a.length, b.length);
   const bb = b.concat(new Array(n - b.length).fill(0)).map((v) => v / a[0]);
   const aa = a.concat(new Array(n - a.length).fill(0)).map((v) => v / a[0]);

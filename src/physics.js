@@ -8,9 +8,11 @@
  * exists, so the user can see when the simple formula holds and when not.
  * initPhysics({ $, tr }) -> { open(), leave() }. */
 
+import { butter, filtfilt, lfilter, lfilterZi, movingAverage } from "./proc_dsp.js";
+
 const G_OPTS = { earth: 9.81, moon: 1.62, mars: 3.71 };
 
-export const SIMS = ["proj", "spring", "pend", "coll"];
+export const SIMS = ["proj", "spring", "pend", "coll", "filt"];
 
 /** Projectile without drag: range, peak and flight time for v (m/s), angle (deg), g. */
 export function projectile(v, deg, g, h0 = 0) {
@@ -37,11 +39,13 @@ export function initPhysics({ $, tr }) {
     spring: { m: 1, k: 40, b: 1, x0: 0.3 },
     pend: { L: 1, amp: 30, g: "earth" },
     coll: { m1: 2, v1: 3, m2: 1, v2: -1, e: 1 },
+    filt: { f: 1, noise: 0.3, hf: 0.3, fc: 6, ord: 2, type: "zero" },
   };
   const SL = {
     proj: [["v", 1, 30, 0.5, "m/s", "ph_speed"], ["ang", 5, 85, 1, "°", "ph_angle"], ["drag", 0, 0.1, 0.005, "", "ph_drag"], ["h0", 0, 3, 0.1, "m", "ph_h0"]],
     spring: [["m", 0.2, 5, 0.1, "kg", "ph_mass"], ["k", 5, 200, 1, "N/m", "ph_stiff"], ["b", 0, 20, 0.1, "N·s/m", "ph_damp"], ["x0", 0.05, 0.5, 0.01, "m", "ph_x0"]],
     pend: [["L", 0.2, 3, 0.05, "m", "ph_len"], ["amp", 5, 170, 1, "°", "ph_amp"]],
+    filt: [["f", 0.5, 5, 0.1, "Hz", "ph_sigF"], ["noise", 0, 1, 0.05, "", "ph_noise"], ["hf", 0, 1, 0.05, "", "ph_hf"], ["fc", 0.5, 45, 0.5, "Hz", "ph_fc"], ["ord", 1, 4, 1, "", "ph_ord"]],
     coll: [["m1", 0.5, 10, 0.5, "kg", "ph_m1"], ["v1", -5, 5, 0.5, "m/s", "ph_v1"], ["m2", 0.5, 10, 0.5, "kg", "ph_m2"], ["v2", -5, 5, 0.5, "m/s", "ph_v2"], ["e", 0, 1, 0.05, "", "ph_e"]],
   };
   const gOf = (k) => G_OPTS[k] || 9.81;
@@ -55,7 +59,8 @@ export function initPhysics({ $, tr }) {
     const lockBox = (k) => (p.lock ? ` <label class="phLock" title="${tr("ph_lockT")}"><input type="checkbox" data-lock="${k}"${p.lock[k] ? " checked" : ""}> 🔒</label>` : "");
     const opt = p.lock ? `<div class="phOpt"><label>${tr("ph_goal")}<select data-goal>${["range", "peak", "tf"].map((g) => `<option value="${g}"${p.goal === g ? " selected" : ""}>${tr("ph_goal_" + g)}</option>`).join("")}</select></label>
       <button type="button" id="phOptBtn">${tr("ph_findOpt")}</button><span class="note" id="phOptOut"></span></div>` : "";
-    $("phCtl").innerHTML = SL[sim].map(([k, mn, mx, stp, u, lab]) =>
+    const fSel = sim === "filt" ? `<label>${tr("ph_ftype")}<select data-pf>${["zero", "causal", "ma", "high"].map((k) => `<option value="${k}"${p.type === k ? " selected" : ""}>${tr("ph_ft_" + k)}</option>`).join("")}</select></label>` : "";
+    $("phCtl").innerHTML = fSel + SL[sim].map(([k, mn, mx, stp, u, lab]) =>
       `<div class="phSl"><span>${tr(lab)} <b data-pv="${k}">${p[k]}</b> ${u}${lockBox(k)}</span><input type="range" min="${mn}" max="${mx}" step="${stp}" value="${p[k]}" data-pk="${k}"></div>`).join("") + gSel + opt;
     $("phNote").textContent = tr("ph_n_" + sim);
   }
@@ -64,6 +69,7 @@ export function initPhysics({ $, tr }) {
     if (sim === "proj") { const a = projectile(p.v, p.ang, 9.81); st = { t: 0, x: 0, y: p.h0, vx: a.vx, vy: a.vy, path: [[0, p.h0]], done: false }; }
     if (sim === "spring") st = { t: 0, x: p.x0, v: 0, hist: [] };
     if (sim === "pend") st = { t: 0, th: p.amp * Math.PI / 180, w: 0, hist: [], cross: [], prevW: 0 };
+    if (sim === "filt") st = { t: 0, ...filtData(p) };
     if (sim === "coll") st = { t: 0, x1: -1.2, x2: 0.6, v1: p.v1, v2: p.v2, hit: false, after: null };
     last = 0; draw();
   }
@@ -85,6 +91,8 @@ export function initPhysics({ $, tr }) {
       if (st.prevW > 0 && st.w <= 0) st.cross.push(st.t); st.prevW = st.w;   // turning points, one per period on this side
       if (!st.hist.length || st.t - st.hist[st.hist.length - 1][0] > 0.02) st.hist.push([st.t, st.th]);
       while (st.hist.length && st.t - st.hist[0][0] > 10) st.hist.shift();
+    } else if (sim === "filt") {
+      st.t += dt; if (st.t > 1) { Object.assign(st, filtData(p)); st.t = 0; }   // new noise every second while playing
     } else if (sim === "coll") {
       st.x1 += st.v1 * dt; st.x2 += st.v2 * dt; st.t += dt;
       if (!st.hit && st.x2 - st.x1 <= 0 && st.v1 > st.v2) {          // block 1 right face meets block 2 left face
@@ -126,6 +134,33 @@ export function initPhysics({ $, tr }) {
     const u = { range: "m", peak: "m", tf: "s" }[p.goal];
     $("phOptOut").textContent = tr("ph_optRes", { what: free.map(([k, , , , un, lab]) => `${tr(lab)} ${p[k]}${un ? " " + un : ""}`).join(", "), val: bestV.toFixed(2) + " " + u });
     reset(); play(true);
+  }
+  /* Signal filtering: 4 s at 200 Hz of a slow "movement" sine + white noise +
+   * a 25 Hz component (vibration / soft-tissue artefact), filtered four ways. */
+  const FS = 200;
+  function filtData(p) {
+    const n = 4 * FS, clean = new Float64Array(n), raw = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / FS; clean[i] = Math.sin(2 * Math.PI * p.f * t);
+      raw[i] = clean[i] + p.hf * Math.sin(2 * Math.PI * 25 * t) + p.noise * (Math.random() * 2 - 1) * 1.2;
+    }
+    const order = 2 * p.ord, wn = Math.min(0.99, p.fc / (FS / 2));
+    let out, b = null, a = null;
+    try {
+      if (p.type === "ma") out = movingAverage(raw, Math.max(1, Math.round(FS / p.fc)));
+      else {
+        ({ b, a } = butter(p.type === "zero" ? Math.max(1, order / 2) : order, wn, p.type === "high" ? "high" : "low"));
+        out = p.type === "causal" ? lfilter(b, a, raw, lfilterZi(b, a).map((v) => v * raw[0])) : filtfilt(b, a, raw);
+      }
+    } catch { out = raw.slice(); }
+    return { clean, raw, out: Float64Array.from(out), b, a };
+  }
+  /** |H(f)| of b/a at frequency f (Hz), squared for the zero-lag (forward-backward) filter. */
+  function gainAt(b, a, f, twice) {
+    const w = 2 * Math.PI * f / FS; let nr = 0, ni = 0, dr = 0, di = 0;
+    b.forEach((c, k) => { nr += c * Math.cos(w * k); ni -= c * Math.sin(w * k); });
+    a.forEach((c, k) => { dr += c * Math.cos(w * k); di -= c * Math.sin(w * k); });
+    const g = Math.hypot(nr, ni) / Math.hypot(dr, di); return twice ? g * g : g;
   }
   function fit(cv) {
     const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
@@ -180,6 +215,31 @@ export function initPhysics({ $, tr }) {
       trace(c, st.hist, X, Yp, acc, 2); c.fillStyle = mut; c.fillText("θ(t)", px0 + 4, 16);
       const g = gOf(p.g), Ts = 2 * Math.PI * Math.sqrt(p.L / g), cr = st.cross, Tm = cr.length > 1 ? cr[cr.length - 1] - cr[cr.length - 2] : NaN;
       info([[tr("ph_Tsmall"), f2(Ts) + " s"], [tr("ph_Tsim"), f2(Tm) + " s"], [tr("ph_diff"), Number.isFinite(Tm) ? f2((Tm / Ts - 1) * 100, 1) + " %" : "–"]]);
+    } else if (sim === "filt") {
+      const n = st.raw.length, h1 = H * 0.66, X = (i) => 40 + (W - 50) * i / (n - 1), Y = (v) => h1 / 2 - v * (h1 / 2 - 12) / 2.2;
+      c.strokeStyle = line; c.beginPath(); c.moveTo(40, Y(0)); c.lineTo(W, Y(0)); c.stroke();
+      const tr2 = (arr, col, w, dash) => { c.setLineDash(dash || []); c.strokeStyle = col; c.lineWidth = w; c.beginPath(); for (let i = 0; i < n; i++) i ? c.lineTo(X(i), Y(arr[i])) : c.moveTo(X(i), Y(arr[i])); c.stroke(); c.setLineDash([]); };
+      tr2(st.raw, "rgba(150,150,150,.55)", 1); tr2(st.clean, mut, 1.5, [5, 4]); tr2(st.out, acc, 2.5);
+      c.fillStyle = mut; c.fillText(`${tr("ph_raw")} · ${tr("ph_clean")} (- -) · ${tr("ph_filtered")}`, 44, 14);
+      // frequency response
+      const y0 = h1 + 14, hh = H - y0 - 16, fmax = 50, XF = (f) => 40 + (W - 50) * f / fmax, YG = (g) => y0 + hh * (1 - Math.min(1.1, g) / 1.1);
+      c.strokeStyle = line; c.beginPath(); c.moveTo(40, YG(0)); c.lineTo(W, YG(0)); c.moveTo(40, YG(1)); c.lineTo(W, YG(1)); c.stroke();
+      c.fillStyle = mut; c.fillText(tr("ph_gain"), 4, y0 + 10); c.fillText("0", 36, H - 2); c.fillText("50 Hz", W - 40, H - 2);
+      c.strokeStyle = acc; c.lineWidth = 2; c.beginPath();
+      for (let f = 0; f <= fmax; f += 0.25) {
+        let g;
+        if (st.b) g = gainAt(st.b, st.a, f, p.type === "zero");
+        else { const N = Math.max(1, Math.round(FS / p.fc)), w = Math.PI * f / FS; g = f === 0 ? 1 : Math.abs(Math.sin(N * w) / (N * Math.sin(w))); }
+        f ? c.lineTo(XF(f), YG(g)) : c.moveTo(XF(f), YG(g));
+      }
+      c.stroke();
+      for (const [f, lab] of [[p.f, "sig"], [25, "25 Hz"], [p.fc, "fc"]]) { c.strokeStyle = lab === "fc" ? "#e76f51" : mut; c.setLineDash([3, 3]); c.beginPath(); c.moveTo(XF(f), y0); c.lineTo(XF(f), YG(0)); c.stroke(); c.setLineDash([]); c.fillStyle = mut; c.fillText(lab, XF(f) + 2, y0 + 10); }
+      // numbers: error vs the clean signal, and lag of the filtered signal (cross-correlation)
+      let se = 0, sr = 0; for (let i = 40; i < n - 40; i++) { se += (st.out[i] - st.clean[i]) ** 2; sr += (st.raw[i] - st.clean[i]) ** 2; }
+      let best = 0, lag = 0; for (let L = -40; L <= 40; L++) { let s2 = 0; for (let i = 60; i < n - 60; i++) s2 += st.clean[i] * st.out[i + L]; if (s2 > best) { best = s2; lag = L; } }
+      let num = 0, den = 0; for (let i = 60; i < n - 60; i++) { num += st.clean[i] * st.out[i + lag]; den += st.clean[i] ** 2; } const amp = num / den;   // movement amplitude kept (lag-aligned)
+      info([[tr("ph_rmseRaw"), f2(Math.sqrt(sr / (n - 80)), 3)], [tr("ph_rmseFilt"), f2(Math.sqrt(se / (n - 80)), 3)],
+            [tr("ph_lag"), Math.round(lag * 1000 / FS) + " ms"], [tr("ph_peakAmp"), f2(amp * 100, 0) + " %"]]);
     } else if (sim === "coll") {
       const X = (x) => W / 2 + x * (W / 5), y = H * 0.55;
       c.strokeStyle = line; c.beginPath(); c.moveTo(0, y + 30); c.lineTo(W, y + 30); c.stroke();
@@ -214,6 +274,7 @@ export function initPhysics({ $, tr }) {
   });
   $("phCtl").addEventListener("change", (e) => {
     if (e.target.dataset.pg) { P[sim].g = e.target.value; reset(); }
+    if ("pf" in e.target.dataset) { P[sim].type = e.target.value; reset(); }
     if (e.target.dataset.lock) P[sim].lock[e.target.dataset.lock] = e.target.checked;
     if ("goal" in e.target.dataset) P[sim].goal = e.target.value;
   });
