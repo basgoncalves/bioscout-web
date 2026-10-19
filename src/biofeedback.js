@@ -1403,6 +1403,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     showBar(ema); hist.push({ t: ts, a: ema, b: NaN, o: {} }); plot(ts);
     st.value = ema; $("bfbValue").textContent = fmt(ema);
     const sts = lampStates(ema, val), lv = sts.filter(Boolean).length, top = sts.lastIndexOf(true);
+    if (top + 1 > (st.repTop || 0)) st.repTop = top + 1;   // highest lamp lit during the current rep (for the trials table colour)
     if (lv > lastLv && cfg.sound !== "off") tone([880, 1047, 1319][lv - 1], 140);
     lastLv = lv; on = lv > 0;
     $("bfbValue").classList.toggle("hit", on); $("bfbValue").style.color = on ? LVCOL[top] : "";
@@ -1874,6 +1875,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbValue").textContent = shown;
     // Hysteresis: switch on past thr, off only once back by `hyst`.
     const sts = lampStates(ema, val), lv = sts.filter(Boolean).length, top = sts.lastIndexOf(true);
+    if (top + 1 > (st.repTop || 0)) st.repTop = top + 1;   // highest lamp lit during the current rep (for the trials table colour)
     if (lv > lastLv && cfg.sound !== "off") tone([880, 1047, 1319][lv - 1], 140);   // higher pitch per lamp
     lastLv = lv; on = lv > 0;
     $("bfbValue").classList.toggle("hit", on);
@@ -2016,7 +2018,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const main = p.pair ? [row[c.key + "_L"], row[c.key + "_R"]].filter(Number.isFinite) : [row[c.key]];
     row.hit = main.some((v) => meets(v));
     // highest lamp this rep reached (0 = none): the quick table colours the rep with it
-    row.lv = Math.max(0, ...main.map((v) => thrs().filter((t) => Number.isFinite(t) && (cfg.dir === "above" ? v > t : v < t)).length));
+    /* The rep's colour = the highest lamp that actually lit during it (what the
+     * person saw), not a count of thresholds passed: a count gave the wrong
+     * colour when a threshold is off, on another metric, or out of order. */
+    row.lv = st.repTop || 0; st.repTop = 0;
     pushRow(cfg.move, row);
   }
   function recordEvent(vals) {
