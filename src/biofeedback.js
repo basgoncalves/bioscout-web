@@ -1148,7 +1148,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     try {
       st.motionStop = await startMotion((t, a, xyz) => {
         vertPush(t, a); if (Array.isArray(xyz)) orientPush(xyz);
-        const sp = stepDet.push(t, a); if (sp) { stepTs.push(sp.t); if (stepTs.length > 20) stepTs.shift(); }
+        if (rec.t0 == null) rec.t0 = t;
+        if (rec.acc.length < 400000) rec.acc.push({ t: (t - rec.t0) / 1000, x: xyz && xyz[0], y: xyz && xyz[1], z: xyz && xyz[2], a, sag: PH_LIVE.sag * 180 / Math.PI, fr: PH_LIVE.fr * 180 / Math.PI });
+        const sp = stepDet.push(t, a); if (sp) {
+          rec.steps.push({ t: (sp.t - rec.t0) / 1000, n: rec.steps.length + 1, impact_g: sp.peak, step_ms: rec.steps.length ? (sp.t - rec.t0) - rec.steps[rec.steps.length - 1].t * 1000 : NaN }); stepTs.push(sp.t); if (stepTs.length > 20) stepTs.shift(); }
         const [x, y, z] = Array.isArray(xyz) ? xyz : [NaN, NaN, NaN];   // an older cached phonemotion.js passes no axes
         accBuf.push({ t, a, x, y, z, sag: PH_LIVE.sag * 180 / Math.PI, fr: PH_LIVE.fr * 180 / Math.PI }); while (accBuf.length && t - accBuf[0].t > 6000) accBuf.shift();
       });
@@ -1386,6 +1389,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function phoneTick() {
     const ts = performance.now(), v = stepDet.values(ts);
     Object.assign(PH_LIVE, { cadence: v.cadence, impact: v.impact, stepTime: v.stepTime, acc: stepDet.level() });
+    if (rec.t0 != null && rec.samples.length < 200000)
+      rec.samples.push({ t: (ts - rec.t0) / 1000, move: cfg.move, source: "phone", phonePos: cfg.phonePos || "pelvis", cadence_spm: v.cadence, impact_g: v.impact, stepTime_ms: v.stepTime,
+                         acc_g: PH_LIVE.acc, segSagittal_deg: PH_LIVE.sag * 180 / Math.PI, segFrontal_deg: PH_LIVE.fr * 180 / Math.PI });
+    if (!(st.saveT > ts - 1000)) { st.saveT = ts; $("bfbSave").disabled = !rec.samples.length && !Object.keys(rec.rows).length; }
     const val = (k) => METRICS[k].f() - ((cfg.zero && cfg.zero[k]) || 0);
     const x = val(cfg.metric);
     ema = Number.isFinite(x) ? (Number.isFinite(ema) ? ema + 0.35 * (x - ema) : x) : NaN;
@@ -1939,7 +1946,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * that movement's table with the peak of every metric (left / right).
    * Jumps and shots add one row per event from the event detectors. One table
    * per movement, rows keep adding, like the recorder's session. */
-  const rec = { t0: null, samples: [], rows: {}, cyc: null };
+  const rec = { t0: null, samples: [], rows: {}, cyc: null, acc: [], steps: [] };   // acc/steps: phone accelerometer mode
     const EXC = { "°": 15, BW: 0.5, cm: 5, ms: 100, "m/s": 0.3, W: 200 };
   const mainKey = (mv) => (cfg.move === "free" ? cfg.metric : mv.def);
   const liveKeys = (mv) => (cfg.src === "phone" ? PHONE_KEYS : cfg.move === "free" ? [cfg.metric, ...(cfg.extra || []).filter((k) => MOVES.free.metrics.includes(k))] : mv.metrics).filter((k) => METRICS[k] && !METRICS[k].ev);
@@ -2239,18 +2246,20 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       const cols = ["t", ...(rows[0].dur != null ? ["dur"] : []), ...[...new Set(rows.flatMap((r) => Object.keys(r)))].filter((c) => !["t", "dur", "hit", "i0", "i1", "ev"].includes(c)), "hit"];
       files.push({ name: `summary_${move}.csv`, data: csv(rows, cols) });
     }
+    if (rec.acc.length) files.push({ name: "accelerometer_raw.csv", data: csv(rec.acc, ["t", "x", "y", "z", "a", "sag", "fr"]) });
+    if (rec.steps.length) files.push({ name: "steps.csv", data: csv(rec.steps, ["n", "t", "step_ms", "impact_g"]) });
     if (rec.samples.length) {
       const cols = ["t", "move", ...[...new Set(rec.samples.flatMap((r) => Object.keys(r)))].filter((c) => c !== "t" && c !== "move" && c !== "_c")];
       files.push({ name: "timeseries.csv", data: csv(rec.samples, cols) });
     }
     files.push({ name: "settings.json", data: JSON.stringify({ saved: new Date().toISOString(), source: cfg.src, movement: cfg.move,
-      metric: cfg.metric, bodyMassKg: cfg.mass, heightM: cfg.height, loadKg: wtOf(cfg.move), threshold: cfg.thr, thresholds: { yellow: cfg.thr, orange: cfg.thr2, red: cfg.thr3 }, unit: METRICS[cfg.metric].unit, lightWhen: cfg.dir, hysteresis: cfg.hyst, zero: cfg.zero }, null, 2) });
+      metric: cfg.metric, phonePlacement: cfg.src === "phone" ? (cfg.phonePos || "pelvis") : undefined, phoneCalibration: cfg.src === "phone" ? ((cfg.phCal || {})[cfg.phonePos || "pelvis"] || null) : undefined, bodyMassKg: cfg.mass, heightM: cfg.height, loadKg: wtOf(cfg.move), threshold: cfg.thr, thresholds: { yellow: cfg.thr, orange: cfg.thr2, red: cfg.thr3 }, unit: METRICS[cfg.metric].unit, lightWhen: cfg.dir, hysteresis: cfg.hyst, zero: cfg.zero }, null, 2) });
     files.push({ name: "README.txt", data: tr("bfb_readme") });
     const blob = makeZip(files), url = URL.createObjectURL(blob), a = document.createElement("a");
     a.href = url; a.download = `bioscout_biofeedback_${stamp}.zip`; document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
   };
-  $("bfbClear").onclick = () => { rec.t0 = null; rec.samples = []; rec.rows = {}; rec.cyc = null; renderTables(); };
+  $("bfbClear").onclick = () => { rec.t0 = null; rec.samples = []; rec.rows = {}; rec.cyc = null; rec.acc = []; rec.steps = []; renderTables(); };
 
   /* ---------- open / leave ---------- */
   function open() {
