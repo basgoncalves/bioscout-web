@@ -1157,8 +1157,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       });
     }
     catch (e) { st.motionStop = null; $("bfbCamNote").textContent = tr("bfb_motFail", { err: e.message }); renderSrc(); return; }
+    // the user may have switched to the camera while the sensor was starting (≈1 s): stop again
+    if (!isPhone()) { stopPhone(); renderSrc(); return; }
     $("bfbCamNote").textContent = tr("bfb_motHint");
-    st.phT = setInterval(phoneTick, 100); renderSrc();
+    clearInterval(st.phT); st.phT = setInterval(phoneTick, 100); renderSrc();
     const loop = () => { if (!st.motionStop) return; drawMotion(performance.now()); drawAcc(performance.now()); drawAng(performance.now()); requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   }
@@ -1387,6 +1389,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     clearInterval(st.phT); st.phT = 0; Object.assign(PH_LIVE, { cadence: NaN, impact: NaN, stepTime: NaN, acc: NaN });
   }
   function phoneTick() {
+    if (!isPhone() || !METRICS[cfg.metric] || typeof METRICS[cfg.metric].f !== "function") { if (!isPhone()) stopPhone(); return; }
     const ts = performance.now(), v = stepDet.values(ts);
     Object.assign(PH_LIVE, { cadence: v.cadence, impact: v.impact, stepTime: v.stepTime, acc: stepDet.level() });
     if (rec.t0 != null && rec.samples.length < 200000)
@@ -2245,6 +2248,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const v = r[c]; return v == null ? "" : typeof v === "number" ? (Number.isFinite(v) ? +v.toFixed(4) : "") : String(v).includes(",") ? `"${v}"` : v;
   }).join(","))].join("\n");
   $("bfbSave").onclick = async () => {
+    const bar = $("bfbSaveBar"), note = $("bfbSaveNote");
+    $("bfbSave").disabled = true; bar.classList.remove("hidden"); bar.removeAttribute("value"); note.textContent = tr("bfb_saving");
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));   // let the bar paint before the CSVs are built
+    try {
     const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
     const files = [];
     for (const [move, rows] of Object.entries(rec.rows)) {
@@ -2260,11 +2267,10 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     files.push({ name: "settings.json", data: JSON.stringify({ saved: new Date().toISOString(), source: cfg.src, movement: cfg.move,
       metric: cfg.metric, phonePlacement: cfg.src === "phone" ? (cfg.phonePos || "pelvis") : undefined, phoneCalibration: cfg.src === "phone" ? ((cfg.phCal || {})[cfg.phonePos || "pelvis"] || null) : undefined, bodyMassKg: cfg.mass, heightM: cfg.height, loadKg: wtOf(cfg.move), threshold: cfg.thr, thresholds: { yellow: cfg.thr, orange: cfg.thr2, red: cfg.thr3 }, unit: METRICS[cfg.metric].unit, lightWhen: cfg.dir, hysteresis: cfg.hyst, zero: cfg.zero }, null, 2) });
     files.push({ name: "README.txt", data: tr("bfb_readme") });
-    const note = $("bfbSaveNote");
-    try {
-      const r = await saveFiles(files, `bioscout_biofeedback_${stamp}`);
+      const r = await saveFiles(files, `bioscout_biofeedback_${stamp}`, (i, n) => { bar.max = n; bar.value = i; });
       note.textContent = r.how === "folder" ? tr("bfb_savedDir", { where: r.where }) : r.how === "zip" ? tr("bfb_savedZip", { where: r.where }) : "";
     } catch (e) { note.textContent = "✗ " + e.message; }
+    finally { bar.max = 1; bar.value = 1; setTimeout(() => bar.classList.add("hidden"), 700); $("bfbSave").disabled = !rec.samples.length && !Object.keys(rec.rows).length; }
   };
   /* Clear session: back to the page as first opened — camera/phone off, no source chosen,
    * recorded data and notes gone. Movement, metric and thresholds are kept. */
