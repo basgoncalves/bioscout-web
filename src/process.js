@@ -985,6 +985,7 @@ export function mountProcess(root, { t, download }) {
       <p class="note" style="margin:4px 0 10px">${t("pr_intro")}</p>
       <label class="prDrop" for="prFiles"><input id="prFiles" type="file" multiple style="display:none"
         accept=".csv,.txt,.tsv,.mot,.sto,.trc,.c3d,.xlsx,.xlsm,.zip">${t("pr_drop")}</label>
+      <label class="ghost prFolderBtn" style="display:inline-block;margin:6px 0 0;cursor:pointer;padding:6px 12px;border:1px solid var(--line);border-radius:8px">📁 ${t("pr_folder")}<input id="prFolder" type="file" webkitdirectory multiple style="display:none"></label>
       ${S.ds.length ? `<div class="prFiles">${S.ds.map((d, i) => `<div class="prFile${i === S.cur ? " sel" : ""}">
         <button type="button" class="ghost" data-use="${i + 1}" style="margin:0;text-align:left">${i + 1} · ${escX(d.name)}
           <span class="sub" style="font-size:15.5px;display:block;margin:0">${d.fs ? `${+d.fs.toFixed(2)} Hz · ` : ""}${d.time.length} ${t("pr_samples")} · ${Object.keys(d.cols).length} ${t("pr_columns")}${d.meta?.noTime ? " · " + t("pr_noTime") : ""}</span></button>
@@ -1039,6 +1040,11 @@ export function mountProcess(root, { t, download }) {
   function wire(ds) {
     const q = (s) => root.querySelector(s);
     q("#prFiles").onchange = (e) => load([...e.target.files]);
+    // a whole folder (e.g. one saved by BioFeedback / Record): every data file in it, sub-folders too
+    q("#prFolder").onchange = (e) => {
+      const fs = [...e.target.files].filter((f) => /\.(csv|txt|tsv|mot|sto|trc|c3d|xlsx|xlsm)$/i.test(f.name) && !/(^|\/)\./.test(f.webkitRelativePath || f.name));
+      load(fs.map((f) => (f.webkitRelativePath ? new File([f], f.webkitRelativePath, { type: f.type }) : f)));
+    };
     const drop = q(".prDrop");
     drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
     drop.ondragleave = () => drop.classList.remove("over");

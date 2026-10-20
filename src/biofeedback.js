@@ -18,7 +18,7 @@ import { makeStepDetector, startMotion } from "./phonemotion.js";
 import { measure as measureSegs, summarise as summariseSegs, constrain as constrainSegs, fromOsim, SEGS } from "./bodyscale.js";
 import { bodyMapHTML, REGIONS } from "./bodymap.js";
 import { loadForceModel, predictForces } from "./forces.js";
-import { makeZip } from "./zip.js";
+import { saveFiles } from "./savefiles.js";
 import { jointLoadSVG } from "./jointload.js";
 
 const L = { sh: [11, 12], el: [13, 14], wr: [15, 16], hip: [23, 24], kn: [25, 26], an: [27, 28] };
@@ -2244,7 +2244,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const csv = (rows, cols) => [cols.join(","), ...rows.map((r) => cols.map((c) => {
     const v = r[c]; return v == null ? "" : typeof v === "number" ? (Number.isFinite(v) ? +v.toFixed(4) : "") : String(v).includes(",") ? `"${v}"` : v;
   }).join(","))].join("\n");
-  $("bfbSave").onclick = () => {
+  $("bfbSave").onclick = async () => {
     const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 19);
     const files = [];
     for (const [move, rows] of Object.entries(rec.rows)) {
@@ -2260,9 +2260,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     files.push({ name: "settings.json", data: JSON.stringify({ saved: new Date().toISOString(), source: cfg.src, movement: cfg.move,
       metric: cfg.metric, phonePlacement: cfg.src === "phone" ? (cfg.phonePos || "pelvis") : undefined, phoneCalibration: cfg.src === "phone" ? ((cfg.phCal || {})[cfg.phonePos || "pelvis"] || null) : undefined, bodyMassKg: cfg.mass, heightM: cfg.height, loadKg: wtOf(cfg.move), threshold: cfg.thr, thresholds: { yellow: cfg.thr, orange: cfg.thr2, red: cfg.thr3 }, unit: METRICS[cfg.metric].unit, lightWhen: cfg.dir, hysteresis: cfg.hyst, zero: cfg.zero }, null, 2) });
     files.push({ name: "README.txt", data: tr("bfb_readme") });
-    const blob = makeZip(files), url = URL.createObjectURL(blob), a = document.createElement("a");
-    a.href = url; a.download = `bioscout_biofeedback_${stamp}.zip`; document.body.appendChild(a); a.click();
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
+    const note = $("bfbSaveNote");
+    try {
+      const r = await saveFiles(files, `bioscout_biofeedback_${stamp}`);
+      note.textContent = r.how === "folder" ? tr("bfb_savedDir", { where: r.where }) : r.how === "zip" ? tr("bfb_savedZip", { where: r.where }) : "";
+    } catch (e) { note.textContent = "✗ " + e.message; }
   };
   $("bfbClear").onclick = () => { rec.t0 = null; rec.samples = []; rec.rows = {}; rec.cyc = null; rec.acc = []; rec.steps = []; renderTables(); };
 

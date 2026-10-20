@@ -1810,9 +1810,10 @@ try {
       </div>
       <p class="note" id="bfbZeroNote"></p>
       <div class="row bfbRow">
-        <button type="button" id="bfbSave" data-i18n="bfb_save" disabled>Save session (.zip)</button>
+        <button type="button" id="bfbSave" data-i18n="bfb_save" disabled>Save session</button>
         <button type="button" class="ghost" id="bfbClear" data-i18n="bfb_clear">Clear session</button>
       </div>
+      <p class="note" id="bfbSaveNote"></p>
       <div id="bfbTables" class="bfbTables"></div>
       <ol id="bfbResults" class="bfbResults"></ol>
       <p class="note" data-i18n="bfb_disclaimer">Camera-estimated angles, smoothed; not motion capture. Testing feature.</p>
@@ -1862,7 +1863,7 @@ try {
       <div id="labTrialBar" class="hidden" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
         <div class="row" style="align-items:end">
           <div><label for="labTrialName" data-i18n="lt_name">Trial name</label><input id="labTrialName" type="text"></div>
-          <div><button type="button" id="labTrialBtn" style="margin:0">Save trial (.zip)</button></div>
+          <div><button type="button" id="labTrialBtn" style="margin:0">Save trial</button></div>
         </div>
         <p class="note" id="labTrialNote" style="margin:6px 0 0" data-i18n="lt_note">The recording is kept only until this page closes: save it as a trial (2_experimental/&lt;trial&gt;/marker_experimental.trc, estimated grf.mot, video; 3_iterations/bioscout_web/&lt;trial&gt;/ joint angles and planar inverse dynamics). With a session folder open in Simulate → Batch mode, every recording is written into that session by itself.</p>
         <div class="status" id="labTrialStatus"></div>
@@ -2178,8 +2179,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 115;
-window.BUILD_AT = "2026-10-20 07:03";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 116;
+window.BUILD_AT = "2026-10-20 07:29";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2293,7 +2294,8 @@ import { cleanEngineUrl, engineFromSearch, fileKind, makeEngineClient, EngineErr
          defaultReactionJoint, reactionForce, scaleRows, lineChartSVG, legendHTML,
          MUSCLE_COLORS } from "./src/osimlab.js";
 import { buildSessionFiles } from "./src/osimexport.js";
-import { buildLabTrial, trialZip, nextTrialName, saveTrialToSession } from "./src/labtrial.js";
+import { buildLabTrial, nextTrialName, saveTrialToSession } from "./src/labtrial.js";
+import { saveFiles } from "./src/savefiles.js";
 import { ballFor } from "./src/ballmodel.js";
 import { S as labSession } from "./src/simsession.js";
 import { bodyMapHTML, regionsFor } from "./src/bodymap.js";
@@ -11927,10 +11929,8 @@ async function labTrialSave() {
       const where = await saveTrialToSession(files, trial);
       st.textContent = tr("lt_written", { where });
     } else {
-      const blob = trialZip(files), url = URL.createObjectURL(blob), a = document.createElement("a");
-      a.href = url; a.download = `${trial}.zip`; document.body.appendChild(a); a.click();
-      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
-      st.textContent = tr("lt_zipped", { trial, mb: (blob.size / 1e6).toFixed(1) });
+      const r = await saveFiles(files, trial);
+      st.textContent = r.how === "folder" ? tr("lt_written", { where: r.where }) : r.how === "zip" ? tr("lt_zipped", { trial, mb: (r.bytes / 1e6).toFixed(1) }) : "";
     }
   } catch (e) { st.textContent = "✗ " + e.message; }
 }
