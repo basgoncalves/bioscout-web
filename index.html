@@ -647,6 +647,11 @@ try {
   #viewAnalysis .anTblWrap { overflow:auto; max-width:100%; }
   #viewAnalysis .anVars, #viewAnalysis .anCurves { max-height:340px; }
   #viewAnalysis table.anTbl { border-collapse:collapse; font-size:13.5px; width:100%; }
+  #viewAnalysis .anGrid td, #viewAnalysis .anGrid th { padding:0; }
+  #viewAnalysis .anGrid input { width:100%; min-width:80px; box-sizing:border-box; border:0; border-radius:0; background:transparent; padding:5px 8px; margin:0; font:inherit; color:inherit; }
+  #viewAnalysis .anGrid th input { font-weight:600; }
+  #viewAnalysis .anGrid input:focus { outline:2px solid var(--accent); outline-offset:-2px; }
+  #viewAnalysis .anGrid .anRowN { color:var(--muted); padding:0 8px; text-align:right; width:1%; }
   #viewAnalysis .anTbl th, #viewAnalysis .anTbl td { padding:5px 8px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap; }
   #viewAnalysis .anTbl th { position:sticky; top:0; background:var(--card); font-weight:600; color:var(--muted); }
   #viewAnalysis .anTbl td.num { text-align:right; font-variant-numeric:tabular-nums; }
@@ -1707,7 +1712,7 @@ try {
       <div class="row bfbRow">
         <label><span data-i18n="bfb_movement">Movement</span><select id="bfbMove"></select></label>
       </div>
-      <details class="bfbFold" id="bfbSettings" open><summary data-i18n="bfb_settings">Settings</summary>
+      <details class="bfbFold" id="bfbSettings"><summary data-i18n="bfb_settings">Settings</summary>
       <div class="row bfbRow bfbLoadWrap" id="bfbLoadWrap">
         <label><span data-i18n="bfb_loadL">Left load (kg)</span><input type="number" id="bfbLoadL" min="0" max="300" step="0.5"></label>
         <label><span data-i18n="bfb_loadR">Right load (kg)</span><input type="number" id="bfbLoadR" min="0" max="300" step="0.5"></label>
@@ -2180,8 +2185,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 122;
-window.BUILD_AT = "2026-10-20 09:06";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 123;
+window.BUILD_AT = "2026-10-20 09:12";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

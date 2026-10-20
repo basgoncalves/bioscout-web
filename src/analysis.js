@@ -19,6 +19,7 @@
  * Nothing leaves the device: files are read in the browser.
  */
 import * as S from "./stats.js";
+import { basicHTML, wireBasic } from "./anbasic.js";
 import { reliabilityOf, conditionsFromHeaders, waveformReliability, ICC_TYPES } from "./reliability.js";
 import { runSpm, TESTS, normalise } from "./spm.js";
 import * as G from "./anfigs.js";
@@ -185,7 +186,7 @@ function blocksToTables(blocks) {
 export function mountAnalysis(root, { t, download }) {
   const L = (k, v) => t("an_" + k, v);
   const st = {
-    tab: "stats",
+    tab: "basic",
     rel: { mode: "discrete", table: null, type: "A-1", zero: false, sep: "-", idCol: "", result: null, session: "B" },
     stats: { table: null, kind: "descriptives", roles: {}, nonpar: true, result: null },
     spm: { curves: [], cols: [], variable: "", Q: 101, pattern: "{subject}_{group}_{condition}", filter: "", names: { A: "Group", B: "Condition" }, test: "", alpha: 0.05, two: true, perm: false, iters: 1000, mu: 0, ylabel: "", result: null, raw: [] },
@@ -912,9 +913,10 @@ meta = d[["file", "subject", "group", "condition", "covariate"]].fillna("")
   function render() {
     root.innerHTML = `<div class="card"><div class="labHead"><b style="font-size:16px">${L("title")}</b>
         <button type="button" class="ghost labHomeBtn anSmall">${t("labHome")}</button></div>
-      <div class="anTabs">${tabBtn("rel", L("tabRel"))}${tabBtn("stats", L("tabStats"))}${tabBtn("spm", "SPM")}</div>
+      <div class="anTabs">${tabBtn("basic", L("tabBasic"))}${tabBtn("rel", L("tabRel"))}${tabBtn("stats", L("tabStats"))}${tabBtn("spm", "SPM")}</div>
       ${st.msg ? `<p class="note bad anNote">${esc(st.msg)}</p>` : ""}${st.busy ? `<p class="note">${L("working")}</p>` : ""}</div>
-      ${st.tab === "rel" ? relHTML() : st.tab === "stats" ? statsHTML() : spmHTML()}`;
+      ${st.tab === "basic" ? `<div id="anBasicHost">${basicHTML(L)}</div>` : st.tab === "rel" ? relHTML() : st.tab === "stats" ? statsHTML() : spmHTML()}`;
+    const bh = root.querySelector("#anBasicHost"); if (bh) wireBasic(bh, L, { rerender: render, download });
   }
 
   const run = (fn, set) => {

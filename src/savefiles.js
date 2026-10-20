@@ -5,9 +5,8 @@
  * folder again with "Open folder". */
 import { makeZip } from "./zip.js";
 
-// Phones (Android Chrome) get the picker too, but write FLAT into the chosen folder
-// ("<name>_timeseries.csv" ...): a new sub-folder made inside a phone folder came out
-// empty in Google Drive. Every file is read back; anything missing -> the .zip instead.
+// Every browser with a picker (computer or phone) writes <chosen folder>/<name>/<file>.
+// Every file is read back; one that came out empty -> the .zip instead.
 const isMobile = () => (navigator.userAgentData && navigator.userAgentData.mobile) || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
 export const canPickFolder = () => typeof window.showDirectoryPicker === "function";
 
@@ -21,10 +20,10 @@ export async function saveFiles(files, name, onProgress = () => {}) {
     catch (e) { if (e && e.name === "AbortError") return { how: "cancel" }; reason = `folder picker: ${e && e.message || e}`; }   // other errors: fall back to the zip
     if (root) {
       try {
-        const flat = isMobile(), dir = flat ? root : await root.getDirectoryHandle(name, { create: true });
+        const dir = await root.getDirectoryHandle(name, { create: true });
         for (const [i, f] of files.entries()) {
           onProgress(i, files.length);
-          const parts = flat ? [`${name}_${f.name.replace(/\//g, "_")}`] : f.name.split("/").filter(Boolean); let d = dir;
+          const parts = f.name.split("/").filter(Boolean); let d = dir;
           for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p, { create: true });
           const h = await d.getFileHandle(parts[parts.length - 1], { create: true });
           const w = await h.createWritable(); await w.write(f.data); await w.close();
@@ -33,7 +32,7 @@ export async function saveFiles(files, name, onProgress = () => {}) {
           if (got === 0 && want > 0) throw new Error(`${f.name} came out empty`);
         }
         onProgress(files.length, files.length);
-        return { how: "folder", where: flat ? `${root.name} (${name}_…)` : `${root.name}/${name}` };
+        return { how: "folder", where: `${root.name}/${name}` };
       } catch (e) { reason = `writing to the folder: ${e && e.message || e}`; console.warn("folder save failed, falling back to .zip:", e); }   // the zip below still delivers the data
     }
   }
