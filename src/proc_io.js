@@ -219,6 +219,10 @@ export async function unzip(buf) {
   }
   return {
     names: Object.keys(files),
+    async bytes(name) {
+      const f = files[name]; if (!f) return null;
+      return f.method === 0 ? f.data : inflateRaw(f.data);
+    },
     async text(name) {
       const f = files[name]; if (!f) return null;
       const raw = f.method === 0 ? f.data : await inflateRaw(f.data);
@@ -426,11 +430,29 @@ export function readC3d(buf, fileName) {
   return out;
 }
 
+/** A .zip (Record trial, BioFeedback session, any folder zipped): every readable file
+ *  inside, named "<zip>/<path>". Videos, JSON and unreadable files are skipped. */
+const ZIP_OK = /\.(csv|txt|tsv|mot|sto|trc|c3d|xlsx|xlsm)$/i;
+async function readZip(buf, zipName) {
+  const z = await unzip(buf), out = [], base = zipName.replace(/\.zip$/i, "");
+  for (const path of z.names) {
+    if (path.endsWith("/") || !ZIP_OK.test(path) || /(^|\/)(__MACOSX|\.)/.test(path)) continue;
+    const name = `${base}/${path}`;
+    try {
+      const bytes = await z.bytes(path);
+      out.push(...await readAny({ name, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) })); }
+    catch { /* not a table we can read: skip it */ }
+  }
+  if (!out.length) throw new Error("the zip holds no readable data file (csv, trc, mot, sto, c3d, xlsx)");
+  return out;
+}
+
 /** Read any supported file. `file` is a File/Blob with a name. */
 export async function readAny(file) {
   const name = file.name || "file";
   const ext = name.toLowerCase().split(".").pop();
   const buf = await file.arrayBuffer();
+  if (ext === "zip") return readZip(buf, name);
   if (ext === "c3d") return readC3d(buf, name);
   if (ext === "xlsx" || ext === "xlsm") return readXlsx(buf, name);
   const text = new TextDecoder().decode(buf);

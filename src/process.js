@@ -984,7 +984,7 @@ export function mountProcess(root, { t, download }) {
       </div>
       <p class="note" style="margin:4px 0 10px">${t("pr_intro")}</p>
       <label class="prDrop" for="prFiles"><input id="prFiles" type="file" multiple style="display:none"
-        accept=".csv,.txt,.tsv,.mot,.sto,.trc,.c3d,.xlsx,.xlsm">${t("pr_drop")}</label>
+        accept=".csv,.txt,.tsv,.mot,.sto,.trc,.c3d,.xlsx,.xlsm,.zip">${t("pr_drop")}</label>
       ${S.ds.length ? `<div class="prFiles">${S.ds.map((d, i) => `<div class="prFile${i === S.cur ? " sel" : ""}">
         <button type="button" class="ghost" data-use="${i + 1}" style="margin:0;text-align:left">${i + 1} · ${escX(d.name)}
           <span class="sub" style="font-size:15.5px;display:block;margin:0">${d.fs ? `${+d.fs.toFixed(2)} Hz · ` : ""}${d.time.length} ${t("pr_samples")} · ${Object.keys(d.cols).length} ${t("pr_columns")}${d.meta?.noTime ? " · " + t("pr_noTime") : ""}</span></button>
