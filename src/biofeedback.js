@@ -517,7 +517,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     // Only time-varying metrics drive the lamp and the plot; per-jump / per-shot
     // values (jump height, release angles...) go to the table, one row each.
     const live = cfg.src === "phone" ? PHONE_KEYS : mv.metrics.filter((k) => !METRICS[k].ev);
-    if (!live.includes(cfg.metric)) cfg.metric = cfg.src === "phone" ? "runCadence" : live.includes(mv.def) ? mv.def : live[0];
+    if (!live.includes(cfg.metric)) cfg.metric = cfg.src === "phone" ? "accMag" : live.includes(mv.def) ? mv.def : live[0];
     $("bfbMetric").innerHTML = live.map((k) => `<option value="${k}">${tr(METRICS[k].label)}</option>`).join("");
     $("bfbMetric").value = cfg.metric;
   }
@@ -1161,7 +1161,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (!isPhone()) { stopPhone(); renderSrc(); return; }
     $("bfbCamNote").textContent = tr("bfb_motHint");
     clearInterval(st.phT); st.phT = setInterval(phoneTick, 100); renderSrc();
-    const loop = () => { if (!st.motionStop) return; drawMotion(performance.now()); drawAcc(performance.now()); drawAng(performance.now()); requestAnimationFrame(loop); };
+    const loop = () => { if (!st.motionStop) return; drawMotion(performance.now()); drawAcc(performance.now()); requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   }
   /* Phone view: no video. The stage shows a runner/walker animated from the
@@ -1191,10 +1191,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const ft = (t - jd.air) / 1000, t0 = jd.air, v = jd.vals.slice().sort((x, y) => x - y), med = v[v.length >> 1]; jd.air = 0;
     // push-off = the highest |a| in the 600 ms before take-off; a real jump pushes > 1.3 g first,
     // the unweighting of a countermovement (standing → dip) does not
-    const pk = accBuf.reduce((m, s) => (s.t >= t0 - 600 && s.t <= t0 && s.a > m ? s.a : m), -Infinity), push = Number.isFinite(pk) ? pk : NaN;
+    let pk = -Infinity, pushT = t0; for (const s of accBuf) if (s.t >= t0 - 600 && s.t <= t0 && s.a > pk) { pk = s.a; pushT = s.t; }
+    const push = Number.isFinite(pk) ? pk : NaN;
     if (ft < 0.2 || ft > 1.0 || med > 0.45 || !(push > 1.3)) return;
     const n = rec.jumps.length + 1, prev = rec.jumps[rec.jumps.length - 1];
-    const j = { n, t_takeoff_s: rec.t0 != null ? (t0 - rec.t0) / 1000 : 0, type: prev ? prev.type : (cfg.move === "sj" ? "SJ" : cfg.move === "cmj" ? "CMJ" : ""), flight_s: ft, height_cm: (9.81 * ft * ft / 8) * 100, pushoff_g: push, impact_g: a };
+    const j = { n, t_takeoff_s: rec.t0 != null ? (t0 - rec.t0) / 1000 : 0, type: prev ? prev.type : (cfg.move === "sj" ? "SJ" : cfg.move === "cmj" ? "CMJ" : ""), flight_s: ft, height_cm: (9.81 * ft * ft / 8) * 100, pushoff_g: push, impact_g: a, pushT };
     // also a trial in the Trials table next to the figure, like a camera-scored jump
     j.row = { t: j.t_takeoff_s + ft, ev: true, jumpHeight: j.height_cm, flightTime: ft * 1000, pushG: push, impactG: a, hit: cfg.metric === "jumpHeight" ? meets(j.height_cm) : null, lv: 0 };
     rec.jumps.push(j); jumpRowTo(j); jd.land = { t, j };
@@ -1353,9 +1354,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     c.fillText(tr(Number.isFinite(PH_LIVE.sag) ? "bfb_motEstSeg" : "bfb_motEst"), 10, H - 36);
     // live readout, always shown whatever metric drives the lamps
     const f = (v, d, u) => (Number.isFinite(v) ? v.toFixed(d) + " " + u : "–"), dg = (r) => (Number.isFinite(r) ? Math.round(r * 180 / Math.PI) + "°" : "–");
-    const rows = [[tr("bfb_m_phSag"), dg(PH_LIVE.sag)], [tr("bfb_m_phFront"), dg(PH_LIVE.fr)],
-                  [tr("bfb_m_runCad"), f(PH_LIVE.cadence, 0, "spm")], [tr("bfb_m_runStep"), f(PH_LIVE.stepTime, 0, "ms")],
-                  [tr("bfb_m_runImp"), f(PH_LIVE.impact, 2, "g")], [tr("bfb_m_acc"), f(PH_LIVE.acc, 2, "g")], [tr("bfb_motSteps"), String(n)]];
+    // only the accelerations: live |a| and the peaks found (last jump's push-off / landing, last step's impact)
+    const lj = rec.jumps[rec.jumps.length - 1], ls = rec.steps[rec.steps.length - 1];
+    const rows = [[tr("bfb_m_acc"), f(PH_LIVE.acc, 2, "g")], [tr("bfb_jmpPush"), f(lj && lj.pushoff_g, 2, "g")],
+                  [tr("bfb_jmpImpact"), f(lj && lj.impact_g, 2, "g")], [tr("bfb_m_runImp"), f(ls && ls.impact_g, 2, "g")]];
+    void dg;
     c.font = "13px system-ui"; c.textAlign = "right";
     rows.forEach(([k, v], i) => { c.fillStyle = "#8b949e"; c.fillText(k.replace(/\s*\(.*\)/, ""), W - 70, 56 + i * 19); c.fillStyle = "#e6edf3"; c.fillText(v, W - 10, 56 + i * 19); });
     c.textAlign = "left";
@@ -1415,15 +1418,32 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     let lo = -1.5, hi = 1.5;
     for (const p of accBuf) { for (const v of [p.x, p.y, p.z, p.a]) if (Number.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }
     lo = Math.floor(lo); hi = Math.ceil(hi);
-    const Y = (v) => 8 + (H - 22) * (1 - (v - lo) / (hi - lo));
+    hi += 1;                                             // room for the peak labels
+    const Y = (v) => 8 + (H - 36) * (1 - (v - lo) / (hi - lo)), yb = H - 28;
     c.strokeStyle = "rgba(127,127,127,.25)"; c.fillStyle = "#8b949e"; c.font = "10px system-ui"; c.lineWidth = 1;
-    for (let v = lo; v <= hi; v++) { c.beginPath(); c.moveTo(36, Y(v)); c.lineTo(W - 8, Y(v)); c.stroke(); c.fillText(v + " g", 4, Y(v) + 3); }
+    for (let v = lo; v <= hi - 1; v++) { c.beginPath(); c.moveTo(36, Y(v)); c.lineTo(W - 8, Y(v)); c.stroke(); c.fillText(v + " g", 4, Y(v) + 3); }
+    // time axis: seconds before now
+    c.textAlign = "center";
+    for (let s = 0; s <= span / 1000; s++) { const x = X(ts - s * 1000); c.beginPath(); c.moveTo(x, yb); c.lineTo(x, yb + 4); c.stroke(); c.fillText(s ? `−${s} s` : tr("bfb_now"), Math.min(W - 16, x), yb + 14); }
+    c.textAlign = "left";
     c.strokeStyle = "rgba(255,213,74,.6)";
-    for (const t of stepTs) if (ts - t < span) { c.beginPath(); c.moveTo(X(t), 8); c.lineTo(X(t), H - 14); c.stroke(); }
-    const lines = [["x", "#ff7b72"], ["y", "#7ee787"], ["z", "#79c0ff"], ["a", "#e6edf3"]];
+    for (const t of stepTs) if (ts - t < span) { c.beginPath(); c.moveTo(X(t), 8); c.lineTo(X(t), yb); c.stroke(); }
+    const ink = getComputedStyle(document.body).color || "#e6edf3";   // |a| in the text colour: visible in light and dark
+    const lines = [["x", "#ff7b72"], ["y", "#3fb950"], ["z", "#79c0ff"], ["a", ink]];
     for (const [k, col] of lines) {
       c.strokeStyle = col; c.lineWidth = k === "a" ? 2 : 1.2; c.beginPath();
       accBuf.forEach((p, i) => (i ? c.lineTo(X(p.t), Y(p[k])) : c.moveTo(X(p.t), Y(p[k])))); c.stroke();
+    }
+    // the peaks found, labelled with their g: step impacts (yellow), jump push-off and landing (white)
+    const abs = (sec) => rec.t0 + sec * 1000, lab = (t, v, col) => {
+      if (!(ts - t < span) || !Number.isFinite(v)) return;
+      c.fillStyle = col; c.beginPath(); c.arc(X(t), Y(v), 3, 0, 7); c.fill(); c.fillText(v.toFixed(1) + " g", X(t) - 12, Y(v) - 6);
+    };
+    if (rec.t0 != null) {
+      c.font = "10px system-ui";
+      const jt = [];
+      for (const j of rec.jumps.slice(-4)) { const tl = abs(j.t_takeoff_s + j.flight_s); jt.push(j.pushT, tl); lab(j.pushT, j.pushoff_g, "#58a6ff"); lab(tl, j.impact_g, "#58a6ff"); }
+      for (const s of rec.steps.slice(-12)) { const t = abs(s.t); if (!jt.some((u) => Math.abs(u - t) < 250)) lab(t, s.impact_g, "#d29922"); }
     }
     let lx = 40; c.font = "11px system-ui";
     for (const [k, col] of lines) { c.fillStyle = col; const t = k === "a" ? "|a|" : k; c.fillText(t, lx, H - 2); lx += 30; }
@@ -1496,7 +1516,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     cfg.src = src; save(); fillMetrics(); syncInputs(); renderSrc();
   }
   $("bfbUseCam").onclick = () => useSource(isScreen() ? "screen" : "camera");
-  $("bfbUsePhone").onclick = () => useSource("phone");
+  $("bfbUsePhone").onclick = () => { if (!isPhone()) cfg.metric = "accMag"; useSource("phone"); };   // phone: |a| (g) is the default metric
   $("bfbPhPos").onchange = () => { cfg.phonePos = $("bfbPhPos").value; save(); renderCal(); };
   $("bfbPhView").onchange = () => { cfg.phView = $("bfbPhView").value; save(); };
   $("bfbPhCal0").onclick = () => calStep(0);

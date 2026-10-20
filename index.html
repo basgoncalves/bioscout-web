@@ -1802,9 +1802,7 @@ try {
       </div>
       <div id="bfbAccWrap" class="hidden"><p class="note" style="margin:10px 0 2px"><b data-i18n="bfb_jmpTitle">Jumps (from flight time)</b></p><div id="bfbJumps"></div>
       <p class="note" style="margin:10px 0 2px" data-i18n="bfb_accTitle">Accelerometer (g)</p>
-      <canvas id="bfbAccCv" class="bfbPlot" style="height:140px" aria-label="Accelerometer"></canvas>
-      <p class="note" style="margin:8px 0 2px" data-i18n="bfb_angTitle">Segment angles from the phone (°)</p>
-      <canvas id="bfbAngCv" class="bfbPlot" style="height:120px" aria-label="Segment angles"></canvas></div>
+      <canvas id="bfbAccCv" class="bfbPlot" style="height:170px" aria-label="Accelerometer"></canvas></div>
       <div id="bfbBars"></div>
       <canvas id="bfbPlot" class="bfbPlot" aria-label="Live plot"></canvas>
       <div id="bfbPlotPick" class="bfbChips"></div>
@@ -2191,8 +2189,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 127;
-window.BUILD_AT = "2026-10-20 11:12";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 128;
+window.BUILD_AT = "2026-10-20 11:45";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
