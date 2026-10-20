@@ -127,21 +127,34 @@ a photoresistor or a force sensor with a 10 kΩ divider. Never more than 5 V on 
 
 ![Phase 5: motor on pin 9 through a PN2222](phase5.svg)
 
-**Parts:** DC motor 3–6 V, **PN2222** transistor, **1 kΩ**, **1N4007** diode.
+**Parts:** DC motor 3–6 V, **PN2222** (or 2N2222A / S8050, all NPN) transistor,
+**1 kΩ** (brown-black-black-brown-brown), **1N4007** diode, **100 µF** capacitor.
 **Never wire the motor straight to a pin** — it needs 100–250 mA, a pin gives 20 mA.
 
 1. Uno **pin 9** → a free column (white) → **1 kΩ** → the transistor's middle leg **B**.
+   Check the colours: a wrong resistor here (e.g. brown-green-black-black-brown) leaves the
+   transistor off and the motor silent.
 2. PN2222 with the **flat side towards you**: legs **E B C** from left to right.
    **E → − rail.**
-3. **C** → motor **black** wire.
-4. Motor **red** wire → **+ rail**.
-5. **Diode** between C and the + rail, **silver stripe on the + side**
+3. **C column** → motor **black** wire (plug it into a male jumper; bare motor wires
+   don't grip) **and** the diode's plain end — all in the same column.
+4. Motor **red** wire → straight into the **+ rail**.
+5. **Diode** between the C column and the + rail, **silver stripe on the + side**
    (backwards = short circuit).
+6. **100 µF** across the rails next to the transistor: **long leg → + rail**,
+   striped leg → − rail. Without it the motor's start-up dip crashes the Uno
+   (LCD shows garbage, motor may keep running); 10 µF is too small.
 
 **Test:** Arduino window → **Motor** → *Start with* Lamp 1/2/3, *Pin* 9, *Seconds* 2
-→ **Test motor**. Then it spins every time that lamp's line is crossed.
-Uno resets or the LCD flickers when it starts? Power the motor from the kit's
-power-supply module and join its GND to the Uno's GND.
+→ **Test motor** (the note "Pin 9 on for … s" confirms it was sent). Then it spins
+every time that lamp's line is crossed.
+
+| What you see | Fix |
+|---|---|
+| Nothing spins, note says "Pin 9 on" | 1 kΩ wrong value, motor black not in the C column, or transistor reversed (some 2N2222A are C B E — turn it 180°) |
+| Spins only when the motor's black wire touches the diode/− | black wire not in the C column |
+| LCD goes dark / garbled when it starts | 100 µF missing or reversed; press reset. Still happening → power the motor from the kit's power-supply module, GND joined to the Uno |
+| Transistor marked S8550 | that's PNP — swap for PN2222 / S8050 |
 
 ![Motor circuit as a schematic](motor_wiring.svg)
 
