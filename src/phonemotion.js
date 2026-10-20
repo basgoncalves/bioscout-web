@@ -49,6 +49,10 @@ export function makeStepDetector({ minGap = 240, floor = 1.25, maxGap = 2000 } =
   };
 }
 
+/** iOS / iPadOS (an iPad asks for a desktop site, so also a "Mac" with touch). */
+export const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent || "")
+  || (/Macintosh/.test(navigator.userAgent || "") && navigator.maxTouchPoints > 1);
+
 /** Start listening. onSample(t_ms, a_g, [x,y,z] in g). Resolves to a stop() function, or throws with a readable message. */
 export async function startMotion(onSample) {
   if (!("DeviceMotionEvent" in window)) throw new Error("no motion sensor in this browser");
@@ -57,11 +61,15 @@ export async function startMotion(onSample) {
     const r = await DeviceMotionEvent.requestPermission();
     if (r !== "granted") throw new Error("motion access was not allowed");
   }
+  // iPhone/iPad (Safari and every iOS browser, all WebKit) report accelerationIncludingGravity
+  // with the opposite sign to Android and the W3C spec: flat on a table, z reads -1 g instead
+  // of +1 g. Flip it so x, y, z and the segment angles mean the same on both. |a| is unchanged.
+  const sign = isIOS() ? -1 : 1;
   let got = false;
   const h = (e) => {
     const a = e.accelerationIncludingGravity; if (!a || a.x == null) return;
     got = true;
-    onSample(performance.now(), Math.hypot(a.x, a.y, a.z) / G, [a.x / G, a.y / G, a.z / G]);
+    onSample(performance.now(), Math.hypot(a.x, a.y, a.z) / G, [sign * a.x / G, sign * a.y / G, sign * a.z / G]);
   };
   window.addEventListener("devicemotion", h);
   await new Promise((r) => setTimeout(r, 1200));
