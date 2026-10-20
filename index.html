@@ -2180,8 +2180,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 121;
-window.BUILD_AT = "2026-10-20 09:01";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 122;
+window.BUILD_AT = "2026-10-20 09:06";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -11931,7 +11931,7 @@ async function labTrialSave() {
       st.textContent = tr("lt_written", { where });
     } else {
       const r = await saveFiles(files, trial);
-      st.textContent = r.how === "folder" ? tr("lt_written", { where: r.where }) : r.how === "zip" ? tr("lt_zipped", { trial, mb: (r.bytes / 1e6).toFixed(1) }) : "";
+      st.textContent = r.how === "folder" || r.how === "files" ? tr("lt_written", { where: r.where }) : r.how === "zip" ? tr("lt_zipped", { trial, mb: (r.bytes / 1e6).toFixed(1) }) : "";
     }
   } catch (e) { st.textContent = "✗ " + e.message; }
 }

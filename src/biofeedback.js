@@ -2268,7 +2268,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       metric: cfg.metric, phonePlacement: cfg.src === "phone" ? (cfg.phonePos || "pelvis") : undefined, phoneCalibration: cfg.src === "phone" ? ((cfg.phCal || {})[cfg.phonePos || "pelvis"] || null) : undefined, bodyMassKg: cfg.mass, heightM: cfg.height, loadKg: wtOf(cfg.move), threshold: cfg.thr, thresholds: { yellow: cfg.thr, orange: cfg.thr2, red: cfg.thr3 }, unit: METRICS[cfg.metric].unit, lightWhen: cfg.dir, hysteresis: cfg.hyst, zero: cfg.zero }, null, 2) });
     files.push({ name: "README.txt", data: tr("bfb_readme") });
       const r = await saveFiles(files, `bioscout_biofeedback_${stamp}`, (i, n) => { bar.max = n; bar.value = i; });
-      note.textContent = r.how === "folder" ? tr("bfb_savedDir", { where: r.where }) : r.how === "zip" ? tr("bfb_savedZip", { where: r.where }) : "";
+      note.textContent = r.how === "folder" || r.how === "files" ? tr("bfb_savedDir", { where: r.where }) : r.how === "zip" ? tr("bfb_savedZip", { where: r.where }) + (r.reason ? ` — ${r.reason}` : "") : "";
     } catch (e) { note.textContent = "✗ " + e.message; }
     finally { bar.max = 1; bar.value = 1; setTimeout(() => bar.classList.add("hidden"), 700); $("bfbSave").disabled = !rec.samples.length && !Object.keys(rec.rows).length; }
   };
