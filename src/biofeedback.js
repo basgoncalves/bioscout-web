@@ -2266,7 +2266,18 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       note.textContent = r.how === "folder" ? tr("bfb_savedDir", { where: r.where }) : r.how === "zip" ? tr("bfb_savedZip", { where: r.where }) : "";
     } catch (e) { note.textContent = "✗ " + e.message; }
   };
-  $("bfbClear").onclick = () => { rec.t0 = null; rec.samples = []; rec.rows = {}; rec.cyc = null; rec.acc = []; rec.steps = []; renderTables(); };
+  /* Clear session: back to the page as first opened — camera/phone off, no source chosen,
+   * recorded data and notes gone. Movement, metric and thresholds are kept. */
+  $("bfbClear").onclick = () => {
+    if (st.stream) stopCam();
+    stopPhone();
+    rec.t0 = null; rec.samples = []; rec.rows = {}; rec.cyc = null; rec.acc = []; rec.steps = [];
+    cfg.src = null; save();
+    for (const id of ["bfbCamNote", "bfbSaveNote", "bfbPhCalNote"]) if ($(id)) $(id).textContent = "";
+    if ($("bfbValue")) $("bfbValue").textContent = "–";
+    $("bfbSave").disabled = true;
+    fillMetrics(); syncInputs(); renderSrc(); renderTables();
+  };
 
   /* ---------- open / leave ---------- */
   function open() {
