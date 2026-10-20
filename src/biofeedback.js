@@ -1143,7 +1143,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * bars, plot and lamps 10 times a second. */
   const stepDet = makeStepDetector();
   async function startPhone() {
-    stepDet.reset(); ema = NaN; Object.assign(vert, { t: 0, vz: 0, dz: 0, air: 0, lastAir: 0 }); Object.assign(jd, { air: 0, sum: 0, n: 0, land: null });
+    stepDet.reset(); ema = NaN; Object.assign(vert, { t: 0, vz: 0, dz: 0, air: 0, lastAir: 0 }); Object.assign(jd, { air: 0, vals: [], land: null });
     accBuf.length = 0; stepTs.length = 0;
     try {
       st.motionStop = await startMotion((t, a, xyz) => {
@@ -1180,20 +1180,20 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * below 1 g = free fall). Only drives the drawing, never a metric. */
   const vert = { t: 0, vz: 0, dz: 0, air: 0, lastAir: 0 };
   /* Jumps from flight time (lab L03): in the air the phone reads ≈ 0 g. Take-off = |a|
-   * drops below 0.3 g, landing = the impact above 1.2 g. A flight counts when it lasts
-   * 0.2–1.0 s and |a| stayed low on average (< 0.25 g), so the quick unweighting of a
-   * countermovement is not mistaken for a jump. Height h = g·t²/8. */
-  const jd = { air: 0, sum: 0, n: 0, land: null };
+   * drops below 0.5 g, landing = the impact above 1.5 g. A flight counts when it lasts
+   * 0.2–1.0 s, its median |a| is < 0.45 g and a push-off > 1.3 g came just before. Height h = g·t²/8. */
+  const jd = { air: 0, vals: [], land: null };
   function jumpPush(t, a) {
     // the landing impact peak: the highest |a| in the 300 ms after touch-down
     if (jd.land) { if (t - jd.land.t <= 300) { const j = jd.land.j; if (a > j.impact_g) { j.impact_g = j.row.impactG = a; renderJumps(); renderTables(); } } else jd.land = null; }
-    if (!jd.air) { if (a < 0.3) Object.assign(jd, { air: t, sum: a, n: 1 }); return; }
-    if (a <= 1.2) { jd.sum += a; jd.n++; if (t - jd.air > 1500) jd.air = 0; return; }
-    const ft = (t - jd.air) / 1000, low = jd.sum / jd.n, t0 = jd.air; jd.air = 0;
-    if (ft < 0.2 || ft > 1.0 || low > 0.25) return;
-    const n = rec.jumps.length + 1, prev = rec.jumps[rec.jumps.length - 1];
-    // push-off = the highest |a| in the 600 ms before take-off
+    if (!jd.air) { if (a < 0.5) Object.assign(jd, { air: t, vals: [a] }); return; }
+    if (a <= 1.5) { jd.vals.push(a); if (t - jd.air > 1500) jd.air = 0; return; }
+    const ft = (t - jd.air) / 1000, t0 = jd.air, v = jd.vals.slice().sort((x, y) => x - y), med = v[v.length >> 1]; jd.air = 0;
+    // push-off = the highest |a| in the 600 ms before take-off; a real jump pushes > 1.3 g first,
+    // the unweighting of a countermovement (standing → dip) does not
     const pk = accBuf.reduce((m, s) => (s.t >= t0 - 600 && s.t <= t0 && s.a > m ? s.a : m), -Infinity), push = Number.isFinite(pk) ? pk : NaN;
+    if (ft < 0.2 || ft > 1.0 || med > 0.45 || !(push > 1.3)) return;
+    const n = rec.jumps.length + 1, prev = rec.jumps[rec.jumps.length - 1];
     const j = { n, t_takeoff_s: rec.t0 != null ? (t0 - rec.t0) / 1000 : 0, type: prev ? prev.type : (cfg.move === "sj" ? "SJ" : cfg.move === "cmj" ? "CMJ" : ""), flight_s: ft, height_cm: (9.81 * ft * ft / 8) * 100, pushoff_g: push, impact_g: a };
     // also a trial in the Trials table next to the figure, like a camera-scored jump
     j.row = { t: j.t_takeoff_s + ft, ev: true, jumpHeight: j.height_cm, flightTime: ft * 1000, pushG: push, impactG: a, hit: cfg.metric === "jumpHeight" ? meets(j.height_cm) : null, lv: 0 };
