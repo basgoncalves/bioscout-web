@@ -1143,7 +1143,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * bars, plot and lamps 10 times a second. */
   const stepDet = makeStepDetector();
   async function startPhone() {
-    stepDet.reset(); ema = NaN; Object.assign(vert, { t: 0, vz: 0, dz: 0, air: 0, lastAir: 0 }); Object.assign(jd, { air: 0, sum: 0, n: 0 });
+    stepDet.reset(); ema = NaN; Object.assign(vert, { t: 0, vz: 0, dz: 0, air: 0, lastAir: 0 }); Object.assign(jd, { air: 0, sum: 0, n: 0, land: null });
     accBuf.length = 0; stepTs.length = 0;
     try {
       st.motionStop = await startMotion((t, a, xyz) => {
@@ -1183,15 +1183,30 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * drops below 0.3 g, landing = the impact above 1.2 g. A flight counts when it lasts
    * 0.2–1.0 s and |a| stayed low on average (< 0.25 g), so the quick unweighting of a
    * countermovement is not mistaken for a jump. Height h = g·t²/8. */
-  const jd = { air: 0, sum: 0, n: 0 };
+  const jd = { air: 0, sum: 0, n: 0, land: null };
   function jumpPush(t, a) {
+    // the landing impact peak: the highest |a| in the 300 ms after touch-down
+    if (jd.land) { if (t - jd.land.t <= 300) { const j = jd.land.j; if (a > j.impact_g) { j.impact_g = j.row.impactG = a; renderJumps(); renderTables(); } } else jd.land = null; }
     if (!jd.air) { if (a < 0.3) Object.assign(jd, { air: t, sum: a, n: 1 }); return; }
     if (a <= 1.2) { jd.sum += a; jd.n++; if (t - jd.air > 1500) jd.air = 0; return; }
     const ft = (t - jd.air) / 1000, low = jd.sum / jd.n, t0 = jd.air; jd.air = 0;
     if (ft < 0.2 || ft > 1.0 || low > 0.25) return;
     const n = rec.jumps.length + 1, prev = rec.jumps[rec.jumps.length - 1];
-    rec.jumps.push({ n, t_takeoff_s: rec.t0 != null ? (t0 - rec.t0) / 1000 : 0, type: prev ? prev.type : "", flight_s: ft, height_cm: (9.81 * ft * ft / 8) * 100 });
-    renderJumps();
+    // push-off = the highest |a| in the 600 ms before take-off
+    const pk = accBuf.reduce((m, s) => (s.t >= t0 - 600 && s.t <= t0 && s.a > m ? s.a : m), -Infinity), push = Number.isFinite(pk) ? pk : NaN;
+    const j = { n, t_takeoff_s: rec.t0 != null ? (t0 - rec.t0) / 1000 : 0, type: prev ? prev.type : (cfg.move === "sj" ? "SJ" : cfg.move === "cmj" ? "CMJ" : ""), flight_s: ft, height_cm: (9.81 * ft * ft / 8) * 100, pushoff_g: push, impact_g: a };
+    // also a trial in the Trials table next to the figure, like a camera-scored jump
+    j.row = { t: j.t_takeoff_s + ft, ev: true, jumpHeight: j.height_cm, flightTime: ft * 1000, pushG: push, impactG: a, hit: cfg.metric === "jumpHeight" ? meets(j.height_cm) : null, lv: 0 };
+    rec.jumps.push(j); jumpRowTo(j); jd.land = { t, j };
+    renderJumps(); renderTables();
+  }
+  const jumpMove = (j) => (j.type === "SJ" ? "sj" : j.type === "CMJ" ? "cmj" : MOVES[cfg.move] && /^(sj|cmj)$/.test(cfg.move) ? cfg.move : "cmj");
+  function jumpRowOut(j) {
+    for (const [mv, rows] of Object.entries(rec.rows)) { const i = rows.indexOf(j.row); if (i >= 0) { rows.splice(i, 1); if (!rows.length) delete rec.rows[mv]; } }
+  }
+  function jumpRowTo(j) {
+    jumpRowOut(j); const mv = jumpMove(j), rows = (rec.rows[mv] ||= []);
+    let k = rows.findIndex((r) => r.t > j.row.t); if (k < 0) k = rows.length; rows.splice(k, 0, j.row);
   }
   const JTYPES = ["", "SJ", "CMJ", "DJ", "other"];
   function renderJumps() {
@@ -1202,10 +1217,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const f = (x, d) => (Number.isFinite(x) ? x.toFixed(d) : "–");
     const groups = [...new Set(J.map((j) => j.type))].map((ty) => [ty, J.filter((j) => j.type === ty)]);
     if (groups.length > 1) groups.push(["*", J]);
-    host.innerHTML = `<table class="bfbJmpTbl"><thead><tr><th>#</th><th>${esc(tr("bfb_jmpType"))}</th><th>${esc(tr("bfb_jmpFlight"))}</th><th>${esc(tr("bfb_jmpHeight"))}</th><th></th></tr></thead><tbody>${
-      J.map((j, i) => `<tr><td>${j.n}</td><td><select data-jtype="${i}">${JTYPES.map((ty) => `<option value="${ty}"${ty === j.type ? " selected" : ""}>${ty || "–"}</option>`).join("")}</select></td><td>${f(j.flight_s, 3)}</td><td><b>${f(j.height_cm, 1)}</b></td><td><button type="button" class="ghost" data-jdel="${i}" aria-label="remove">×</button></td></tr>`).join("")}</tbody>
+    host.innerHTML = `<table class="bfbJmpTbl"><thead><tr><th>#</th><th>${esc(tr("bfb_jmpType"))}</th><th>${esc(tr("bfb_jmpFlight"))}</th><th>${esc(tr("bfb_jmpHeight"))}</th><th>${esc(tr("bfb_jmpPush"))} (g)</th><th>${esc(tr("bfb_jmpImpact"))} (g)</th><th></th></tr></thead><tbody>${
+      J.map((j, i) => `<tr><td>${j.n}</td><td><select data-jtype="${i}">${JTYPES.map((ty) => `<option value="${ty}"${ty === j.type ? " selected" : ""}>${ty || "–"}</option>`).join("")}</select></td><td>${f(j.flight_s, 3)}</td><td><b>${f(j.height_cm, 1)}</b></td><td>${f(j.pushoff_g, 2)}</td><td>${f(j.impact_g, 2)}</td><td><button type="button" class="ghost" data-jdel="${i}" aria-label="remove">×</button></td></tr>`).join("")}</tbody>
       <tfoot>${groups.map(([ty, g]) => { const a = ms(g.map((j) => j.flight_s)), b = ms(g.map((j) => j.height_cm));
-        return `<tr><td colspan="2">${esc(tr("bfb_jmpMean"))} ${ty === "*" ? esc(tr("bfb_jmpAll")) : esc(ty || "–")} (n=${a.n})</td><td>${f(a.m, 3)} ± ${f(a.s, 3)}</td><td><b>${f(b.m, 1)}</b> ± ${f(b.s, 1)}</td><td></td></tr>`; }).join("")}</tfoot></table>
+        const c = ms(g.map((j) => j.pushoff_g).filter(Number.isFinite)), d = ms(g.map((j) => j.impact_g));
+        return `<tr><td colspan="2">${esc(tr("bfb_jmpMean"))} ${ty === "*" ? esc(tr("bfb_jmpAll")) : esc(ty || "–")} (n=${a.n})</td><td>${f(a.m, 3)} ± ${f(a.s, 3)}</td><td><b>${f(b.m, 1)}</b> ± ${f(b.s, 1)}</td><td>${f(c.m, 2)} ± ${f(c.s, 2)}</td><td>${f(d.m, 2)} ± ${f(d.s, 2)}</td><td></td></tr>`; }).join("")}</tfoot></table>
       <p class="note">${esc(tr("bfb_jmpNote"))}</p>`;
   }
   function vertPush(t, a) {
@@ -2077,12 +2093,15 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const RECORDER_ACT = { squat: "squat", slsquat: "slsquat", cmj: "cmj", sj: "sj", shot: "jumpshot" };
   async function openRep(move, idx) {
     const row = rec.rows[move][idx]; if (!row) return;
-    const smp = (row.i0 != null ? rec.samples.slice(row.i0, row.i1 + 1)
+    // a jump found by the phone: the |a| trace from 1.5 s before take-off to 0.8 s after landing
+    const smp = row.pushG !== undefined ? rec.acc.filter((x) => x.t > row.t - row.flightTime / 1000 - 1.5 && x.t < row.t + 0.8).map((x) => ({ t: x.t, accMag: x.a, _c: true }))
+      : (row.i0 != null ? rec.samples.slice(row.i0, row.i1 + 1)
       : rec.samples.filter((x) => x.t > row.t - 2.5 && x.t < row.t + 1 && x.move === move)).filter((x) => x._c);
     const cols = columns(move), u = (k) => METRICS[k].unit;
     const asym = (l, r) => Number.isFinite(l) && Number.isFinite(r) && Math.max(Math.abs(l), Math.abs(r)) > 1e-6
       && Math.abs(l - r) / Math.max(Math.abs(l), Math.abs(r)) > ASYM;
-    const valRows = cols.map((k) => {
+    const phoneJump = row.pushG !== undefined;
+    const valRows = (phoneJump ? [] : cols).map((k) => {
       const m = METRICS[k];
       if (!m.pair) return `<tr><td>${esc(short(k))}</td><td colspan="3" class="num">${cell(row[k], u(k))} ${esc(u(k))}</td></tr>`;
       const l = row[k + "_L"], r = row[k + "_R"], bad = asym(l, r);
@@ -2121,6 +2140,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     /* line plot, % of the rep */
     const drawLine = () => {
       const k = dlg.querySelector(".bfbRepSel").value, cv = dlg.querySelector(".bfbRepPlot");
+      if (!METRICS[k]) return;
       const W = cv.clientWidth || 600, H = 220, dpr = window.devicePixelRatio || 1;
       cv.width = W * dpr; cv.height = H * dpr; const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
       const ser = METRICS[k].pair ? [[k + "_L", SIDE_L, tr("leftShort")], [k + "_R", SIDE_R, tr("rightShort")]] : [[k, SIDE_R, ""]];
@@ -2168,7 +2188,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     /* joint-load figure: the surrogate re-run over the whole rep (loads,
      * vectors and magnitudes), drawn by the recorder's jointLoadSVG. */
     const box = dlg.querySelector(".bfbJL");
-    if (smp.length < 6) { box.innerHTML = ""; return; }
+    if (smp.length < 6 || phoneJump) { box.innerHTML = ""; return; }
     box.innerHTML = `<p class="note">${esc(tr("bfb_loadLoading"))}</p>`;
     let model;
     try { model = await loadEst.load(); } catch { box.innerHTML = `<p class="note">${esc(tr("bfb_loadFail"))}</p>`; return; }
@@ -2220,8 +2240,9 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   /* Per-rep bar columns (not live metrics, so declared here). */
   const REPCOLS = { load: ["bfb_c_load", "kg"], barRange: ["bfb_c_barRange", "cm"], barDrift: ["bfb_c_barDrift", "cm"],
-                    barVpk: ["bfb_c_barVpk", "m/s"], barVmean: ["bfb_c_barVmean", "m/s"], barPpk: ["bfb_c_barPpk", "W"] };
-  const repCell = (k, v) => (Number.isFinite(v) ? (REPCOLS[k][1] === "m/s" ? v.toFixed(2) : v.toFixed(0)) : "–");
+                    barVpk: ["bfb_c_barVpk", "m/s"], barVmean: ["bfb_c_barVmean", "m/s"], barPpk: ["bfb_c_barPpk", "W"],
+                    pushG: ["bfb_jmpPush", "g"], impactG: ["bfb_jmpImpact", "g"] };
+  const repCell = (k, v) => (Number.isFinite(v) ? (REPCOLS[k][1] === "m/s" || REPCOLS[k][1] === "g" ? v.toFixed(2) : v.toFixed(0)) : "–");
   function renderTables() {
     const host = $("bfbTables"); if (!host) return;
     host.innerHTML = Object.keys(rec.rows).map((move) => {
@@ -2276,8 +2297,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const csv = (rows, cols) => [cols.join(","), ...rows.map((r) => cols.map((c) => {
     const v = r[c]; return v == null ? "" : typeof v === "number" ? (Number.isFinite(v) ? +v.toFixed(4) : "") : String(v).includes(",") ? `"${v}"` : v;
   }).join(","))].join("\n");
-  $("bfbJumps").addEventListener("change", (e) => { const i = e.target.dataset.jtype; if (i != null) { rec.jumps[+i].type = e.target.value; renderJumps(); } });
-  $("bfbJumps").addEventListener("click", (e) => { const b = e.target.closest("[data-jdel]"); if (b) { rec.jumps.splice(+b.dataset.jdel, 1); rec.jumps.forEach((j, k) => (j.n = k + 1)); renderJumps(); } });
+  $("bfbJumps").addEventListener("change", (e) => { const i = e.target.dataset.jtype; if (i != null) { const j = rec.jumps[+i]; j.type = e.target.value; jumpRowTo(j); renderJumps(); renderTables(); } });
+  $("bfbJumps").addEventListener("click", (e) => { const b = e.target.closest("[data-jdel]"); if (b) { const [j] = rec.jumps.splice(+b.dataset.jdel, 1); jumpRowOut(j); rec.jumps.forEach((x, k) => (x.n = k + 1)); renderJumps(); renderTables(); } });
   $("bfbSave").onclick = async () => {
     const bar = $("bfbSaveBar"), note = $("bfbSaveNote");
     $("bfbSave").disabled = true; bar.classList.remove("hidden"); bar.removeAttribute("value"); note.textContent = tr("bfb_saving");
@@ -2291,7 +2312,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     }
     if (rec.acc.length) files.push({ name: "accelerometer_raw.csv", data: csv(rec.acc, ["t", "x", "y", "z", "a", "sag", "fr"]) });
     if (rec.steps.length) files.push({ name: "steps.csv", data: csv(rec.steps, ["n", "t", "step_ms", "impact_g"]) });
-    if (rec.jumps.length) files.push({ name: "jumps.csv", data: csv(rec.jumps, ["n", "type", "t_takeoff_s", "flight_s", "height_cm"]) });
+    if (rec.jumps.length) files.push({ name: "jumps.csv", data: csv(rec.jumps, ["n", "type", "t_takeoff_s", "flight_s", "height_cm", "pushoff_g", "impact_g"]) });
     if (rec.samples.length) {
       const cols = ["t", "move", ...[...new Set(rec.samples.flatMap((r) => Object.keys(r)))].filter((c) => c !== "t" && c !== "move" && c !== "_c")];
       files.push({ name: "timeseries.csv", data: csv(rec.samples, cols) });
