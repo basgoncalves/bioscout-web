@@ -1356,8 +1356,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const f = (v, d, u) => (Number.isFinite(v) ? v.toFixed(d) + " " + u : "–"), dg = (r) => (Number.isFinite(r) ? Math.round(r * 180 / Math.PI) + "°" : "–");
     // only the accelerations: live |a| and the peaks found (last jump's push-off / landing, last step's impact)
     const lj = rec.jumps[rec.jumps.length - 1], ls = rec.steps[rec.steps.length - 1];
-    const rows = [[tr("bfb_m_acc"), f(PH_LIVE.acc, 2, "g")], [tr("bfb_jmpPush"), f(lj && lj.pushoff_g, 2, "g")],
-                  [tr("bfb_jmpImpact"), f(lj && lj.impact_g, 2, "g")], [tr("bfb_m_runImp"), f(ls && ls.impact_g, 2, "g")]];
+    const rows = [[tr("bfb_jmpPush"), f(lj && lj.pushoff_g, 2, "g")], [tr("bfb_jmpImpact"), f(lj && lj.impact_g, 2, "g")]];
+    void ls;
     void dg;
     c.font = "13px system-ui"; c.textAlign = "right";
     rows.forEach(([k, v], i) => { c.fillStyle = "#8b949e"; c.fillText(k.replace(/\s*\(.*\)/, ""), W - 70, 56 + i * 19); c.fillStyle = "#e6edf3"; c.fillText(v, W - 10, 56 + i * 19); });
