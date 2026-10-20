@@ -1496,6 +1496,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     $("bfbNoSrc").classList.toggle("hidden", !none);
     $("bfbStage").classList.toggle("phone", isPhone());
     $("bfbAccWrap").classList.toggle("hidden", !isPhone());
+    // phone: the accelerometer graph already shows |a|; the lamp meter + 10 s plot would repeat it
+    $("bfbPlot").classList.toggle("hidden", isPhone()); $("bfbBars").classList.toggle("hidden", isPhone());
     $("bfbFlip").classList.toggle("hidden", isScreen() || isPhone());
     $("bfbUseCam").classList.toggle("on", !!cfg.src && !isPhone()); $("bfbUsePhone").classList.toggle("on", isPhone());
     $("bfbSrcRow").classList.toggle("hidden", none || isPhone());
