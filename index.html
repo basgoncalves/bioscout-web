@@ -552,6 +552,11 @@ try {
                  padding:4px 9px; font-size:12.5px; line-height:1.3; }
   button.repchip.out { text-decoration:line-through; color:var(--muted); }
   details.repedit { margin-top:10px; font-size:13px; }
+  .bfbJmpTbl { border-collapse:collapse; width:100%; font-size:13.5px; }
+  .bfbJmpTbl th, .bfbJmpTbl td { padding:3px 6px; border-bottom:1px solid var(--line); text-align:left; }
+  .bfbJmpTbl tfoot td { color:var(--muted); }
+  .bfbJmpTbl select { margin:0; padding:2px 4px; width:auto; }
+  .bfbJmpTbl button { margin:0; padding:2px 8px; width:auto; }
   details.bfbFold { border:1px solid var(--line, #333); border-radius:10px; padding:6px 10px; margin:8px 0; }
   details.bfbFold > summary { cursor:pointer; font-weight:600; color:var(--muted); padding:4px 0; }
   details.bfbFold[open] > summary { margin-bottom:6px; }
@@ -1795,7 +1800,8 @@ try {
       </div>
       <aside id="bfbQuick" class="bfbQuick" aria-label="Trials"></aside>
       </div>
-      <div id="bfbAccWrap" class="hidden"><p class="note" style="margin:10px 0 2px" data-i18n="bfb_accTitle">Accelerometer (g)</p>
+      <div id="bfbAccWrap" class="hidden"><p class="note" style="margin:10px 0 2px"><b data-i18n="bfb_jmpTitle">Jumps (from flight time)</b></p><div id="bfbJumps"></div>
+      <p class="note" style="margin:10px 0 2px" data-i18n="bfb_accTitle">Accelerometer (g)</p>
       <canvas id="bfbAccCv" class="bfbPlot" style="height:140px" aria-label="Accelerometer"></canvas>
       <p class="note" style="margin:8px 0 2px" data-i18n="bfb_angTitle">Segment angles from the phone (°)</p>
       <canvas id="bfbAngCv" class="bfbPlot" style="height:120px" aria-label="Segment angles"></canvas></div>
@@ -2185,8 +2191,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 123;
-window.BUILD_AT = "2026-10-20 09:12";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 124;
+window.BUILD_AT = "2026-10-20 09:25";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

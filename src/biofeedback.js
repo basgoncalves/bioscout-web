@@ -1143,11 +1143,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * bars, plot and lamps 10 times a second. */
   const stepDet = makeStepDetector();
   async function startPhone() {
-    stepDet.reset(); ema = NaN; Object.assign(vert, { t: 0, vz: 0, dz: 0, air: 0, lastAir: 0 });
+    stepDet.reset(); ema = NaN; Object.assign(vert, { t: 0, vz: 0, dz: 0, air: 0, lastAir: 0 }); Object.assign(jd, { air: 0, sum: 0, n: 0 });
     accBuf.length = 0; stepTs.length = 0;
     try {
       st.motionStop = await startMotion((t, a, xyz) => {
-        vertPush(t, a); if (Array.isArray(xyz)) orientPush(xyz);
+        vertPush(t, a); jumpPush(t, a); if (Array.isArray(xyz)) orientPush(xyz);
         if (rec.t0 == null) rec.t0 = t;
         if (rec.acc.length < 400000) rec.acc.push({ t: (t - rec.t0) / 1000, x: xyz && xyz[0], y: xyz && xyz[1], z: xyz && xyz[2], a, sag: PH_LIVE.sag * 180 / Math.PI, fr: PH_LIVE.fr * 180 / Math.PI });
         const sp = stepDet.push(t, a); if (sp) {
@@ -1179,6 +1179,35 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * leaky integrators (drift dies out in ~3 s), plus flight detection (|a| well
    * below 1 g = free fall). Only drives the drawing, never a metric. */
   const vert = { t: 0, vz: 0, dz: 0, air: 0, lastAir: 0 };
+  /* Jumps from flight time (lab L03): in the air the phone reads ≈ 0 g. Take-off = |a|
+   * drops below 0.3 g, landing = the impact above 1.2 g. A flight counts when it lasts
+   * 0.2–1.0 s and |a| stayed low on average (< 0.25 g), so the quick unweighting of a
+   * countermovement is not mistaken for a jump. Height h = g·t²/8. */
+  const jd = { air: 0, sum: 0, n: 0 };
+  function jumpPush(t, a) {
+    if (!jd.air) { if (a < 0.3) Object.assign(jd, { air: t, sum: a, n: 1 }); return; }
+    if (a <= 1.2) { jd.sum += a; jd.n++; if (t - jd.air > 1500) jd.air = 0; return; }
+    const ft = (t - jd.air) / 1000, low = jd.sum / jd.n, t0 = jd.air; jd.air = 0;
+    if (ft < 0.2 || ft > 1.0 || low > 0.25) return;
+    const n = rec.jumps.length + 1, prev = rec.jumps[rec.jumps.length - 1];
+    rec.jumps.push({ n, t_takeoff_s: rec.t0 != null ? (t0 - rec.t0) / 1000 : 0, type: prev ? prev.type : "", flight_s: ft, height_cm: (9.81 * ft * ft / 8) * 100 });
+    renderJumps();
+  }
+  const JTYPES = ["", "SJ", "CMJ", "DJ", "other"];
+  function renderJumps() {
+    const host = $("bfbJumps"); if (!host) return;
+    const J = rec.jumps;
+    if (!J.length) { host.innerHTML = `<p class="note">${esc(tr("bfb_jmpNone"))}</p>`; return; }
+    const ms = (v) => { const n = v.length, m = v.reduce((a, b) => a + b, 0) / n, s = n > 1 ? Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / (n - 1)) : NaN; return { n, m, s }; };
+    const f = (x, d) => (Number.isFinite(x) ? x.toFixed(d) : "–");
+    const groups = [...new Set(J.map((j) => j.type))].map((ty) => [ty, J.filter((j) => j.type === ty)]);
+    if (groups.length > 1) groups.push(["*", J]);
+    host.innerHTML = `<table class="bfbJmpTbl"><thead><tr><th>#</th><th>${esc(tr("bfb_jmpType"))}</th><th>${esc(tr("bfb_jmpFlight"))}</th><th>${esc(tr("bfb_jmpHeight"))}</th><th></th></tr></thead><tbody>${
+      J.map((j, i) => `<tr><td>${j.n}</td><td><select data-jtype="${i}">${JTYPES.map((ty) => `<option value="${ty}"${ty === j.type ? " selected" : ""}>${ty || "–"}</option>`).join("")}</select></td><td>${f(j.flight_s, 3)}</td><td><b>${f(j.height_cm, 1)}</b></td><td><button type="button" class="ghost" data-jdel="${i}" aria-label="remove">×</button></td></tr>`).join("")}</tbody>
+      <tfoot>${groups.map(([ty, g]) => { const a = ms(g.map((j) => j.flight_s)), b = ms(g.map((j) => j.height_cm));
+        return `<tr><td colspan="2">${esc(tr("bfb_jmpMean"))} ${ty === "*" ? esc(tr("bfb_jmpAll")) : esc(ty || "–")} (n=${a.n})</td><td>${f(a.m, 3)} ± ${f(a.s, 3)}</td><td><b>${f(b.m, 1)}</b> ± ${f(b.s, 1)}</td><td></td></tr>`; }).join("")}</tfoot></table>
+      <p class="note">${esc(tr("bfb_jmpNote"))}</p>`;
+  }
   function vertPush(t, a) {
     const dt = vert.t ? Math.min(0.05, (t - vert.t) / 1000) : 0; vert.t = t;
     const av = (a - 1) * 9.81; vert.vz = vert.vz * 0.99 + av * dt; vert.dz = vert.dz * 0.99 + vert.vz * dt;
@@ -1951,7 +1980,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
    * that movement's table with the peak of every metric (left / right).
    * Jumps and shots add one row per event from the event detectors. One table
    * per movement, rows keep adding, like the recorder's session. */
-  const rec = { t0: null, samples: [], rows: {}, cyc: null, acc: [], steps: [] };   // acc/steps: phone accelerometer mode
+  const rec = { t0: null, samples: [], rows: {}, cyc: null, acc: [], steps: [], jumps: [] };   // acc/steps: phone accelerometer mode
     const EXC = { "°": 15, BW: 0.5, cm: 5, ms: 100, "m/s": 0.3, W: 200 };
   const mainKey = (mv) => (cfg.move === "free" ? cfg.metric : mv.def);
   const liveKeys = (mv) => (cfg.src === "phone" ? PHONE_KEYS : cfg.move === "free" ? [cfg.metric, ...(cfg.extra || []).filter((k) => MOVES.free.metrics.includes(k))] : mv.metrics).filter((k) => METRICS[k] && !METRICS[k].ev);
@@ -2247,6 +2276,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   const csv = (rows, cols) => [cols.join(","), ...rows.map((r) => cols.map((c) => {
     const v = r[c]; return v == null ? "" : typeof v === "number" ? (Number.isFinite(v) ? +v.toFixed(4) : "") : String(v).includes(",") ? `"${v}"` : v;
   }).join(","))].join("\n");
+  $("bfbJumps").addEventListener("change", (e) => { const i = e.target.dataset.jtype; if (i != null) { rec.jumps[+i].type = e.target.value; renderJumps(); } });
+  $("bfbJumps").addEventListener("click", (e) => { const b = e.target.closest("[data-jdel]"); if (b) { rec.jumps.splice(+b.dataset.jdel, 1); rec.jumps.forEach((j, k) => (j.n = k + 1)); renderJumps(); } });
   $("bfbSave").onclick = async () => {
     const bar = $("bfbSaveBar"), note = $("bfbSaveNote");
     $("bfbSave").disabled = true; bar.classList.remove("hidden"); bar.removeAttribute("value"); note.textContent = tr("bfb_saving");
@@ -2260,6 +2291,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     }
     if (rec.acc.length) files.push({ name: "accelerometer_raw.csv", data: csv(rec.acc, ["t", "x", "y", "z", "a", "sag", "fr"]) });
     if (rec.steps.length) files.push({ name: "steps.csv", data: csv(rec.steps, ["n", "t", "step_ms", "impact_g"]) });
+    if (rec.jumps.length) files.push({ name: "jumps.csv", data: csv(rec.jumps, ["n", "type", "t_takeoff_s", "flight_s", "height_cm"]) });
     if (rec.samples.length) {
       const cols = ["t", "move", ...[...new Set(rec.samples.flatMap((r) => Object.keys(r)))].filter((c) => c !== "t" && c !== "move" && c !== "_c")];
       files.push({ name: "timeseries.csv", data: csv(rec.samples, cols) });
@@ -2277,7 +2309,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   $("bfbClear").onclick = () => {
     if (st.stream) stopCam();
     stopPhone();
-    rec.t0 = null; rec.samples = []; rec.rows = {}; rec.cyc = null; rec.acc = []; rec.steps = [];
+    rec.t0 = null; rec.samples = []; rec.rows = {}; rec.cyc = null; rec.acc = []; rec.steps = []; rec.jumps = []; renderJumps();
     cfg.src = null; save();
     for (const id of ["bfbCamNote", "bfbSaveNote", "bfbPhCalNote"]) if ($(id)) $(id).textContent = "";
     if ($("bfbValue")) $("bfbValue").textContent = "–";
@@ -2289,7 +2321,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   function open() {
     $("bfbNoSerial").classList.toggle("hidden", hasSerial);
     if (!MOVES[cfg.move]) cfg.move = "squat";
-    fillMoves(); fillMetrics(); syncInputs(); renderScale(); renderConn(); listPorts(); renderBody(); renderSrc(); renderTables();
+    fillMoves(); fillMetrics(); syncInputs(); renderScale(); renderConn(); listPorts(); renderBody(); renderSrc(); renderTables(); renderJumps();
     if (!st.port) status("bfb_portNone");
   }
   async function leave() {
