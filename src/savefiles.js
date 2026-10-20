@@ -5,10 +5,11 @@
  * folder again with "Open folder". */
 import { makeZip } from "./zip.js";
 
-// Phones are excluded: Android Chrome offers the picker, but folders from cloud apps
-// (Google Drive, ...) get created while the files never arrive. Phones get the .zip.
+// Phones (Android Chrome) get the picker too, but write FLAT into the chosen folder
+// ("<name>_timeseries.csv" ...): a new sub-folder made inside a phone folder came out
+// empty in Google Drive. Every file is read back; anything missing -> the .zip instead.
 const isMobile = () => (navigator.userAgentData && navigator.userAgentData.mobile) || /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "");
-export const canPickFolder = () => typeof window.showDirectoryPicker === "function" && !isMobile();
+export const canPickFolder = () => typeof window.showDirectoryPicker === "function";
 
 /** files: [{ name: "a/b.csv", data: string|Uint8Array }].
  *  Resolves { how: "folder", where } | { how: "zip", where, bytes } | { how: "cancel" }. */
@@ -19,10 +20,10 @@ export async function saveFiles(files, name, onProgress = () => {}) {
     catch (e) { if (e && e.name === "AbortError") return { how: "cancel" }; }   // other errors: fall back to the zip
     if (root) {
       try {
-        const dir = await root.getDirectoryHandle(name, { create: true });
+        const flat = isMobile(), dir = flat ? root : await root.getDirectoryHandle(name, { create: true });
         for (const [i, f] of files.entries()) {
           onProgress(i, files.length);
-          const parts = f.name.split("/").filter(Boolean); let d = dir;
+          const parts = flat ? [`${name}_${f.name.replace(/\//g, "_")}`] : f.name.split("/").filter(Boolean); let d = dir;
           for (const p of parts.slice(0, -1)) d = await d.getDirectoryHandle(p, { create: true });
           const h = await d.getFileHandle(parts[parts.length - 1], { create: true });
           const w = await h.createWritable(); await w.write(f.data); await w.close();
@@ -30,7 +31,7 @@ export async function saveFiles(files, name, onProgress = () => {}) {
           if ((await h.getFile()).size !== want) throw new Error(`${f.name} was not written`);
         }
         onProgress(files.length, files.length);
-        return { how: "folder", where: `${root.name}/${name}` };
+        return { how: "folder", where: flat ? `${root.name} (${name}_…)` : `${root.name}/${name}` };
       } catch (e) { console.warn("folder save failed, falling back to .zip:", e); }   // the zip below still delivers the data
     }
   }
