@@ -552,6 +552,9 @@ try {
                  padding:4px 9px; font-size:12.5px; line-height:1.3; }
   button.repchip.out { text-decoration:line-through; color:var(--muted); }
   details.repedit { margin-top:10px; font-size:13px; }
+  details.bfbFold { border:1px solid var(--line, #333); border-radius:10px; padding:6px 10px; margin:8px 0; }
+  details.bfbFold > summary { cursor:pointer; font-weight:600; color:var(--muted); padding:4px 0; }
+  details.bfbFold[open] > summary { margin-bottom:6px; }
   details.repedit summary { cursor:pointer; color:var(--muted); }
   .repset { margin:8px 0 0; }
   .infoDot { display:inline-flex; align-items:center; justify-content:center;
@@ -1699,11 +1702,12 @@ try {
         </div>
       </dialog>
 
-      <h4 data-i18n="bfb_step2">2. Movement and metric</h4>
+      <h4 data-i18n="bfb_step2">1. Movement and metrics</h4>
       <div id="bfbBody" class="bfbBody"></div>
       <div class="row bfbRow">
         <label><span data-i18n="bfb_movement">Movement</span><select id="bfbMove"></select></label>
       </div>
+      <details class="bfbFold" id="bfbSettings" open><summary data-i18n="bfb_settings">Settings</summary>
       <div class="row bfbRow bfbLoadWrap" id="bfbLoadWrap">
         <label><span data-i18n="bfb_loadL">Left load (kg)</span><input type="number" id="bfbLoadL" min="0" max="300" step="0.5"></label>
         <label><span data-i18n="bfb_loadR">Right load (kg)</span><input type="number" id="bfbLoadR" min="0" max="300" step="0.5"></label>
@@ -1715,8 +1719,6 @@ try {
           <select id="bfbDir"><option value="above" data-i18n="bfb_above">above threshold</option><option value="below" data-i18n="bfb_below">below threshold</option></select></label>
       </div>
       <div class="row bfbRow">
-        <label><span data-i18n="bfb_mass">Body mass (kg)</span><input type="number" id="bfbMass" min="20" max="250" step="0.5" style="width:6em"></label>
-        <label><span data-i18n="bfb_height">Height (m)</span><input type="number" id="bfbHeight" min="1" max="2.4" step="0.01" style="width:6em"></label>
         <label><span><span data-i18n="bfb_hyst">Hysteresis</span> (<span id="bfbHystUnit">°</span>)</span><input type="number" id="bfbHyst" min="0" max="20" step="1" style="width:5em"></label>
         <label><span data-i18n="bfb_sound">Sound</span><select id="bfbSound"><option value="off" data-i18n="bfb_soundOff">Off</option><option value="beep" data-i18n="bfb_soundBeep">Beep when crossed</option><option value="repeat" data-i18n="bfb_soundRepeat">Beep while over</option></select></label>
       </div>
@@ -1747,8 +1749,13 @@ try {
           <input type="number" id="bfbThrN3" min="0" max="180" step="1" aria-label="Red threshold">
         </div>
       </div>
+      </details>
 
-      <h4 data-i18n="bfb_step3">3. Camera and go</h4>
+      <h4 data-i18n="bfb_step3">2. Live Feedback</h4>
+      <div class="row bfbRow">
+        <label><span data-i18n="bfb_mass">Body mass (kg)</span><input type="number" id="bfbMass" min="20" max="250" step="0.5" style="width:6em"></label>
+        <label><span data-i18n="bfb_height">Height (m)</span><input type="number" id="bfbHeight" min="1" max="2.4" step="0.01" style="width:6em"></label>
+      </div>
       <div class="row bfbRow bfbUseSrc">
         <button type="button" class="ghost" id="bfbUseCam" data-i18n="bfb_useCam">Use camera</button>
         <button type="button" class="ghost" id="bfbUsePhone" data-i18n="bfb_usePhone">Use phone accelerometer</button>
@@ -2171,8 +2178,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 113;
-window.BUILD_AT = "2026-10-19 11:28";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 114;
+window.BUILD_AT = "2026-10-20 07:03";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
