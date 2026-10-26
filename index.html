@@ -2194,8 +2194,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 131;
-window.BUILD_AT = "2026-10-26 11:12";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 132;
+window.BUILD_AT = "2026-10-26 11:57";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -9196,8 +9196,11 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
     const pts = named ? Object.values(named) : [];
     const ocx = roi.x + roi.w / 2, ocy = roi.y + roi.h / 2;
     if (pts.length < 6) {
-      // Lost: widen the search, but keep the centre where the athlete was last.
-      if (++roiLost >= 6) { roiPlace(ocx, ocy, roi.w * 1.25); roiLost = 3; }
+      /* Lost: widen the search, but keep the centre where the athlete was last,
+       * and never past twice the drawn box -- widening to the whole picture
+       * undoes the magnification the box is for (Luka pregame clip,
+       * 2026-10-26: the box grew to the full court and found nobody). */
+      if (++roiLost >= 6) { roiPlace(ocx, ocy, Math.min(roi.w * 1.25, roiBase.w * 2)); roiLost = 3; }
       return;
     }
     roiLost = 0;

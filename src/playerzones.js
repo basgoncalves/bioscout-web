@@ -28,7 +28,7 @@ export function askZones({ src, n, zones = [], tr }) {
     dlg.style.cssText = "width:min(96vw,960px);max-width:none";
     dlg.innerHTML = `<h2 style="margin:0 0 6px">${tr("mpZonesTitle")}</h2>
       <p class="note" id="pzHint" style="margin:0 0 8px"></p>
-      <div style="position:relative"><canvas id="pzCv" style="width:100%;display:block;touch-action:none;border-radius:8px;cursor:crosshair"></canvas></div>
+      <div style="position:relative"><canvas id="pzCv" style="max-width:100%;max-height:68vh;width:auto;height:auto;margin:0 auto;display:block;touch-action:none;border-radius:8px;cursor:crosshair"></canvas></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
         <button type="button" class="ghost" id="pzUndo">${tr("mpZonesUndo")}</button>
         <button type="button" class="ghost" id="pzClear">${tr("mpZonesClear")}</button>
