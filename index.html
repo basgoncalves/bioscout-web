@@ -1950,6 +1950,11 @@ try {
     </label>
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
+    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin:-4px 2px 11px;
+                  font-size:13.5px;color:var(--ink)">
+      <input type="checkbox" id="fileRoi" style="width:auto;margin:0">
+      <span data-i18n="fileRoi">Box the athlete first (small or crowded videos)</span>
+    </label>
     <button class="ghost trainOnly hidden" id="ytBtn" data-i18n="ytButton">From URL</button>
     <button class="ghost trainOnly hidden" id="screenRecBtn" data-i18n="srRecordScreen">Record the screen</button>
     <button class="ghost trainOnly" id="manualBtn" data-i18n="manualSet">Count reps by hand (no camera)</button>
@@ -2189,8 +2194,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 130;
-window.BUILD_AT = "2026-10-20 12:28";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 131;
+window.BUILD_AT = "2026-10-26 11:12";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -8785,6 +8790,13 @@ $("recBtn").onclick = () => {
 
 // --- video file ------------------------------------------------------------
 $("fileBtn").onclick = () => $("fileInput").click();
+/* "Box the athlete first": remembered, because whoever analyses broadcast or
+ * crowded clips will want it every time and nobody else ever. */
+{
+  const RKEY = "bioscout.fileroi.v1";
+  try { $("fileRoi").checked = localStorage.getItem(RKEY) === "1"; } catch { /* no storage */ }
+  $("fileRoi").onchange = (e) => { try { localStorage.setItem(RKEY, e.target.checked ? "1" : "0"); } catch { /* no storage */ } };
+}
 /* A clip from a video that cannot be exported: record that part of the screen
  * (desktop browsers; phones have no screen capture for web pages). */
 if (screenRecSupported()) $("screenRecBtn").classList.remove("hidden");
@@ -9125,7 +9137,13 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
    * Player 1 is the body the single-athlete analysis follows. */
   const fileMulti = multiOn || $("activity").value === "stroke";
   let ftrack = fileMulti ? newTracker() : null;
-  const needsPage = fileMulti || $("activity").value === "kick";
+  /* The athlete's box (Bas, 2026-10-26: a pregame full-court shot from the
+   * stands -- the player ~40 px tall in a 1080 px frame, and the model fitted a
+   * "body" across the crowd). Asked only when there is no screen-recording
+   * crop already. The box follows the athlete frame to frame, so it needs each
+   * result before the next frame: the page's own model, not the worker. */
+  const roiWanted = !(crop && crop.w > 8 && crop.h > 8) && !!($("fileRoi") && $("fileRoi").checked);
+  const needsPage = fileMulti || $("activity").value === "kick" || roiWanted;
   const pw = !needsPage && v.requestVideoFrameCallback && window.createImageBitmap && window.__bsNoWorker !== true
     ? await startPoseWorker() : null;
   vidAbort.pw = pw;
@@ -9161,7 +9179,56 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   const fw = cr ? Math.round(cr.w) : v.videoWidth, fh = cr ? Math.round(cr.h) : v.videoHeight;
   let cropCv = null, cropCx = null;
   if (cr) { cropCv = document.createElement("canvas"); cropCv.width = fw; cropCv.height = fh; cropCx = cropCv.getContext("2d"); }
-  const srcNow = () => { if (!cr) return v; cropCx.drawImage(v, cr.x, cr.y, cr.w, cr.h, 0, 0, fw, fh); return cropCv; };
+  /* The followed box, in the video's own pixels. The model sees only the box,
+   * drawn onto a canvas of fixed size (at least 512 px on its long side, so a
+   * small box is magnified); the landmarks are mapped back to the WHOLE frame,
+   * so everything downstream sees ordinary full-frame coordinates and does not
+   * care that the box moved. The box keeps its aspect ratio: it only moves,
+   * grows when the body fills it or is lost, and eases back to its drawn size. */
+  const VW = v.videoWidth, VH = v.videoHeight;
+  let roi = null, roiBase = null, roiLost = 0, roiCv = null, roiCx = null;
+  const roiPlace = (cx, cy, w) => {
+    let h = w * roiBase.h / roiBase.w;
+    const s = Math.min(1, VW / w, VH / h); w *= s; h *= s;
+    roi = { x: Math.min(VW - w, Math.max(0, cx - w / 2)), y: Math.min(VH - h, Math.max(0, cy - h / 2)), w, h };
+  };
+  const roiFollow = (named) => {
+    const pts = named ? Object.values(named) : [];
+    const ocx = roi.x + roi.w / 2, ocy = roi.y + roi.h / 2;
+    if (pts.length < 6) {
+      // Lost: widen the search, but keep the centre where the athlete was last.
+      if (++roiLost >= 6) { roiPlace(ocx, ocy, roi.w * 1.25); roiLost = 3; }
+      return;
+    }
+    roiLost = 0;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const [x, y] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    const need = Math.max((x1 - x0) / roi.w, (y1 - y0) / roi.h);
+    let w = roi.w;
+    if (need > 0.8) w = roi.w * need / 0.7;
+    else if (roi.w > roiBase.w) w = Math.max(roiBase.w, roi.w * 0.97);
+    // Half-way towards the body each frame: follows a sprint, ignores jitter.
+    roiPlace(ocx + 0.5 * ((x0 + x1) / 2 - ocx), ocy + 0.5 * ((y0 + y1) / 2 - ocy), w);
+  };
+  const srcNow = () => {
+    if (roi) { roiCx.drawImage(v, roi.x, roi.y, roi.w, roi.h, 0, 0, roiCv.width, roiCv.height); return roiCv; }
+    if (!cr) return v; cropCx.drawImage(v, cr.x, cr.y, cr.w, cr.h, 0, 0, fw, fh); return cropCv;
+  };
+  if (roiWanted) {
+    await seekTo(seekOf(0));
+    say(tr("roiAsk"));
+    const roiKeys = { mpZonesTitle: "roiTitle", mpZonesHint: "roiHint", mpZonesAll: "roiAll" };
+    const z = await askZones({ src: v, n: 1, zones: [], tr: (k, p) => tr(roiKeys[k] || k, p) });
+    checkAbort();
+    if (z && z.length) {
+      roiBase = { w: z[0].w * VW, h: z[0].h * VH };
+      roi = { x: z[0].x * VW, y: z[0].y * VH, ...roiBase };
+      const up = Math.max(1, 512 / Math.max(roi.w, roi.h));
+      roiCv = document.createElement("canvas");
+      roiCv.width = Math.round(roi.w * up); roiCv.height = Math.round(roi.h * up);
+      roiCx = roiCv.getContext("2d");
+    }
+  }
   /* Player areas on this clip: drawn on its first frame (after any crop), when
    * the user asked for areas -- the view of a file is rarely the camera's. */
   if (ftrack && mpSet.use) {
@@ -9186,13 +9253,17 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
     const res = off.detectForVideo(src, Math.round(t * 1000));
     stats.detectMs += performance.now() - d0;
     if (ftrack) {
-      const p1 = ftrack.update(res.landmarks, t * 1000, fw, fh).find((p) => p.id === 1);
+      const p1 = ftrack.update(res.landmarks, t * 1000, roi ? roiCv.width : fw, roi ? roiCv.height : fh).find((p) => p.id === 1);
       res.landmarks = p1 ? [p1.lm] : [];
     }
-    const named = res.landmarks && res.landmarks.length
-      ? toNamed(res.landmarks[0], fw, fh) : null;
-    ballGrab(src, t * 1000, named);
-    if (named) preview.draw(src, named, fw, fh);
+    let lm0 = res.landmarks && res.landmarks.length ? res.landmarks[0] : null;
+    // Box-relative -> whole frame (fw, fh are the video's own size here).
+    if (lm0 && roi) lm0 = lm0.map((l) => ({ ...l, x: (roi.x + l.x * roi.w) / VW, y: (roi.y + l.y * roi.h) / VH, z: (l.z ?? 0) * roi.w / VW }));
+    const named = lm0 ? toNamed(lm0, fw, fh) : null;
+    if (roi) roiFollow(named);
+    const fsrc = roi ? v : src;
+    ballGrab(fsrc, t * 1000, named);
+    if (named) preview.draw(fsrc, named, fw, fh);
     if (named) {
       // `i` is the GRID index, and it is what the analysis keys off. A frame
       // the model found no body in is then a hole at its own place in time
