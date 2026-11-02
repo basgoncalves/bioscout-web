@@ -659,12 +659,43 @@ export function findSquatReps(F, cfg = DEFAULT_SQUAT_CFG) {
   return { reps, depth };
 }
 
+/**
+ * Can the two legs be told apart on this clip?
+ *
+ * Side-on, the far leg is behind the near one for most of the movement. The
+ * pose model still emits landmarks for it, inferred rather than seen, so a
+ * left-right difference computed from them is a property of the model, not of
+ * the athlete. Front-on, both legs are in view and the sides are real.
+ *
+ * `frontality` is the shoulder/hip separation over torso length (viewOf):
+ * ~0 side-on, large front-on. The same 0.45 boundary that calls a view
+ * "frontal" is what makes the sides trustworthy, and the per-side angles must
+ * also actually exist on enough frames.
+ */
+export function sidesSeparable(F, view, t0 = 0, t1 = (F._n || 1) - 1) {
+  if (!view || !isNum(view.frontality) || view.frontality < 0.45) return false;
+  const have = (a) => {
+    if (!a) return 0;
+    let k = 0;
+    for (let i = t0; i <= t1 && i < a.length; i++) if (isNum(a[i])) k++;
+    return k / Math.max(1, t1 - t0 + 1);
+  };
+  return Math.min(have(F.knee_flex_l), have(F.knee_flex_r)) > 0.6;
+}
+
 export function squatRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
-                                    { model = "gpk", ankleValid = true } = {}) {
+                                    { model = "gpk", ankleValid = true, sides = false } = {}) {
   const [t0, , t1] = rep, lo = F._lo;
   const sl = (a) => interpNan(a).slice(t0, t1 + 1);
   const knee = sl(F.knee_flex), hip = sl(F.hip_flex);
   const ankle = sl(F.ankle_dorsi), lean = sl(F.trunk_lean);
+  /* Per side when the view allows it (sidesSeparable), both sides from the
+   * one measured curve when it does not. The fallback is a copy and is
+   * labelled as one everywhere it surfaces -- it is not a measurement of two
+   * legs, and presenting it as one would invent an asymmetry. */
+  const kneeL = sides ? sl(F.knee_flex_l) : null, kneeR = sides ? sl(F.knee_flex_r) : null;
+  const hipL = sides ? sl(F.hip_flex_l) : null, hipR = sides ? sl(F.hip_flex_r) : null;
+  const ankL = sides ? sl(F.ankle_dorsi_l) : null, ankR = sides ? sl(F.ankle_dorsi_r) : null;
   const hipY = sl(F.hip_cy), hipX = sl(F.hip_cx), ankleY = sl(F.ankle_cy);
   const times = [], z = [];
   for (let i = t0; i <= t1; i++) { times.push((lo + i) / fps); z.push(0); }
@@ -683,11 +714,17 @@ export function squatRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
       // displacement starting near zero drops the model through the floor.
       pelvis_ty: ankleY.map((ay, i) => (ay - hipY[i]) / pxPerM + ANKLE_JOINT_HEIGHT_M),
       pelvis_tz: hipX.map((x) => (x - midX) / pxPerM),
-      hip_flexion_r: hipFlex, hip_flexion_l: hipFlex,
-      knee_angle_r: kneeAng, knee_angle_l: kneeAng,
-      ankle_angle_r: ankleAng, ankle_angle_l: ankleAng,
+      hip_flexion_r: sides ? clipArr(hipR, -20, 130) : hipFlex,
+      hip_flexion_l: sides ? clipArr(hipL, -20, 130) : hipFlex,
+      knee_angle_r: sides ? clipArr(kneeR, 0, 145).map((v) => sign * v) : kneeAng,
+      knee_angle_l: sides ? clipArr(kneeL, 0, 145).map((v) => sign * v) : kneeAng,
+      ankle_angle_r: sides && ankleValid ? clipArr(ankR, -40, 40) : ankleAng,
+      ankle_angle_l: sides && ankleValid ? clipArr(ankL, -40, 40) : ankleAng,
       lumbar_extension: clipArr(lean.map((v) => -v), -60, 30),
     },
+    /* Whether the two sides above are two measurements or one copied twice.
+     * Everything downstream that compares sides must check this first. */
+    sidesMeasured: !!sides,
   };
 }
 
@@ -3574,11 +3611,16 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   found.reps = bounds;
   const view = viewQuality(poses);
 
+  /* Front-on clips give two legs; side-on clips give one leg twice. Decided
+   * once per clip from the view, not per rep, so a single rep where the far
+   * leg happened to be visible cannot turn the whole set into a left-right
+   * comparison that the rest of the clip does not support. */
+  const twoSides = sidesSeparable(F, view);
   const reps = bounds.map((b, i) => {
     const { times, coords } = (activity === "squat" || spec.jump || spec.perLeg
                                || spec.shot || spec.stroke || spec.generic)
       ? spec.coords(F, b, fps, pxPerM, refA, refB,
-                    { model: osimModel, ankleValid: view.ankle_usable })
+                    { model: osimModel, ankleValid: view.ankle_usable, sides: twoSides })
       : activity === "neck"
         ? spec.coords(F, b, fps)
         : spec.coords(F, b, fps, pxPerM, refA, refB);
@@ -3786,6 +3828,9 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
 
   return { activity, fps, pxPerM, scaleDetail: detail, view, osimModel,
            coverage: F._coverage, reps, whole, columns: spec.columns,
+           /* Two measured legs, or one measured leg written to both sides.
+            * The results page and the .mot export both say which. */
+           sidesMeasured: twoSides,
            refused: found.refused || null,
            runSummary: spec.gait ? runSummary(F, found, fps) : null,
            // Whether the athlete held station. Only running asks -- it is the

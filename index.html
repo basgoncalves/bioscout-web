@@ -2236,8 +2236,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 138;
-window.BUILD_AT = "2026-11-02 20:26";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 139;
+window.BUILD_AT = "2026-11-02 20:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -10185,7 +10185,8 @@ async function enrich(res, poses, fps, heightM, activity) {
     const side = activity === "jumpshot" ? (Fj._shootSide || null) : null;
     const tracks = isUpperBody(activity) ? armTracks(poses, side) : null;
     const angles = clipAngles(activity, spec, Fj, tracks,
-                              { ankleUsable: res.view?.ankle_usable !== false });
+                              { ankleUsable: res.view?.ankle_usable !== false,
+                                sides: !!res.sidesMeasured });
     const vels = clipVelocities(angles, fps);
     let armPrep = null;
     if (tracks) {
@@ -11472,6 +11473,17 @@ function armSeries(joint, muscle, angles) {
     const f = (a - g[i]) / (g[i + 1] - g[i] || 1);
     return arm[i] + (arm[i + 1] - arm[i]) * f;
   });
+}
+
+/* Which coordinate a joint's angle curve comes from. With two measured legs
+ * the right and left are different curves and both are drawn; with one, the
+ * single curve is drawn once and labelled as covering both sides, rather than
+ * two identical lines that look like a left-right comparison. */
+function jointCoords(res, j) {
+  const base = j.coord.replace(/_r$/, "");
+  return res && res.sidesMeasured
+    ? [{ coord: `${base}_r`, suffix: " (R)" }, { coord: `${base}_l`, suffix: " (L)" }]
+    : [{ coord: j.coord, suffix: "" }];
 }
 
 const JOINTS = [
@@ -12872,6 +12884,9 @@ function render(res, fps) {
     ${isFoot ? kickPanel(res) : ""}
     ${runPanel}
     ${camFixNote(res)}
+    ${res.sidesMeasured === false && ACTIVITIES[res.activity]?.columns?.some((c) => /_l$/.test(c))
+      ? `<p class="note">${tr("sidesMirroredNote")}</p>`
+      : res.sidesMeasured ? `<p class="note">${tr("sidesMeasuredNote")}</p>` : ""}
     ${suspect.length ? `<p class="note banner">${
       tr("heightsDisagree", { n: suspect.length, total: n })}</p>` : ""}
     ${mismatched.length ? `<p class="note banner">${

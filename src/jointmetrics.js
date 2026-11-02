@@ -221,7 +221,10 @@ const LOWER = { knee: "knee_flex", hip: "hip_flex", ankle: "ankle_dorsi" };
  * `F` is the feature set analyse() built for this activity (spec.features);
  * `tracks` is armTracks() for the arm(s) the task uses.
  */
-export function clipAngles(activity, spec, F, tracks, { ankleUsable = true } = {}) {
+/* `sides` is set when the view lets the two legs be told apart (front-on).
+ * Per-leg curves are then emitted for every task, not only the per-leg ones,
+ * so the plot and the export carry two real legs instead of one twice. */
+export function clipAngles(activity, spec, F, tracks, { ankleUsable = true, sides = false } = {}) {
   const out = {};
   const put = (k, a) => { if (finiteSome(a)) out[k] = Array.from(a, Number); };
   if (activity === "pullup" || activity === "dip" || activity === "pushup") {
@@ -233,7 +236,7 @@ export function clipAngles(activity, spec, F, tracks, { ankleUsable = true } = {
     for (const [j, fk] of Object.entries(LOWER)) {
       if (j === "ankle" && !ankleUsable) continue;
       put(j, F[fk]);
-      if (spec && spec.perLeg) {
+      if ((spec && spec.perLeg) || sides) {
         put(j + "_l", F[fk + "_l"]);
         put(j + "_r", F[fk + "_r"]);
         // A per-leg feature set with no averaged column still needs one for
