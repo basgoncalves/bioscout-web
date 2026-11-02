@@ -1898,6 +1898,7 @@ try {
       <div>
         <label for="activity" data-i18n="movement">Movement</label>
         <select id="activity">
+          <option value="generic" data-i18n="generic" selected>Generic (whole trial)</option>
           <option value="auto" data-i18n="auto">Detect automatically</option>
           <option value="squat" data-i18n="squat">Squat</option>
           <option value="deadlift" data-i18n="deadlift">Deadlift / RDL</option>
@@ -2238,8 +2239,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 141;
-window.BUILD_AT = "2026-11-02 20:35";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 142;
+window.BUILD_AT = "2026-11-02 20:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -10378,6 +10379,9 @@ function viewNote(res) {
   const v = res.view || {};
   const bits = [];
   const spec = ACTIVITIES[res.activity] || {};
+  // Say what Generic did and did not do, so an empty rep count reads as a
+  // choice rather than a failed detection.
+  if (spec.wholeTrial) bits.push(tr("genericNote"));
   const sagittal = res.activity === "squat" || spec.jump || res.activity === "slsquat"
                    || spec.gait || spec.kickback || spec.kick;
   if (sagittal && (v.view === "frontal" || v.view === "oblique")) {

@@ -914,10 +914,33 @@ export function viewQuality(poses) {
   const medAnkle = ankles.length ? nanmedian(ankles) : NaN;
   const view = !isNum(frontality) ? "unknown"
     : frontality < 0.30 ? "sagittal" : frontality < 0.45 ? "oblique" : "frontal";
+  /* Is the ankle angle a measurement or an artefact of the projection?
+   *
+   * Three ways it can fail, and the first two used to be missed:
+   *
+   * 1. THE VIEW. Dorsiflexion is a rotation in the sagittal plane. Filmed
+   *    front-on you are looking down that plane edge-on, so the knee-ankle-toe
+   *    angle is a projection of a rotation the camera cannot see. No threshold
+   *    on the angle itself rescues that, so a frontal view disqualifies the
+   *    ankle outright.
+   * 2. SATURATION. A real ankle lives inside roughly +-40 deg, which is why
+   *    the export clips there. When most frames land OUTSIDE that range the
+   *    clip stops being a safety rail and becomes the signal: the export
+   *    flatlines on the bound and reads as a held joint. Measured on the
+   *    unclipped value, so the check cannot be fooled by its own clipping.
+   * 3. DEGENERACY. The foot pointing straight at or away from the lens
+   *    flattens knee-ankle-toe toward 180 deg (the original check).
+   */
+  const dorsi = ankles.map((a) => 90 - a);
+  const saturated = dorsi.length
+    ? dorsi.filter((v) => Math.abs(v) >= 40).length / dorsi.length : 1;
+  const ankleUsable = isNum(medAnkle) && medAnkle < 155
+    && view !== "frontal" && view !== "unknown" && saturated < 0.25;
   return {
     frontality: isNum(frontality) ? +frontality.toFixed(3) : null,
     view,
-    ankle_usable: isNum(medAnkle) && medAnkle < 155,
+    ankle_usable: ankleUsable,
+    ankle_saturated_frac: +saturated.toFixed(2),
     median_ankle_interior_deg: isNum(medAnkle) ? +medAnkle.toFixed(1) : null,
   };
 }
@@ -3233,6 +3256,21 @@ MORE_FIND.movement = (F, c) => {
   }
   return f;
 };
+/* Whole trial, one "rep", no detection of anything.
+ *
+ * Every other finder answers "where are the reps"; this one is for the trials
+ * where that question has no answer -- a warm-up, a drill, a movement the app
+ * has never heard of, a clip someone just wants the angles out of. Asking a
+ * rep finder to guess there produces cycles that are an artefact of the
+ * threshold rather than of the movement, so nothing is guessed: the clip is
+ * the unit, and every angle, curve and range is still measured over it. */
+MORE_FIND.generic = (F) => {
+  const n = F._n || 0;
+  // The midpoint stands in for the "top" the rep machinery expects; nothing
+  // generic reports is computed from it, and no phase split is claimed.
+  return n >= 2 ? { reps: [[0, Math.max(1, (n - 1) >> 1), n - 1]], depth: [], driver: null }
+                : { reps: [], depth: [], driver: null };
+};
 const moreFinder = (id) => (F, cfg = DEFAULT_MORE_CFG) => MORE_FIND[id](F, cfg);
 
 /** Per-rep numbers for the ten, from the measured angles in the rep window. */
@@ -3277,7 +3315,7 @@ export function moreMetrics(activity, F, rep, fps, found, i) {
       if (activity === "curl") o.shoulder_swing_deg = rng("shoulder_elev");
       else o.trunk_pitch_mean_deg = mean("trunk_pitch");
       o.main_range = o.elbow_range_deg; break;
-    case "movement":
+    case "movement": case "generic":
       o.knee_range_deg = rng("knee_flex"); o.hip_range_deg = rng("hip_flex");
       o.elbow_range_deg = rng("elbow_flex"); o.shoulder_range_deg = rng("shoulder_elev");
       o.trunk_range_deg = rng("trunk_pitch");
@@ -3317,6 +3355,10 @@ export const MORE_ACTIVITIES = {
   row: MORE("bent-over row", "row", { armTask: true, phases: ["concentric_s", "eccentric_s"] }),
   raise: MORE("lateral / front raise", "raise", { armTask: true, phases: ["concentric_s", "eccentric_s"] }),
   movement: MORE("movement", "movement", { phases: ["concentric_s", "eccentric_s"] }),
+  /* "Generic" -- the whole trial as one, no task assumed. `phases: null`
+   * because a trial that was never cut into reps has no concentric and no
+   * eccentric to time. */
+  generic: MORE("whole trial", "generic", { wholeTrial: true, phases: null }),
 };
 
 export const ACTIVITIES = {
@@ -3658,11 +3700,15 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
         };
         s.peak_hip_flex_deg = peak(["hip_flexion_r", "hip_flexion_l"]);
         s.peak_knee_flex_deg = peak(["knee_angle_r", "knee_angle_l"]);
-        s.peak_ankle_df_deg = peak(["ankle_angle_r", "ankle_angle_l"]);   // OpenSim: + is dorsiflexion
+        // OpenSim: + is dorsiflexion. null when the view could not show it.
+        s.peak_ankle_df_deg = view.ankle_usable === false ? null
+          : peak(["ankle_angle_r", "ankle_angle_l"]);
       }
     }
-    s[spec.phases[0]] = (top - b0) / fps;
-    s[spec.phases[1]] = (b1 - top) / fps;
+    if (spec.phases) {
+      s[spec.phases[0]] = (top - b0) / fps;
+      s[spec.phases[1]] = (b1 - top) / fps;
+    }
     if (activity === "neck") {
       const span = (a, b2) => {
         const t = coords[a].map((v, k) => v + coords[b2][k]);
@@ -3695,7 +3741,11 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       // magnitude; otherwise a GPK export summarises as "-2 deg".
       s.knee_flex_max_deg = Math.max(...coords.knee_angle_r.map(Math.abs));
       s.hip_flex_max_deg = Math.max(...coords.hip_flexion_r);
-      s.ankle_dorsi_max_deg = Math.max(...coords.ankle_angle_r.map(Math.abs));
+      /* null, not 0, when the camera could not see the ankle: the coords
+       * carry zeros there, and a reported "0 deg of dorsiflexion" is a
+       * measurement nobody made. */
+      s.ankle_dorsi_max_deg = view.ankle_usable === false ? null
+        : Math.max(...coords.ankle_angle_r.map(Math.abs));
       // pelvis_ty is an ABSOLUTE height, so depth is the drop, not -min.
       s.depth_m = Math.max(...coords.pelvis_ty) - Math.min(...coords.pelvis_ty);
       if (spec.perLeg) {

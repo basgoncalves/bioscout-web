@@ -51,8 +51,13 @@ for (const caseName of Object.keys(ref.cases)) {
   // windows. The browser's crop is covered by test_rep_quality.mjs.
   const got = analyse(c.poses, c.fps, { heightM: c.height_m, activity: c.activity,
                                         osimModel: c.osim_model || "gpk", trim: false });
-  const vOk = JSON.stringify(got.view) === JSON.stringify(c.view);
-  if (!vOk) failures.push(`${caseName}: view ${JSON.stringify(got.view)} vs ${JSON.stringify(c.view)}`);
+  /* Every field the Python pipeline computes must match exactly. Fields the
+   * browser adds on top (diagnostics the pipeline has no equivalent for, like
+   * ankle_saturated_frac) are not parity failures -- this test guards the
+   * shared detector, not the browser's extra reporting. */
+  const mine = Object.fromEntries(Object.keys(c.view).map((k) => [k, got.view[k]]));
+  const vOk = JSON.stringify(mine) === JSON.stringify(c.view);
+  if (!vOk) failures.push(`${caseName}: view ${JSON.stringify(mine)} vs ${JSON.stringify(c.view)}`);
   console.log(`  [${vOk ? "OK  " : "FAIL"}] camera view                   ${JSON.stringify(got.view)}`);
 
   const okCount = got.reps.length === c.reps.length;

@@ -268,6 +268,10 @@ export const MOVES = {
   plank:  { label: "bfb_mv_plank",  metrics: ["hipFlex", "neckFlex"], def: "hipFlex", thr: 15, dir: "above" },
   heelraise:{ label: "bfb_mv_heelraise", wt: true, metrics: ["ankleDF", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "ankleDF", thr: -15, dir: "below" },
   neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "headNod", "neckTilt", "headTurn", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
+  /* Generic: no task assumed. Every live metric is available and the trial is
+   * recorded whole -- nothing is cut into cycles, because a threshold crossing
+   * in a movement the app was never told about marks the threshold, not a rep. */
+  generic: { label: "bfb_mv_generic", wt: true, metrics: [], def: "kneeFlex", thr: 70, dir: "above" },
   /* Quiet standing: no cycles to count, so the value of it is the steady
    * state -- how the legs are loaded and how still the athlete is. Thresholds
    * sit on trunk lean, which is what drifts when balance goes. */
@@ -279,10 +283,14 @@ export const MOVES = {
 {
   const halves = new Set(Object.values(METRICS).flatMap((m) => m.pair || []));
   MOVES.free.metrics = Object.keys(METRICS).filter((k) => !METRICS[k].ev && !METRICS[k].side && !halves.has(k) && !METRICS[k].bar && !METRICS[k].phone);
+  MOVES.generic.metrics = MOVES.free.metrics.slice();
 }
 /* Movements scored per event (jump / shot): their table rows come from the
  * event detectors only, not from the cycle finder as well. */
 const EVENT_MOVES = new Set(["cmj", "sj", "shot"]);
+/* Movements that are never cut into cycles: the trial is the unit. Generic
+ * assumes no task, so there is no cycle for a threshold to find. */
+const WHOLE_TRIAL_MOVES = new Set(["generic"]);
 /* Hysteresis default per unit: 3 deg is sensible, 3 body weights is not. */
 const HYST = { spm: 3, g: 0.15, raw: 10, "°": 3, BW: 0.3, cm: 2, ms: 30, "m/s": 0.05, W: 50, Nm: 3 };
 
@@ -491,7 +499,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     port: null, writer: null, reader: null, lm: null, stream: null, raf: 0,
     active: false, lit: null, value: NaN, lastTs: -1,
   };
-  let cfg = { move: "squat", metric: "kneeFlexL", thr: 70, thr1Off: true, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, green: "flash", sound: "beep", src: "camera", facing: "user", extra: [], mass: 75, height: 1.75, load: 0, thr2: null, thr3: null, pins: [13, 12, 11, 8, 7] };
+  let cfg = { move: "generic", metric: "kneeFlexL", thr: 70, thr1Off: true, dir: "above", hyst: 3, baud: 9600, invert: false, zero: {}, green: "flash", sound: "beep", src: "camera", facing: "user", extra: [], mass: 75, height: 1.75, load: 0, thr2: null, thr3: null, pins: [13, 12, 11, 8, 7] };
   try { cfg = { ...cfg, ...JSON.parse(localStorage.getItem(SKEY) || "{}") }; } catch { /* private */ }
   cfg.src = null;                                      // no source until the user picks camera or phone
   /* Load per movement and side: cfg.wt[move] = { L, R } kg. Only movements
@@ -2061,7 +2069,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     // stick figures and contact-force dials. Not exported as columns.
     if (rec.samples.length < 200000) rec.samples.push({ t: (ts - rec.t0) / 1000, move: cfg.move, ...o, _c: w ? liveCoords(w) : null });
     // main signal: the side further from rest (either side counts)
-    const mk = mainKey(mv), mm = METRICS[mk]; if (!mm || mm.ev || EVENT_MOVES.has(cfg.move)) return o;
+    const mk = mainKey(mv), mm = METRICS[mk];
+    if (!mm || mm.ev || EVENT_MOVES.has(cfg.move) || WHOLE_TRIAL_MOVES.has(cfg.move)) return o;
     const xs = mm.pair ? [o[mk + "_L"], o[mk + "_R"]].filter(Number.isFinite) : [o[mk]].filter(Number.isFinite);
     if (!xs.length) return o;
     let c = rec.cyc;

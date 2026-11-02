@@ -32,10 +32,26 @@ assert.equal(front.ankle_usable, false, "a flattened ankle must not be called us
 const side = viewQuality(clip({ frontal: false, ankleDeg: 105 }));
 assert.equal(side.view, "sagittal", "view " + side.view);
 assert.equal(side.ankle_usable, true, "a side-on ankle is measurable");
+assert.ok(side.ankle_saturated_frac < 0.25, "a real ankle sits inside the clip bounds");
 
-// The gate is the angle, not the view: side-on with the foot square to the
-// lens is still unmeasurable.
+// Degenerate angle, even side-on: the foot square to the lens.
 assert.equal(viewQuality(clip({ frontal: false, ankleDeg: 170 })).ankle_usable, false);
+
+/* A FRONTAL view disqualifies the ankle even when the interior angle looks
+ * innocent. Regression for the squat jump filmed face-on: interior sat at
+ * ~143 deg, which cleared the old <155 check, but the dorsiflexion it implies
+ * (90 - 143 = -53 deg) is outside any real ankle and the export flatlined on
+ * the -40 clip bound. */
+const sneaky = viewQuality(clip({ frontal: true, ankleDeg: 143 }));
+assert.equal(sneaky.view, "frontal");
+assert.ok(sneaky.median_ankle_interior_deg < 155, "clears the old degeneracy check");
+assert.equal(sneaky.ankle_usable, false, "but a frontal view still cannot show dorsiflexion");
+
+/* SATURATION on its own: an oblique clip whose implied dorsiflexion spends
+ * most of its time past +-40 deg is the clip bound talking, not the ankle. */
+const sat = viewQuality(clip({ frontal: false, ankleDeg: 143 }));
+assert.ok(sat.ankle_saturated_frac >= 0.25, "saturation measured: " + sat.ankle_saturated_frac);
+assert.equal(sat.ankle_usable, false, "a saturated ankle is not a measured one");
 
 /* The export contract: analyse() drops the ankle columns when the camera could
  * not see them. Mirrors the filter in kinematics.js -- a zero column would
