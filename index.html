@@ -1548,6 +1548,11 @@ try {
     <div class="card" id="summaryCard"></div>
   </section>
 
+  <!-- Developer mode: the page a finished session opens on. -->
+  <section id="viewSessionEnd" class="hidden">
+    <div class="card" id="sessionEndCard"></div>
+  </section>
+
   <section id="viewCycle" class="hidden">
     <div class="card" id="cycleCard"></div>
   </section>
@@ -2021,7 +2026,19 @@ try {
   </div>
 
   <div class="card hidden" id="controls">
-    <button id="recBtn" data-i18n="startRecording">Start recording</button>
+    <button id="recBtn" data-i18n="trackSet">Track set</button>
+    <div class="trainOnly" id="srcBox" style="display:flex;gap:16px;margin:10px 0 0;
+         font-size:13.5px;color:var(--ink)">
+      <label style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="useCamera" checked style="width:auto;margin:0">
+        <span data-i18n="useCamera">Camera</span></label>
+      <label style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="useAccel" style="width:auto;margin:0">
+        <span data-i18n="useAccel">Accelerometer</span></label>
+    </div>
+    <p class="note trainOnly" style="margin:2px 0 0" data-i18n="srcNote">The camera gives
+      angles, moments and the floor map. The accelerometer counts reps and tempo only —
+      useful when the phone is on you and nothing is filming.</p>
     <label style="display:flex;align-items:center;gap:8px;margin:10px 0 0;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="gestureOn" style="width:auto;margin:0">
@@ -2039,10 +2056,9 @@ try {
       <b data-i18n="motionTitle">Phone motion</b>
       <span class="sub" id="motionState" data-i18n="motionOff">off</span>
     </div>
-    <p class="note" style="margin:2px 0 8px" data-i18n="motionNote">Put the phone on your
-      trunk (armband, belt or a tight pocket) and leave it there for the whole session.
-      Needs https on the phone itself.</p>
-    <button id="motionBtn" data-i18n="motionStart">Track this session</button>
+    <p class="note" style="margin:2px 0 8px" data-i18n="motionNote">Recording for the whole
+      session. Put the phone on your trunk (armband, belt or a tight pocket) and leave it
+      there. Needs https on the phone itself.</p>
     <label style="display:flex;align-items:center;gap:8px;margin:10px 0 0;
                   font-size:13.5px;color:var(--ink);opacity:.55">
       <input type="checkbox" id="gpsOn" style="width:auto;margin:0" disabled>
@@ -2215,8 +2231,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 134;
-window.BUILD_AT = "2026-11-02 17:02";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 135;
+window.BUILD_AT = "2026-11-02 17:28";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2264,7 +2280,9 @@ import { gradeReps } from "./src/repquality.js";
 import { floorPath, savePath, sessionPaths, pathMapSVG, liftReport,
          leaderboardEntry, saveLeaderboardEntry } from "./src/postrack.js";
 import { makeEffortTrace, effortSummary, saveEffort as saveEffortTrace,
-         sessionEffort, effortTraceSVG } from "./src/motionset.js";
+         sessionEffort, effortTraceSVG, makeRepDetector, motionSummary,
+         saveMotionSet, sessionMotionSets, motionRepSVG } from "./src/motionset.js";
+import { sessionTotals, muscleLoad, spiderSVG, topViewSVG } from "./src/sessionreport.js";
 import { startMotion } from "./src/phonemotion.js";
 import { screenRecSupported, openScreenRecorder } from "./src/screenrec.js";
 import { jcfContributions, jcfContribSVG } from "./src/jcfcontrib.js";
@@ -5741,7 +5759,7 @@ $("mealShotFile").onchange = (e) => {
  * gets stored. The login screen writes to it rather than replacing it, so
  * there is still exactly one source of truth for the athlete.
  */
-const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat", "viewSummary",
+const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat", "viewSummary", "viewSessionEnd",
                "viewHome", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback", "viewPhysics"];
 /* The lab demo's screens: a home with three doors, and what they open. */
 const LAB_VIEWS = ["viewHome", "viewRecord", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback", "viewPhysics"];
@@ -5791,6 +5809,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewReaction") openReaction(false);
   if (id === "viewFriends") renderFriends();
   if (id === "viewSummary") renderAthSummary();
+  if (id === "viewRecord") ensureMotion();
   if (id === "viewFeed") renderFeed();
   if (id === "viewChat") chat.open();
   if (id === "viewProcess") openProcess();
@@ -6866,7 +6885,8 @@ function devPositionHTML(sess) {
  * Per-second bins of |a - 1g| need no integration and stay honest; the floor
  * map comes from the camera (postrack.js), which has bounded error. */
 const motion = {
-  stop: null, trace: null, started: null,
+  stop: null, trace: null, started: null, reps: null, setFrom: null,
+  failed: null,
   get on() { return !!this.stop; },
 };
 
@@ -6874,34 +6894,160 @@ function paintMotion() {
   const card = $("motionCard");
   if (!card) return;
   card.classList.toggle("hidden", LAB || DEMO || !getSession());
-  $("motionBtn").textContent = tr(motion.on ? "motionStop" : "motionStart");
-  $("motionState").textContent = motion.on
+  const st = $("motionState");
+  if (!st) return;
+  st.textContent = motion.on
     ? tr("motionOnFor", { s: Math.round((performance.now() - motion.started) / 1000) })
-    : tr("motionOff");
+    : motion.failed ? tr("motionUnavailable") : tr("motionOff");
 }
 
-async function toggleMotion() {
-  if (motion.on) {
-    try { motion.stop(); } catch { /* already gone */ }
-    const sess = getSession();
-    const sum = effortSummary(motion.trace.bins());
-    if (sess && sum.ok) saveEffortTrace(sess.started, sum);
-    motion.stop = null; motion.trace = null;
-    paintMotion(); renderTraining();
-    say(tr("sayMotionSaved", { pct: sum.ok ? sum.work_pct : 0 }));
-    return;
-  }
+/* The accelerometer runs for the WHOLE session, not per set: rest is as much
+ * a part of a session as the sets, and a trace with the gaps cut out cannot
+ * say what the work:rest ratio was. Started once, when a session opens. */
+async function ensureMotion() {
+  if (motion.on || motion.failed || LAB || DEMO || !getSession()) return;
   motion.trace = makeEffortTrace();
   try {
-    motion.stop = await startMotion((t, a) => motion.trace.push(t, a));
+    motion.stop = await startMotion((t, a) => {
+      motion.trace.push(t, a);
+      if (motion.reps) {
+        const r = motion.reps.push(t, a);
+        if (r) $("hudRight").textContent = tr("nRepsCount", { n: motion.reps.count() });
+      }
+    });
     motion.started = performance.now();
-    say(tr("sayMotionOn"));
   } catch (e) {
-    // A PC has no accelerometer and plain http has no sensor API: say which.
+    /* A desktop has no accelerometer and plain http has no sensor API. Said
+     * once, in the card, rather than as an error on every session: the camera
+     * half of the app works perfectly well without it. */
+    motion.failed = e.message || String(e);
     motion.trace = null;
-    say(tr("sayMotionFailed", { err: e.message || String(e) }), true);
   }
   paintMotion();
+}
+
+/** Stop the session trace and file it. Called when the session ends. */
+function closeMotion(sessionStarted) {
+  if (!motion.on) return null;
+  try { motion.stop(); } catch { /* already gone */ }
+  const sum = effortSummary(motion.trace.bins());
+  if (sessionStarted && sum.ok) saveEffortTrace(sessionStarted, sum);
+  motion.stop = null; motion.trace = null; motion.reps = null;
+  paintMotion();
+  return sum;
+}
+
+/* An accelerometer-only set: the phone is on the body, nothing is filming.
+ * Reps and tempo only -- there are no joint angles or moments without a
+ * camera, and the set is filed as a counted set (manual) so nothing
+ * downstream mistakes it for a measured one. */
+function startAccelSet() {
+  motion.reps = makeRepDetector();
+  motion.setFrom = performance.now();
+  $("hudRight").textContent = tr("nRepsCount", { n: 0 });
+}
+
+function finishAccelSet() {
+  const det = motion.reps;
+  motion.reps = null;
+  if (!det) return;
+  const sum = motionSummary(det.reps(), (performance.now() - motion.setFrom) / 1000);
+  const activity = $("activity").value;
+  if (!sum.ok) { say(tr("sayAccelNoReps"), true); return; }
+  try {
+    const badgesBefore = myAchievements();
+    const set = addManualSet(activity === "auto" ? "movement" : activity, sum.reps, {
+      profile: $("profile").value || null,
+      massKg: parseFloat($("mass").value) || null,
+      addedKg: parseFloat($("added").value) || 0,
+      assistKg: parseFloat($("assist").value) || 0,
+      loadDir: normLoadDir($("loadDir").value),
+    });
+    const sess = getSession();
+    if (sess) saveMotionSet(sess.started, set.index, sum);
+    announceBadges(newlyEarned(badgesBefore, myAchievements()));
+    scheduleSync();
+    say(tr("sayAccelSet", { n: sum.reps, tempo: sum.tempo_s, set: set.index }));
+    renderTraining();
+  } catch (err) {
+    say(tr("setNotSaved", { err: err.message || String(err) }), true);
+  }
+}
+
+/* End of session: close it, file it, and show what it added up to.
+ *
+ * The session is archived here, so the page is built from the numbers BEFORE
+ * the log is cleared -- a report assembled after archiving would find an empty
+ * session and show nothing. */
+function endSession() {
+  const sess = getSession();
+  if (!sess || !sess.sets.length) return;
+  const started = sess.started;
+  const effort = closeMotion(started);
+  const paths = sessionPaths(started);
+  const msets = sessionMotionSets(started);
+  const totals = sessionTotals(sess, effort);
+  const groups = muscleLoad(sess);
+  const labels = Object.fromEntries(sess.sets.map((x) =>
+    [x.index, tr("setLabel", { n: x.index }) + " " + tr(x.activity)]));
+  // The leaderboard record, written once per finished session.
+  try { saveLeaderboardEntry(leaderboardEntry(sess, paths)); }
+  catch (e) { console.warn("leaderboard entry", e); }
+  const snapshot = { sess, effort, paths, msets, totals, groups, labels };
+  archiveSession();
+  newSession($("profile").value || null);
+  $("trainingCard").classList.add("hidden");
+  renderSessionEnd(snapshot);
+  showView("viewSessionEnd");
+}
+
+function renderSessionEnd(d) {
+  const { sess, effort, paths, msets, totals, groups, labels } = d;
+  const mm = Math.floor(totals.duration_s / 60), ss = totals.duration_s % 60;
+  /* Written out rather than built from the key, so the translation scanner
+   * can see every string that can reach the page. */
+  const MG = { hip_ext: () => tr("mg_hip_ext"), knee_ext: () => tr("mg_knee_ext"),
+               ankle_pf: () => tr("mg_ankle_pf"), knee_flex: () => tr("mg_knee_flex"),
+               hip_flex: () => tr("mg_hip_flex"), shoulder_ext: () => tr("mg_shoulder_ext"),
+               elbow_flex: () => tr("mg_elbow_flex"), elbow_ext: () => tr("mg_elbow_ext"),
+               shoulder_flex: () => tr("mg_shoulder_flex") };
+  const spider = spiderSVG(groups, (g) => (MG[g.key] ? MG[g.key]() : g.label));
+  const top = topViewSVG(paths, labels);
+  const motionRows = Object.entries(msets).map(([i, m]) =>
+    `<tr><td>${labels[i] || i}</td><td>${m.reps}</td><td>${m.tempo_s} s</td>
+      <td>${m.peak_g} g</td><td>${m.peak_drop_pct > 0 ? "−" + m.peak_drop_pct + "%" : "—"}</td></tr>`).join("");
+  $("sessionEndCard").innerHTML = `
+    <h1 style="font-size:19px;margin:0 0 2px">${tr("sessionDone")}</h1>
+    <p class="sub" style="margin-bottom:12px">${new Date(sess.started).toLocaleString()}</p>
+    <div style="display:flex;gap:10px;margin-bottom:6px">
+      <div class="card" style="flex:1;margin:0;text-align:center">
+        <div class="sub">${tr("duration")}</div>
+        <div style="font-size:26px;font-weight:600">${mm}:${String(ss).padStart(2, "0")}</div>
+      </div>
+      <div class="card" style="flex:1;margin:0;text-align:center">
+        <div class="sub">${tr("intensity")}</div>
+        <div style="font-size:26px;font-weight:600">${totals.density_kg_min}</div>
+        <div class="sub">${tr("kgPerMin")}</div>
+      </div>
+    </div>
+    <p class="note">${tr("sessionTotals", { sets: totals.sets, reps: totals.reps,
+       vol: totals.volume_kg })}${totals.effort_index != null
+       ? " " + tr("sessionEffortLine", { idx: totals.effort_index, pct: totals.work_pct }) : ""}</p>
+    ${spider ? `<h2 style="font-size:15px;margin:16px 0 2px">${tr("muscleLoadTitle")}</h2>
+      ${spider}<p class="note">${tr("muscleLoadNote")}</p>` : ""}
+    ${top ? `<h2 style="font-size:15px;margin:16px 0 2px">${tr("topViewTitle")}</h2>
+      ${top}<p class="note">${tr("topViewNote")}</p>` : ""}
+    ${effort?.ok ? `<h2 style="font-size:15px;margin:16px 0 2px">${tr("effortTitle")}</h2>
+      ${effortTraceSVG(effort)}<p class="note">${tr("effortSummary", {
+        work: Math.round(effort.work_s / 60), rest: Math.round(effort.rest_s / 60),
+        pct: effort.work_pct, idx: effort.effort_index })}</p>
+      <p class="note">${tr("effortTraceNote")}</p>` : ""}
+    ${motionRows ? `<h2 style="font-size:15px;margin:16px 0 2px">${tr("accelSetsTitle")}</h2>
+      <table><thead><tr><th>${tr("set")}</th><th>${tr("reps")}</th><th>${tr("tempoCol")}</th>
+        <th>${tr("peakGCol")}</th><th>${tr("fadeCol")}</th></tr></thead>
+        <tbody>${motionRows}</tbody></table>` : ""}
+    <button class="ghost" id="endDoneBtn" style="margin-top:14px">${tr("close")}</button>`;
+  $("endDoneBtn").onclick = () => goHome();
 }
 
 function renderTraining() {
@@ -6956,7 +7102,7 @@ function renderTraining() {
     <div id="peakChartBox" style="margin-top:10px">${
       peakVar ? setChart(series, peakVar, pairSeries) : ""}</div>
     ${repEditorHTML(sess)}
-    <button id="summaryBtn" style="margin-top:10px">${tr("finishSummarise")}</button>
+    <button id="summaryBtn" style="margin-top:10px">${tr("endSession")}</button>
     <button class="ghost" id="newSessionBtn" style="margin-top:8px">${tr("newSession")}</button>
     ${!LAB && !DEMO ? devPositionHTML(sess) : ""}
     <div id="summaryBox"></div>`;
@@ -6970,17 +7116,7 @@ function renderTraining() {
     say(tr("sayNewSession", {
       kept: tr(kept === 1 ? "nPastSession" : "nPastSessions", { n: kept }) }));
   };
-  const mb = $("motionBtn");
-  if (mb) mb.onclick = toggleMotion;
-  $("summaryBtn").onclick = () => {
-    // The leaderboard record is written when the session is summarised
-    // (developer mode only, local until the leaderboard exists).
-    if (!LAB && !DEMO) {
-      try { saveLeaderboardEntry(leaderboardEntry(sess, sessionPaths(sess.started))); }
-      catch (e) { console.warn("leaderboard entry", e); }
-    }
-    renderSummary();
-  };
+  $("summaryBtn").onclick = () => endSession();
   wireRepEditor(card, sess, renderTraining);
   renderDash();          // keeps the dashboard current behind the record view
   const pv = $("peakVar");
@@ -7276,7 +7412,7 @@ function syncRecLabel() {
   b.disabled = false;
   b.textContent = recording
     ? (assessStep ? tr("assessStopTest") : tr("stopAndAnalyse"))
-    : (assessStep ? tr("assessStartTest") : tr("startRecording"));
+    : (assessStep ? tr("assessStartTest") : tr("trackSet"));
 }
 let assessLeadTimer = null;
 
@@ -8495,7 +8631,7 @@ function stopCamera() {
   $("controls").classList.add("hidden");
   $("startBtn").classList.remove("hidden");
   $("fileBtn").classList.remove("hidden");
-  $("recBtn").textContent = tr("startRecording");
+  $("recBtn").textContent = tr("trackSet");
   // The zoom slider belongs to a track that no longer exists.
   $("zoomRow").classList.add("hidden");
   say(tr("sayCameraClosed"));
@@ -8602,6 +8738,11 @@ const BONES = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],
  * tested without a camera; see there for why it is not the same check the
  * analysis runs afterwards. */
 const framing = framingWatcher();
+/* Which instruments the set in progress is using (the tick boxes under
+ * "Track set"). Read at the press, not at the stop, so changing a box
+ * mid-set cannot change how the set is filed. */
+let accelSet = false, cameraSet = true;
+const useAccelSet = () => !!($("useAccel") && $("useAccel").checked && motion.on);
 
 /* Two fists starts or stops the recording, so the walk to and from the phone
  * is not in the clip. On by default -- the phone being out of reach is the
@@ -8817,6 +8958,13 @@ $("recBtn").onclick = () => {
         say(tr(!framing.sawBody ? "assessNoBodyYet" : "assessBadFraming_" + bad), true);
       }
     }
+    /* Which instruments this set uses. Both ticked is a camera set that also
+     * counts reps from the phone; accelerometer alone needs no camera at all. */
+    accelSet = useAccelSet();
+    cameraSet = $("useCamera") ? $("useCamera").checked : true;
+    if (!cameraSet && !accelSet) { say(tr("sayPickASource"), true); return; }
+    if (!cameraSet && accelSet && !motion.on) { say(tr("sayAccelUnavailable", { err: motion.failed || "" }), true); return; }
+    if (accelSet) startAccelSet();
     frames = []; pf0 = null; recording = true;
     syncMulti(); mtrack = newTracker(); $("mpResults").classList.add("hidden");
     ballTracker.reset();
@@ -8890,7 +9038,7 @@ $("recBtn").onclick = () => {
     gesture.reset();
     clearInterval(assessTimer);
     liveHudStop();
-    $("recBtn").textContent = assessStep ? tr("assessStartTest") : tr("startRecording");
+    $("recBtn").textContent = assessStep ? tr("assessStartTest") : tr("trackSet");
     $("hudRight").textContent = "";
     if (multiOn) showMultiResults();
     if (recorder && recorder.state !== "inactive") {
@@ -8903,7 +9051,11 @@ $("recBtn").onclick = () => {
       };
       recorder.stop();
     }
-    finish();
+    if (accelSet && !cameraSet) finishAccelSet();
+    else {
+      if (accelSet) motion.reps = null;      // the camera's own reps are the record
+      finish();
+    }
   }
 };
 
