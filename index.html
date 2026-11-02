@@ -1729,7 +1729,6 @@ try {
         <small class="note" id="bfbLoadNote"></small>
       </div>
       <div class="row bfbRow">
-        <label><span data-i18n="bfb_metric">Metric</span><select id="bfbMetric"></select></label>
         <label><span data-i18n="bfb_when">Light when</span>
           <select id="bfbDir"><option value="above" data-i18n="bfb_above">above threshold</option><option value="below" data-i18n="bfb_below">below threshold</option></select></label>
       </div>
@@ -1810,6 +1809,9 @@ try {
       <canvas id="bfbAccCv" class="bfbPlot" style="height:170px" aria-label="Accelerometer"></canvas></div>
       <div id="bfbBars"></div>
       <canvas id="bfbPlot" class="bfbPlot" aria-label="Live plot"></canvas>
+      <div class="row bfbRow" id="bfbMetricRow" style="margin:2px 0 0">
+        <label><span data-i18n="bfb_metric">Metric</span><select id="bfbMetric"></select></label>
+      </div>
       <div id="bfbPlotPick" class="bfbChips"></div>
       <div id="bfbAnWrap" class="hidden"><p class="note" style="margin:10px 0 2px" data-i18n="bfb_anTitle">Live inputs (A0–A5)</p>
       <canvas id="bfbAnCv2" class="bfbPlot" style="height:110px" aria-label="Arduino inputs"></canvas>
@@ -2236,8 +2238,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 140;
-window.BUILD_AT = "2026-11-02 20:15";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 141;
+window.BUILD_AT = "2026-11-02 20:35";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -10363,6 +10365,15 @@ function addArmMuscles(res, activity) {
 
 // A squat filmed face-on still yields plausible-looking knee and hip numbers
 // that are measuring the wrong plane, so say so rather than let them pass.
+/* The coordinates this result may honestly export. analyse() already drops a
+ * joint the camera could not see; this is the fallback for a result rebuilt
+ * from storage, which predates that. */
+function motColumns(res) {
+  const all = (res && res.columns) || ACTIVITIES[res.activity].columns || [];
+  return res && res.ankleMeasured === false
+    ? all.filter((c) => !/^ankle_angle(_[lr])?$/.test(c)) : all;
+}
+
 function viewNote(res) {
   const v = res.view || {};
   const bits = [];
@@ -10377,7 +10388,9 @@ function viewNote(res) {
       && res.reps.length) {
     bits.push(tr("viewJumpHeight", { view: tr("view_" + v.view) }));
   }
-  if (sagittal && v.ankle_usable === false) {
+  /* Not gated on `sagittal`: the ankle is dropped whenever the camera could
+   * not see it, and the view that most often causes that is the frontal one. */
+  if (v.ankle_usable === false) {
     bits.push(tr("ankleNotMeasurable"));
   }
   if (spec.travels) {
@@ -11966,7 +11979,7 @@ async function exportZip(res, fps) {
   try {
     note("Collecting…");
     const files = [];
-    const cols = ACTIVITIES[res.activity].columns;
+    const cols = motColumns(res);
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
 
     // Plots: page through the reps so each one's charts are in the DOM.
@@ -13003,7 +13016,7 @@ function render(res, fps) {
    * handed to Process in memory. Every rep goes, so the curves can be
    * compared there rather than one rep at a time. */
   $("procBtn").onclick = () => {
-    const cols = ACTIVITIES[res.activity].columns;
+    const cols = motColumns(res);
     const files = res.reps.map((r) => new File(
       [writeMot("joint_angles", cols, r.times, r.coords)],
       `${res.activity}_rep${r.rep}_${res.osimModel}_joint_angles.mot`,
@@ -13030,7 +13043,7 @@ function render(res, fps) {
    * A browser cannot write a folder tree from a plain download, so it goes out
    * as one zip holding that tree. */
   $("dlBtn").onclick = async () => {
-    const cols = ACTIVITIES[res.activity].columns;
+    const cols = motColumns(res);
     const who = ($("profile").value || currentAthlete() || "athlete")
       .trim().replace(/[^A-Za-z0-9._-]+/g, "_") || "athlete";
     const files = [];

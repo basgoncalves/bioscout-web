@@ -3827,7 +3827,16 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
   }
 
   return { activity, fps, pxPerM, scaleDetail: detail, view, osimModel,
-           coverage: F._coverage, reps, whole, columns: spec.columns,
+           coverage: F._coverage, reps, whole,
+           /* A coordinate the camera could not see is LEFT OUT of the export,
+            * not written as zero. A zero column is a measurement of neutral --
+            * it plots as a flat line, loads into OpenSim as a held joint, and
+            * nothing downstream can tell it from data. A missing column asks
+            * the question out loud. */
+           columns: view.ankle_usable === false
+             ? spec.columns.filter((c) => !/^ankle_angle(_[lr])?$/.test(c))
+             : spec.columns,
+           ankleMeasured: view.ankle_usable !== false,
            /* Two measured legs, or one measured leg written to both sides.
             * The results page and the .mot export both say which. */
            sidesMeasured: twoSides,
