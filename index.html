@@ -620,13 +620,24 @@ try {
   .lmPreview { margin:0 2px 10px; }
   .lmPreview canvas { width:100%; max-width:480px; height:auto; display:block; border-radius:8px; background:#000; }
   dialog.lmReview { width:min(960px, 96vw); max-width:96vw; padding:12px; border-radius:12px; border:1px solid var(--line, #333); background:var(--card); color:var(--ink); }
-  dialog.lmReview canvas { width:100%; height:auto; display:block; background:#000; border-radius:8px; }
+  /* A portrait clip made this canvas ~1700 px tall, so on a phone the frame
+   * filled the screen and every control sat below the fold. Capped and
+   * letterboxed (canvas is a replaced element, so object-fit applies), with
+   * the dialog itself scrollable for the rest. */
+  dialog.lmReview { max-height:94vh; overflow:auto; }
+  dialog.lmReview canvas { width:100%; height:auto; max-height:52vh; object-fit:contain;
+                           display:block; margin:0 auto; background:#000; border-radius:8px; }
   dialog.lmReview .lmHead { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
   dialog.lmReview .lmX { width:auto; margin:0; padding:4px 10px; }
   dialog.lmReview .lmSlider { width:100%; margin:8px 0; }
   dialog.lmReview .lmCtl { display:flex; gap:8px; align-items:center; justify-content:space-between; }
   dialog.lmReview .lmCtl button { flex:1; margin:0; }
   dialog.lmReview .lmLabel { flex:1; text-align:center; font-variant-numeric:tabular-nums; }
+  /* The stage holds the canvas and the 1px decoder video (see lmreview.js). */
+  dialog.lmReview .lmStage { position:relative; }
+  /* The canvas takes the drag, so the browser must not treat it as a scroll. */
+  dialog.lmReview canvas { touch-action:none; cursor:crosshair; }
+  dialog.lmReview .lmApply:disabled { opacity:.45; }
   .lmReviewRow { margin-bottom:8px; }
   .glossLink { margin:12px 0 0; font-size:13px; }
   .glossLink a { color:var(--muted, inherit); }
@@ -2239,7 +2250,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 142;
+window.BUILD = 143;
 window.BUILD_AT = "2026-11-02 20:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
@@ -9787,7 +9798,7 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   try { v.pause(); URL.revokeObjectURL(v.src); } catch { /* already gone */ }
   vidAbort = null; bar(null);
   preview.hide();
-  reviewSrc = { file, fw, fh, crop: cr };
+  reviewSrc = { file, fw, fh, crop: cr, fps: fileFps };
   /* Take the camera's own motion off the landmarks before anything reads them
    * as body motion. Done here, once, rather than inside the tracking loop: the
    * correction is cumulative, and a frame the background could not be read on
@@ -10098,7 +10109,19 @@ function addReviewButton(res) {
   row.innerHTML = `<button type="button" class="ghost" id="lmReviewBtn">${tr("lmReviewBtn")}</button>`;
   box.prepend(row);
   row.querySelector("button").onclick = () => openReview({
-    file: src.file, frames: fr, fw: src.fw, fh: src.fh, crop: src.crop, tr,
+    file: src.file, frames: fr, fw: src.fw, fh: src.fh, crop: src.crop,
+    fps: src.fps, tr,
+    /* Corrected points or a trimmed span: re-run the analysis on what the
+     * reviewer actually approved. fileFps is restored first so the re-run is
+     * stepped on the file's own grid -- inferring the rate from the wall clock
+     * would make a trimmed clip report the wrong durations. */
+    onApply: (kept, info) => {
+      if (kept.length < 20) { say(tr("sayTooFewFrames", { n: kept.length }), true); return; }
+      frames = kept;
+      fileFps = info.fps || src.fps || null;
+      say(tr("lmReanalysing", { n: kept.length }));
+      finish();
+    },
     onKeep: () => say(tr("lmKept")),
     onDiscard: () => {
       const sess = getSession();
