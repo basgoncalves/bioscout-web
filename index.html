@@ -1960,6 +1960,11 @@ try {
       <input type="checkbox" id="fileRoi" style="width:auto;margin:0">
       <span data-i18n="fileRoi">Box the athlete first (small or crowded videos)</span>
     </label>
+    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin:-6px 2px 11px;
+                  font-size:13.5px;color:var(--ink)">
+      <input type="checkbox" id="camMoving" style="width:auto;margin:0">
+      <span data-i18n="camMoving">Camera was not stationary (handheld, panning)</span>
+    </label>
     <button class="ghost trainOnly hidden" id="ytBtn" data-i18n="ytButton">From URL</button>
     <button class="ghost trainOnly hidden" id="screenRecBtn" data-i18n="srRecordScreen">Record the screen</button>
     <button class="ghost trainOnly" id="manualBtn" data-i18n="manualSet">Count reps by hand (no camera)</button>
@@ -2231,8 +2236,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 135;
-window.BUILD_AT = "2026-11-02 17:28";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 136;
+window.BUILD_AT = "2026-11-02 19:58";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2285,6 +2290,7 @@ import { makeEffortTrace, effortSummary, saveEffort as saveEffortTrace,
 import { sessionTotals, muscleLoad, spiderSVG, topViewSVG } from "./src/sessionreport.js";
 import { startMotion } from "./src/phonemotion.js";
 import { screenRecSupported, openScreenRecorder } from "./src/screenrec.js";
+import { makeShakeTracker, grayThumb, bodyBox as camBodyBox, stabilise } from "./src/camshake.js";
 import { jcfContributions, jcfContribSVG } from "./src/jcfcontrib.js";
 import { ytSupported, openYouTubeClip } from "./src/ytclip.js";
 import { athleteSummary, taskStats, curveSummary, curveSVG, generalHTML, taskTableHTML,
@@ -8719,6 +8725,10 @@ function loop(now, meta) {
 /* Frame size of the take being recorded, for the position map (postrack.js
  * turns apparent body size into distance from the camera and needs it). */
 let posFrameSize = null;
+/* Set when a clip was analysed with "camera was not stationary": how much of
+ * the background could actually be matched, so the results can say whether the
+ * correction is worth trusting. */
+let camFix = null;
 
 function toNamed(lms, w, h) {
   const out = {};
@@ -9067,6 +9077,9 @@ $("fileBtn").onclick = () => $("fileInput").click();
   const RKEY = "bioscout.fileroi.v1";
   try { $("fileRoi").checked = localStorage.getItem(RKEY) === "1"; } catch { /* no storage */ }
   $("fileRoi").onchange = (e) => { try { localStorage.setItem(RKEY, e.target.checked ? "1" : "0"); } catch { /* no storage */ } };
+  const MKEY = "bioscout.cammoving.v1";
+  try { $("camMoving").checked = localStorage.getItem(MKEY) === "1"; } catch { /* no storage */ }
+  $("camMoving").onchange = (e) => { try { localStorage.setItem(MKEY, e.target.checked ? "1" : "0"); } catch { /* no storage */ } };
 }
 /* A clip from a video that cannot be exported: record that part of the screen
  * (desktop browsers; phones have no screen capture for web pages). */
@@ -9414,7 +9427,15 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
    * crop already. The box follows the athlete frame to frame, so it needs each
    * result before the next frame: the page's own model, not the worker. */
   const roiWanted = !(crop && crop.w > 8 && crop.h > 8) && !!($("fileRoi") && $("fileRoi").checked);
-  const needsPage = fileMulti || $("activity").value === "kick" || roiWanted;
+  /* Handheld clip: the camera's own motion is estimated from the background
+   * and taken off the landmarks afterwards (src/camshake.js). The box tracker
+   * is forced on with it, because a body that slides across the frame is
+   * exactly what makes the pose model lose the legs. */
+  const camMoving = !!($("camMoving") && $("camMoving").checked);
+  const shake = camMoving ? makeShakeTracker() : null;
+  const shakeSteps = [];
+  const shakeCv = camMoving ? document.createElement("canvas") : null;
+  const needsPage = fileMulti || $("activity").value === "kick" || roiWanted || camMoving;
   const pw = !needsPage && v.requestVideoFrameCallback && window.createImageBitmap && window.__bsNoWorker !== true
     ? await startPoseWorker() : null;
   vidAbort.pw = pw;
@@ -9545,6 +9566,14 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
       // and speed up every movement in it by however many frames were missed.
       frames.push({ i, t: t * 1000, lm: named });
       posFrameSize = { w: fw, h: fh };
+      /* One step per KEPT frame, so the steps line up with the frames they
+       * correct. The whole video frame is used, never the magnified box: the
+       * box moves with the athlete, so its background is not still even when
+       * the camera is. */
+      if (shake) {
+        try { shakeSteps.push(shake.step(grayThumb(v, shakeCv), camBodyBox(named, fw, fh))); }
+        catch { shakeSteps.push({ dx: 0, dy: 0, conf: 0 }); }
+      }
     }
     bar((i + 1) / n);
     if (i % 5 === 0) {
@@ -9756,7 +9785,29 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   vidAbort = null; bar(null);
   preview.hide();
   reviewSrc = { file, fw, fh, crop: cr };
+  /* Take the camera's own motion off the landmarks before anything reads them
+   * as body motion. Done here, once, rather than inside the tracking loop: the
+   * correction is cumulative, and a frame the background could not be read on
+   * must inherit the last good offset rather than guess its own. */
+  if (shake && frames.length) {
+    const st = stabilise(frames, shakeSteps, { frameW: fw, frameH: fh });
+    frames = st.frames;
+    camFix = { readable: st.readable, frames: frames.length };
+  } else camFix = null;
   finish();
+}
+
+/* What the handheld correction managed on this clip.
+ *
+ * Said plainly rather than hidden, because a corrected position is an estimate
+ * built on another estimate: where the background could not be matched there
+ * is no correction at all, and the reader should know which of the two they
+ * are looking at before trusting a travel distance or a jump height. */
+function camFixNote(res) {
+  const c = res && res.camFix;
+  if (!c) return "";
+  const pct = Math.round(c.readable * 100);
+  return `<p class="note banner">${tr(pct >= 70 ? "camFixGood" : pct >= 30 ? "camFixPartial" : "camFixPoor", { pct })}</p>`;
 }
 
 /** The horizontal load on the head for a neck set: the force, and the lateral
@@ -9947,18 +9998,29 @@ async function finish() {
     // timing: a file was sampled on a grid we chose, a camera delivered
     // whatever it managed.
     lastResult.fromFile = !!fromFile;
+    lastResult.camFix = camFix;
+    camFix = null;
     // How long tracking took and where the time went, so a slow clip can be
     // pinned on the decoder or on the pose model from the status line alone.
     lastResult.trackStats = fromFile ? lastTrackStats : null;
     lastTrackStats = null;
     await enrich(lastResult, poses, fps, heightM, activity);
-    if (lastResult.reps.length && !DEMO) {
+    /* A set with no reps found is still a set that happened.
+     *
+     * The athlete did the work, and dropping the row means the session log
+     * disagrees with their own memory of it -- and the take (landmarks, video,
+     * curves) was being thrown away with it, so there was nothing left to
+     * check WHY nothing was found. It is logged with 0 reps, which is honest:
+     * the analysis found none, and everything recorded is still there to
+     * inspect. Outside a session there is nothing to log it to. */
+    if ((lastResult.reps.length || getSession()) && !DEMO) {
       // Never let the training log take the analysis down with it: the results
       // are the point of the recording, the set row is a bonus on top.
       try {
         const badgesBefore = myAchievements();
         const set = addSet(lastResult, fps, { profile: $("profile").value || null,
                                              assess: assessStep });
+        if (!lastResult.reps.length) say(tr("sayZeroRepSet", { set: set.index }), true);
         if (!LAB) announceBadges(newlyEarned(badgesBefore, myAchievements()));
         scheduleSync();
         lastResult.setIndex = set.index;
@@ -9967,7 +10029,10 @@ async function finish() {
         const sess = getSession();
         if (sess) saveCurves(sess.started, set.index, lastResult);
         // Developer mode only: where on the floor this set happened.
-        if (sess && !LAB) {
+        /* Not for a handheld clip whose background was mostly unreadable: the
+         * floor map is an absolute position, and without a trustworthy camera
+         * correction it would be the camera's path as much as the athlete's. */
+        if (sess && !LAB && !(lastResult.camFix && lastResult.camFix.readable < 0.3)) {
           try {
             savePath(sess.started, set.index, floorPath(frames, {
               heightM, frameW: posFrameSize?.w, frameH: posFrameSize?.h }));
@@ -12806,6 +12871,7 @@ function render(res, fps) {
     ${isStroke ? strokePanel(res) : ""}
     ${isFoot ? kickPanel(res) : ""}
     ${runPanel}
+    ${camFixNote(res)}
     ${suspect.length ? `<p class="note banner">${
       tr("heightsDisagree", { n: suspect.length, total: n })}</p>` : ""}
     ${mismatched.length ? `<p class="note banner">${
@@ -12820,6 +12886,7 @@ function render(res, fps) {
     <div id="loadBox" class="jmplot hidden"></div>
     <div id="chartBox"></div>
     <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMot")}</button>
+    <button class="ghost" id="procBtn" style="margin-top:8px">${tr("openInProcess")}</button>
     <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
     <div class="status" id="zipStatus"></div>
     ${res.detection ? `<p class="note" style="border-left:3px solid var(--good);
@@ -12915,6 +12982,28 @@ function render(res, fps) {
   });
 
   $("zipBtn").onclick = () => exportZip(res, fps);
+
+  /* Straight from a recorded set into Process, without the download-then-
+   * upload round trip: the same .mot files the download button writes are
+   * handed to Process in memory. Every rep goes, so the curves can be
+   * compared there rather than one rep at a time. */
+  $("procBtn").onclick = () => {
+    const cols = ACTIVITIES[res.activity].columns;
+    const files = res.reps.map((r) => new File(
+      [writeMot("joint_angles", cols, r.times, r.coords)],
+      `${res.activity}_rep${r.rep}_${res.osimModel}_joint_angles.mot`,
+      { type: "text/plain" }));
+    for (const r of res.reps) {
+      if (!r.dyn) continue;
+      const dcols = ["hip_moment", "knee_moment", "ankle_moment", "grf_vertical", "grf_horizontal"];
+      files.push(new File([writeMot("joint_moments", dcols, r.times,
+        Object.fromEntries(dcols.map((k) => [k, r.dyn[k]])))],
+        `${res.activity}_rep${r.rep}_joint_moments.sto`, { type: "text/plain" }));
+    }
+    if (!files.length) { say(tr("sayNothingToProcess"), true); return; }
+    showView("viewProcess"); openProcess();
+    processMounted.then((m) => m && m.load(files));
+  };
 
   $("dlBtn").onclick = () => {
     const cols = ACTIVITIES[res.activity].columns;

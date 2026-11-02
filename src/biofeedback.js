@@ -268,6 +268,10 @@ export const MOVES = {
   plank:  { label: "bfb_mv_plank",  metrics: ["hipFlex", "neckFlex"], def: "hipFlex", thr: 15, dir: "above" },
   heelraise:{ label: "bfb_mv_heelraise", wt: true, metrics: ["ankleDF", "kneeFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "ankleDF", thr: -15, dir: "below" },
   neck:   { label: "bfb_mv_neck",   metrics: ["neckFlex", "headNod", "neckTilt", "headTurn", "trunkLean"], def: "neckFlex", thr: 20, dir: "above" },
+  /* Quiet standing: no cycles to count, so the value of it is the steady
+   * state -- how the legs are loaded and how still the athlete is. Thresholds
+   * sit on trunk lean, which is what drifts when balance goes. */
+  stand:  { label: "bfb_mv_stand", wt: true, metrics: ["trunkLean", "kneeFlex", "ankleDF", "valgus", "hipFlex", "kneeJCF", "hipJCF", "ankleJCF", "quadsF", "glutesF", "hamsF", "calvesF"], def: "trunkLean", thr: 10, dir: "above" },
   free:   { label: "bfb_mv_free",   metrics: [], def: "kneeFlex", thr: 70, dir: "above" },
 };
 /* Free = every live metric once: a left/right pair is ONE entry (both bars),
@@ -330,10 +334,10 @@ export const REGION_MOVES = {
   biceps: ["curl", "pullup", "row"],
   triceps: ["pushup", "dip", "ohpress", "shot"],
   core: ["plank", "deadlift", "bridge", "hinge", "padel", "tennis", "kick"],
-  glutes: ["squat", "deadlift", "slsquat", "sj", "cmj", "run", "walk", "shot", "kick", "lunge", "bridge", "hinge"],
-  quads: ["squat", "slsquat", "sj", "cmj", "run", "walk", "shot", "kick", "lunge"],
-  hamstrings: ["deadlift", "hinge", "bridge", "cmj", "sj", "run", "walk", "kick"],
-  calves: ["heelraise", "sj", "cmj", "run", "walk", "shot"],
+  glutes: ["stand", "squat", "deadlift", "slsquat", "sj", "cmj", "run", "walk", "shot", "kick", "lunge", "bridge", "hinge"],
+  quads: ["stand", "squat", "slsquat", "sj", "cmj", "run", "walk", "shot", "kick", "lunge"],
+  hamstrings: ["stand", "deadlift", "hinge", "bridge", "cmj", "sj", "run", "walk", "kick"],
+  calves: ["stand", "heelraise", "sj", "cmj", "run", "walk", "shot"],
 };
 export const regionsOfMove = (mv) => REGIONS.filter((r) => (REGION_MOVES[r] || []).includes(mv));
 
@@ -1270,7 +1274,7 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     const cal = calOf();
     $("bfbPhCalSt").textContent = tr(cal && cal.ml ? "bfb_phCalFull" : cal && cal.g0 ? "bfb_phCalHalf" : "bfb_phCalNone");
   }
-  const POSES = { run: "gait", walk: "gait", squat: "squat", slsquat: "slsquat", lunge: "lunge", deadlift: "hinge", hinge: "hinge",
+  const POSES = { run: "gait", walk: "gait", squat: "squat", stand: "stand", slsquat: "slsquat", lunge: "lunge", deadlift: "hinge", hinge: "hinge",
                   cmj: "jump", sj: "jump", shot: "jump", heelraise: "raise" };
   function drawMotion(ts) {
     const [c, W, H] = fitCv($("bfbMotCv"));
@@ -1691,8 +1695,22 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (cfg.src === "phone") return;
     const mv = MOVES[cfg.move] || MOVES.free;
     const keys = mv.metrics.filter((k) => !METRICS[k].ev && k !== cfg.metric);
-    host.innerHTML = `<span class="note">${esc(tr("bfb_plotAlso"))}</span> ` + keys.map((k) =>
-      `<button type="button" class="ghost bmEx${(cfg.extra || []).includes(k) ? " on" : ""}" data-extra="${k}">${esc(short(k))}</button>`).join("");
+    /* A drop-down rather than a row of buttons: a movement can offer a dozen
+     * extra metrics, and as buttons they wrapped into three lines that pushed
+     * the live plot off the screen on a phone. Picking one adds it; the chips
+     * below show what is on and remove it when tapped, so the lines actually
+     * plotted stay visible without the menu being open. */
+    const on = (cfg.extra || []).filter((k) => keys.includes(k));
+    host.innerHTML = `
+      <label class="note" for="bfbPlotMore">${esc(tr("bfb_plotAlso"))}</label>
+      <select id="bfbPlotMore" style="margin:4px 0 6px">
+        <option value="">${esc(tr("bfb_plotAdd"))}</option>
+        ${keys.filter((k) => !on.includes(k)).map((k) =>
+          `<option value="${esc(k)}">${esc(short(k))}</option>`).join("")}
+      </select>
+      <div>${on.map((k) =>
+        `<button type="button" class="ghost bmEx on" data-extra="${esc(k)}"
+           title="${esc(tr("bfb_plotRemove"))}">${esc(short(k))} &times;</button>`).join("")}</div>`;
   }
   function plot(now) {
     const cv = $("bfbPlot"); if (!cv) return;
@@ -1998,15 +2016,20 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (!st.active) send(false, true);
   };
 
+  /* The chips remove a line; the drop-down adds one. */
   $("bfbPlotPick").addEventListener("click", (e) => {
     const b = e.target.closest("[data-extra]"); if (!b) return;
-    const k = b.dataset.extra, cur = cfg.extra || [];
-    if (cur.includes(k)) cfg.extra = cur.filter((x) => x !== k);
-    else {
-      const lines = nMain() + extraCols().length + (METRICS[k].pair ? 2 : 1);
-      if (lines > MAXLINES) { $("bfbCamNote").textContent = tr("bfb_plotMax", { n: MAXLINES }); return; }
-      cfg.extra = [...cur, k];
-    }
+    cfg.extra = (cfg.extra || []).filter((x) => x !== b.dataset.extra);
+    save(); renderPick();
+  });
+  $("bfbPlotPick").addEventListener("change", (e) => {
+    if (e.target.id !== "bfbPlotMore") return;
+    const k = e.target.value;
+    e.target.value = "";
+    if (!k || !METRICS[k] || (cfg.extra || []).includes(k)) return;
+    const lines = nMain() + extraCols().length + (METRICS[k].pair ? 2 : 1);
+    if (lines > MAXLINES) { $("bfbCamNote").textContent = tr("bfb_plotMax", { n: MAXLINES }); return; }
+    cfg.extra = [...(cfg.extra || []), k];
     save(); renderPick();
   });
 
@@ -2305,17 +2328,62 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
       const u = METRICS[k].unit;
       return METRICS[k].pair ? `${cell(r[k + "_L"], u)} / ${cell(r[k + "_R"], u)}` : cell(r[k], u) + " " + u;
     };
-    const body = rows.map((r, i) => [r, i]).reverse().map(([r, i]) =>
-      `<tr data-move="${move}" data-row="${i}" class="${r.hit ? "hit" : ""}" style="${r.lv > 0 ? `--lv:${LVCOL[r.lv - 1]}` : ""}" title="${esc(tr("bfb_repOpen"))}"><td>${i + 1}</td><td>${val(r)}</td></tr>`).join("");
+    /* Only the last four, newest first. This sits beside the live camera on a
+     * phone: a table that grows with every rep pushes the picture off the
+     * screen, and the rep anyone looks at mid-set is the one just done. The
+     * full list is in the tables below and in the export. */
+    const QUICK_N = 4;
+    const shown = rows.map((r, i) => [r, i]).reverse().slice(0, QUICK_N);
+    const body = shown.map(([r, i]) =>
+      `<tr data-move="${move}" data-row="${i}" class="${r.hit ? "hit" : ""}" style="${r.lv > 0 ? `--lv:${LVCOL[r.lv - 1]}` : ""}"><td title="${esc(tr("bfb_repOpen"))}">${i + 1}</td><td title="${esc(tr("bfb_repOpen"))}">${val(r)}</td>
+        <td style="width:1%"><button type="button" class="ghost qdel" data-qdel="${i}" data-move="${esc(move)}"
+          aria-label="${esc(tr("bfb_repDelete"))}" title="${esc(tr("bfb_repDelete"))}">&times;</button></td></tr>`).join("");
     host.innerHTML = `<div class="qh"><span>${esc(tr(MOVES[move].label))}</span><b>${rows.length}</b></div>
       <select aria-label="${esc(tr("bfb_quickCol"))}">${opts.map(([v, l]) => `<option value="${v}"${v === pick ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
-      <div class="qs"><table><tbody>${body}</tbody></table></div>`;
+      <div class="qs"><table><tbody>${body}</tbody></table></div>
+      ${rows.length > QUICK_N ? `<p class="note">${esc(tr("bfb_quickMore", { n: rows.length - QUICK_N }))}</p>` : ""}
+      <button type="button" class="ghost" id="bfbQuickClear" data-move="${esc(move)}">${esc(tr("bfb_clearReps"))}</button>`;
     host.querySelector("select").onchange = (e) => { cfg.quick = { ...(cfg.quick || {}), [move]: e.target.value }; save(); renderQuick(); };
   }
   $("bfbQuick").addEventListener("click", (e) => {
+    /* Delete one rep. A miscounted rep is common -- a shuffle between sets
+     * reads as a cycle -- and it should cost one tap, not a lost trial. */
+    const del = e.target.closest("[data-qdel]");
+    if (del) {
+      dropRep(del.dataset.move, +del.dataset.qdel);
+      return;
+    }
+    /* Clear the reps of this movement and keep recording: the recording goes
+     * on, only the counted reps of this task go. */
+    const clr = e.target.closest("#bfbQuickClear");
+    if (clr) {
+      const move = clr.dataset.move;
+      const n = (rec.rows[move] || []).length;
+      if (!n || !confirm(tr("bfb_clearRepsConfirm", { n, move: tr(MOVES[move].label) }))) return;
+      /* A jump owns its row, so clearing the movement's reps must drop the
+       * jumps whose rows live there -- otherwise they reappear on the next
+       * render. jumpMove() is what decides where a jump's row goes. */
+      const mine = rec.jumps.filter((j) => jumpMove(j) === move);
+      for (const j of mine) jumpRowOut(j);
+      rec.jumps = rec.jumps.filter((j) => !mine.includes(j));
+      rec.jumps.forEach((x, k) => (x.n = k + 1));
+      delete rec.rows[move];
+      renderJumps(); renderTables();
+      return;
+    }
     const tr_ = e.target.closest("tr[data-row]"); if (!tr_) return;
     openRep(tr_.dataset.move, +tr_.dataset.row);
   });
+  /* Remove one counted rep, keeping the jump list consistent with it. */
+  function dropRep(move, i) {
+    const rows = rec.rows[move];
+    if (!rows || !rows[i]) return;
+    const [gone] = rows.splice(i, 1);
+    const j = rec.jumps.findIndex((x) => x.row === gone);
+    if (j >= 0) { jumpRowOut(rec.jumps[j]); rec.jumps.splice(j, 1); rec.jumps.forEach((x, k) => (x.n = k + 1)); renderJumps(); }
+    if (!rows.length) delete rec.rows[move];
+    renderTables();
+  }
   const csv = (rows, cols) => [cols.join(","), ...rows.map((r) => cols.map((c) => {
     const v = r[c]; return v == null ? "" : typeof v === "number" ? (Number.isFinite(v) ? +v.toFixed(4) : "") : String(v).includes(",") ? `"${v}"` : v;
   }).join(","))].join("\n");
