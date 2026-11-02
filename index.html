@@ -2194,8 +2194,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 132;
-window.BUILD_AT = "2026-10-26 11:57";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 133;
+window.BUILD_AT = "2026-11-02 16:45";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2240,6 +2240,8 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          jointPositionsM } from "./src/kinematics.js";
 import { inverseDynamics } from "./src/dynamics.js";
 import { gradeReps } from "./src/repquality.js";
+import { floorPath, savePath, sessionPaths, pathMapSVG, liftReport,
+         leaderboardEntry, saveLeaderboardEntry } from "./src/postrack.js";
 import { screenRecSupported, openScreenRecorder } from "./src/screenrec.js";
 import { jcfContributions, jcfContribSVG } from "./src/jcfcontrib.js";
 import { ytSupported, openYouTubeClip } from "./src/ytclip.js";
@@ -6802,6 +6804,30 @@ function renderRtp() {
   });
 }
 
+/* Developer mode: the floor map of every set in the session and the
+ * volume / intensity report per lift (src/postrack.js). */
+function devPositionHTML(sess) {
+  const paths = sessionPaths(sess.started);
+  const labels = Object.fromEntries(sess.sets.map((s) =>
+    [s.index, tr("setLabel", { n: s.index }) + " " + tr(s.activity)]));
+  const map = pathMapSVG(paths, labels);
+  const dist = Object.values(paths).reduce((a, p) => a + (p?.distance_m || 0), 0);
+  const rows = liftReport(sess).map((r) => `<tr><td>${tr(r.activity)}</td><td>${r.sets}</td>
+      <td>${r.reps}</td><td>${r.volume_kg}</td><td>${r.mean_load_kg}</td>
+      <td>${r.rel_intensity ?? "—"}</td><td>${r.best_e1rm_kg ?? "—"}</td>
+      <td>${r.intensity_pct != null ? r.intensity_pct + "%" : "—"}</td></tr>`).join("");
+  return `<details class="devbox" style="margin-top:12px" open>
+    <summary><b>${tr("posTitle")}</b> <span class="note">(${tr("devOnly")})</span></summary>
+    ${map ? map + `<p class="note">${tr("posSummary", { d: dist.toFixed(1) })}</p>
+      <p class="note">${tr("posNote")}</p>` : `<p class="note">${tr("posNone")}</p>`}
+    <h2 style="font-size:15px;margin:12px 0 4px">${tr("liftReportTitle")}</h2>
+    <table><thead><tr><th>${tr("movement")}</th><th>${tr("set")}</th><th>${tr("reps")}</th>
+      <th>${tr("lrVolume")}</th><th>${tr("lrMeanLoad")}</th><th>${tr("lrRel")}</th>
+      <th>${tr("lrE1rm")}</th><th>${tr("lrPct")}</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="note">${tr("liftReportNote")}</p>
+  </details>`;
+}
+
 function renderTraining() {
   const card = $("trainingCard");
   const sess = getSession();
@@ -6855,6 +6881,7 @@ function renderTraining() {
     ${repEditorHTML(sess)}
     <button id="summaryBtn" style="margin-top:10px">${tr("finishSummarise")}</button>
     <button class="ghost" id="newSessionBtn" style="margin-top:8px">${tr("newSession")}</button>
+    ${!LAB && !DEMO ? devPositionHTML(sess) : ""}
     <div id="summaryBox"></div>`;
   $("newSessionBtn").onclick = () => {
     // File the old one rather than dropping it: the export is only worth
@@ -6866,7 +6893,15 @@ function renderTraining() {
     say(tr("sayNewSession", {
       kept: tr(kept === 1 ? "nPastSession" : "nPastSessions", { n: kept }) }));
   };
-  $("summaryBtn").onclick = () => renderSummary();
+  $("summaryBtn").onclick = () => {
+    // The leaderboard record is written when the session is summarised
+    // (developer mode only, local until the leaderboard exists).
+    if (!LAB && !DEMO) {
+      try { saveLeaderboardEntry(leaderboardEntry(sess, sessionPaths(sess.started))); }
+      catch (e) { console.warn("leaderboard entry", e); }
+    }
+    renderSummary();
+  };
   wireRepEditor(card, sess, renderTraining);
   renderDash();          // keeps the dashboard current behind the record view
   const pv = $("peakVar");
@@ -8454,6 +8489,7 @@ function loop(now, meta) {
         if (pf !== null && pf0 === null) pf0 = pf;
         frames.push({ i: pf !== null && pf0 !== null ? pf - pf0 : undefined, t: ts,
                       lm: named });
+        posFrameSize = { w: video.videoWidth, h: video.videoHeight };
         // During a test the athlete needs the rep count, not the frame count.
         // Both used to write here and the once-a-second counter lost every
         // time, fifty frames to one.
@@ -8464,6 +8500,10 @@ function loop(now, meta) {
   }
   schedule();
 }
+
+/* Frame size of the take being recorded, for the position map (postrack.js
+ * turns apparent body size into distance from the camera and needs it). */
+let posFrameSize = null;
 
 function toNamed(lms, w, h) {
   const out = {};
@@ -9273,6 +9313,7 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
       // rather than a frame quietly removed -- which used to shorten the clip
       // and speed up every movement in it by however many frames were missed.
       frames.push({ i, t: t * 1000, lm: named });
+      posFrameSize = { w: fw, h: fh };
     }
     bar((i + 1) / n);
     if (i % 5 === 0) {
@@ -9391,6 +9432,7 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
         if (lms) {
           const lmN = toNamed(lms, vw, vh);
           frames.push({ i: k, t: tOf(k) * 1000, lm: lmN });
+          posFrameSize = { w: vw, h: vh };
           preview.draw(v, lmN, v.videoWidth, v.videoHeight, cr);
         }
         bar(Math.min(1, done / Math.max(1, stats.played)));
@@ -9693,6 +9735,13 @@ async function finish() {
         pageSets.push({ index: set.index, res: lastResult, fps });
         const sess = getSession();
         if (sess) saveCurves(sess.started, set.index, lastResult);
+        // Developer mode only: where on the floor this set happened.
+        if (sess && !LAB) {
+          try {
+            savePath(sess.started, set.index, floorPath(frames, {
+              heightM, frameW: posFrameSize?.w, frameH: posFrameSize?.h }));
+          } catch (e) { console.warn("position path", e); }
+        }
         viewingSet = set.index;
         // The rest between sets is when the effort question gets asked, so
         // the prompt follows the set that was just recorded.
