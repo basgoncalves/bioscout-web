@@ -2236,8 +2236,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 137;
-window.BUILD_AT = "2026-11-02 20:12";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 138;
+window.BUILD_AT = "2026-11-02 20:26";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -13005,35 +13005,59 @@ function render(res, fps) {
     processMounted.then((m) => m && m.load(files));
   };
 
-  $("dlBtn").onclick = () => {
+  /* One folder per trial, every trial holding the SAME file names.
+   *
+   * The old download wrote one flat pile of files whose names carried the rep
+   * number (cmj_rep1_joint_angles.mot), which is the wrong way round for the
+   * lab layout: <participant>/<trial>/, where every trial folder holds
+   * joint_angles.mot and inverse_dynamics.sto under those exact names, so a
+   * script or a person can walk the folders and read the same file from each.
+   * A browser cannot write a folder tree from a plain download, so it goes out
+   * as one zip holding that tree. */
+  $("dlBtn").onclick = async () => {
     const cols = ACTIVITIES[res.activity].columns;
+    const who = ($("profile").value || currentAthlete() || "athlete")
+      .trim().replace(/[^A-Za-z0-9._-]+/g, "_") || "athlete";
+    const files = [];
     res.reps.forEach((r, i) => {
-      const txt = writeMot("joint_angles", cols, r.times, r.coords);
+      // cmj_01, cmj_02 … numbered by position, so the folders sort in order
+      // even when reps have been removed and the rep numbers have gaps.
+      const trial = `${res.activity}_${String(i + 1).padStart(2, "0")}`;
+      files.push({ name: `${who}/${trial}/joint_angles.mot`,
+                   data: writeMot("joint_angles", cols, r.times, r.coords) });
       if (r.dyn) {
         const dcols = ["hip_moment", "knee_moment", "ankle_moment",
                        "grf_vertical", "grf_horizontal"];
-        const sto = writeMot("joint_moments", dcols, r.times,
-          Object.fromEntries(dcols.map((k) => [k, r.dyn[k]])));
-        const du = URL.createObjectURL(new Blob([sto], { type: "text/plain" }));
-        const da = document.createElement("a");
-        da.href = du; da.download = `${res.activity}_rep${r.rep}_joint_moments.sto`;
-        document.body.appendChild(da);
-        setTimeout(() => { da.click(); setTimeout(() => { URL.revokeObjectURL(du); da.remove(); }, 4000); }, i * 350 + 150);
+        files.push({ name: `${who}/${trial}/inverse_dynamics.sto`,
+                     data: writeMot("joint_moments", dcols, r.times,
+                       Object.fromEntries(dcols.map((k) => [k, r.dyn[k]]))) });
       }
-      const url = URL.createObjectURL(new Blob([txt], { type: "text/plain" }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${res.activity}_rep${r.rep}_${res.osimModel}_joint_angles.mot`;
-      // The anchor must be in the document, the clicks must be staggered (a
-      // burst of downloads gets suppressed), and the URL must outlive the
-      // click -- revoking straight away cancels the download.
-      document.body.appendChild(a);
-      setTimeout(() => {
-        a.click();
-        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 4000);
-      }, i * 350);
     });
+    if (!files.length) { say(tr("sayNothingToProcess"), true); return; }
+    files.push({ name: `${who}/README.txt`, data:
+`BioScout Web — ${res.activity}, ${new Date().toISOString().slice(0, 19).replace("T", " ")}
+
+One folder per trial. Every trial folder holds the same file names:
+  joint_angles.mot       OpenSim coordinates, signed for ${res.osimModel}
+  inverse_dynamics.sto   net joint moments (N.m) and the ground reaction, where
+                         the planar inverse dynamics ran
+
+Angles, range and timing are measured. Moments come from body mass with the
+ground reaction derived from centre-of-mass acceleration; centre of pressure is
+taken as the midfoot and the legs are assumed symmetric. Left and right are
+mirrored: one camera cannot separate the sides.
+`});
+    const blob = makeZip(files);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${who}_${res.activity}_${new Date().toISOString().slice(0, 10)}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
+    say(tr("sayTrialFolders", { n: res.reps.length, who }));
   };
+
 }
 
 // --- demo mode (last: everything above must be initialised first) ----------
