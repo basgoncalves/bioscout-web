@@ -2250,7 +2250,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 146;
+window.BUILD = 147;
 window.BUILD_AT = "2026-11-02 20:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
@@ -13278,13 +13278,41 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
       if (served && served !== window.BUILD && !pinnedBuild()) ready(true, served);
     } catch { /* offline */ }
   }, 2500));
+  /** Resolve once a new worker has finished installing, or give up. */
+  const waitInstalled = (reg, ms) => new Promise((res) => {
+    if (!reg || reg.waiting) return res(!!(reg && reg.waiting));
+    const w = reg.installing;
+    if (!w) return res(false);
+    const t = setTimeout(() => res(!!reg.waiting), ms);
+    w.addEventListener("statechange", () => {
+      if (w.state === "installed" || w.state === "activated") { clearTimeout(t); res(true); }
+      if (w.state === "redundant") { clearTimeout(t); res(false); }
+    });
+  });
   $("updateLink").onclick = async (e) => {
     e.preventDefault();
+    const a = $("updateLink");
     const reg = window.__bsReg || await navigator.serviceWorker.getRegistration();
-    try { if (reg) await Promise.race([reg.update(), new Promise((r) => setTimeout(r, 2500))]); } catch { /* offline */ }
+    /* Wait for the install, do not race it.
+     *
+     * This used to give up after 2.5 s and fall through to location.reload(),
+     * which the OLD worker answers from its own cache -- so the page came back
+     * on the same build and the button looked broken. A new build has a whole
+     * shell to precache, which on a phone takes far longer than 2.5 s, so the
+     * only honest thing is to say "updating" and wait for it. */
+    a.textContent = tr("updating");
+    try { if (reg) await Promise.race([reg.update(), new Promise((r) => setTimeout(r, 8000))]); } catch { /* offline */ }
     if (pinnedBuild()) await setPin(null);
-    if (applyWaiting(reg)) return;                    // reloads on controllerchange
-    location.reload();
+    if (!applyWaiting(reg)) {
+      await waitInstalled(reg, 60000);
+      if (!applyWaiting(reg)) {
+        /* Nothing new to activate: either this IS the newest build, or the
+         * worker could not be fetched. A reload at least re-checks, and the
+         * link goes back to its normal label rather than lying. */
+        a.textContent = tr("updateLink");
+        location.reload();
+      }
+    }
   };
   /* Older builds: the small arrow after the build. builds.json lists them
    * (build -> commit); the worker serves the chosen one's files from the
