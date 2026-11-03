@@ -686,6 +686,16 @@ export function sidesSeparable(F, view, t0 = 0, t1 = (F._n || 1) - 1) {
 export function squatRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
                                     { model = "gpk", ankleValid = true, sides = false } = {}) {
   const [t0, , t1] = rep, lo = F._lo;
+  /* `ankleValid` is either true/false for the whole clip or a per-frame mask
+   * over the WHOLE clip (index 0 = clip frame 0). A frame the camera could not
+   * show the ankle in gets NaN, not a number: the plot then breaks the line
+   * there instead of drawing through frames nobody measured. */
+  const maskObj = ankleValid && typeof ankleValid === "object" ? ankleValid : null;
+  const ankOk = maskObj ? (i) => maskObj[lo + t0 + i] === true
+                        : () => ankleValid !== false;
+  let anyAnkle = ankleValid !== false;
+  if (maskObj) { anyAnkle = false;
+    for (let i = 0; i <= t1 - t0; i++) if (maskObj[lo + t0 + i]) { anyAnkle = true; break; } }
   const sl = (a) => interpNan(a).slice(t0, t1 + 1);
   const knee = sl(F.knee_flex), hip = sl(F.hip_flex);
   const ankle = sl(F.ankle_dorsi), lean = sl(F.trunk_lean);
@@ -702,9 +712,16 @@ export function squatRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
   const sign = KNEE_SIGN[model] ?? -1;
   const hipFlex = clipArr(hip, -20, 130);
   const kneeAng = clipArr(knee, 0, 145).map((v) => sign * v);
-  // A frontal view pins knee-ankle-toe at the clip bound; a saturated constant
-  // would masquerade as data, so emit zero and report it separately instead.
-  const ankleAng = ankleValid ? clipArr(ankle, -40, 40) : ankle.map(() => 0);
+  /* A frontal frame pins knee-ankle-toe at the clip bound, and a saturated
+   * constant masquerades as data -- so an unmeasurable frame gets NaN and the
+   * chart leaves a gap. Zero used to go here and read as a held joint. */
+  /* Masked AND unsaturated. The mask is built from the per-frame median of the
+   * two sides, while the feature here is their mean after interpolation, so a
+   * frame can clear the mask and still land on the clip bound. A value sitting
+   * exactly on +-40 is the bound talking, not the ankle, so it goes too. */
+  const maskAnk = (arr) => clipArr(arr, -40, 40)
+    .map((v, i) => (ankOk(i) && Math.abs(v) < 40 ? v : NaN));
+  const ankleAng = anyAnkle ? maskAnk(ankle) : ankle.map(() => NaN);
   return {
     times,
     coords: {
@@ -718,8 +735,8 @@ export function squatRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
       hip_flexion_l: sides ? clipArr(hipL, -20, 130) : hipFlex,
       knee_angle_r: sides ? clipArr(kneeR, 0, 145).map((v) => sign * v) : kneeAng,
       knee_angle_l: sides ? clipArr(kneeL, 0, 145).map((v) => sign * v) : kneeAng,
-      ankle_angle_r: sides && ankleValid ? clipArr(ankR, -40, 40) : ankleAng,
-      ankle_angle_l: sides && ankleValid ? clipArr(ankL, -40, 40) : ankleAng,
+      ankle_angle_r: sides && anyAnkle ? maskAnk(ankR) : ankleAng,
+      ankle_angle_l: sides && anyAnkle ? maskAnk(ankL) : ankleAng,
       lumbar_extension: clipArr(lean.map((v) => -v), -60, 30),
     },
     /* Whether the two sides above are two measurements or one copied twice.
@@ -893,6 +910,51 @@ export function computePxPerM(poses, heightM, fractions = null) {
   return { pxPerM: nanmedian(ests), detail };
 }
 
+/**
+ * Per frame: can this frame's ankle angle be believed?
+ *
+ * Dorsiflexion is a rotation in the sagittal plane, so a frame shot face-on is
+ * looking down that plane edge-on and the knee-ankle-toe angle is a projection
+ * of a rotation the camera cannot see. Two more ways a frame fails: the foot
+ * pointing at or away from the lens flattens the angle toward 180 deg, and an
+ * implied dorsiflexion outside roughly +-40 deg is past any real ankle, so the
+ * export would flatline on its clip bound.
+ *
+ * Keyed by FRAME INDEX, the same keys `poses` has -- not a dense array.
+ * Feature arrays span lo..hi including the holes a missed frame leaves, so a
+ * dense array in pose order would slide out of step with them on any clip the
+ * tracker dropped frames from.
+ */
+export function ankleValidMask(poses, torsoPx = null) {
+  const vals = Object.values(poses);
+  let torso = torsoPx;
+  if (!isNum(torso)) {
+    const ts = [];
+    for (const lm of vals) {
+      const sh = mid(lm.left_shoulder, lm.right_shoulder), hp = mid(lm.left_hip, lm.right_hip);
+      if (sh && hp) ts.push(Math.hypot(sh[0] - hp[0], sh[1] - hp[1]));
+    }
+    torso = ts.length ? nanmedian(ts) : 1;
+  }
+  const out = {};
+  for (const [key, lm] of Object.entries(poses)) out[key] = (() => {
+    const ls = lm.left_shoulder, rs = lm.right_shoulder;
+    if (!ls || !rs || !(torso > 1e-6)) return false;
+    const fr = Math.abs(ls[0] - rs[0]) / torso;
+    if (!isNum(fr) || fr >= 0.45) return false;                 // frontal: not visible
+    const as = [];
+    for (const side of ["left", "right"]) {
+      const a = angle3(lm[`${side}_knee`], lm[`${side}_ankle`], lm[`${side}_foot_index`]);
+      if (isNum(a)) as.push(a);
+    }
+    if (!as.length) return false;
+    const interior = nanmedian(as);
+    if (!isNum(interior) || interior >= 155) return false;      // degenerate
+    return Math.abs(90 - interior) < 40;                        // within a real ankle
+  })();
+  return out;
+}
+
 export function viewQuality(poses) {
   /* How side-on the camera is, and whether the feet are usable.
      Every angle here is SAGITTAL and only meaningful from the side. Filmed
@@ -934,12 +996,22 @@ export function viewQuality(poses) {
   const dorsi = ankles.map((a) => 90 - a);
   const saturated = dorsi.length
     ? dorsi.filter((v) => Math.abs(v) >= 40).length / dorsi.length : 1;
-  const ankleUsable = isNum(medAnkle) && medAnkle < 155
-    && view !== "frontal" && view !== "unknown" && saturated < 0.25;
+  /* Decided PER FRAME, not once for the clip.
+   *
+   * A person can turn mid-trial: stand facing the camera, turn side-on, turn
+   * back. One verdict for the whole clip threw away the stretch where the
+   * ankle was perfectly measurable, because the median view was frontal. The
+   * frame is the unit the projection argument actually applies to. */
+  const mask = ankleValidMask(poses, torso);
+  const keys = Object.keys(mask);
+  const validFrac = keys.length ? keys.filter((k) => mask[k]).length / keys.length : 0;
   return {
     frontality: isNum(frontality) ? +frontality.toFixed(3) : null,
     view,
-    ankle_usable: ankleUsable,
+    // Worth reporting at all: enough frames to show a stretch of real ankle.
+    ankle_usable: validFrac >= 0.15,
+    ankle_valid_frac: +validFrac.toFixed(2),
+    ankle_mask: mask,
     ankle_saturated_frac: +saturated.toFixed(2),
     median_ankle_interior_deg: isNum(medAnkle) ? +medAnkle.toFixed(1) : null,
   };
@@ -2060,9 +2132,10 @@ export function perLegRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
   const sign = KNEE_SIGN[model] ?? -1;
   const kneeOf = (sd) => clipArr(sl(F["knee_flex_" + sd]), 0, 145).map((v) => sign * v);
   const hipOf = (sd) => clipArr(sl(F["hip_flex_" + sd]), -20, 130);
-  const ankOf = (sd) => (ankleValid
-    ? clipArr(sl(F["ankle_dorsi_" + sd]), -40, 40)
-    : sl(F["ankle_dorsi_" + sd]).map(() => 0));
+  const mo1 = ankleValid && typeof ankleValid === "object" ? ankleValid : null;
+  const ankValidAt = mo1 ? (i) => mo1[lo + t0 + i] === true : () => ankleValid !== false;
+  const ankOf = (sd) => clipArr(sl(F["ankle_dorsi_" + sd]), -40, 40)
+    .map((v, i) => (ankValidAt(i) && Math.abs(v) < 40 ? v : NaN));
   return {
     times,
     coords: {
@@ -2399,9 +2472,10 @@ export function kickbackRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
   const sign = KNEE_SIGN[model] ?? -1;
   const kneeOf = (sd) => clipArr(sl(F["knee_flex_" + sd]), 0, 145).map((v) => sign * v);
   const hipOf = (sd) => clipArr(sl(F["hip_flex_" + sd]), -40, 130);
-  const ankOf = (sd) => (ankleValid
-    ? clipArr(sl(F["ankle_dorsi_" + sd]), -40, 40)
-    : sl(F["ankle_dorsi_" + sd]).map(() => 0));
+  const mo2 = ankleValid && typeof ankleValid === "object" ? ankleValid : null;
+  const ankValidAt2 = mo2 ? (i) => mo2[lo + t0 + i] === true : () => ankleValid !== false;
+  const ankOf = (sd) => clipArr(sl(F["ankle_dorsi_" + sd]), -40, 40)
+    .map((v, i) => (ankValidAt2(i) && Math.abs(v) < 40 ? v : NaN));
   return {
     times,
     coords: {
@@ -3662,7 +3736,9 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
     const { times, coords } = (activity === "squat" || spec.jump || spec.perLeg
                                || spec.shot || spec.stroke || spec.generic)
       ? spec.coords(F, b, fps, pxPerM, refA, refB,
-                    { model: osimModel, ankleValid: view.ankle_usable, sides: twoSides })
+                    { model: osimModel,
+                      ankleValid: view.ankle_usable ? view.ankle_mask : false,
+                      sides: twoSides })
       : activity === "neck"
         ? spec.coords(F, b, fps)
         : spec.coords(F, b, fps, pxPerM, refA, refB);
@@ -3701,6 +3777,7 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
         s.peak_hip_flex_deg = peak(["hip_flexion_r", "hip_flexion_l"]);
         s.peak_knee_flex_deg = peak(["knee_angle_r", "knee_angle_l"]);
         // OpenSim: + is dorsiflexion. null when the view could not show it.
+        // Over the frames that WERE measurable; null when none were.
         s.peak_ankle_df_deg = view.ankle_usable === false ? null
           : peak(["ankle_angle_r", "ankle_angle_l"]);
       }
@@ -3744,8 +3821,9 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
       /* null, not 0, when the camera could not see the ankle: the coords
        * carry zeros there, and a reported "0 deg of dorsiflexion" is a
        * measurement nobody made. */
-      s.ankle_dorsi_max_deg = view.ankle_usable === false ? null
-        : Math.max(...coords.ankle_angle_r.map(Math.abs));
+      const ankFin = (coords.ankle_angle_r || []).filter(isNum);
+      s.ankle_dorsi_max_deg = view.ankle_usable === false || !ankFin.length ? null
+        : Math.max(...ankFin.map(Math.abs));
       // pelvis_ty is an ABSOLUTE height, so depth is the drop, not -min.
       s.depth_m = Math.max(...coords.pelvis_ty) - Math.min(...coords.pelvis_ty);
       if (spec.perLeg) {
@@ -3858,7 +3936,8 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
     try {
       const wb = [0, Math.floor((F._n - 1) / 2), F._n - 1];
       const w = spec.coords(F, wb, fps, pxPerM, refA, refB,
-                            { model: osimModel, ankleValid: view.ankle_usable });
+                            { model: osimModel,
+                              ankleValid: view.ankle_usable ? view.ankle_mask : false });
       /* Where each foot met the floor, in seconds from the start of the clip.
        *
        * The whole-run panel without them is a wall of oscillation: the eye can
@@ -3883,10 +3962,19 @@ export function analyse(poses, fps, { heightM = 1.75, activity = "pullup",
             * it plots as a flat line, loads into OpenSim as a held joint, and
             * nothing downstream can tell it from data. A missing column asks
             * the question out loud. */
-           columns: view.ankle_usable === false
+           /* The plot and the export have different bars, on purpose.
+            *
+            * The chart can show a stretch of real ankle and a gap either side,
+            * which is exactly what a clip where the athlete turns deserves. A
+            * .mot cannot: a column of holes is not a motion file, and filling
+            * the holes would invent the frames the camera never saw. So the
+            * ankle is exported only when nearly the whole trial was
+            * measurable, and shown in the app whenever any of it was. */
+           columns: (view.ankle_valid_frac ?? 0) < 0.8
              ? spec.columns.filter((c) => !/^ankle_angle(_[lr])?$/.test(c))
              : spec.columns,
-           ankleMeasured: view.ankle_usable !== false,
+           ankleMeasured: (view.ankle_valid_frac ?? 0) >= 0.8,
+           ankleShownFrac: view.ankle_valid_frac ?? 0,
            /* Two measured legs, or one measured leg written to both sides.
             * The results page and the .mot export both say which. */
            sidesMeasured: twoSides,

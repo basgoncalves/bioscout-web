@@ -2250,7 +2250,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 143;
+window.BUILD = 144;
 window.BUILD_AT = "2026-11-02 20:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
@@ -10212,7 +10212,8 @@ async function enrich(res, poses, fps, heightM, activity) {
     const tracks = isUpperBody(activity) ? armTracks(poses, side) : null;
     const angles = clipAngles(activity, spec, Fj, tracks,
                               { ankleUsable: res.view?.ankle_usable !== false,
-                                sides: !!res.sidesMeasured });
+                                sides: !!res.sidesMeasured,
+                                ankleMask: res.view?.ankle_mask || null });
     const vels = clipVelocities(angles, fps);
     let armPrep = null;
     if (tracks) {
@@ -10415,10 +10416,12 @@ function viewNote(res) {
       && res.reps.length) {
     bits.push(tr("viewJumpHeight", { view: tr("view_" + v.view) }));
   }
-  /* Not gated on `sagittal`: the ankle is dropped whenever the camera could
-   * not see it, and the view that most often causes that is the frontal one. */
+  /* Three states now, not two: measurable throughout, measurable for only
+   * part of the trial -- the athlete turned mid-clip -- or not at all. */
   if (v.ankle_usable === false) {
     bits.push(tr("ankleNotMeasurable"));
+  } else if ((v.ankle_valid_frac ?? 1) < 0.8) {
+    bits.push(tr("anklePartlyMeasurable", { pct: Math.round((v.ankle_valid_frac || 0) * 100) }));
   }
   if (spec.travels) {
     bits.push(!spec.gait ? tr("sidestepNoKinetics")
@@ -11291,7 +11294,11 @@ function lineChart(t, series, unit, palette, bandsIn, opts) {
     const b = bands && bands[i];
     return b ? v.flatMap((x, j) => [x + b[j], x - b[j]]) : v;
   }).concat(hlines.map((h) => h.y));
-  const y0 = Math.min(...all), y1 = Math.max(...all);
+  /* Only the measured points set the range. A series may have GAPS -- a joint
+   * the camera could see for part of the clip and not the rest -- and those
+   * are non-finite, which would make the whole range NaN. */
+  const finVals = all.filter(Number.isFinite);
+  const y0 = finVals.length ? Math.min(...finVals) : 0, y1 = finVals.length ? Math.max(...finVals) : 1;
   const pad = (y1 - y0) * 0.08 || 1, lo = y0 - pad, hi = y1 + pad;
   const sx = (v) => P.l + ((v - t[0]) / (t[t.length - 1] - t[0] || 1)) * (W - P.l - P.r);
   const sy = (v) => H - P.b - ((v - lo) / (hi - lo)) * (H - P.t - P.b);
@@ -11314,9 +11321,27 @@ function lineChart(t, series, unit, palette, bandsIn, opts) {
     const o = sopt[i], col = o.color || pal[i % pal.length];
     const dash = o.dash ? ' stroke-dasharray="4 3"'
                : o.dot ? ` stroke-dasharray="${SIDE_DASH}"` : "";
-    g += `<polyline fill="none" stroke="${col}" stroke-width="${o.dash ? 1.4 : 1.7}"${
-      dash} stroke-linejoin="round" points="${
-      vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
+    /* One polyline per unbroken run of measured points. A single polyline
+     * would either bridge a gap -- drawing a straight line through frames
+     * nobody measured -- or, with NaN in its points list, fail to render at
+     * all. A break in the line is the honest picture. */
+    let run = [];
+    const flush = () => {
+      if (run.length > 1) {
+        g += `<polyline fill="none" stroke="${col}" stroke-width="${o.dash ? 1.4 : 1.7}"${
+          dash} stroke-linejoin="round" points="${run.join(" ")}"/>`;
+      } else if (run.length === 1) {
+        // A lone measured frame between two gaps: a dot, or it would vanish.
+        const [cx0, cy0] = run[0].split(",");
+        g += `<circle cx="${cx0}" cy="${cy0}" r="1.6" fill="${col}"/>`;
+      }
+      run = [];
+    };
+    vals.forEach((v, j) => {
+      if (Number.isFinite(v)) run.push(`${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`);
+      else flush();
+    });
+    flush();
   });
   // Walking hip and walking knee sit 0.2 xBW apart, so their labels landed on
   // top of each other and neither could be read. Draw the lines where they

@@ -1,6 +1,6 @@
 // A coordinate the camera cannot see is dropped from the export, not zeroed.
 import assert from "node:assert/strict";
-import { viewQuality } from "../src/kinematics.js";
+import { viewQuality, ankleValidMask } from "../src/kinematics.js";
 
 /* Built from the real front-on CMJ (cmj_2.mp4): filmed face-on the foot points
  * at the lens, so the knee-ankle-toe angle flattens to ~164 deg and stays
@@ -65,3 +65,51 @@ assert.equal(kept.length, full.length - 2);
 assert.ok(kept.includes("knee_angle_r") && kept.includes("lumbar_extension"),
           "only the ankle goes");
 console.log("ankle view gate ok");
+
+
+/* --- per-frame validity -----------------------------------------------------
+ * The regression this guards: a clip where the athlete starts facing the
+ * camera, turns side-on, and turns back. One verdict for the whole trial
+ * called it "frontal" and threw away the side-on stretch, where the ankle was
+ * perfectly measurable. */
+function turning(nFront = 40, nSide = 40) {
+  const poses = {};
+  let i = 0;
+  const put = (sep, ankleDeg) => {
+    const a = (ankleDeg * Math.PI) / 180;
+    poses[i++] = {
+      left_shoulder: [200 - sep / 2, 100], right_shoulder: [200 + sep / 2, 100],
+      left_hip: [200 - sep / 4, 300], right_hip: [200 + sep / 4, 300],
+      left_knee: [200, 450], right_knee: [210, 450],
+      left_ankle: [200, 600], right_ankle: [210, 600],
+      left_foot_index: [200 + 60 * Math.sin(a), 600 - 60 * Math.cos(a)],
+      right_foot_index: [210 + 60 * Math.sin(a), 600 - 60 * Math.cos(a)],
+    };
+  };
+  for (let n = 0; n < nFront; n++) put(120, 164);   // face-on, flattened ankle
+  for (let n = 0; n < nSide; n++) put(12, 105);     // side-on, a real ankle
+  return poses;
+}
+
+const mixed = turning();
+const vq = viewQuality(mixed);
+assert.ok(vq.ankle_usable, "a clip with a side-on stretch is not a write-off");
+assert.ok(Math.abs(vq.ankle_valid_frac - 0.5) < 0.05, "half measurable: " + vq.ankle_valid_frac);
+
+const m = ankleValidMask(mixed);
+assert.equal(m[0], false, "a face-on frame is not measurable");
+assert.equal(m[60], true, "a side-on frame is");
+assert.equal(Object.keys(m).length, Object.keys(mixed).length, "one entry per frame");
+
+/* Keyed by FRAME INDEX, not by position: feature arrays span lo..hi including
+ * the holes a dropped frame leaves, so a dense array would slide out of step. */
+const holey = {}; for (const k of [0, 1, 5, 9]) holey[k] = mixed[k];
+const hm = ankleValidMask(holey);
+assert.deepEqual(Object.keys(hm).sort((x, y) => x - y).map(Number), [0, 1, 5, 9],
+                 "the mask keeps the original frame numbers");
+
+// All frontal is still a refusal, not a partial.
+assert.equal(viewQuality(turning(40, 0)).ankle_usable, false);
+// All side-on is fully measurable, so the .mot keeps its ankle column.
+assert.equal(viewQuality(turning(0, 40)).ankle_valid_frac, 1);
+console.log("per-frame ankle validity ok");

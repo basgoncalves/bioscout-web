@@ -224,9 +224,16 @@ const LOWER = { knee: "knee_flex", hip: "hip_flex", ankle: "ankle_dorsi" };
 /* `sides` is set when the view lets the two legs be told apart (front-on).
  * Per-leg curves are then emitted for every task, not only the per-leg ones,
  * so the plot and the export carry two real legs instead of one twice. */
-export function clipAngles(activity, spec, F, tracks, { ankleUsable = true, sides = false } = {}) {
+export function clipAngles(activity, spec, F, tracks,
+                           { ankleUsable = true, sides = false, ankleMask = null } = {}) {
   const out = {};
   const put = (k, a) => { if (finiteSome(a)) out[k] = Array.from(a, Number); };
+  /* The ankle is measurable on some frames and not others when the athlete
+   * turns mid-clip, so it is masked per frame rather than dropped whole. The
+   * mask is keyed by FRAME INDEX; feature arrays start at F._lo. */
+  const lo0 = F && F._lo != null ? F._lo : 0;
+  const maskAnkle = (a) => (!ankleMask || !a ? a
+    : Array.from(a, (v, i) => (ankleMask[lo0 + i] === true ? v : NaN)));
   if (activity === "pullup" || activity === "dip" || activity === "pushup") {
     // buildFeatures keeps INCLUDED angles; flexion is 180 minus.
     put("elbow", F.elbow && F.elbow.map((v) => 180 - v));
@@ -235,10 +242,11 @@ export function clipAngles(activity, spec, F, tracks, { ankleUsable = true, side
   } else {
     for (const [j, fk] of Object.entries(LOWER)) {
       if (j === "ankle" && !ankleUsable) continue;
-      put(j, F[fk]);
+      const m = j === "ankle" ? maskAnkle : (x) => x;
+      put(j, m(F[fk]));
       if ((spec && spec.perLeg) || sides) {
-        put(j + "_l", F[fk + "_l"]);
-        put(j + "_r", F[fk + "_r"]);
+        put(j + "_l", m(F[fk + "_l"]));
+        put(j + "_r", m(F[fk + "_r"]));
         // A per-leg feature set with no averaged column still needs one for
         // power, which pairs a single sagittal moment with a single angle.
         if (!out[j] && out[j + "_l"] && out[j + "_r"]) {
