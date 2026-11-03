@@ -113,3 +113,40 @@ assert.equal(viewQuality(turning(40, 0)).ankle_usable, false);
 // All side-on is fully measurable, so the .mot keeps its ankle column.
 assert.equal(viewQuality(turning(0, 40)).ankle_valid_frac, 1);
 console.log("per-frame ankle validity ok");
+
+/* --- two destinations, two rules ------------------------------------------
+ * A .mot FILE goes to OpenSim, which cannot read a column with holes, so a
+ * partly measurable joint is left out. Process stays inside BioScout, where
+ * the charts lift the pen on a non-finite sample, so the same joint is worth
+ * having there with its gaps. Mirrors motColumns() in index.html. */
+const ACT_COLS = ["pelvis_tilt", "pelvis_tx", "pelvis_ty", "pelvis_tz",
+                  "hip_flexion_r", "hip_flexion_l", "knee_angle_r", "knee_angle_l",
+                  "ankle_angle_r", "ankle_angle_l", "lumbar_extension"];
+function motColumns(res, { forFile = true } = {}) {
+  const all = res.columns || ACT_COLS;
+  if (!forFile && (res.view?.ankle_usable ?? false)) {
+    return ACT_COLS.filter((c) => all.includes(c) || /^ankle_angle(_[lr])?$/.test(c));
+  }
+  return res.ankleMeasured === false ? all.filter((c) => !/^ankle_angle(_[lr])?$/.test(c)) : all;
+}
+const hasAnkle = (cols) => cols.some((c) => /^ankle_angle/.test(c));
+
+// Partly measurable: out of the file, into Process.
+const partly = { columns: ACT_COLS.filter((c) => !/^ankle_angle/.test(c)),
+                 ankleMeasured: false, view: { ankle_usable: true } };
+assert.ok(!hasAnkle(motColumns(partly)), "a gapped ankle stays out of the .mot file");
+assert.ok(hasAnkle(motColumns(partly, { forFile: false })), "but reaches Process");
+assert.deepEqual(motColumns(partly, { forFile: false }), ACT_COLS,
+                 "and in the model's own column order");
+
+// Never measurable: out of both.
+const never = { columns: ACT_COLS.filter((c) => !/^ankle_angle/.test(c)),
+                ankleMeasured: false, view: { ankle_usable: false } };
+assert.ok(!hasAnkle(motColumns(never)), "an unmeasurable ankle stays out of the file");
+assert.ok(!hasAnkle(motColumns(never, { forFile: false })), "and out of Process too");
+
+// Fully measurable: in both, unchanged.
+const allOk = { columns: ACT_COLS, ankleMeasured: true, view: { ankle_usable: true } };
+assert.deepEqual(motColumns(allOk), ACT_COLS);
+assert.deepEqual(motColumns(allOk, { forFile: false }), ACT_COLS);
+console.log("export destinations ok");

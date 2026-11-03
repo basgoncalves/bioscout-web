@@ -2250,7 +2250,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 145;
+window.BUILD = 146;
 window.BUILD_AT = "2026-11-02 20:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
@@ -10390,11 +10390,26 @@ function addArmMuscles(res, activity) {
 
 // A squat filmed face-on still yields plausible-looking knee and hip numbers
 // that are measuring the wrong plane, so say so rather than let them pass.
-/* The coordinates this result may honestly export. analyse() already drops a
- * joint the camera could not see; this is the fallback for a result rebuilt
- * from storage, which predates that. */
-function motColumns(res) {
-  const all = (res && res.columns) || ACTIVITIES[res.activity].columns || [];
+/* The coordinates this result may honestly hand on -- and where to depends on
+ * where they are going.
+ *
+ * A .mot FILE is headed for OpenSim, which cannot read a column with holes in
+ * it, so a partly measurable joint is left out: analyse() already drops it
+ * from res.columns, and this is the fallback for a result rebuilt from
+ * storage, which predates that.
+ *
+ * Process is a different destination. It stays inside BioScout, its charts
+ * lift the pen on a non-finite sample, and its statistics ignore them -- so a
+ * joint measured for part of the trial is worth having there, gaps and all.
+ * Withholding it was treating one rule as if it covered both. */
+function motColumns(res, { forFile = true } = {}) {
+  const spec = ACTIVITIES[res && res.activity];
+  const all = (res && res.columns) || (spec && spec.columns) || [];
+  if (!forFile && res && (res.view?.ankle_usable ?? false)) {
+    // Put the ankle back for Process, in the order the model expects.
+    const full = (spec && spec.columns) || all;
+    return full.filter((c) => all.includes(c) || /^ankle_angle(_[lr])?$/.test(c));
+  }
   return res && res.ankleMeasured === false
     ? all.filter((c) => !/^ankle_angle(_[lr])?$/.test(c)) : all;
 }
@@ -13068,7 +13083,7 @@ function render(res, fps) {
    * handed to Process in memory. Every rep goes, so the curves can be
    * compared there rather than one rep at a time. */
   $("procBtn").onclick = () => {
-    const cols = motColumns(res);
+    const cols = motColumns(res, { forFile: false });
     const files = res.reps.map((r) => new File(
       [writeMot("joint_angles", cols, r.times, r.coords)],
       `${res.activity}_rep${r.rep}_${res.osimModel}_joint_angles.mot`,
