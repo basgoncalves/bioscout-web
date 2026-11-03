@@ -16,7 +16,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { isShipped, buildOf, releaseOf, BUILD_RE, BUILD_AT_RE } from "./shipped.mjs";
+import { isShipped, buildOf, releaseOf, BUILD_RE, BUILD_AT_RE, SW_BUILD_RE } from "./shipped.mjs";
 
 const git = (...a) => { try { return execFileSync("git", a, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }); } catch { return null; } };
 const check = process.argv.includes("--check");
@@ -46,4 +46,17 @@ if (!BUILD_RE.test(html)) { console.error("build: no window.BUILD line in index.
 const stamp = new Date().toLocaleString("sv-SE", { timeZone: "Europe/Vienna" }).slice(0, 16); // 2026-10-13 16:50, local time
 writeFileSync("index.html", html.replace(BUILD_RE, `window.BUILD = ${next};`).replace(BUILD_AT_RE, `window.BUILD_AT = "${stamp}";`));
 git("add", "index.html");
+/* sw.js carries the number too, and must: a browser only installs a new
+ * service worker when sw.js differs byte for byte. Builds 137-144 left it
+ * untouched and never reached anybody who already had build 136. */
+const sw = readFileSync("sw.js", "utf8");
+if (!SW_BUILD_RE.test(sw)) { console.error("build: no `const BUILD = N;` line in sw.js"); process.exit(1); }
+const swUnstaged = (git("diff", "--name-only") || "").split("\n").includes("sw.js");
+if (swUnstaged) {
+  console.error(`build: sw.js has unstaged edits, so its build number cannot be bumped for you.\n` +
+    `       Set const BUILD = ${next}; yourself (or stage/stash sw.js) and commit again.`);
+  process.exit(1);
+}
+writeFileSync("sw.js", sw.replace(SW_BUILD_RE, `const BUILD = ${next};`));
+git("add", "sw.js");
 console.log(`build ${head} -> ${next}`);

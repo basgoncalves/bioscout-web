@@ -10,6 +10,11 @@ export const SHIPPED = [/^index\.html$/, /^sw\.js$/, /^src\//, /^data\//,
   /^assets\//, /^manifest\.webmanifest$/, /^privacy\.html$/, /^formats\.html$/, /^glossary\//];
 export const isShipped = (f) => SHIPPED.some((re) => re.test(f));
 export const BUILD_RE = /window\.BUILD = (\d+);/;
+/* sw.js carries the same number. A browser installs a new service worker only
+ * when sw.js changes byte for byte, so a build that leaves it untouched can
+ * never reach anyone who already has the old one. */
+export const SW_BUILD_RE = /^const BUILD = (\d+);$/m;
+export const swBuildOf = (js) => { const m = (js || "").match(SW_BUILD_RE); return m ? +m[1] : null; };
 export const BUILD_AT_RE = /window\.BUILD_AT = "[^"]*";/;
 export const RELEASE_RE = /window\.RELEASE = "([^"]*)";/;
 /** The release a build number belongs to: a new release (V1 -> V2) starts again at build 1. */

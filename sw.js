@@ -36,7 +36,17 @@
  * and the heavy version moves only when a vendored asset actually changes,
  * which is rarely. A shell bump can no longer cost anybody a 20 MB download.
  */
-const SHELL_CACHE = "bioscout-shell-v321";
+/* MUST move with every build, and does -- tools/bump_build.mjs writes it.
+ *
+ * A browser installs a new service worker only when THIS FILE changes byte for
+ * byte. Builds 137-144 shipped with an identical sw.js, so no browser that had
+ * build 136's worker ever saw another one: reg.update() found nothing, the
+ * Update link had no waiting worker to activate, and the old shell cache was
+ * served for ever. The served index.html said 144 and the running app said
+ * 136. Deriving the cache name from the build keeps the two in step and
+ * guarantees the file differs on every release. */
+const BUILD = 145;
+const SHELL_CACHE = "bioscout-shell-b" + BUILD;
 const HEAVY_CACHE = "bioscout-heavy-v1";
 const PIN_CACHE = "bioscout-pin";        // which old build the person chose (one entry), and its files
 const KEEP = [SHELL_CACHE, HEAVY_CACHE, PIN_CACHE];
