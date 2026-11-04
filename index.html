@@ -2255,8 +2255,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 149;
-window.BUILD_AT = "2026-11-02 20:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 150;
+window.BUILD_AT = "2026-11-04 19:15";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -10425,7 +10425,8 @@ async function enrich(res, poses, fps, heightM, activity) {
       r.osimOut = { activations: out.activations, activationNames: out.activationNames,
                     moments: out.moments, momentNames: out.momentNames,
                     grf: out.grf, grfNames: out.grfNames,
-                    jrfComp: out.jrfComp, jrfCompNames: out.jrfCompNames };
+                    jrfComp: out.jrfComp, jrfCompNames: out.jrfCompNames,
+                    power: out.power, powerNames: out.powerNames };
     }
   } catch (err) {
     /* Say so on the page. A missing or refused force model used to remove the
@@ -12993,18 +12994,23 @@ function render(res, fps) {
    * handed to Process in memory. Every rep goes, so the curves can be
    * compared there rather than one rep at a time. */
   $("procBtn").onclick = () => {
+    /* The SAME writer the download uses, so Process sees everything the trial
+     * produced -- angles, both inverse-dynamics flavours, the 3D ground
+     * reaction, muscle forces, activations, power, contact forces and their
+     * contributions -- instead of only angles and moments, which is all this
+     * handler used to build by hand. */
     const cols = motColumns(res, { forFile: false });
-    const files = res.reps.map((r) => new File(
-      [writeMot("joint_angles", cols, r.times, r.coords)],
-      `${res.activity}_rep${r.rep}_${res.osimModel}_joint_angles.mot`,
-      { type: "text/plain" }));
-    for (const r of res.reps) {
-      if (!r.dyn) continue;
-      const dcols = ["hip_moment", "knee_moment", "ankle_moment", "grf_vertical", "grf_horizontal"];
-      files.push(new File([writeMot("joint_moments", dcols, r.times,
-        Object.fromEntries(dcols.map((k) => [k, r.dyn[k]])))],
-        `${res.activity}_rep${r.rep}_joint_moments.sto`, { type: "text/plain" }));
-    }
+    const bwN = (res.massKg || parseFloat($("mass").value) || 75) * 9.80665;
+    const files = [];
+    res.reps.forEach((r, i) => {
+      const trial = `${res.activity}_${String(i + 1).padStart(2, "0")}`;
+      const contrib = muscleJoints ? jcfContributions(r, muscleJoints, bwN) : null;
+      for (const f of trialFiles(trial, r, { columns: cols, osimModel: res.osimModel,
+                                             massKg: res.massKg, contrib })) {
+        const leaf = f.name.split("/").pop().replace(/^output_so\.sto$/, "joint_contact_forces.sto");
+        files.push(new File([f.data], `${trial}_${leaf}`, { type: "text/plain" }));
+      }
+    });
     if (!files.length) { say(tr("sayNothingToProcess"), true); return; }
     showView("viewProcess"); openProcess();
     processMounted.then((m) => m && m.load(files));
@@ -13036,7 +13042,8 @@ function render(res, fps) {
        * joint contact forces -- whichever of them this rep actually has. Its
        * subfolders are flattened so every trial folder still holds the same
        * short list of file names. */
-      for (const f of trialFiles(trial, r, { columns: cols, osimModel: res.osimModel, massKg: res.massKg })) {
+      const contrib = muscleJoints ? jcfContributions(r, muscleJoints, (res.massKg || 75) * 9.80665) : null;
+      for (const f of trialFiles(trial, r, { columns: cols, osimModel: res.osimModel, massKg: res.massKg, contrib })) {
         const leaf = f.name.split("/").pop().replace(/^output_so\.sto$/, "joint_contact_forces.sto");
         files.push({ name: `${who}/${trial}/${leaf}`, data: f.data });
       }
@@ -13078,7 +13085,19 @@ One folder per trial, each holding whatever that trial produced:
                                      video and body mass
   StaticOptimization_force.sto       muscle forces (N), surrogate
   StaticOptimization_activation.sto  activations 0-1, surrogate
+  muscle_power.sto                   muscle power (W), surrogate
+  ground_reaction.mot                3D ground reaction per foot (N), surrogate:
+                                     fx fore-aft, fy vertical, fz medio-lateral
   joint_contact_forces.sto           joint reaction forces (N), surrogate
+  contributions_so.sto               each muscle group's share of the contact
+                                     force (BW), approximate -- see the note
+                                     in the file
+
+Not in here: muscle and tendon LENGTHS. The surrogate predicts forces,
+activations, moments and contact loads; it has no length, fibre or moment-arm
+outputs, and lengths cannot be recovered from the angles in the browser
+without the model's muscle paths. Run the .mot through OpenSim's Analyze tool
+(MuscleAnalysis) against the shipped model to get them.
 
 The trunk: one camera sees a single shoulder-to-hip line and cannot tell a
 pelvis that tilted from a spine that flexed, so the whole measured lean drives

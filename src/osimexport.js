@@ -85,7 +85,7 @@ const SURROGATE_NOTE = "BioScout Web: predicted by a static-optimisation surroga
   + "kinematics (Rajagopal muscle names). An estimate, not an OpenSim solve.";
 
 /** One trial's model-dependent files: angles, moments, SO forces/activations, JRF. */
-export function trialFiles(base, r, { columns, osimModel = "gpk", massKg = null }) {
+export function trialFiles(base, r, { columns, osimModel = "gpk", massKg = null, contrib = null }) {
   const out = [], n = r.times.length;
   const eb = `${base}/external_biomechanics/`, so = `${base}/static_optimisation/`;
   out.push({ name: eb + "joint_angles.mot", data: writeSto("Coordinates", columns, r.times,
@@ -120,6 +120,26 @@ export function trialFiles(base, r, { columns, osimModel = "gpk", massKg = null 
       o.activationNames, r.times, o.activations.map((row) => Array.from(row)),
       { note: SURROGATE_NOTE + "\nActivations, 0 to 1." }) });
   }
+  /* Muscle power, one column per muscle. Predicted by the surrogate and, until
+   * now, thrown away before anything could see it. */
+  if (o.power) {
+    out.push({ name: so + "muscle_power.sto", data: writeSto("Muscle Power",
+      o.powerNames, r.times, o.power.map((row) => Array.from(row)),
+      { note: SURROGATE_NOTE + "\nMuscle power in W. Positive while the muscle shortens under load." }) });
+  }
+  /* The ground reaction in THREE components, including medio-lateral.
+   *
+   * The planar file above is what the video's own inverse dynamics can see:
+   * vertical and fore-aft, nothing sideways. The surrogate predicts all three
+   * per foot, and grf_*_fz -- the medio-lateral one -- had no file of its own,
+   * so it was only reachable buried among 80 muscle columns. */
+  if (o.grf) {
+    out.push({ name: eb + "ground_reaction.mot", data: writeSto("Ground Reaction",
+      o.grfNames, r.times, o.grf.map((row) => Array.from(row)),
+      { note: SURROGATE_NOTE + "\nGround reaction per foot in N: fx fore-aft, fy vertical, "
+        + "fz medio-lateral. A single camera sees almost no sideways motion, so fz is the "
+        + "weakest of the three." }) });
+  }
   if (o.jrfComp || r.jrf) {
     const cols = [], rows = Array.from({ length: n }, () => []);
     if (o.jrfComp) { cols.push(...o.jrfCompNames); o.jrfComp.forEach((v, i) => rows[i].push(...v)); }
@@ -130,6 +150,29 @@ export function trialFiles(base, r, { columns, osimModel = "gpk", massKg = null 
     }
     out.push({ name: `${base}/joint_contact_forces/output_so.sto`, data: writeSto("Joint Reaction Loads", cols, r.times, rows,
       { note: SURROGATE_NOTE + "\nJoint reaction forces in N, in the child body's frame (femur, tibia, talus)." }) });
+  }
+  /* Muscle contributions to the joint contact force.
+   *
+   * Only on screen until now. One wide table: per side and joint, the total
+   * and each muscle group's share, in bodyweights. `contrib` comes from
+   * jcfContributions() at the call site, which has the muscle-to-joint map. */
+  if (contrib) {
+    const cols = [], cells = [];
+    for (const side of Object.keys(contrib)) {
+      for (const [joint, c] of Object.entries(contrib[side])) {
+        cols.push(`${joint}_${side}_total`); cells.push(c.total);
+        for (const [k, v] of Object.entries(c.groups)) { cols.push(`${joint}_${side}_${k}`); cells.push(v); }
+        cols.push(`${joint}_${side}_intersegmental`); cells.push(c.seg);
+      }
+    }
+    if (cols.length) {
+      out.push({ name: `${base}/joint_contact_forces/contributions_so.sto`,
+        data: writeSto("Joint Contact Force Contributions", cols, r.times,
+          rowsOf(cols, (c, i) => cells[cols.indexOf(c)][i], n),
+          { note: SURROGATE_NOTE + "\nIn bodyweights. Each muscle group counts with its whole "
+            + "force, since the surrogate carries no muscle paths to project it along the contact "
+            + "force; *_intersegmental is the remainder of the total. An approximation." }) });
+    }
   }
   return out;
 }
