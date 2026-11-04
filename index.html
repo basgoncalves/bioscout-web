@@ -1891,8 +1891,7 @@ try {
            into the session folder open in Simulate's Batch mode. Nothing is kept in the browser. -->
       <div id="labTrialBar" class="hidden" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
         <div class="row" style="align-items:end">
-          <div><label for="labTrialName" data-i18n="lt_name">Trial name</label><input id="labTrialName" type="text"></div>
-          <div><button type="button" id="labTrialBtn" style="margin:0">Save trial</button></div>
+          <div style="flex:1"><label for="labTrialName" data-i18n="lt_name">Trial name</label><input id="labTrialName" type="text"></div>
         </div>
         <p class="note" id="labTrialNote" style="margin:6px 0 0" data-i18n="lt_note">The recording is kept only until this page closes: save it as a trial (2_experimental/&lt;trial&gt;/marker_experimental.trc, estimated grf.mot, video; 3_iterations/bioscout_web/&lt;trial&gt;/ joint angles and planar inverse dynamics). With a session folder open in Simulate → Batch mode, every recording is written into that session by itself.</p>
         <div class="status" id="labTrialStatus"></div>
@@ -1963,25 +1962,30 @@ try {
          button opens it and reads back what is set (paintLoadSummary). -->
     <button type="button" class="ghost trainOnly" id="loadBtn" style="margin-bottom:11px">
       <span id="loadSummary" data-i18n="addLoadBtn">Add load</span></button>
-    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
+    <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
+    <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
+    <button class="ghost trainOnly hidden" id="ytBtn" data-i18n="ytButton">From URL</button>
+    <button class="ghost trainOnly hidden" id="screenRecBtn" data-i18n="srRecordScreen">Record the screen</button>
+    <!-- The tick boxes sit under the buttons they modify: with them in
+         between, the four ways to get a recording read as four unrelated
+         controls. -->
+    <div class="trainOnly" id="recOpts" style="margin:4px 2px 11px">
+    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin:0 0 8px;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="saveVideo" style="width:auto;margin:0">
       <span data-i18n="keepVideo">Keep the video (export and clips)</span>
     </label>
-    <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
-    <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
-    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin:-4px 2px 11px;
+    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin:0 0 8px;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="fileRoi" style="width:auto;margin:0">
       <span data-i18n="fileRoi">Box the athlete first (small or crowded videos)</span>
     </label>
-    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin:-6px 2px 11px;
+    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin:0;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="camMoving" style="width:auto;margin:0">
       <span data-i18n="camMoving">Camera was not stationary (handheld, panning)</span>
     </label>
-    <button class="ghost trainOnly hidden" id="ytBtn" data-i18n="ytButton">From URL</button>
-    <button class="ghost trainOnly hidden" id="screenRecBtn" data-i18n="srRecordScreen">Record the screen</button>
+    </div>
     <button class="ghost trainOnly" id="manualBtn" data-i18n="manualSet">Count reps by hand (no camera)</button>
     <div id="linkRow" class="hidden" style="margin-top:11px">
       <label for="linkUrl" data-i18n="videoLink">Video link</label>
@@ -2251,7 +2255,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 148;
+window.BUILD = 149;
 window.BUILD_AT = "2026-11-02 20:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
@@ -2373,7 +2377,7 @@ import { cleanEngineUrl, engineFromSearch, fileKind, makeEngineClient, EngineErr
          pickAngles, pickMoments, markerErrors, topMuscles, worstReserve, reactionJoints,
          defaultReactionJoint, reactionForce, scaleRows, lineChartSVG, legendHTML,
          MUSCLE_COLORS } from "./src/osimlab.js";
-import { buildSessionFiles } from "./src/osimexport.js";
+import { buildSessionFiles, trialFiles } from "./src/osimexport.js";
 import { buildLabTrial, nextTrialName, saveTrialToSession } from "./src/labtrial.js";
 import { saveFiles } from "./src/savefiles.js";
 import { ballFor } from "./src/ballmodel.js";
@@ -7017,6 +7021,24 @@ function finishAccelSet() {
  * The session is archived here, so the page is built from the numbers BEFORE
  * the log is cleared -- a report assembled after archiving would find an empty
  * session and show nothing. */
+/* Everything on the Record screen that belongs to the take just analysed.
+ *
+ * Ending a session archived the log and opened a fresh one, but left the last
+ * take's results card, its share buttons and the in-memory pageSets behind --
+ * so going back to Record showed the finished session's numbers under a new,
+ * empty one. */
+function clearLastTake() {
+  $("results").classList.add("hidden");
+  $("results").innerHTML = "";
+  const mp = $("mpResults"); if (mp) mp.classList.add("hidden");
+  const sb = $("shareSetBtn"); if (sb) sb.classList.add("hidden");
+  document.querySelectorAll(".lmReviewRow").forEach((x) => x.remove());
+  lastResult = null; shareSrc = null; shareFile = null; viewingSet = null;
+  reviewSrc = null;
+  pageSets.length = 0;
+  const bar = $("labTrialBar"); if (bar) bar.classList.add("hidden");
+}
+
 function endSession() {
   const sess = getSession();
   if (!sess || !sess.sets.length) return;
@@ -7035,6 +7057,7 @@ function endSession() {
   archiveSession();
   newSession($("profile").value || null);
   $("trainingCard").classList.add("hidden");
+  clearLastTake();
   renderSessionEnd(snapshot);
   showView("viewSessionEnd");
 }
@@ -8369,7 +8392,6 @@ function enterLab() {
       $(to).dispatchEvent(new Event("change", { bubbles: true }));
     });
   }
-  $("labTrialBtn").onclick = () => labTrialSave();
   $("labNewBtn").onclick = () => {
     leaveRecorder();
     eraseAthlete(LAB_NAME);
@@ -9939,7 +9961,6 @@ function neckHoldResultsHTML(res, fps) {
     ${neckMusclesHTML(res)}
     <div id="chartBox"></div>
     <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMotOnly")}</button>
-    <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
     <div class="status" id="zipStatus"></div>
     <p class="note">${tr("noteCervical")}</p>`;
 }
@@ -10162,6 +10183,39 @@ const MCOLORS = ["#2f6fe4", "#e8871a", "#1d7a45", "#c0392b", "#7d5bbe"];
 /** Attach joint moments and muscle forces to each rep.
  *  Shared by the live path and ?demo, which is the only way to be sure the
  *  demo exercises the same code the camera does. */
+/* The surrogate needs an unbroken input, so bridge the holes before it runs.
+ *
+ * A joint the camera could not see for part of the clip is NaN on those
+ * frames, which is right for the plot and the export. It is NOT something a
+ * neural network can be handed: one NaN in the input makes that frame's
+ * outputs NaN, the 6 Hz smoothing spreads it over its whole window, and
+ * peakByMuscle -- a plain Math.max -- then returns NaN for EVERY muscle. The
+ * visible symptom was a muscle list of nothing but adductors (the ranking had
+ * collapsed, so it showed the first five in model order), peaks printed as
+ * 0 N, and an empty contributions plot.
+ *
+ * Bridged linearly between the frames either side and held flat at the ends.
+ * Only the model's copy is filled; what is plotted and exported keeps its
+ * gaps. */
+function fillGaps(arr) {
+  if (!arr || typeof arr.some !== "function" || !arr.some((v) => !Number.isFinite(v))) return arr;
+  const out = Array.from(arr, Number), n = out.length;
+  let i = 0;
+  while (i < n) {
+    if (Number.isFinite(out[i])) { i++; continue; }
+    let j = i; while (j < n && !Number.isFinite(out[j])) j++;
+    const a = i > 0 ? out[i - 1] : NaN, b = j < n ? out[j] : NaN;
+    for (let k = i; k < j; k++) {
+      if (Number.isFinite(a) && Number.isFinite(b)) out[k] = a + ((b - a) * (k - i + 1)) / (j - i + 1);
+      else out[k] = Number.isFinite(a) ? a : (Number.isFinite(b) ? b : 0);
+    }
+    i = j;
+  }
+  return out;
+}
+/** Every coordinate bridged, for anything that cannot take a hole. */
+const solidCoords = (c) => Object.fromEntries(Object.entries(c).map(([k, v]) => [k, fillGaps(v)]));
+
 async function enrich(res, poses, fps, heightM, activity) {
   const massKg = parseFloat($("mass").value) || 75;
   // Added and assistance are cumulative and signed: a loaded bar with a band
@@ -10356,7 +10410,7 @@ async function enrich(res, poses, fps, heightM, activity) {
       // its own established convention.
       mc.pelvis_tx = r.coords.pelvis_tz;
       mc.pelvis_tz = r.coords.pelvis_tx;
-      const out = predictForces(fm, mc, r.times.length,
+      const out = predictForces(fm, solidCoords(mc), r.times.length,
         { massKg, heightM, times: r.times });
       r.forces = out.forces;
       r.forceNames = out.muscleNames;
@@ -12059,163 +12113,6 @@ async function summaryFigures(res) {
   return out;
 }
 
-async function exportZip(res, fps) {
-  const st = $("zipStatus");
-  const note = (t) => { st.textContent = t; };
-  try {
-    note("Collecting…");
-    const files = [];
-    const cols = motColumns(res);
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-
-    // Plots: page through the reps so each one's charts are in the DOM.
-    note("Rendering plots…");
-    const pages = shownItems.length || res.reps.length;
-    for (let i = 0; i < pages; i++) {
-      if (selectRep) selectRep(i);
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const svgs = document.querySelectorAll("#results svg.chart");
-      let k = 0;
-      for (const svg of svgs) {
-        const png = await svgToPng(svg, 1100);
-        if (!png) continue;
-        // Name each plot from its own legend, so the files are self-describing
-        // rather than rep1_02.png.
-        const leg = svg.nextElementSibling;
-        const labels = leg && leg.classList.contains("legend")
-          ? [...leg.querySelectorAll("span")].map((x) => x.textContent.trim())
-              .filter((t) => t && !/^N(·m)?$/.test(t))
-          : [];
-        const slug = (labels.slice(0, 3).join("_") || `chart${++k}`)
-          .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
-        /* Named from the ITEM on screen, not from res.reps[i].
-         *
-         * On gait the panels are no longer one per rep -- they are one per
-         * stride cycle, plus a mean and the whole run -- so indexing back into
-         * res.reps read past the end and threw mid-export, after the analysis
-         * had already been written into the zip. */
-        const it = shownItems[i];
-        const who = !it ? `rep${i + 1}`
-          : it.wholeTrial ? "whole_trial"
-          : it.cycle ? `stride${it.cycle}`
-          : it.isMean ? "mean"
-          : `rep${it.rep ?? i + 1}`;
-        files.push({ name: `plots/${who}_${String(++k).padStart(2, "0")}_${slug}.png`,
-                     data: await blobBytes(png) });
-      }
-    }
-
-    const video = videoBlob && videoBlob.size
-      ? { name: "video." + extFor(videoBlob.type), data: await blobBytes(videoBlob) } : null;
-
-    const summary = {
-      generated: new Date().toISOString(),
-      activity: res.activity, osim_model: res.osimModel,
-      fps: +fps.toFixed(2), pose_coverage: +res.coverage.toFixed(3),
-      px_per_m: +res.pxPerM.toFixed(2), camera_view: res.view,
-      body_mass_kg: res.massKg, added_kg: res.addedKg, assistance_kg: res.assistKg,
-      net_external_kg: res.externalKg,
-      reps: res.reps.map((r) => ({
-        rep: r.rep, duration_s: +r.duration_s.toFixed(3),
-        // Every joint that has a moment -- the arms' on the arm tasks, the
-        // legs' where the inverse dynamics ran.
-        quality: r.quality || null,
-        quality_notes: (r.qualityNotes || []).map((q) => `${q.code}:${q.v}`),
-        peak_moments_Nm: jmPeaks(r.jm, "moment"),
-        peak_power_W: jmPeaks(r.jm, "power"),
-      })),
-    };
-    files.push({ name: "session.json", data: JSON.stringify(summary, null, 2) });
-
-    // The whole training session, not just this set: every set recorded so
-    // far, plus the first-to-last trends.
-    const training = getSession();
-    if (training && training.sets.length) {
-      files.push({ name: "training/sets.json", data: JSON.stringify(training, null, 2) });
-      const past = listArchive();
-      if (past.length) {
-        files.push({ name: "training/history.json", data: JSON.stringify(past, null, 2) });
-      }
-      const ts = summariseSession(training);
-      files.push({ name: "training/summary.json", data: JSON.stringify(ts, null, 2) });
-      const hdr = ["set", "activity", "reps", "added_kg", "assist_kg", "at"];
-      const rows = training.sets.map((x) => [x.index, x.activity, x.reps,
-        x.addedKg ?? 0, x.assistKg ?? 0, x.at].join(","));
-      files.push({ name: "training/sets.csv", data: hdr.join(",") + "\n" + rows.join("\n") + "\n" });
-    }
-    files.push({ name: "README.txt", data:
-`BioScout Web export — ${stamp}
-Activity: ${res.activity}   frame rate: ${fps.toFixed(1)} fps
-Camera view: ${res.view?.view ?? "?"} (frontality ${res.view?.frontality ?? "?"})
-
-LAYOUT                   The zip is a bioscout session folder, <athlete>/<YY_MM_DD>/,
-                         the same layout the Python pipeline writes for a Vicon
-                         session. Trial files are under
-                         3_iterations/bioscout_web/<Trial>/ (one folder per rep,
-                         plus the whole clip for gait); this README, the charts
-                         and the training data are in 4_outputs/.
-external_biomechanics/joint_angles.mot   OpenSim coordinates, signed for ${res.osimModel}
-                         (knee flexion NEGATIVE). pelvis_ty is an ABSOLUTE
-                         height above the floor, not a displacement.
-external_biomechanics/inverse_dynamics.sto     net joint moments (N.m), OpenSim names
-external_biomechanics/inverse_dynamics_2d.sto  planar inverse dynamics from video (N.m, N)
-static_optimisation/StaticOptimization_force.sto       muscle forces (N) + predicted GRF
-static_optimisation/StaticOptimization_activation.sto  muscle activations (0-1)
-joint_contact_forces/output_so.sto             joint reaction forces (N), components + resultants
-2_experimental/<Trial>/marker_experimental.trc pose landmarks in metres (depth is the pose
-                         model's guess), and the video when it was kept.
-4_outputs/               summary figures, every chart in the app (plots/), session.json,
-                         training/ (the whole training session).
-All .sto/.mot open in the OpenSim GUI (File > Load Motion / Preview Experimental Data).
-Forces, activations, moments and joint loads come from the static-optimisation
-surrogate, not from an OpenSim solve; each file's header says so.
-
-WHAT TO TRUST
-  Joint angles, range of motion, rep count and depth are measured.
-  Joint moments are inverse dynamics from body mass; the ground reaction is
-  derived from whole-body centre-of-mass acceleration, not assumed. Centre of
-  pressure is taken as the midfoot and the legs are assumed symmetric.
-  Durations depend on the frame rate the browser delivered — treat as
-  approximate.
-  Left and right are mirrored: one camera cannot separate the sides.
-
-WHAT NOT TO TRUST
-  The muscle forces come from a surrogate that FAILS ITS OWN AUDIT: on a real
-  trial from its own gait training set it predicts 113,250 N, where the largest
-  human muscle produces a few thousand. The waveform SHAPES look plausible; the
-  magnitudes are wrong by orders of magnitude. Do not publish these numbers.
-
-  Sagittal angles are only valid filmed from the side. This session was
-  ${res.view?.view ?? "?"}.
-` });
-
-    note("Packing…");
-    /* Laid out like a lab session from the Python pipeline (osimexport.js):
-     * the trial's OpenSim files under 3_iterations/bioscout_web, everything
-     * above (charts, summaries, training) under 4_outputs. */
-    note("Writing OpenSim files…");
-    for (const fig of await summaryFigures(res)) files.push(fig);
-    const built = buildSessionFiles({
-      athlete: currentAthlete() || "athlete",
-      date: getSession()?.started || new Date(),
-      massKg: res.massKg,
-      set: { res, fps, setIndex: res.setIndex ?? 1,
-             frames: res === lastResult ? frames : null, video },
-      extra: files,
-    });
-    const blob = makeZip(built.files);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `bioscout_${res.activity}_${stamp}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
-    note(tr("savedFiles", { n: files.length, mb: (blob.size / 1e6).toFixed(1) }));
-  } catch (err) {
-    note(tr("exportFailedShort", { err: err.message }));
-  }
-}
 
 /** Dropdown over the sets recorded since the page loaded. Sets from an earlier
  *  page are listed but disabled: their summaries survived in storage, their
@@ -12260,7 +12157,7 @@ async function restoreLoads(res) {
         mc.knee_angle_l = (r.coords.knee_angle_l || r.coords.knee_angle_r).map((v) => -v);
       }
       mc.pelvis_tx = r.coords.pelvis_tz; mc.pelvis_tz = r.coords.pelvis_tx;   // as enrich()
-      const out = predictForces(fm, mc, r.times.length, { massKg, heightM, times: r.times });
+      const out = predictForces(fm, solidCoords(mc), r.times.length, { massKg, heightM, times: r.times });
       Object.assign(r, { forces: out.forces, forceNames: out.muscleNames, jrf: out.jrf, jrfNames: out.jrfNames,
         loads: out.loads, loadNames: out.loadNames, forceMissing: out.missing, forceModel: fm,
         forceImplausible: implausibleFraction(out.forces) });
@@ -12448,7 +12345,6 @@ function labTrialReady(res, fps) {
   const bar = $("labTrialBar"); if (!bar) return;
   bar.classList.remove("hidden");
   $("labTrialName").value = nextTrialName(res.activity, res.setIndex);
-  $("labTrialBtn").textContent = labSession.root && labSession.session ? tr("lt_write", { s: `${labSession.subject}/${labSession.session}` }) : tr("lt_zip");
   $("labTrialStatus").textContent = "";
   if (labSession.root && labSession.session) labTrialSave();   // in a session every recording is filed by itself
 }
@@ -12524,7 +12420,6 @@ function render(res, fps) {
       ["lateral bend", sum("roll1", "roll2")],
       ["rotation", sum("yaw1", "yaw2")]], "deg", null, null);
     wireSetSwitcher();
-    $("zipBtn").onclick = () => exportZip(res, fps);
     $("dlBtn").onclick = () => {
       const txt = writeMot("joint_angles", ACTIVITIES.neck.columns, r.times, r.coords);
       const u = URL.createObjectURL(new Blob([txt], { type: "text/plain" }));
@@ -12563,7 +12458,6 @@ function render(res, fps) {
       <div class="tabs" id="repTabs" style="margin-top:14px"></div>
       <div id="chartBox"></div>
       <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMotOnly")}</button>
-      <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
       <div class="status" id="zipStatus"></div>
       <p class="note">${tr("noteCervical")}</p>`;
     const meanN = ensembleRep(res.reps);
@@ -12596,7 +12490,6 @@ function render(res, fps) {
     selN(0);
     wireSetSwitcher();
     wireRepRemoval(el, res, fps);
-    $("zipBtn").onclick = () => exportZip(res, fps);
     $("dlBtn").onclick = () => {
       const txt = writeMot("joint_angles", ACTIVITIES.neck.columns,
                            res.reps[0].times, res.reps[0].coords);
@@ -13001,7 +12894,6 @@ function render(res, fps) {
     <div id="chartBox"></div>
     <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMot")}</button>
     <button class="ghost" id="procBtn" style="margin-top:8px">${tr("openInProcess")}</button>
-    <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
     <div class="status" id="zipStatus"></div>
     ${res.detection ? `<p class="note" style="border-left:3px solid var(--good);
         padding-left:11px;color:var(--good)">${tr("detectedAs", {
@@ -13095,7 +12987,6 @@ function render(res, fps) {
     };
   });
 
-  $("zipBtn").onclick = () => exportZip(res, fps);
 
   /* Straight from a recorded set into Process, without the download-then-
    * upload round trip: the same .mot files the download button writes are
@@ -13137,14 +13028,17 @@ function render(res, fps) {
       // cmj_01, cmj_02 … numbered by position, so the folders sort in order
       // even when reps have been removed and the rep numbers have gaps.
       const trial = `${res.activity}_${String(i + 1).padStart(2, "0")}`;
-      files.push({ name: `${who}/${trial}/joint_angles.mot`,
-                   data: writeMot("joint_angles", cols, r.times, r.coords) });
-      if (r.dyn) {
-        const dcols = ["hip_moment", "knee_moment", "ankle_moment",
-                       "grf_vertical", "grf_horizontal"];
-        files.push({ name: `${who}/${trial}/inverse_dynamics.sto`,
-                     data: writeMot("joint_moments", dcols, r.times,
-                       Object.fromEntries(dcols.map((k) => [k, r.dyn[k]]))) });
+      /* Everything the trial produced, not just the angles.
+       *
+       * trialFiles() is the writer the full session export uses, so a trial
+       * folder holds what the Python pipeline would write: angles, both
+       * inverse-dynamics flavours, muscle forces and activations, and the
+       * joint contact forces -- whichever of them this rep actually has. Its
+       * subfolders are flattened so every trial folder still holds the same
+       * short list of file names. */
+      for (const f of trialFiles(trial, r, { columns: cols, osimModel: res.osimModel, massKg: res.massKg })) {
+        const leaf = f.name.split("/").pop().replace(/^output_so\.sto$/, "joint_contact_forces.sto");
+        files.push({ name: `${who}/${trial}/${leaf}`, data: f.data });
       }
     });
     if (!files.length) { say(tr("sayNothingToProcess"), true); return; }
@@ -13177,10 +13071,14 @@ ${modelName ? `${modelName}             the OpenSim model these angles belong to
 ` : `(the OpenSim model could not be included -- you were offline. It is
  data/opensim/models/${OSIM_FILE} in the app.)
 `}
-One folder per trial. Every trial folder holds the same file names:
-  joint_angles.mot       OpenSim coordinates, signed for ${res.osimModel}
-  inverse_dynamics.sto   net joint moments (N.m) and the ground reaction, where
-                         the planar inverse dynamics ran
+One folder per trial, each holding whatever that trial produced:
+  joint_angles.mot                   OpenSim coordinates, signed for ${res.osimModel}
+  inverse_dynamics.sto               net joint moments (N.m), surrogate
+  inverse_dynamics_2d.sto            planar moments and ground reaction from
+                                     video and body mass
+  StaticOptimization_force.sto       muscle forces (N), surrogate
+  StaticOptimization_activation.sto  activations 0-1, surrogate
+  joint_contact_forces.sto           joint reaction forces (N), surrogate
 
 The trunk: one camera sees a single shoulder-to-hip line and cannot tell a
 pelvis that tilted from a spine that flexed, so the whole measured lean drives
