@@ -364,6 +364,24 @@ export function mergeSides(left, right) {
       return src[k][c];
     }));
   }
+  /* Muscle forces, by the same rule as the loads: each leg's columns from ITS
+   * OWN cycle.
+   *
+   * Left out until now, so gait -- where every tab is a merged pair, not just
+   * the mean -- had no muscle-force plot at all, and no contributions either,
+   * since those need the forces and the contact force together. The contact
+   * force was carried and the muscles that cause it were not. */
+  const fl = left && left.forces, fr = right && right.forces;
+  const fn = (left && left.forceNames) || (right && right.forceNames);
+  if (fn && (fl || fr) && (!fl || !fr || fl.length === fr.length)) {
+    out.forceNames = fn;
+    out.forces = (fl || fr).map((_, k) => fn.map((nm, c) =>
+      ((/_l$/.test(nm) ? (fl || fr) : (fr || fl))[k][c])));
+    out.forceModel = (left || right).forceModel;
+    out.forceMissing = (left || right).forceMissing;
+    out.forceImplausible = Math.max(left ? left.forceImplausible || 0 : 0,
+                                    right ? right.forceImplausible || 0 : 0);
+  }
   if (left && left.dyn) out.dyn = left.dyn;
   if (right && right.dyn) out.dynRight = right.dyn;
   return out;
