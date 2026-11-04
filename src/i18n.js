@@ -2871,6 +2871,7 @@ const EN = {
   "chat_jumpNoneEver": "No jumps recorded yet. Record a countermovement jump or a squat jump to get a height.",
   "shareSeeFeed": "See it in the feed",
   // Lab home, Process and Simulate (2026-10-12)
+  "labBack": "‹ Back",
   "labHome": "Home",
   "labHomeNote": "Pick what you want to do. Nothing is uploaded unless you connect to the lab engine in Simulate.",
   "doorRecord": "Record",
@@ -6012,6 +6013,7 @@ const PT = {
   "chat_jumpNoneEver": "Ainda nenhum salto registado. Grava um salto com contramovimento ou um salto sem contramovimento para obter uma altura.",
   "shareSeeFeed": "Ver no feed",
   // Lab home, Process and Simulate (2026-10-12)
+  "labBack": "‹ Voltar",
   "labHome": "Início",
   "labHomeNote": "Escolha o que quer fazer. Nada é enviado, a menos que se ligue ao motor do laboratório em Simular.",
   "doorRecord": "Gravar",
@@ -9152,6 +9154,7 @@ const DE = {
   "chat_jumpNoneEver": "Noch keine Sprünge aufgezeichnet. Nimm einen Counter-Movement-Sprung oder einen Squat Jump auf, um eine Höhe zu bekommen.",
   "shareSeeFeed": "Im Feed ansehen",
   // Lab home, Process and Simulate (2026-10-12)
+  "labBack": "‹ Zurück",
   "labHome": "Start",
   "labHomeNote": "Wähle, was du tun möchtest. Nichts wird hochgeladen, außer du verbindest dich unter Simulieren mit der Labor-Engine.",
   "doorRecord": "Aufnehmen",

@@ -912,6 +912,7 @@ meta = d[["file", "subject", "group", "condition", "covariate"]].fillna("")
   /* ---------------- render + events ---------------- */
   function render() {
     root.innerHTML = `<div class="card"><div class="labHead"><b style="font-size:16px">${L("title")}</b>
+        <button type="button" class="ghost labBackBtn anSmall">${t("labBack")}</button>
         <button type="button" class="ghost labHomeBtn anSmall">${t("labHome")}</button></div>
       <div class="anTabs">${tabBtn("basic", L("tabBasic"))}${tabBtn("rel", L("tabRel"))}${tabBtn("stats", L("tabStats"))}${tabBtn("spm", "SPM")}</div>
       ${st.msg ? `<p class="note bad anNote">${esc(st.msg)}</p>` : ""}${st.busy ? `<p class="note">${L("working")}</p>` : ""}</div>

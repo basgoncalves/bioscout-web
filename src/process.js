@@ -1056,6 +1056,7 @@ export function mountProcess(root, { t, download }) {
         <b style="font-size:16px">${t("pr_title")}</b>
         <span style="display:flex;gap:6px">
           ${document.documentElement.dataset.fromSim ? `<button type="button" class="ghost labSimBtn" style="margin:0;width:auto;padding:6px 12px">${t("pr_backSim")}</button>` : ""}
+          <button type="button" class="ghost labBackBtn" style="margin:0;width:auto;padding:6px 12px">${t("labBack")}</button>
           <button type="button" class="ghost labHomeBtn" style="margin:0;width:auto;padding:6px 12px">${t("labHome")}</button>
         </span>
       </div>

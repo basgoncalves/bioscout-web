@@ -41,6 +41,20 @@ if (!fs.existsSync("data/reference.json")) {
   console.log("skip  data/reference.json is not in this checkout (see .gitignore)");
   process.exit(0);
 }
+/* Columns the BROWSER now writes differently from the Python pipeline, on
+ * purpose. Each one was wrong before and loading a .mot into OpenSim showed
+ * it: a squat came out reclining with its knees up. They are listed rather
+ * than quietly skipped so the Python side gets the same fix -- delete an entry
+ * here the moment py/pyosim matches. */
+const DIVERGED = new Map([
+  ["pelvis_tilt", "browser drives the pelvis with the measured trunk lean; Python leaves it at 0"],
+  ["lumbar_extension", "browser keeps it at 0 (one camera cannot split pelvis tilt from spine flexion); Python wrote the lean here, with the sign inverted"],
+  ["ankle_angle_r", "browser references dorsiflexion to the athlete's own quiet stance; Python reports raw 90 - knee-ankle-toe"],
+  ["ankle_angle_l", "as ankle_angle_r"],
+]);
+const diverged = new Map();
+diverged.add = function (k) { this.set(k, DIVERGED.get(k)); };
+
 const ref = JSON.parse(fs.readFileSync("data/reference.json", "utf8"));
 
 for (const caseName of Object.keys(ref.cases)) {
@@ -81,9 +95,16 @@ for (const caseName of Object.keys(ref.cases)) {
     check(`rep${i + 1} bounds`, g.bounds, p.bounds, 0);
     check(`rep${i + 1} time`, g.times, p.times);
     for (const col of c.columns) {
+      if (DIVERGED.has(col)) { diverged.add(col); continue; }
       check(`rep${i + 1} ${col}`, g.coords[col] || [], p.coords[col] || []);
     }
   }
+}
+
+if (diverged.size) {
+  console.log(`\nNOT COMPARED — the browser deliberately differs from the Python pipeline here:`);
+  for (const c2 of diverged) console.log(`  ${c2}: ${DIVERGED.get(c2)}`);
+  console.log("  Until py/pyosim writes these the same way, the two will disagree on purpose.");
 }
 
 console.log("\n" + (failures.length

@@ -856,6 +856,7 @@ try {
   .labDoor span { color:var(--muted); font-size:13px; line-height:1.4; }
   .labHead { display:flex; justify-content:space-between; align-items:center; gap:8px; }
   .labHead .labHomeBtn { margin:0; width:auto; padding:6px 12px; }
+  .labBackBtn { margin:0; width:auto; padding:6px 12px; }
   /* Process page (src/process.js) */
   .prDrop { display:block; border:1.5px dashed var(--line); border-radius:12px; padding:18px 12px; text-align:center;
             color:var(--muted); cursor:pointer; font-size:13.5px; }
@@ -1621,7 +1622,7 @@ try {
   <section id="viewPhysics" class="hidden">
     <div class="card">
       <div class="labHead"><b style="font-size:16px" data-i18n="doorPhysics">Physics playground</b>
-        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+        <button type="button" class="ghost labBackBtn" data-i18n="labBack" aria-label="Back">‹ Back</button><button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
       <div class="chips phTabs" id="phTabs"></div>
       <canvas id="phCv" class="phCv" aria-label="Simulation"></canvas>
       <div class="row bfbRow"><button type="button" id="phPlay" data-i18n="ph_play">Play</button><button type="button" class="ghost" id="phReset" data-i18n="ph_reset">Reset</button></div>
@@ -1637,7 +1638,7 @@ try {
   <section id="viewBiofeedback" class="hidden">
     <div class="card">
       <div class="labHead"><b style="font-size:16px" data-i18n="doorBiofeedback">BioFeedback</b>
-        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+        <button type="button" class="ghost labBackBtn" data-i18n="labBack" aria-label="Back">‹ Back</button><button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
       <p class="note hidden bad" id="bfbNoSerial" data-i18n="bfb_noSerial">This browser cannot talk to USB devices. Use Chrome or Edge on a computer; the lamp is still shown on screen.</p>
 
       <div class="row bfbTop">
@@ -1858,7 +1859,7 @@ try {
         <span style="display:flex;gap:6px"><button type="button" class="ghost" id="osimStep" data-i18n="sim_stepTab">Step-by-step</button>
         <button type="button" class="ghost" id="osimQuick" data-i18n="sq_tab">Quick run</button>
         <button type="button" class="ghost" id="osimBatch" data-i18n="ss_batch">Batch mode</button>
-        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></span></div>
+        <button type="button" class="ghost labBackBtn" data-i18n="labBack" aria-label="Back">‹ Back</button><button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></span></div>
       <button type="button" class="ghost hidden" id="osimToggle" style="margin:0" data-i18n="osimOpen">OpenSim trial (markers and force plates)</button>
       <div id="osimBody" class="hidden" style="margin-top:12px"></div>
     </div>
@@ -1873,7 +1874,7 @@ try {
   <section id="viewRecord" class="hidden">
     <div class="card hidden" id="labCard">
       <div class="labHead"><b data-i18n="labTitle">Lab demo</b>
-        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+        <button type="button" class="ghost labBackBtn" data-i18n="labBack" aria-label="Back">‹ Back</button><button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
       <p class="note" style="margin:4px 0 10px" data-i18n="labNote">Record a movement and read its joint angles, moments and estimated loads. No account, nothing uploaded: it all stays on this device. The numbers are estimates from video, not measurements, and this is not a medical device.</p>
       <div class="row" style="margin-bottom:11px">
         <div>
@@ -2250,7 +2251,7 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 147;
+window.BUILD = 148;
 window.BUILD_AT = "2026-11-02 20:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
@@ -2739,6 +2740,8 @@ window.__mlBooted = true;   // the watchdog above can stand down
 // offered as a choice: picking the wrong one silently renders a collapsed
 // figure in OpenSim. The force model is still fed Rajagopal signs internally.
 const OSIM_MODEL = "gpk";
+// The model file those coordinates belong to, shipped beside every export.
+const OSIM_FILE = "GPK_v4_016.osim";
 const DEMO = new URLSearchParams(location.search).get("demo");
 
 /* Lab demo is what everybody gets. The full app (athletes, dashboard,
@@ -5806,8 +5809,23 @@ function leaveRecorder() {
   if (stream || running) stopCamera();
 }
 
+/* The view we came from, for the lab demo's Back button.
+ *
+ * history.back() alone is not enough there: open the app straight on a door
+ * (a bookmark, a reload, the PWA's start_url) and there is nothing behind it,
+ * so Back would walk out of the app. This remembers the last view instead and
+ * falls back to the lab home. */
+let prevView = null;
+function goBack() {
+  const to = prevView && prevView !== currentView ? prevView : (LAB ? "viewHome" : "viewDash");
+  showView(to);
+  if (to === "viewDash") renderDash();
+}
+let currentView = null;
 function showView(id, push = true) {
   if (LAB && !LAB_VIEWS.includes(id)) id = "viewHome";   // the lab demo: home + its three doors
+  if (currentView && currentView !== id) prevView = currentView;
+  currentView = id;
   document.documentElement.classList.remove("booting");
   if (id !== "viewRecord") leaveRecorder();
   if (id !== "viewBiofeedback" && biofeedback) biofeedback.leave();
@@ -8359,6 +8377,7 @@ function enterLab() {
   };
   const linked = osimInit();
   document.addEventListener("click", (e) => {
+    if (e.target.closest(".labBackBtn")) { goBack(); return; }
     if (e.target.closest(".labHomeBtn")) showView("viewHome");
     if (e.target.closest(".labSimBtn")) { showView("viewSimulate"); openSimulate(); }
   });
@@ -13129,13 +13148,45 @@ function render(res, fps) {
       }
     });
     if (!files.length) { say(tr("sayNothingToProcess"), true); return; }
+    /* The model the angles are signed for, shipped with them.
+     *
+     * A .mot is only coordinate values: without the model whose coordinates
+     * they are, OpenSim has nothing to apply them to, and picking the wrong
+     * one silently plays the motion against a different sign convention. The
+     * generic model is enough -- joint ANGLES do not depend on segment
+     * lengths, so scaling changes how big the skeleton looks and nothing
+     * about the movement. */
+    let modelName = null;
+    try {
+      const mr = await fetch(`data/opensim/models/${OSIM_FILE}`);
+      if (mr.ok) {
+        modelName = OSIM_FILE;
+        files.push({ name: `${who}/${OSIM_FILE}`, data: new Uint8Array(await mr.arrayBuffer()) });
+      }
+    } catch { /* offline: the .mot still goes out, the README says what is missing */ }
     files.push({ name: `${who}/README.txt`, data:
 `BioScout Web — ${res.activity}, ${new Date().toISOString().slice(0, 19).replace("T", " ")}
 
+${modelName ? `${modelName}             the OpenSim model these angles belong to.
+                         In the GUI: File > Open Model, then File > Load Motion
+                         and pick a trial's joint_angles.mot. It is the GENERIC
+                         model, not scaled to you -- joint angles do not depend
+                         on segment lengths, so the movement is identical; only
+                         the skeleton's size is nominal. Scale it in Simulate if
+                         you need a subject-specific model.
+` : `(the OpenSim model could not be included -- you were offline. It is
+ data/opensim/models/${OSIM_FILE} in the app.)
+`}
 One folder per trial. Every trial folder holds the same file names:
   joint_angles.mot       OpenSim coordinates, signed for ${res.osimModel}
   inverse_dynamics.sto   net joint moments (N.m) and the ground reaction, where
                          the planar inverse dynamics ran
+
+The trunk: one camera sees a single shoulder-to-hip line and cannot tell a
+pelvis that tilted from a spine that flexed, so the whole measured lean drives
+pelvis_tilt and lumbar_extension stays at 0. Ankle dorsiflexion is referenced
+to your own quiet stance in this clip, because knee-ankle-toe carries a
+subject-specific offset that is foot shape, not ankle angle.
 
 Angles, range and timing are measured. Moments come from body mass with the
 ground reaction derived from centre-of-mass acceleration; centre of pressure is

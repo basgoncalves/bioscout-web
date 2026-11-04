@@ -624,6 +624,25 @@ export function buildSquatFeatures(poses) {
   F.depth = F.hip_cy.map((y) => (y - standY) / scale);
 
   F._lo = lo; F._n = n; F._scale = scale; F._standY = standY;
+  /* Which way the athlete faces. trunk_lean is signed by IMAGE direction, so
+   * without this a squat filmed from the left leans the opposite way to the
+   * same squat filmed from the right. */
+  F._facing = facingSign(poses);
+  /* The athlete's own ankle angle standing still, used as the zero.
+   *
+   * knee-ankle-toe is not dorsiflexion: the toe landmark sits forward AND
+   * below the ankle, so the interior angle is ~110-120 deg with the foot flat
+   * and the raw measure reads ~25 deg of PLANTARflexion while standing
+   * upright. The offset is the subject's foot geometry, not their ankle, so
+   * the angle is referenced to their own quiet stance -- measured over the
+   * most upright fifth of the clip, where the knee is least flexed. */
+  {
+    const kf = interpNan(F.knee_flex);
+    const upright = nanpercentile(kf.filter(isNum), 20);
+    const at = [];
+    for (let i = 0; i < n; i++) if (isNum(kf[i]) && kf[i] <= upright && isNum(F.ankle_dorsi[i])) at.push(F.ankle_dorsi[i]);
+    F._ankleRef = at.length ? nanmedian(at) : 0;
+  }
   // Frames the tracker actually found a body in. `n` spans the clip and now
   // includes the holes a missed frame leaves, so a coverage measured against
   // n would punish a clip for frames that were never tracked at all.
@@ -699,6 +718,8 @@ export function squatRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
   const sl = (a) => interpNan(a).slice(t0, t1 + 1);
   const knee = sl(F.knee_flex), hip = sl(F.hip_flex);
   const ankle = sl(F.ankle_dorsi), lean = sl(F.trunk_lean);
+  // Positive = leaning FORWARD, whichever way the athlete faces the camera.
+  const fwdLean = lean.map((v) => (F._facing || 1) * v);
   /* Per side when the view allows it (sidesSeparable), both sides from the
    * one measured curve when it does not. The fallback is a copy and is
    * labelled as one everywhere it surfaces -- it is not a measurement of two
@@ -721,7 +742,11 @@ export function squatRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
    * exactly on +-40 is the bound talking, not the ankle, so it goes too. */
   const maskAnk = (arr) => clipArr(arr, -40, 40)
     .map((v, i) => (ankOk(i) && Math.abs(v) < 40 ? v : NaN));
-  const ankleAng = anyAnkle ? maskAnk(ankle) : ankle.map(() => NaN);
+  /* Referenced to quiet standing (see F._ankleRef), so 0 is this athlete's
+   * own neutral ankle and the sign means what OpenSim thinks it means. */
+  const aRef = F._ankleRef || 0;
+  const deRef = (arr) => arr.map((v) => (isNum(v) ? v - aRef : v));
+  const ankleAng = anyAnkle ? maskAnk(deRef(ankle)) : ankle.map(() => NaN);
   return {
     times,
     coords: {
@@ -735,9 +760,24 @@ export function squatRepCoordinates(F, rep, fps, pxPerM, standHipY, midX,
       hip_flexion_l: sides ? clipArr(hipL, -20, 130) : hipFlex,
       knee_angle_r: sides ? clipArr(kneeR, 0, 145).map((v) => sign * v) : kneeAng,
       knee_angle_l: sides ? clipArr(kneeL, 0, 145).map((v) => sign * v) : kneeAng,
-      ankle_angle_r: sides && anyAnkle ? maskAnk(ankR) : ankleAng,
-      ankle_angle_l: sides && anyAnkle ? maskAnk(ankL) : ankleAng,
-      lumbar_extension: clipArr(lean.map((v) => -v), -60, 30),
+      ankle_angle_r: sides && anyAnkle ? maskAnk(deRef(ankR)) : ankleAng,
+      ankle_angle_l: sides && anyAnkle ? maskAnk(deRef(ankL)) : ankleAng,
+      /* The whole measured trunk lean goes in the PELVIS, and the lumbar stays
+       * at zero.
+       *
+       * One camera sees a single trunk line, shoulder to hip. It cannot tell a
+       * pelvis that tilted from a spine that flexed, so splitting the lean
+       * between the two would be inventing the split. Driving the pelvis and
+       * leaving the lumbar at its default puts the torso where the camera
+       * actually saw it, and hip_flexion -- measured trunk-to-thigh -- is then
+       * exactly what OpenSim wants, femur relative to pelvis.
+       *
+       * This column used to be the lean with its sign flipped and the pelvis
+       * left at zero, which stood the model upright and leaned it BACKWARDS by
+       * up to the 30 deg clip: a squat loaded in OpenSim looked like someone
+       * reclining with their knees up. */
+      pelvis_tilt: clipArr(fwdLean.map((v) => -v), -90, 90),
+      lumbar_extension: z,
     },
     /* Whether the two sides above are two measurements or one copied twice.
      * Everything downstream that compares sides must check this first. */
