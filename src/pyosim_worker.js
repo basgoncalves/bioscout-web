@@ -3,7 +3,7 @@
  * -> {id, log:[...]} while running, then {id, done:true, outputs:{name: text}} or {id, error}. */
 /* global importScripts, loadPyodide */
 const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
-const PY_FILES = ["__init__.py", "model.py", "io.py", "ik.py", "scale.py", "id.py", "muscles.py", "so.py", "ma.py", "jra.py", "ceinms.py"];
+const PY_FILES = ["__init__.py", "model.py", "io.py", "ik.py", "scale.py", "id.py", "muscles.py", "so.py", "ma.py", "jra.py", "ceinms.py", "millard.py"];
 let ready = null;
 
 function boot(base) {
