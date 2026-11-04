@@ -1917,6 +1917,11 @@ try {
           <option value="slsquat" data-i18n="slsquat">Single-leg squat</option>
           <option value="sj" data-i18n="sj">Squat jump</option>
           <option value="cmj" data-i18n="cmj">Countermovement jump</option>
+          <!-- Gait before the sport-specific tasks: the three Bas reaches for
+               most often sat at the bottom behind a scroll. -->
+          <option value="walk" data-i18n="walk">Walking</option>
+          <option value="run" data-i18n="run">Running</option>
+          <option value="sidestep" data-i18n="sidestep">Side step</option>
           <option value="jumpshot" data-i18n="jumpshot">Basketball jump shot</option>
           <option value="kick" data-i18n="kick">Football kick</option>
           <option value="stroke" data-i18n="stroke">Tennis / padel strokes</option>
@@ -1933,9 +1938,6 @@ try {
           <option value="wallsit" data-i18n="wallsit">Wall sit</option>
           <option value="plank" data-i18n="plank">Plank</option>
           <option value="sideplank" data-i18n="sideplank">Side plank</option>
-          <option value="walk" data-i18n="walk">Walking</option>
-          <option value="run" data-i18n="run">Running</option>
-          <option value="sidestep" data-i18n="sidestep">Side step</option>
           <option value="neck" data-i18n="neck">Neck (close-up)</option>
         </select>
       </div>
@@ -2255,8 +2257,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 150;
-window.BUILD_AT = "2026-11-04 19:15";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 151;
+window.BUILD_AT = "2026-11-04 19:19";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
