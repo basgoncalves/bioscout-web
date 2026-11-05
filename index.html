@@ -912,6 +912,14 @@ try {
   .simFname { word-break:break-all; font-weight:600; }
   fieldset.simPreview { border:0; padding:0; margin:0; min-width:0; }
   fieldset.simPreview .simDrop { cursor:default; opacity:.75; }
+  /* Peak muscle force, one row per muscle, a bar per leg. */
+  .pfRows { display:flex; flex-direction:column; gap:7px; margin-top:6px; }
+  .pfRow { display:flex; align-items:center; gap:10px; }
+  .pfName { flex:0 0 86px; font-size:13px; color:var(--muted); }
+  .pfBars { flex:1; display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .pfBar { display:flex; align-items:center; gap:7px; }
+  .pfBar i { display:block; height:9px; border-radius:3px; }
+  .pfBar span { font-size:12px; font-variant-numeric:tabular-nums; color:var(--muted); }
   .simModel { border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-top:10px; }
   .simTool { border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-top:10px; }
   .simTool > summary { cursor:pointer; font-size:17px; }
@@ -2257,8 +2265,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 157;
-window.BUILD_AT = "2026-11-05 12:54";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 158;
+window.BUILD_AT = "2026-11-05 13:22";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -10909,41 +10917,52 @@ const momSel = {};   // activity -> { dof, side }
  */
 function momContribPlot(rep, res) {
   const kept = momSel[res.activity] || {};
-  const sides = ["r", "l"].filter((s) => rep.forceNames.some((n) => n.endsWith(`_${s}`)));
-  const side = sides.includes(kept.side) ? kept.side : (sides[0] || "r");
+  const sides = ["l", "r"].filter((s) => rep.forceNames.some((n) => n.endsWith(`_${s}`)));
+  if (!sides.length) return "";
 
   const avail = MOM_DOFS.filter((d) => momentArms.joints[d.key]
-    && momentContributions(rep, { dof: d, side, arms: momentArms, muscleJoints }));
+    && sides.some((s) => momentContributions(rep, { dof: d, side: s, arms: momentArms, muscleJoints })));
   if (!avail.length) return "";
   const dof = avail.find((d) => d.key === kept.dof) || avail[0];
 
-  // The net moment comes from the surrogate, which has all three hip DOF; the
-  // planar inverse dynamics only ever had the sagittal one.
+  /* Both legs, one under the other on a SHARED axis.
+   *
+   * The side used to be a radio button, which makes a left-right comparison a
+   * memory test: you look at one, click, and try to remember what the other
+   * looked like. Two panels with the same y range answer it by looking. */
   const o = rep.osimOut;
-  let net = null;
-  if (o && o.moments && o.momentNames) {
-    const j = o.momentNames.indexOf(`${dof.coord}_${side}`);
-    if (j >= 0) net = o.moments.map((r) => r[j]);
-  }
-  const c = momentContributions(rep, { dof, side, arms: momentArms, muscleJoints, net });
-  if (!c) return "";
+  const panels = sides.map((side) => {
+    let net = null;
+    if (o && o.moments && o.momentNames) {
+      const j = o.momentNames.indexOf(`${dof.coord}_${side}`);
+      if (j >= 0) net = o.moments.map((r) => r[j]);
+    }
+    return { side, c: momentContributions(rep, { dof, side, arms: momentArms, muscleJoints, net }), net };
+  }).filter((p) => p.c);
+  if (!panels.length) return "";
+
+  const lo = Math.min(...panels.map((p) => p.c.range[0]));
+  const hi = Math.max(...panels.map((p) => p.c.range[1]));
+  const pad = 0.05 * (hi - lo || 1);
+  const range = [lo - pad, hi + pad];
 
   const marks = Number.isFinite(rep.contact_frac) ? [{ frac: rep.contact_frac, label: tr("jlEvContact") }]
     : Number.isFinite(rep.release_frac) ? [{ frac: rep.release_frac, label: tr("jlEvRelease") }] : [];
   const dofBtns = avail.map((d) => `<label class="${d.key === dof.key ? "on" : ""}"><input
       type="radio" name="momdof" class="momdof" value="${d.key}"${
       d.key === dof.key ? " checked" : ""}>${tr(d.label)}</label>`).join("");
-  const sideBtns = sides.map((s) => `<label class="${s === side ? "on" : ""}"><input
-      type="radio" name="momside" class="momside" value="${s}"${
-      s === side ? " checked" : ""}>${tr(s === "l" ? "leftLeg" : "rightLeg")}</label>`).join("");
+
+  const figs = panels.map((p) => momContribSVG(p.c, { t: (k) => tr(k), marks, range,
+    title: tr(p.side === "l" ? "leftLeg" : "rightLeg") })).join("");
+  const anyNeutral = panels.some((p) => !p.c.angleKnown);
+  const anyNet = panels.some((p) => p.net);
 
   return `<h2>${tr("jmContribMomTitle")}</h2>
     <div class="jmpick" role="group">${dofBtns}</div>
-    <div class="jmpick" role="group">${sideBtns}</div>
-    ${momContribSVG(c, { t: (k) => tr(k), marks })}
+    ${figs}
     <p class="note" style="margin-top:2px">${tr("momContribNote")}</p>
-    ${c.angleKnown ? "" : `<p class="note banner">${tr("momNeutralNote")}</p>`}
-    ${net ? "" : `<p class="note">${tr("momNoNetNote")}</p>`}`;
+    ${anyNeutral ? `<p class="note banner">${tr("momNeutralNote")}</p>` : ""}
+    ${anyNet ? "" : `<p class="note">${tr("momNoNetNote")}</p>`}`;
 }
 
 function selectedJoints(activity, metric, opts) {
@@ -11175,7 +11194,6 @@ function drawMetric(box, rep, res) {
       drawMetric(box, rep, res);
     };
     box.querySelectorAll("input.momdof").forEach((r) => { r.onchange = save("dof"); });
-    box.querySelectorAll("input.momside").forEach((r) => { r.onchange = save("side"); });
   }
   if (metric === "muscle" || metric === "jrf") {
     /* Two independent groups in one box: WHAT to draw and WHICH LEGS. Reading
@@ -11985,13 +12003,27 @@ function forcePanel(rep, res) {
   // problem -- it reads as one muscle with four curves.
   const groups = groupBySide(rep.forceNames, (n) => allPeaks.get(n) || 0)
                    .slice(0, MCOLORS.length);
-  const cell = (g, side) => {
-    if (!g[side]) return "—";
-    const v = g[side].peak;
-    return `<span${v > MAX_PLAUSIBLE_FORCE_N ? ' style="color:var(--warn)"' : ""}>${v.toFixed(0)}</span>`;
+  /* The same peaks as a paired bar chart.
+   *
+   * Two columns of four-digit numbers is a table you have to read; two bars
+   * per muscle is a left-right difference you can see. Right red, left green,
+   * the same two colours the curves use everywhere else, and the value at the
+   * end of its own bar so nothing has to be looked up. */
+  const peakMax = Math.max(1, ...groups.flatMap((g) => ["r", "l"].map((s) => (g[s] ? g[s].peak : 0))));
+  const bar = (g, side) => {
+    if (!g[side]) return "";
+    const v = g[side].peak, w = Math.max(1.5, (100 * v) / peakMax);
+    const over = v > MAX_PLAUSIBLE_FORCE_N;
+    return `<div class="pfBar"><i style="width:${w.toFixed(1)}%;background:${
+      side === "l" ? SIDE_L : SIDE_R}"></i><span${
+      over ? ' style="color:var(--warn)"' : ""}>${v.toFixed(0)}</span></div>`;
   };
-  const rows = groups.map((g) =>
-    `<tr><td>${g.base}</td><td>${cell(g, "r")}</td><td>${cell(g, "l")}</td></tr>`).join("");
+  const peakBars = `<div class="pfRows">${groups.map((g) => `<div class="pfRow">
+      <span class="pfName">${g.base}</span>
+      <span class="pfBars">${bar(g, "r")}${bar(g, "l")}</span></div>`).join("")}</div>
+    <p class="jmpeaks"><span class="lgd"><i class="swatch" style="background:${SIDE_R}"></i>${
+      tr("rightLeg")}</span> <span class="lgd"><i class="swatch" style="background:${SIDE_L}"></i>${
+      tr("leftLeg")}</span> N</p>`;
 
   const jrfPeaks = new Map((rep.jrf ? peakJRF(rep.jrf, rep.jrfNames) : [])
     .map(([n, v]) => [n, v]));
@@ -12088,8 +12120,7 @@ function forcePanel(rep, res) {
       r2j: r2j == null ? "—" : r2j.toFixed(2) })} ${limitsLink()}</p>
     ${impulseBars}
     <h1 style="font-size:14px;margin:14px 0 2px">${tr("musclePeakTitle")}</h1>
-    <table><thead><tr><th>${tr("muscle")}</th><th>${tr("rightPeakN")}</th><th>${tr("leftPeakN")}</th></tr></thead>
-      <tbody>${rows}</tbody></table>
+    ${peakBars}
     <h1 style="font-size:14px;margin:14px 0 2px">${tr("jointContactForce")}</h1>
     <table class="jcf"><thead><tr><th>${tr("joint")}</th><th>${tr("right")}</th><th>${tr("left")}</th>
       <th class="ref">${refCondT ? tr("refSuffix", { cond: refCondT }) : tr("squatRef")}</th>

@@ -153,14 +153,55 @@ export function clipGrf(poses, activity, { pxPerM, heightM, systemKg, fps, trave
   /* Contact, de-bounced. A foot does not leave and retake the floor within a
    * frame or two; a landmark does. Majority vote over a 5-frame window turns a
    * one-frame drop-out back into contact instead of a weight transfer. */
-  const rawContact = (low) => low.map((v, i) => isNum(v) && floor[i] - v < band);
+  /* Each foot against ITS OWN floor, not a floor shared by both.
+   *
+   * A camera is almost never level with the ground, so in a front view the two
+   * feet sit at different heights in the picture by pure perspective: in a
+   * squat filmed face-on the two differed by a CONSTANT 11% of body height
+   * while the contact band is 4% (Bas, squat_02.mp4). With one floor taken
+   * from the lower foot, the other foot was above the band in every single
+   * frame, was called airborne for the whole clip, and the left leg was handed
+   * 100% of body weight from start to finish while the right read zero.
+   *
+   * Its own rolling median is where that foot sits when it is down, whatever
+   * perspective does to it, so the comparison is against that. */
+  const floorL = rollingMedian(lowL, Math.max(3, Math.round(fps)));
+  const floorR = rollingMedian(lowR, Math.max(3, Math.round(fps)));
+  const rawContact = (low, fl) => low.map((v, i) => isNum(v) && fl[i] - v < band);
   const debounce = (b) => b.map((_, i) => {
     let on = 0, tot = 0;
     for (let k = Math.max(0, i - 2); k <= Math.min(b.length - 1, i + 2); k++) { tot++; if (b[k]) on++; }
     return on * 2 > tot;
   });
-  const contactL = debounce(rawContact(lowL)), contactR = debounce(rawContact(lowR));
-  // The same test with a lift big enough to mean it, for the overlapping case.
+  let contactL = debounce(rawContact(lowL, floorL)), contactR = debounce(rawContact(lowR, floorR));
+
+  /* One foot held off the floor for the WHOLE clip -- a front-on single-leg
+   * squat -- has no transition for the test above to find: its own floor
+   * follows it up and it reads as grounded. The only evidence left is the
+   * other foot, so compare where each foot gets to at its lowest.
+   *
+   * The threshold has to clear perspective, which put a measured 11% of body
+   * height between two feet that were both flat on the floor. 15% is above
+   * that and below a real lift. It errs towards splitting a single-leg squat
+   * rather than towards writing off a leg that is carrying the athlete, which
+   * is the failure that was actually on the page. */
+  const pct = (a, q) => {
+    const v = a.filter(isNum).sort((x, y) => x - y);
+    return v.length ? v[Math.min(v.length - 1, Math.floor(q * v.length))] : NaN;
+  };
+  const deepL = pct(lowL, 0.9), deepR = pct(lowR, 0.9);   // the lowest each gets
+  if (isNum(deepL) && isNum(deepR)) {
+    const gap = 0.15 * bodyPx;
+    if (deepL - deepR > gap) contactR = contactR.map(() => false);
+    else if (deepR - deepL > gap) contactL = contactL.map(() => false);
+  }
+
+  /* The overlapping case is the opposite: with both feet at the same place in
+   * the picture there is no perspective offset between them, so a height
+   * difference IS one foot off the floor. That branch keeps the SHARED floor
+   * -- a per-foot floor would follow a foot held up for the whole clip and
+   * call a single-leg squat two-legged -- with a lift big enough to mean it,
+   * because the far foot's landmarks are a guess. */
   const strictBand = 1.5 * band;
   const strict = (low) => debounce(low.map((v, i) => isNum(v) && floor[i] - v < strictBand));
   const strictL = strict(lowL), strictR = strict(lowR);
