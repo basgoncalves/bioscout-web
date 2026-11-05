@@ -2257,8 +2257,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 155;
-window.BUILD_AT = "2026-11-04 22:33";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 156;
+window.BUILD_AT = "2026-11-05 10:31";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2313,6 +2313,7 @@ import { startMotion } from "./src/phonemotion.js";
 import { screenRecSupported, openScreenRecorder } from "./src/screenrec.js";
 import { makeShakeTracker, grayThumb, bodyBox as camBodyBox, stabilise } from "./src/camshake.js";
 import { jcfContributions, jcfContribSVG } from "./src/jcfcontrib.js";
+import { momentContributions, momContribSVG, MOM_DOFS } from "./src/momcontrib.js";
 import { ytSupported, openYouTubeClip } from "./src/ytclip.js";
 import { athleteSummary, taskStats, curveSummary, curveSVG, generalHTML, taskTableHTML,
          ASM_WINDOWS, ASM_METRICS, stats as asmStats, mr as asmMR } from "./src/athsummary.js";
@@ -10751,8 +10752,7 @@ function metricAvailable(rep, res, metric) {
   // arms there is no force x arm to draw, which is why this used to show a
   // "generate moment_arms.json" note instead of a plot.
   if (src === "contribmom") {
-    return !!(rep.forces && rep.forces.length && momentArms
-      && jointOptions(rep.jm, "moment", res.activity).some((o) => JOINTS.some((x) => x.key === o.joint)));
+    return !!(rep.forces && rep.forces.length && rep.forceNames && momentArms && momentArms.joints);
   }
   return jointOptions(rep.jm, metric, res.activity).length > 0;
 }
@@ -10891,6 +10891,56 @@ function jrfPlot(rep, res) {
     ${refs ? refNote(refCond) : ""}`;
 }
 
+/* Which DOF and which leg the moment-contribution figure is showing, kept per
+ * task like every other pick on this page. */
+const momSel = {};   // activity -> { dof, side }
+
+/**
+ * Muscle contributions to ONE joint moment, stacked.
+ *
+ * Three hip DOF, not one: the surrogate predicts hip flexion, adduction and
+ * rotation moments, and a sagittal-only figure left the adductors' real work
+ * -- the frontal plane -- off the page entirely.
+ */
+function momContribPlot(rep, res) {
+  const kept = momSel[res.activity] || {};
+  const sides = ["r", "l"].filter((s) => rep.forceNames.some((n) => n.endsWith(`_${s}`)));
+  const side = sides.includes(kept.side) ? kept.side : (sides[0] || "r");
+
+  const avail = MOM_DOFS.filter((d) => momentArms.joints[d.key]
+    && momentContributions(rep, { dof: d, side, arms: momentArms, muscleJoints }));
+  if (!avail.length) return "";
+  const dof = avail.find((d) => d.key === kept.dof) || avail[0];
+
+  // The net moment comes from the surrogate, which has all three hip DOF; the
+  // planar inverse dynamics only ever had the sagittal one.
+  const o = rep.osimOut;
+  let net = null;
+  if (o && o.moments && o.momentNames) {
+    const j = o.momentNames.indexOf(`${dof.coord}_${side}`);
+    if (j >= 0) net = o.moments.map((r) => r[j]);
+  }
+  const c = momentContributions(rep, { dof, side, arms: momentArms, muscleJoints, net });
+  if (!c) return "";
+
+  const marks = Number.isFinite(rep.contact_frac) ? [{ frac: rep.contact_frac, label: tr("jlEvContact") }]
+    : Number.isFinite(rep.release_frac) ? [{ frac: rep.release_frac, label: tr("jlEvRelease") }] : [];
+  const dofBtns = avail.map((d) => `<label class="${d.key === dof.key ? "on" : ""}"><input
+      type="radio" name="momdof" class="momdof" value="${d.key}"${
+      d.key === dof.key ? " checked" : ""}>${tr(d.label)}</label>`).join("");
+  const sideBtns = sides.map((s) => `<label class="${s === side ? "on" : ""}"><input
+      type="radio" name="momside" class="momside" value="${s}"${
+      s === side ? " checked" : ""}>${tr(s === "l" ? "leftLeg" : "rightLeg")}</label>`).join("");
+
+  return `<h2>${tr("jmContribMomTitle")}</h2>
+    <div class="jmpick" role="group">${dofBtns}</div>
+    <div class="jmpick" role="group">${sideBtns}</div>
+    ${momContribSVG(c, { t: (k) => tr(k), marks })}
+    <p class="note" style="margin-top:2px">${tr("momContribNote")}</p>
+    ${c.angleKnown ? "" : `<p class="note banner">${tr("momNeutralNote")}</p>`}
+    ${net ? "" : `<p class="note">${tr("momNoNetNote")}</p>`}`;
+}
+
 function selectedJoints(activity, metric, opts) {
   const avail = opts.map((o) => o.joint);
   const kept = jointSel[`${activity}|${metric}`];
@@ -10964,6 +11014,7 @@ function metricPlot(rep, res, metric) {
   // The two that read their own arrays rather than rep.jm.
   if (metric === "muscle") return metricAvailable(rep, res, "muscle") ? musclePlot(rep, res) : "";
   if (metric === "jrf") return metricAvailable(rep, res, "jrf") ? jrfPlot(rep, res) : "";
+  if (metric === "contribmom") return metricAvailable(rep, res, "contribmom") ? momContribPlot(rep, res) : "";
   if (metric === "contrib") {
     if (!metricAvailable(rep, res, "contrib")) return "";
     const bwN = (res.massKg || parseFloat($("mass").value) || 75) * 9.80665;
@@ -10974,16 +11025,11 @@ function metricPlot(rep, res, metric) {
       <p class="note">${tr("jcfContribNote")}</p>` : "";
   }
   const jm = rep.jm;
-  /* contribmom draws the moment, so it reads the moment's curves; it keeps its
-   * own key for the tick state and is limited to ONE leg joint, because a set
-   * of coloured muscle curves on a two-joint axis could belong to either. */
-  const cmom = metric === "contribmom", mkey = cmom ? "moment" : metric;
-  const allOpts = jointOptions(jm, mkey, res.activity);
-  const opts = cmom ? allOpts.filter((o) => JOINTS.some((x) => x.key === o.joint)) : allOpts;
+  const mkey = metric;
+  const opts = jointOptions(jm, metric, res.activity);
   if (!opts.length) return "";
   const meta = METRIC_META[metric];
-  const sel0 = selectedJoints(res.activity, metric, opts);
-  const sel = cmom ? sel0.slice(0, 1) : sel0;
+  const sel = selectedJoints(res.activity, metric, opts);
   const aspec = ACTIVITIES[res.activity] || {};
   const gait = !!aspec.gait;
   const sdj = rep.sd && rep.sd.jm;
@@ -11027,7 +11073,6 @@ function metricPlot(rep, res, metric) {
     for (const j of ["knee", "hip", "ankle"]) {
       if (!sel.includes(j)) continue;
       const c = refCurve(refCond, metric === "angle" ? "joint_angle" : "joint_moment", j);
-      if (cmom) continue;
       if (!c) continue;
       const flip = metric === "angle" && j === "knee" ? -1 : 1;
       series.push([`${tr(JOINT_LABEL[j])} (${tr("refShort")})`, c.mean.map((v) => flip * v),
@@ -11047,7 +11092,7 @@ function metricPlot(rep, res, metric) {
         for (const x of mc.series) { series.push(x); bands.push(null); }
         extra = mc.html;
       }
-    } else if (legSel.length && !cmom) {
+    } else if (legSel.length) {
       extra = `<p class="note" style="margin-top:2px">${tr("jmOneJointForMuscles")}</p>`;
     }
   }
@@ -11106,6 +11151,14 @@ function drawMetric(box, rep, res) {
           tr(METRIC_META[m].title)}</option>`).join("")}</select></div>`
     : "") + html;
   box.classList.toggle("hidden", !html);
+  if (metric === "contribmom") {
+    const save = (k) => (e) => {
+      momSel[res.activity] = { ...(momSel[res.activity] || {}), [k]: e.target.value };
+      drawMetric(box, rep, res);
+    };
+    box.querySelectorAll("input.momdof").forEach((r) => { r.onchange = save("dof"); });
+    box.querySelectorAll("input.momside").forEach((r) => { r.onchange = save("side"); });
+  }
   if (metric === "muscle" || metric === "jrf") {
     /* Two independent groups in one box: WHAT to draw and WHICH LEGS. Reading
      * every checked box into one list, as the joint plots do, would mix them
@@ -11182,7 +11235,9 @@ function grfPanel(rep, res) {
     ${series.length ? curveChart(rep, res.activity, series, bands, { unit: "N", zero: true })
                     : `<p class="note">${tr("jmNoneTicked")}</p>`}
     ${peaks.length ? `<p class="jmpeaks">${peaks.join(" · ")}</p>` : ""}
-    <p class="note" style="margin-top:2px">${tr(note)}</p>`;
+    <p class="note" style="margin-top:2px">${tr(note)}</p>
+    ${src === "feet" && jm.feet_grf_split === "even"
+      ? `<p class="note banner">${tr("grfNoteEvenSplit")}</p>` : ""}`;
 }
 function drawGrf(box, rep, res) {
   if (!box) return;

@@ -37,6 +37,13 @@ JOINTS = {
     "hip":   dict(coord="hip_flexion_r", lo=-30.0, hi=130.0, step=5.0),
     "knee":  dict(coord="knee_angle_r",  lo=-10.0, hi=150.0, step=5.0),
     "ankle": dict(coord="ankle_angle_r", lo=-40.0, hi=40.0,  step=2.5),
+    # The hip is a ball joint and the surrogate predicts all three of its
+    # moments, so a sagittal-only table could only ever explain one of them.
+    # A single camera does not measure these two angles, so the app reads them
+    # at neutral; tabulating them anyway keeps that an explicit assumption
+    # rather than a missing column.
+    "hip_adduction": dict(coord="hip_adduction_r", lo=-30.0, hi=30.0, step=2.5),
+    "hip_rotation":  dict(coord="hip_rotation_r",  lo=-40.0, hi=40.0, step=2.5),
 }
 
 # A muscle whose arm never exceeds this at any angle does not cross the joint
@@ -111,7 +118,9 @@ def via_pyosim(args, keep):
         _, R = paths.moment_arms(Q, [name])
         table, repaired = {}, 0
         for mi, mname in enumerate(names):
-            if keep is not None and mname not in keep.get(jkey, set()):
+            # hip_adduction / hip_rotation are the same joint as "hip" in
+            # muscle_joints.json, which is keyed by joint, not by coordinate.
+            if keep is not None and mname not in keep.get(jkey.split("_")[0], set()):
                 continue
             arms = [round(float(v), 5) for v in R[:, 0, mi]]
             arms, fixed = _despike(arms)
@@ -179,7 +188,9 @@ def main() -> int:
         for mi in range(muscles.getSize()):
             m = muscles.get(mi)
             mname = m.getName()
-            if keep is not None and mname not in keep.get(jkey, set()):
+            # hip_adduction / hip_rotation are the same joint as "hip" in
+            # muscle_joints.json, which is keyed by joint, not by coordinate.
+            if keep is not None and mname not in keep.get(jkey.split("_")[0], set()):
                 continue
             arms = []
             for deg in grid:

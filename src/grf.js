@@ -126,6 +126,45 @@ export function clipGrf(poses, activity, { pxPerM, heightM, systemKg, fps, trave
   const floor = rollingMedian(lowest, Math.max(3, Math.round(fps)));
   const band = 0.04 * bodyPx;
 
+  /* Can the camera tell the two feet apart at all?
+   *
+   * Filmed side-on -- which is how a squat is filmed -- the far foot sits
+   * behind the near one, so both feet are at the same place in the picture and
+   * the pose model's far-side landmarks are a guess. The per-foot contact test
+   * below then flickers: the guessed foot drifts out of the floor band for a
+   * few frames, that foot is called airborne, and the whole body weight jumps
+   * to the other leg. The result was a squat whose legs alternated between 0
+   * and 1.4 BW -- not a left-right difference, just noise given a side each.
+   *
+   * So: measure how far apart the feet actually are in the image over the clip.
+   * Below a stance's worth of separation the split is not measurable, and the
+   * honest answer is half each, every frame. */
+  const seps = [];
+  for (let i = 0; i < n; i++) {
+    const a = footX(at(i), "left"), b = footX(at(i), "right");
+    if (isNum(a) && isNum(b)) seps.push(Math.abs(b - a));
+  }
+  seps.sort((p, q) => p - q);
+  const sepMed = seps.length ? seps[seps.length >> 1] : 0;
+  const splitMeasurable = sepMed >= 0.08 * bodyPx;
+  out.sidesSplit = splitMeasurable ? "lever" : "even";
+  out.footSepFrac = bodyPx > 0 ? sepMed / bodyPx : 0;
+
+  /* Contact, de-bounced. A foot does not leave and retake the floor within a
+   * frame or two; a landmark does. Majority vote over a 5-frame window turns a
+   * one-frame drop-out back into contact instead of a weight transfer. */
+  const rawContact = (low) => low.map((v, i) => isNum(v) && floor[i] - v < band);
+  const debounce = (b) => b.map((_, i) => {
+    let on = 0, tot = 0;
+    for (let k = Math.max(0, i - 2); k <= Math.min(b.length - 1, i + 2); k++) { tot++; if (b[k]) on++; }
+    return on * 2 > tot;
+  });
+  const contactL = debounce(rawContact(lowL)), contactR = debounce(rawContact(lowR));
+  // The same test with a lift big enough to mean it, for the overlapping case.
+  const strictBand = 1.5 * band;
+  const strict = (low) => debounce(low.map((v, i) => isNum(v) && floor[i] - v < strictBand));
+  const strictL = strict(lowL), strictR = strict(lowR);
+
   if (hands) { out.hands_l = new Array(n).fill(NaN); out.hands_r = new Array(n).fill(NaN); }
   if (feet) { out.feet_l = new Array(n).fill(NaN); out.feet_r = new Array(n).fill(NaN); }
 
@@ -145,8 +184,19 @@ export function clipGrf(poses, activity, { pxPerM, heightM, systemKg, fps, trave
     if (hands) [out.hands_l[i], out.hands_r[i]] = lever(handT, xc[i], hl, hr, minSep);
     if (!feet) continue;
     if (hands) { [out.feet_l[i], out.feet_r[i]] = lever(footT, xc[i], fl, fr, minSep); continue; }
-    const cl = isNum(lowL[i]) && floor[i] - lowL[i] < band;
-    const cr = isNum(lowR[i]) && floor[i] - lowR[i] < band;
+    if (!splitMeasurable) {
+      /* The feet are at the same place in the picture, so a left-right split
+       * cannot be measured -- but a foot held clearly OFF the floor still can.
+       * That needs a much bigger lift than the contact band uses, because the
+       * far foot's landmarks are a guess: only a deliberate lift counts, not
+       * the few centimetres of jitter that were flipping the load leg to leg.
+       * Anything short of that is half each. */
+      if (strictL[i] && !strictR[i]) { out.feet_l[i] = footT; out.feet_r[i] = 0; }
+      else if (strictR[i] && !strictL[i]) { out.feet_l[i] = 0; out.feet_r[i] = footT; }
+      else { out.feet_l[i] = footT / 2; out.feet_r[i] = footT / 2; }
+      continue;
+    }
+    const cl = contactL[i], cr = contactR[i];
     if (cl && cr) [out.feet_l[i], out.feet_r[i]] = lever(footT, xc[i], fl, fr, minSep);
     else if (cl) { out.feet_l[i] = footT; out.feet_r[i] = 0; }
     else if (cr) { out.feet_l[i] = 0; out.feet_r[i] = footT; }
@@ -171,6 +221,8 @@ export function grfForRep(clip, bounds) {
       if (a) o[`${src}_grf_${s}`] = a.slice(b0, b1 + 1);
     }
   }
+  // Were the feet far enough apart in the picture to split the load at all?
+  if (clip.sidesSplit) o.feet_grf_split = clip.sidesSplit;
   return o;
 }
 
