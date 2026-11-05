@@ -63,10 +63,14 @@ check(grf.source === "model", "falls back to the model GRF when the app has no f
 const own = verticalGrf({ ...rep, jm: { feet_grf_r: times.map(() => 400) } }, "r", 800);
 check(own.source === "newton" && Math.abs(own.v[0] - 0.5) < 1e-9, "uses the app's own foot force, in bodyweights");
 
+/* Three postures, not four. "Peak descent" and "peak load on the ascent" are
+ * instants on a curve, and the figures at them are the frames either side of
+ * the bottom -- four columns that all looked the same (Bas, 2026-11-05). */
 const ev = loadEvents(rep, "squat", {}, "r", grf.v, -1);
-check(ev.map((e) => e.key).join() === "jlEvStart,jlEvPeakDescent,jlEvBottom,jlEvPeakAscent",
+check(ev.map((e) => e.key).join() === "jlEvStart,jlEvBottom,jlEvStand",
       `squat events: ${ev.map((e) => e.key + "@" + e.i).join(" ")}`);
-check(ev[2].i === 50 && ev[1].i > 0 && ev[1].i < 50 && ev[3].i > 50, "bottom at the deepest frame, descent before; peak load AT the bottom yields peak ascent instead");
+check(ev[0].i === 0 && ev[1].i === 50 && ev[2].i === rep.loads.length - 1,
+      "start, the deepest frame, and standing again");
 check(eventFamily("run", { gait: true }) === "gait" && eventFamily("cmj", { jump: true }) === "jump", "task families");
 
 const deep = poseAt(rep, 50, -1), up = poseAt(rep, 0, -1);
@@ -79,7 +83,7 @@ check(niceCeiling(22.6) === 30 && niceCeiling(3.2) === 4 && niceCeiling(0) === 1
 for (const plane of ["sagittal", "frontal"]) {
   const fig = jointLoadSVG(rep, { plane, side: "r", activity: "squat", massKg: 80, tr: i18n.t });
   check(fig && fig.svg.startsWith("<svg") && !/NaN|undefined/.test(fig.svg), `${plane}: draws, no NaN/undefined in the markup`);
-  check(fig.events.length === 4 && fig.rim === 4, `${plane}: 4 events, shared rim ${fig.rim} BW`);
+  check(fig.events.length === 3 && fig.rim === 4, `${plane}: 3 events, shared rim ${fig.rim} BW`);
   check(fig.svg.includes(plane === "frontal" ? ">LAT<" : ">ANT<"), `${plane}: axis labelled for its plane`);
 }
 // the dial's length is the table's number: the model's *_mag target
