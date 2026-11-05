@@ -12,7 +12,8 @@ import { butter, filtfilt, lfilter, lfilterZi, movingAverage } from "./proc_dsp.
 
 const G_OPTS = { earth: 9.81, moon: 1.62, mars: 3.71 };
 
-export const SIMS = ["proj", "spring", "pend", "multi", "coll", "filt", "robot"];
+import { initRunMsk } from "./runmsk.js";
+export const SIMS = ["proj", "spring", "pend", "multi", "coll", "filt", "robot", "run"];
 
 /** Projectile without drag: range, peak and flight time for v (m/s), angle (deg), g. */
 export function projectile(v, deg, g, h0 = 0) {
@@ -85,6 +86,8 @@ export function collide(m1, v1, m2, v2, e) {
 
 export function initPhysics({ $, tr }) {
   const host = $("phHost"), tabs = $("phTabs");
+  const run = initRunMsk({ host: $("phRun"), tr });          // "Biomechanics of running" lives in src/runmsk.js
+  const own = ["phCv", "phBtns", "phOut", "phCtl", "phNote"];
   let sim = "proj", raf = 0, st = null, last = 0, running = false;
   const P = {
     proj: { v: 8, ang: 45, g: "earth", drag: 0, h0: 0, lock: { v: true, drag: true, h0: true, ang: false }, goal: "range" },
@@ -377,7 +380,11 @@ export function initPhysics({ $, tr }) {
     running = on; $("phPlay").textContent = tr(on ? "ph_pause" : "ph_play");
     if (on && !raf) { last = 0; raf = requestAnimationFrame(loop); }
   }
-  function select(s) { sim = s; play(false); renderTabs(); renderControls(); reset(); }
+  function show() {
+    const isRun = sim === "run"; own.forEach((id) => $(id).classList.toggle("hidden", isRun));
+    if (isRun) run.show(); else { run.hide(); renderControls(); reset(); }
+  }
+  function select(s) { sim = s; play(false); renderTabs(); show(); }
 
   $("phCv").addEventListener("pointerdown", (e) => {
     if (sim !== "robot" || !st || !st.scale) return;
@@ -402,10 +409,10 @@ export function initPhysics({ $, tr }) {
   $("phCtl").addEventListener("click", (e) => { if (e.target.id === "phOptBtn") optimise(); });
   $("phPlay").onclick = () => { if (sim === "proj" && st.done) reset(); play(!running); };
   $("phReset").onclick = () => { play(false); reset(); };
-  window.addEventListener("resize", () => { if (!$("viewPhysics").classList.contains("hidden")) draw(); });
+  window.addEventListener("resize", () => { if (!$("viewPhysics").classList.contains("hidden")) (sim === "run" ? run.draw() : draw()); });
 
   return {
-    open() { renderTabs(); renderControls(); reset(); },
-    leave() { play(false); },
+    open() { renderTabs(); show(); },
+    leave() { play(false); run.hide(); },
   };
 }
