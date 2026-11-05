@@ -2257,8 +2257,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 156;
-window.BUILD_AT = "2026-11-05 10:31";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 157;
+window.BUILD_AT = "2026-11-05 12:54";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -10736,6 +10736,10 @@ const METRIC_META = {
   /* The moment plot restricted to one leg joint, with that joint's muscles on
    * the same axis. Same drawing as `moment` -- the overlay was only reachable
    * by ticking a single joint there, which nobody found. */
+  /* The ground reaction. It had a section of its own below the chart, which
+   * made it the one measured-ish curve you could not pick from the same menu
+   * as everything else. */
+  grf: { title: "grfTitle", unit: "N", note: null, zero: true, src: "grf" },
   contribmom: { title: "jmContribMomTitle", unit: "N\u00b7m", note: null, zero: true, src: "contribmom" },
 };
 const jointSel = {};   // "<activity>|<metric>" -> joints ticked
@@ -10751,6 +10755,7 @@ function metricAvailable(rep, res, metric) {
   // Needs the moment, the muscle forces AND the moment-arm table: without the
   // arms there is no force x arm to draw, which is why this used to show a
   // "generate moment_arms.json" note instead of a plot.
+  if (src === "grf") return grfSources(rep.jm).length > 0;
   if (src === "contribmom") {
     return !!(rep.forces && rep.forces.length && rep.forceNames && momentArms && momentArms.joints);
   }
@@ -11014,6 +11019,7 @@ function metricPlot(rep, res, metric) {
   // The two that read their own arrays rather than rep.jm.
   if (metric === "muscle") return metricAvailable(rep, res, "muscle") ? musclePlot(rep, res) : "";
   if (metric === "jrf") return metricAvailable(rep, res, "jrf") ? jrfPlot(rep, res) : "";
+  if (metric === "grf") return grfPanel(rep, res);
   if (metric === "contribmom") return metricAvailable(rep, res, "contribmom") ? momContribPlot(rep, res) : "";
   if (metric === "contrib") {
     if (!metricAvailable(rep, res, "contrib")) return "";
@@ -11127,7 +11133,7 @@ function metricPlot(rep, res, metric) {
  * the product of two curves already on this menu and adds no independent
  * information -- and it carried the error of both (Bas, 2026-09-19).
  * jointmetrics.js still computes it; the export still contains it. */
-const PLOT_METRICS = ["angle", "vel", "moment", "power", "muscle", "jrf", "contrib", "contribmom"];
+const PLOT_METRICS = ["angle", "vel", "moment", "power", "grf", "muscle", "jrf", "contrib", "contribmom"];
 const metricSel = {};   // activity -> the metric last picked
 
 function drawMetric(box, rep, res) {
@@ -11151,6 +11157,18 @@ function drawMetric(box, rep, res) {
           tr(METRIC_META[m].title)}</option>`).join("")}</select></div>`
     : "") + html;
   box.classList.toggle("hidden", !html);
+  if (metric === "grf") {
+    const save = () => {
+      grfSel[res.activity] = {
+        src: box.querySelector("select.grfsrc")?.value,
+        sides: [...box.querySelectorAll('input[type="checkbox"]:checked')].map((x) => x.value),
+      };
+      drawMetric(box, rep, res);
+    };
+    const pick = box.querySelector("select.grfsrc");
+    if (pick) pick.onchange = save;
+    box.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.onchange = save; });
+  }
   if (metric === "contribmom") {
     const save = (k) => (e) => {
       momSel[res.activity] = { ...(momSel[res.activity] || {}), [k]: e.target.value };
@@ -11239,22 +11257,6 @@ function grfPanel(rep, res) {
     ${src === "feet" && jm.feet_grf_split === "even"
       ? `<p class="note banner">${tr("grfNoteEvenSplit")}</p>` : ""}`;
 }
-function drawGrf(box, rep, res) {
-  if (!box) return;
-  const html = grfPanel(rep, res);
-  box.innerHTML = html;
-  box.classList.toggle("hidden", !html);
-  const save = () => {
-    grfSel[res.activity] = {
-      src: box.querySelector("select.grfsrc")?.value,
-      sides: [...box.querySelectorAll('input[type="checkbox"]:checked')].map((x) => x.value),
-    };
-    drawGrf(box, rep, res);
-  };
-  box.querySelector("select.grfsrc")?.addEventListener("change", save);
-  box.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.onchange = save; });
-}
-
 /* Joint-load summary (src/jointload.js): poses at the task's key instants, the
  * vertical GRF, and a hip/knee/ankle contact-force dial per instant. A
  * sagittal/frontal toggle and an L/R leg toggle, kept per task like jointSel. */
@@ -12968,7 +12970,6 @@ function render(res, fps) {
          what you open when the summary raises a question. -->
     <div id="loadBox" class="jmplot hidden"></div>
     <div id="chartBox"></div>
-    <div id="grfBox" class="grfplot jmplot"></div>
     ${res.detection ? `<p class="note" style="border-left:3px solid var(--good);
         padding-left:11px;color:var(--good)">${tr("detectedAs", {
           activity: tr(res.activity),
@@ -13037,11 +13038,10 @@ function render(res, fps) {
                     { n: items[i].nReps }) + tr("noteMeanBand")}</p>`
            : "");
     wireMetrics($("chartBox"), items[i], res);
-    /* The "Moments and power" section is gone: moments and power are two
-     * entries on the plot menu above, so the section repeated them under a
-     * heading of their own. Its caveats moved onto the moment plot itself
-     * (momentNotes) and the ground reaction keeps its own box. */
-    drawGrf($("grfBox"), items[i], res);
+    /* "Moments and power" and the ground-reaction section are both gone: all
+     * of it is on the plot menu above, so the sections repeated entries under
+     * headings of their own. The moment's caveats moved onto the moment plot
+     * itself (momentNotes). */
     $("forceBox").innerHTML = forcePanel(items[i], res);
     drawJointLoad($("loadBox"), items[i], res);
   }
