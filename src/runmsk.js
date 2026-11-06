@@ -311,7 +311,7 @@ export function initRunMsk({ host, tr }) {
   function draw() {
     const cv = host.querySelector("#rmCv"); if (!cv || !R) return;
     const [c, W, H] = fit(cv), ink = css("--ink"), mut = css("--muted"), acc = css("--accent"), mom = "#f4a261", red = "#e76f51";
-    const fr = Math.round(S.fr), narrow = W < 620;
+    const fr = Math.round(S.fr), narrow = true;   // one layout everywhere: leg on top, plots below (Bas prefers the phone view)
     const fw = narrow ? W : Math.min(250, W * 0.28), fh = narrow ? 300 : H;
     const px = narrow ? 44 : fw + 44, py = narrow ? fh + 8 : 6, pw = W - px - 44, ph = H - py - 4;
     // leg
