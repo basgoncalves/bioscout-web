@@ -2285,8 +2285,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 163;
-window.BUILD_AT = "2026-11-06 16:01";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 164;
+window.BUILD_AT = "2026-11-06 16:15";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -5821,9 +5821,9 @@ $("mealShotFile").onchange = (e) => {
  * there is still exactly one source of truth for the athlete.
  */
 const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat", "viewSummary", "viewSessionEnd",
-               "viewHome", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback", "viewPhysics"];
+               "viewHome", "viewProcess", "viewSimulate", "viewVisualise", "viewAnalysis", "viewBiofeedback", "viewPhysics"];
 /* The lab demo's screens: a home with three doors, and what they open. */
-const LAB_VIEWS = ["viewHome", "viewRecord", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback", "viewPhysics"];
+const LAB_VIEWS = ["viewHome", "viewRecord", "viewProcess", "viewSimulate", "viewVisualise", "viewAnalysis", "viewBiofeedback", "viewPhysics"];
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
