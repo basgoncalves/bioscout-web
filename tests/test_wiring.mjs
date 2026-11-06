@@ -285,7 +285,7 @@ for (const [label, raw] of files) {
   const m = whole.match(/<script type="module">([\s\S]*?)<\/script>/);
   if (!m) fail("index.html: no inline module to check");
   else {
-    const tmp = `/tmp/bioscout_module_check_${process.pid}.mjs`;
+    const tmp = `${(await import("node:os")).tmpdir()}/bioscout_module_check_${process.pid}.mjs`;   // os.tmpdir(): /tmp does not exist on Windows
     writeFileSync(tmp, m[1]);
     try {
       execFileSync(process.execPath, ["--check", tmp], { stdio: "pipe" });

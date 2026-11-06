@@ -2288,8 +2288,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 165;
-window.BUILD_AT = "2026-11-06 17:34";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 166;
+window.BUILD_AT = "2026-11-06 17:39";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2430,7 +2430,6 @@ import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
 import { initBiofeedback } from "./src/biofeedback.js";
 import { initPhysics } from "./src/physics.js";
-import { initVisualise } from "./src/visualise.js";
 import { startPresence } from "./src/presence.js";
 import { createPreview, openReview } from "./src/lmreview.js";
 import { ensembleRep, mergeSides } from "./src/ensemble.js";
@@ -2520,7 +2519,10 @@ queueMicrotask(() => { try { if (CLOUD && CLOUD.url) startPresence({ url: CLOUD.
 let physics = null;
 queueMicrotask(() => { physics = initPhysics({ $, tr }); });
 let visualise = null;
-queueMicrotask(() => { visualise = initVisualise({ host: $("visHost"), tr }); });
+// Loaded on its own: if visualise.js (or anything it imports) ever fails -- e.g. a half-updated cache mixing two builds --
+// only the Visualise screen says so; the rest of the app still starts.
+import("./src/visualise.js").then((mod) => { visualise = mod.initVisualise({ host: $("visHost"), tr }); })
+  .catch((err) => { console.error("Visualise failed to load", err); const h = $("visHost"); if (h) h.innerHTML = `<p class="warn">${tr("vi_loadFail")} (${String(err && err.message || err)})</p>`; });
 queueMicrotask(() => { biofeedback = initBiofeedback({ $, tr, getLandmarker: async () => ((await loadMediaPipe()) ? makeLandmarker() : null) }); });
 const statusEl = $("status");
 const say = (t, warn) => {
