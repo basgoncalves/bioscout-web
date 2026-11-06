@@ -601,7 +601,10 @@ try {
   .rmDet { border:1px solid var(--line); border-radius:10px; padding:6px 10px; } .rmDet summary { cursor:pointer; font-weight:600; padding:4px 0; }
   .rmDet[open] summary { color:var(--accent); } .rmDet .phSl { margin:6px 0; } .rmDet select { width:100%; }
   .rmRes { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin:6px 0; font-size:12px; } .rmRes div { border:1px solid var(--line); border-radius:6px; padding:4px 6px; } .rmRes span { display:block; color:var(--muted); font-size:10px; }
-  .rmMain { flex:1 1 auto; min-width:0; } .rmCv { height:1180px; }
+  .rmMain { flex:1 1 auto; min-width:0; }
+  .viCvA { height:max(520px, 62vh); } .viCvB { height:max(240px, 30vh); } .viBar { display:flex; gap:10px; align-items:center; } .viBar #viPlay { margin:0; } .viAWrap { position:relative; } .viStep { display:flex; align-items:center; gap:6px; } .viStep input { flex:1; } .viStep button { width:34px; margin:0; padding:3px 0; font-size:12px; } .viCrop { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:4px 0 8px; font-size:13px; } .viCrop input { width:90px; margin:0; } .viCrop button { width:auto; margin:0; padding:4px 10px; } .viViews { position:absolute; left:50%; transform:translateX(-50%); display:flex; gap:6px; } .viViews button { width:auto; margin:0; padding:3px 12px; font-size:12px; } .viViews button.on { background:var(--accent); color:#fff; border-color:var(--accent); } .viViews button[disabled] { opacity:.4; } .viSpeed { display:flex; align-items:center; gap:6px; } .viSpeed button { width:36px; margin:0; padding:4px 0; font-size:18px; } .viSpeed b { min-width:44px; text-align:center; }
+  .viSelRow { margin:10px 0 4px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; } .viSelRow select { margin:0 !important; } .viTitleSel { font-weight:700; font-size:14px; padding:6px 10px; width:auto; max-width:100%; }
+  .viMA { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; margin-bottom:8px; } .rmCv { height:1180px; }
   .rmLeg { display:flex; flex-wrap:wrap; gap:4px; margin:6px 0; align-items:center; } .rmLeg button { width:auto; margin:0; padding:3px 8px; font-size:12px; display:inline-flex; gap:5px; align-items:center; }
   .rmLeg button i { width:12px; height:4px; border-radius:2px; display:inline-block; } .rmLeg button.off { opacity:.35; text-decoration:line-through; }
   .rmAll { display:flex; gap:6px; align-items:center; margin:4px 0; } .rmAll input { width:64px; } .rmAll button { width:auto; margin:0; padding:4px 10px; }
@@ -2285,8 +2288,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 164;
-window.BUILD_AT = "2026-11-06 16:15";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 165;
+window.BUILD_AT = "2026-11-06 17:34";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -8444,7 +8447,7 @@ function enterLab() {
   $("doorAnalysis").onclick = () => { showView("viewAnalysis"); openAnalysis(); };
   $("doorBiofeedback").onclick = () => { showView("viewBiofeedback"); biofeedback.open(); };
   $("doorPhysics").onclick = () => { showView("viewPhysics"); physics && physics.open(); };
-  $("doorVisualise").onclick = () => { showView("viewVisualise"); };
+  $("doorVisualise").onclick = () => { showView("viewVisualise"); visualise && visualise.open(); };
   $("doorSimulate").onclick = (e) => { if (e.target.closest("a")) return; showView("viewSimulate"); openSimulate(); };
   $("doorSimulate").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("doorSimulate").click(); } };
   $("devModeBtn").onclick = () => { $("devForm").classList.toggle("hidden"); $("devPw").focus(); };
@@ -8462,6 +8465,7 @@ function enterLab() {
   if (land === "viewAnalysis") openAnalysis();
   if (land === "viewBiofeedback") queueMicrotask(() => biofeedback && biofeedback.open());
   if (land === "viewPhysics") queueMicrotask(() => physics && physics.open());
+  if (land === "viewVisualise") queueMicrotask(() => visualise && visualise.open());
 }
 
 if (LAB) {
