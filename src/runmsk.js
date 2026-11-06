@@ -133,7 +133,7 @@ export function doID(q, L, o = {}) {
     (F) => [F.knee, F.ank, [F.knee[0] + 0.433 * L.s * F.ds[0], F.knee[1] + 0.433 * L.s * F.ds[1]], 1, 0.0465, 0.302, L.s],
     (F) => [F.hip, F.knee, [F.hip[0] + 0.433 * L.t * F.dt[0], F.hip[1] + 0.433 * L.t * F.dt[1]], 0, 0.1, 0.323, L.t],
   ];
-  const acc = (f, i) => { const a = Math.max(1, Math.min(N - 2, i)); return (f(a + 1) - 2 * f(a) + f(a - 1)) / (DT * DT); };
+  const acc = (f, i) => { const a = Math.max(3, Math.min(N - 4, i)); /* hold edge values: clip ends are not real data */ return (f(a + 1) - 2 * f(a) + f(a - 1)) / (DT * DT); };
   const cr = (r, F) => r[0] * F[1] - r[1] * F[0], out = [];
   for (let i = 0; i < N; i++) {
     const g = grf(i / (N - 1), o);
@@ -218,17 +218,22 @@ export function initRunMsk({ host, tr }) {
   function render() {
     const sec = (t) => `<details class="rmDet" data-sec="${t}"${open.has(t) ? " open" : ""}><summary>${tr("rm_s_" + t)}</summary>
       <div class="rmRes" id="rmOut_${t}"></div>
-      ${SL[t]().map(([k, mn, mx, st, u, lab]) => k === "#" ? `<div class="rmSec">${mn}</div>` :
+      ${SL[t]().map(([k, mn, mx, st, u, lab]) => k === "#" ? `<div class="rmSec">${mn}</div>${mn === tr("rm_secW") ? `<div class="rmAll"><input type="number" min="0" max="20" step="1" value="10" data-allv="${t}"><button type="button" class="ghost" data-all="${t}">${tr("rm_applyAll")}</button></div>` : ""}` :
         k === "@misM" ? `<label class="phSl">${tr("rm_misM")}<select data-rm>${MK.map((m) => `<option${S.scale.misM === m ? " selected" : ""}>${m}</option>`).join("")}</select></label>` :
         `<div class="phSl"><span>${lab} <b data-rv="${t}:${k}">${get(t, k)}</b> ${u}</span><input type="range" min="${mn}" max="${mx}" step="${st}" value="${get(t, k)}" data-rk="${t}:${k}"></div>`).join("")}
       <p class="note">${tr("rm_n_" + t)}</p></details>`;
     host.innerHTML = `<div class="rmWrap"><div class="rmSide">${TABS.map(sec).join("")}</div>
       <div class="rmMain"><canvas class="phCv rmCv" id="rmCv"></canvas>
+      <div class="rmLeg" id="rmLeg">${legend()}</div>
       <div class="row bfbRow"><button type="button" id="rmPlay">${tr(S.play ? "ph_pause" : "ph_play")}</button></div>
       <div class="phSl"><span>${tr("rm_frame")} <b data-rv="fr">${Math.round(S.fr)}</b></span><input type="range" min="0" max="${N - 1}" step="1" value="${Math.round(S.fr)}" data-rk="fr"></div>
       <p class="note">${tr("rm_legAll")}</p></div></div>`;
     draw();
   }
+  const RES = ["Rh", "Rk", "Ra"], RCOL = ["#ff8a65", "#ffb74d", "#e57373"];
+  const hide = new Set();
+  const legend = () => MUS.map((m, i) => [m.n, MCOL[i]]).concat(RES.map((n, j) => [n, RCOL[j]])).map(([n, col]) =>
+    `<button type="button" class="ghost${hide.has(n) ? " off" : ""}" data-mu="${n}"><i style="background:${col}"></i>${n}</button>`).join("") + `<span class="note">${tr("rm_legTap")}</span>`;
   function fit(cv) {
     const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1, w = Math.max(1, Math.round(r.width * d)), h = Math.max(1, Math.round(r.height * d));
     if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
@@ -280,15 +285,37 @@ export function initRunMsk({ host, tr }) {
     put("so", [[tr("rm_maxAct"), f(mxA * 100, 0) + " %"], [tr("rm_resPk"), f(pkR, 1) + " N·m"], [tr("rm_sumF"), f(Math.max(...sumF) / (BM * G), 1) + " BW"], [tr("rm_cost"), f(so.cost, 3)]]);
   }
 
-  // ---- one view: leg (markers, GRF, muscles) | joint angles and moments, hip/knee/ankle | muscle forces + activations ----
+  // ---- one view: leg on the left; on the right, time-aligned from top: hip, knee, ankle (angle + moment, two axes), muscle forces + reserves, activation bars ----
+  function axes(c, x0, y0, w, h, ser, side) {      // returns Y mapper for a set of series; draws its tick labels on one side
+    let lo = Infinity, hi = -Infinity; for (const s of ser) for (const v of s.v) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    lo = Math.min(lo, 0); hi = Math.max(hi, 0); if (hi - lo < 1e-6) hi = lo + 1; const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+    const Y = (v) => y0 + h - h * (v - lo) / (hi - lo);
+    c.font = "11px system-ui"; c.fillStyle = ser[0].col;
+    for (const v of [hi, (hi + lo) / 2, lo]) { const t = f(v, Math.abs(hi - lo) < 5 ? 1 : 0), tw = c.measureText(t).width; c.fillText(t, side < 0 ? x0 - tw - 4 : x0 + w + 4, Math.min(y0 + h, Math.max(y0 + 10, Y(v) + 4))); }
+    return Y;
+  }
+  function panel(c, x0, y0, w, h, title, L, R, fr) {
+    const line = css("--line"), X = (i) => x0 + w * i / (N - 1);
+    c.fillStyle = css("--card"); c.fillRect(x0, y0, w, h); c.strokeStyle = line; c.lineWidth = 1; c.strokeRect(x0, y0, w, h);
+    for (let g = 1; g < 4; g++) { c.globalAlpha = 0.35; c.beginPath(); c.moveTo(x0 + w * g / 4, y0); c.lineTo(x0 + w * g / 4, y0 + h); c.stroke(); c.globalAlpha = 1; }
+    const draw1 = (ser, Y) => { c.beginPath(); c.moveTo(x0, Y(0)); c.lineTo(x0 + w, Y(0)); c.strokeStyle = line; c.stroke();
+      for (const s of ser) { c.setLineDash(s.dash ? [6, 4] : []); c.strokeStyle = s.col; c.globalAlpha = s.dash ? 0.6 : 1; c.lineWidth = s.lw || 2.5; c.beginPath(); s.v.forEach((v, i) => (i ? c.lineTo(X(i), Y(v)) : c.moveTo(X(i), Y(v)))); c.stroke(); }
+      c.setLineDash([]); c.globalAlpha = 1; };
+    if (L && L.s.length) draw1(L.s, axes(c, x0, y0, w, h, L.s, -1));
+    if (R && R.s.length) draw1(R.s, axes(c, x0, y0, w, h, R.s, 1));
+    c.strokeStyle = "#e76f51"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(fr), y0); c.lineTo(X(fr), y0 + h); c.stroke();
+    c.font = "bold 12px system-ui"; c.fillStyle = css("--ink"); c.fillText(title, x0 + 6, y0 + 15);
+    let tx = x0 + 12 + c.measureText(title).width; c.font = "11px system-ui";
+    for (const a of [L, R]) if (a && a.lab) { c.fillStyle = a.s[0].col; c.fillText(a.lab, tx, y0 + 15); tx += c.measureText(a.lab).width + 10; }
+  }
   function draw() {
     const cv = host.querySelector("#rmCv"); if (!cv || !R) return;
-    const [c, W, H] = fit(cv), ink = css("--ink"), mut = css("--muted"), acc = css("--accent"), red = "#e76f51";
+    const [c, W, H] = fit(cv), ink = css("--ink"), mut = css("--muted"), acc = css("--accent"), mom = "#f4a261", red = "#e76f51";
     const fr = Math.round(S.fr), narrow = W < 620;
-    const fw = narrow ? W : Math.min(260, W * 0.3), fh = narrow ? Math.min(300, H * 0.36) : H;
-    const px = narrow ? 6 : fw + 10, py = narrow ? fh + 6 : 4, pw = W - px - 6, ph = H - py - 6;
+    const fw = narrow ? W : Math.min(250, W * 0.28), fh = narrow ? 300 : H;
+    const px = narrow ? 44 : fw + 44, py = narrow ? fh + 8 : 6, pw = W - px - 44, ph = H - py - 4;
     // leg
-    const sc = Math.min(fw / 1.25, (fh - 20) / 1.15), X = (x) => fw * 0.55 + x * sc, Y = (y) => fh - 10 - y * sc;
+    const sc = Math.min(fw / 1.25, (Math.min(fh, 520) - 20) / 1.15), X = (x) => fw * 0.55 + x * sc, Y = (y) => (narrow ? fh : Math.min(fh, 560)) - 10 - y * sc;
     c.strokeStyle = css("--line"); c.lineWidth = 1; c.beginPath(); c.moveTo(4, Y(0)); c.lineTo(fw - 4, Y(0)); c.stroke();
     const Fm = fk(R.ik.q[fr], R.sc.L), Ft = fk(R.ik.Q[fr], SUBJ), so = R.so[fr];
     const add = (a, u, k, v, m) => [a[0] + k * u[0] + m * v[0], a[1] + k * u[1] + m * v[1]], H0 = Fm.hip, Lt = R.sc.L.t, Ls = R.sc.L.s;
@@ -299,31 +326,35 @@ export function initRunMsk({ host, tr }) {
       [add(Fm.knee, Fm.ds, 0.4 * Ls, Fm.ps, -0.025), [Fm.heel[0] + 0.005, Fm.heel[1] + 0.01]], [add(Fm.knee, Fm.ds, 0.3 * Ls, Fm.ps, 0.025), add(Fm.ank, Fm.df, 0.3 * R.sc.L.f, Fm.nf, 0.01)],
     ];
     leg(c, Ft, X, Y, mut, 2, true); leg(c, Fm, X, Y, acc, 4);
-    path.forEach(([a, b], i) => { c.strokeStyle = MCOL[i]; c.globalAlpha = 0.25 + 0.75 * so.a[i]; c.lineWidth = 2 + 7 * so.a[i]; c.beginPath(); c.moveTo(X(a[0]), Y(a[1])); c.lineTo(X(b[0]), Y(b[1])); c.stroke(); });
+    path.forEach(([a, b], i) => { if (hide.has(MUS[i].n)) return; c.strokeStyle = MCOL[i]; c.globalAlpha = 0.25 + 0.75 * so.a[i]; c.lineWidth = 2 + 7 * so.a[i]; c.beginPath(); c.moveTo(X(a[0]), Y(a[1])); c.lineTo(X(b[0]), Y(b[1])); c.stroke(); });
     c.globalAlpha = 1; marks(c, Fm.mk, X, Y, ink, false, true); marks(c, R.ik.exp[fr], X, Y, red, true);
     const g = grf(fr / (N - 1), gOpt()), k = 0.25 / (BM * G);
     c.strokeStyle = red; c.lineWidth = 3; c.beginPath(); c.moveTo(X(g.p[0]), Y(0)); c.lineTo(X(g.p[0] + g.f[0] * k), Y(g.f[1] * k)); c.stroke();
     c.fillStyle = red; c.beginPath(); c.arc(X(g.p[0]), Y(0), 4, 0, 7); c.fill();
-    // joint plots: row 1 angles, row 2 moments
-    const gap = 6, cw = (pw - 2 * gap) / 3, rowH = ph * 0.24;
-    const aT = [tr("rm_hipF"), tr("rm_kneeF"), tr("rm_ankD")], mT = [tr("rm_hipM"), tr("rm_kneeM"), tr("rm_ankM")];
+    // right column, one shared time axis
+    const gap = 8, jh = ph * 0.17, fhh = ph * 0.28, bh = ph - 3 * (jh + gap) - fhh - gap;
+    const JN = [tr("rm_hip"), tr("rm_knee"), tr("rm_ankle")];
     for (let d = 0; d < 3; d++) {
-      const x = px + d * (cw + gap);
-      plot(c, x, py, cw, rowH, aT[d], [{ v: R.ik.Q.map((y) => deg(y[d + 2])), col: mut, dash: true }, { v: R.ik.q.map((y) => deg(y[d + 2])), col: acc }], fr, "°");
-      plot(c, x, py + rowH + gap, cw, rowH, mT[d], [{ v: R.id0.map((m) => m[d] / BM), col: mut, dash: true }, { v: R.id.map((m) => m[d] / BM), col: acc }], fr, "N·m/kg");
+      const y = py + d * (jh + gap);
+      panel(c, px, y, pw, jh, JN[d],
+        { lab: tr("rm_angAx"), s: [{ v: R.ik.q.map((q) => deg(q[d + 2])), col: acc }, { v: R.ik.Q.map((q) => deg(q[d + 2])), col: acc, dash: true }] },
+        { lab: tr("rm_momAx"), s: [{ v: R.id.map((m) => m[d] / BM), col: mom }, { v: R.id0.map((m) => m[d] / BM), col: mom, dash: true }] }, fr);
     }
-    // muscles: forces over stance (left) and activation bars at this frame (right)
-    const my = py + 2 * (rowH + gap), mh = ph - 2 * (rowH + gap), fwid = narrow ? pw : pw * 0.62;
-    plot(c, px, my, fwid, mh, tr("rm_forces"), MUS.map((m, i) => ({ v: R.so.map((o) => o.F[i] / (BM * G)), col: MCOL[i], lw: 1.6 })), fr, "BW");
-    MUS.forEach((m, i) => { c.fillStyle = MCOL[i]; c.fillText(m.n, px + 6 + (i % 4) * 46, my + 26 + Math.floor(i / 4) * 13); });
-    if (!narrow) {
-      const bx = px + fwid + gap, bwid = pw - fwid - gap, bw = bwid / (MUS.length + 3), bh = mh;
-      c.strokeStyle = css("--line"); c.strokeRect(bx, my, bwid, bh); c.fillStyle = mut; c.fillText(tr("rm_actTitle"), bx + 4, my + 12);
-      MUS.forEach((m, i) => { const h = (bh - 44) * so.a[i], x = bx + i * bw + 2; c.fillStyle = MCOL[i]; c.fillRect(x, my + bh - 16 - h, bw - 4, h);
-        c.fillStyle = ink; c.save(); c.translate(x + 2, my + bh - 3); c.fillText(m.n.slice(0, 4), 0, 0); c.restore(); c.fillText(f(so.a[i] * 100, 0), x, my + bh - 19 - h); });
-      ["Rh", "Rk", "Ra"].forEach((nm, j) => { const v = so.res[j], h = Math.min(1, Math.abs(v) / 50) * (bh - 44), x = bx + (MUS.length + j) * bw + 2;
-        c.fillStyle = red; c.fillRect(x, my + bh - 16 - h, bw - 4, h); c.fillStyle = ink; c.fillText(nm, x, my + bh - 3); c.fillText(f(v, 0), x, my + bh - 19 - h); });
-    }
+    const fy = py + 3 * (jh + gap);
+    const ms = MUS.map((m, i) => ({ n: m.n, v: R.so.map((o) => o.F[i] / (BM * G)), col: MCOL[i], lw: 2 })).filter((s) => !hide.has(s.n));
+    const rs = RES.map((n, j) => ({ n, v: R.so.map((o) => o.res[j]), col: RCOL[j], lw: 2, dash: true })).filter((s) => !hide.has(s.n));
+    panel(c, px, fy, pw, fhh, tr("rm_forces"), ms.length ? { lab: "BW", s: ms } : null, rs.length ? { lab: tr("rm_resAx"), s: rs } : null, fr);
+    // activation bars now
+    const by = fy + fhh + gap, items = MUS.map((m, i) => [m.n, so.a[i] * 100, MCOL[i], "%"]).concat(RES.map((n, j) => [n, so.res[j], RCOL[j], "N·m"])).filter((it) => !hide.has(it[0]));
+    c.fillStyle = css("--card"); c.fillRect(px, by, pw, bh); c.strokeStyle = css("--line"); c.strokeRect(px, by, pw, bh);
+    c.font = "bold 12px system-ui"; c.fillStyle = ink; c.fillText(tr("rm_actTitle"), px + 6, by + 15);
+    const bw = pw / Math.max(1, items.length), base = by + bh - 20, top = by + 34;
+    items.forEach(([n, v, col, u], i) => {
+      const x = px + i * bw + bw * 0.15, w = bw * 0.7, frac = u === "%" ? Math.min(1, v / 100) : Math.min(1, Math.abs(v) / 50), h = (base - top) * frac;
+      c.fillStyle = col; c.globalAlpha = u === "%" ? 1 : 0.8; c.fillRect(x, base - h, w, h); c.globalAlpha = 1;
+      c.font = "bold 11px system-ui"; c.fillStyle = ink; const lab = n, tw = c.measureText(lab).width; c.fillText(lab, x + w / 2 - tw / 2, by + bh - 6);
+      c.font = "11px system-ui"; const vt = f(v, 0) + (u === "%" ? "" : ""), vw = c.measureText(vt).width; c.fillText(vt, x + w / 2 - vw / 2, base - h - 4);
+    });
     results();
   }
 
@@ -337,7 +368,16 @@ export function initRunMsk({ host, tr }) {
   }
   function play(on) { S.play = on; const b = host.querySelector("#rmPlay"); if (b) b.textContent = tr(on ? "ph_pause" : "ph_play"); if (on && !raf) { last = 0; raf = requestAnimationFrame(loop); } }
 
-  host.addEventListener("click", (e) => { if (e.target.id === "rmPlay") play(!S.play); });
+  host.addEventListener("click", (e) => {
+    if (e.target.id === "rmPlay") { play(!S.play); return; }
+    const mu = e.target.closest("[data-mu]"); if (mu) { const n = mu.dataset.mu; hide.has(n) ? hide.delete(n) : hide.add(n); mu.classList.toggle("off", hide.has(n)); draw(); return; }
+    const all = e.target.closest("[data-all]"); if (all) {
+      const t = all.dataset.all, v = Math.max(0, Math.min(20, +host.querySelector(`[data-allv="${t}"]`).value || 0));
+      for (const m of MK) S[t].w[m] = v;
+      for (const m of MK) { const sl = host.querySelector(`[data-rk="${t}:w.${m}"]`), o = host.querySelector(`[data-rv="${t}:w.${m}"]`); if (sl) sl.value = v; if (o) o.textContent = v; }
+      compute(); draw();
+    }
+  });
   host.addEventListener("toggle", (e) => { const d = e.target.closest && e.target.closest("[data-sec]"); if (d) { d.open ? open.add(d.dataset.sec) : open.delete(d.dataset.sec); } }, true);
   host.addEventListener("input", (e) => {
     const key = e.target.dataset.rk; if (!key) return;
