@@ -1619,6 +1619,7 @@ try {
       <button type="button" class="labDoor" id="doorRecord"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="13.5" height="12" rx="3"/><path d="M16 10.5l5.5-3v9l-5.5-3z"/><circle cx="9.25" cy="12" r="2.6"/><circle cx="5.5" cy="8.6" r=".6" fill="currentColor"/></svg></i><div><b data-i18n="doorRecord">Record</b><span data-i18n="doorRecordShort">Film a movement and get joint angles, moments and loads.</span></div></button>
       <button type="button" class="labDoor" id="doorProcess"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4v16h18"/><path d="M6.5 15.5l3.5-5 3 2.5 3.5-6.5 3 3.5"/><path d="M6.5 19v-1.5M10 19v-2.5M13 19v-1.5M16.5 19v-3"/></svg></i><div><b data-i18n="doorProcess">Process</b><span data-i18n="doorProcessShort">Open, filter and plot lab files (force plates, EMG, motion capture).</span></div></button>
       <div class="labDoor" id="doorSimulate" role="button" tabindex="0"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4" r="2"/><path d="M12 6.5v6M7.5 9.5L12 8l4.5 1.5M12 12.5l-3 8M12 12.5l3 8"/><path d="M15.5 15.5l2.8 1.6M18.3 17.1l-.4-1.9M18.3 17.1l-1.9.3" /></svg></i><div><b data-i18n="doorSimulate">Simulate</b><span data-i18n="doorSimulateShort">Scale, IK, ID, static optimisation and muscle forces from a c3d.</span><span class="doorLinks"><a href="https://opensim.stanford.edu/" target="_blank" rel="noopener">OpenSim ↗</a> · <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4655131/" target="_blank" rel="noopener">CEINMS ↗</a></span></div></div>
+      <button type="button" class="labDoor" id="doorVisualise"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></i><div><b data-i18n="doorVisualise">Visualise</b><span data-i18n="doorVisualiseShort">Open a BioScout session or OpenSim results and watch angles, moments and muscles together.</span></div></button>
       <button type="button" class="labDoor" id="doorAnalysis"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18"/><rect x="5" y="12" width="3" height="6" rx=".8"/><rect x="10.5" y="8" width="3" height="10" rx=".8"/><rect x="16" y="5" width="3" height="13" rx=".8"/><path d="M4.5 9.5l6-4 5 2 4-4"/></svg></i><div><b data-i18n="doorAnalysis">Analysis</b><span data-i18n="doorAnalysisShort">Reliability, t-tests, ANOVA, regression and SPM on your results.</span></div></button>
       <button type="button" class="labDoor" id="doorBiofeedback"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/><path d="M10 10.5l1.3 1.3L14 9"/></svg></i><div><b data-i18n="doorBiofeedback">BioFeedback</b><span data-i18n="doorBiofeedbackShort">Live angle or sensor feedback with lamps, sound and an Arduino.</span></div></button>
       <button type="button" class="labDoor" id="doorPhysics"><i class="doorIco"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h18"/><path d="M4 19c2.5-9 7-13 9.5-13S18 11 20 19" stroke-dasharray="2.2 2"/><circle cx="13.5" cy="6" r="2.2" fill="currentColor"/><path d="M6 4l1.5 2.5M4 7.5l2.6.4"/></svg></i><div><b data-i18n="doorPhysics">Physics playground</b><span data-i18n="doorPhysicsShort">Interactive mechanics and signal-filtering demos.</span></div></button>
@@ -1885,6 +1886,15 @@ try {
 
   <!-- Analysis: reliability, JASP/SPSS-style statistics and SPM on curves (src/analysis.js,
        maths in src/stats.js, src/reliability.js, src/spm.js). Mounted on first open. -->
+  <!-- Visualise: a BioScout session or single OpenSim result files, shown like the running playground (src/visualise.js). -->
+  <section id="viewVisualise" class="hidden">
+    <div class="card">
+      <div class="labHead"><b style="font-size:16px" data-i18n="doorVisualise">Visualise</b>
+        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+      <div id="visHost"></div>
+    </div>
+  </section>
+
   <section id="viewAnalysis" class="hidden">
     <div id="analysisRoot"><p class="note" data-i18n="loading">Loading…</p></div>
   </section>
@@ -2275,8 +2285,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 162;
-window.BUILD_AT = "2026-11-06 15:00";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 163;
+window.BUILD_AT = "2026-11-06 16:01";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2417,6 +2427,7 @@ import { photoId, putPhoto, getPhoto, delPhoto, shrink } from "./src/media.js";
 import { t as tr, getLang, setLang, LANGUAGES, termsAccepted, acceptTerms } from "./src/i18n.js";
 import { initBiofeedback } from "./src/biofeedback.js";
 import { initPhysics } from "./src/physics.js";
+import { initVisualise } from "./src/visualise.js";
 import { startPresence } from "./src/presence.js";
 import { createPreview, openReview } from "./src/lmreview.js";
 import { ensembleRep, mergeSides } from "./src/ensemble.js";
@@ -2505,6 +2516,8 @@ let biofeedback = null;
 queueMicrotask(() => { try { if (CLOUD && CLOUD.url) startPresence({ url: CLOUD.url, key: CLOUD.key }); } catch { /* no realtime */ } });
 let physics = null;
 queueMicrotask(() => { physics = initPhysics({ $, tr }); });
+let visualise = null;
+queueMicrotask(() => { visualise = initVisualise({ host: $("visHost"), tr }); });
 queueMicrotask(() => { biofeedback = initBiofeedback({ $, tr, getLandmarker: async () => ((await loadMediaPipe()) ? makeLandmarker() : null) }); });
 const statusEl = $("status");
 const say = (t, warn) => {
@@ -5855,6 +5868,7 @@ function showView(id, push = true) {
   if (id !== "viewRecord") leaveRecorder();
   if (id !== "viewBiofeedback" && biofeedback) biofeedback.leave();
   if (id !== "viewPhysics" && physics) physics.leave();
+  if (id !== "viewVisualise" && visualise) visualise.leave();
   if (id !== "viewRecord" && assessStep) exitAssessMode();
   for (const v of VIEWS) $(v).classList.toggle("hidden", v !== id);
   $("navBar").classList.toggle("hidden", id === "viewLogin" || id === "viewDash");
@@ -5880,6 +5894,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewAnalysis") openAnalysis();
   if (id === "viewBiofeedback") biofeedback.open();
   if (id === "viewPhysics" && physics) physics.open();
+  if (id === "viewVisualise" && visualise) visualise.open();
 });
 
 $("navBack").onclick = () => history.back();
@@ -8429,6 +8444,7 @@ function enterLab() {
   $("doorAnalysis").onclick = () => { showView("viewAnalysis"); openAnalysis(); };
   $("doorBiofeedback").onclick = () => { showView("viewBiofeedback"); biofeedback.open(); };
   $("doorPhysics").onclick = () => { showView("viewPhysics"); physics && physics.open(); };
+  $("doorVisualise").onclick = () => { showView("viewVisualise"); };
   $("doorSimulate").onclick = (e) => { if (e.target.closest("a")) return; showView("viewSimulate"); openSimulate(); };
   $("doorSimulate").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("doorSimulate").click(); } };
   $("devModeBtn").onclick = () => { $("devForm").classList.toggle("hidden"); $("devPw").focus(); };
