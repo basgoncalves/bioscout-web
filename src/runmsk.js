@@ -294,15 +294,30 @@ export function initRunMsk({ host, tr }) {
     for (const v of [hi, (hi + lo) / 2, lo]) { const t = f(v, Math.abs(hi - lo) < 5 ? 1 : 0), tw = c.measureText(t).width; c.fillText(t, side < 0 ? x0 - tw - 4 : x0 + w + 4, Math.min(y0 + h, Math.max(y0 + 10, Y(v) + 4))); }
     return Y;
   }
-  function panel(c, x0, y0, w, h, title, L, R, fr) {
+  function panel(c, x0, y0, w, h, title, L, R, fr, stack) {
     const line = css("--line"), X = (i) => x0 + w * i / (N - 1);
     c.fillStyle = css("--card"); c.fillRect(x0, y0, w, h); c.strokeStyle = line; c.lineWidth = 1; c.strokeRect(x0, y0, w, h);
     for (let g = 1; g < 4; g++) { c.globalAlpha = 0.35; c.beginPath(); c.moveTo(x0 + w * g / 4, y0); c.lineTo(x0 + w * g / 4, y0 + h); c.stroke(); c.globalAlpha = 1; }
     const draw1 = (ser, Y) => { c.beginPath(); c.moveTo(x0, Y(0)); c.lineTo(x0 + w, Y(0)); c.strokeStyle = line; c.stroke();
-      for (const s of ser) { c.setLineDash(s.dash ? [6, 4] : []); c.strokeStyle = s.col; c.globalAlpha = s.dash ? 0.6 : 1; c.lineWidth = s.lw || 2.5; c.beginPath(); s.v.forEach((v, i) => (i ? c.lineTo(X(i), Y(v)) : c.moveTo(X(i), Y(v)))); c.stroke(); }
+      for (const s of ser) { if (s.hide) continue; c.setLineDash(s.dash ? [6, 4] : []); c.strokeStyle = s.col; c.globalAlpha = s.dash ? 0.6 : 1; c.lineWidth = s.lw || 2.5; c.beginPath(); s.v.forEach((v, i) => (i ? c.lineTo(X(i), Y(v)) : c.moveTo(X(i), Y(v)))); c.stroke(); }
       c.setLineDash([]); c.globalAlpha = 1; };
     if (L && L.s.length) draw1(L.s, axes(c, x0, y0, w, h, L.s, -1));
-    if (R && R.s.length) draw1(R.s, axes(c, x0, y0, w, h, R.s, 1));
+    if (R && R.s.length) {
+      const Y = axes(c, x0, y0, w, h, R.s, 1);
+      if (stack) {                                   // stacked contributions: positive parts up from 0, negative parts down
+        const up = new Array(N).fill(0), dn = new Array(N).fill(0);
+        for (const it of stack) for (const sign of [1, -1]) {
+          const base = sign > 0 ? up : dn, top = it.v.map((v, i) => base[i] + (sign > 0 ? Math.max(v, 0) : Math.min(v, 0)));
+          if (top.every((v, i) => Math.abs(v - base[i]) < 1e-9)) continue;
+          c.fillStyle = it.col; c.globalAlpha = it.res ? 0.45 : 0.8; c.beginPath();
+          top.forEach((v, i) => (i ? c.lineTo(X(i), Y(v)) : c.moveTo(X(i), Y(v))));
+          for (let i = N - 1; i >= 0; i--) c.lineTo(X(i), Y(base[i]));
+          c.closePath(); c.fill(); c.globalAlpha = 1;
+          for (let i = 0; i < N; i++) base[i] = top[i];
+        }
+      }
+      draw1(R.s, Y);
+    }
     c.strokeStyle = "#e76f51"; c.lineWidth = 1.5; c.beginPath(); c.moveTo(X(fr), y0); c.lineTo(X(fr), y0 + h); c.stroke();
     c.font = "bold 12px system-ui"; c.fillStyle = css("--ink"); c.fillText(title, x0 + 6, y0 + 15);
     let tx = x0 + 12 + c.measureText(title).width; c.font = "11px system-ui";
@@ -334,16 +349,23 @@ export function initRunMsk({ host, tr }) {
     // right column, one shared time axis
     const gap = 8, jh = ph * 0.17, fhh = ph * 0.28, bh = ph - 3 * (jh + gap) - fhh - gap;
     const JN = [tr("rm_hip"), tr("rm_knee"), tr("rm_ankle")];
+    // each muscle's moment = force x moment arm (+ the reserve), N·m/kg, stacked under the net moment
+    const stk = [0, 1, 2].map((d) => {
+      const items = MUS.map((m, i) => ({ n: m.n, col: MCOL[i], v: R.so.map((o) => o.F[i] * m.r[d] / BM) })).filter((it) => m0(it))
+        .concat([{ n: RES[d], col: RCOL[d], res: true, v: R.so.map((o) => o.res[d] / BM) }]).filter((it) => !hide.has(it.n));
+      return { items, pos: R.so.map((_, i) => items.reduce((s, it) => s + Math.max(0, it.v[i]), 0)), neg: R.so.map((_, i) => items.reduce((s, it) => s + Math.min(0, it.v[i]), 0)) };
+    });
+    function m0(it) { return it.v.some((v) => v !== 0); }
     for (let d = 0; d < 3; d++) {
       const y = py + d * (jh + gap);
       panel(c, px, y, pw, jh, JN[d],
         { lab: tr("rm_angAx"), s: [{ v: R.ik.q.map((q) => deg(q[d + 2])), col: acc }, { v: R.ik.Q.map((q) => deg(q[d + 2])), col: acc, dash: true }] },
-        { lab: tr("rm_momAx"), s: [{ v: R.id.map((m) => m[d] / BM), col: mom }, { v: R.id0.map((m) => m[d] / BM), col: mom, dash: true }] }, fr);
+        { lab: tr("rm_momAx"), s: [{ v: R.id.map((m) => m[d] / BM), col: mom, lw: 3 }, { v: R.id0.map((m) => m[d] / BM), col: mom, dash: true },
+          { v: stk[d].pos, hide: true }, { v: stk[d].neg, hide: true }] }, fr, stk[d].items);
     }
     const fy = py + 3 * (jh + gap);
-    const ms = MUS.map((m, i) => ({ n: m.n, v: R.so.map((o) => o.F[i] / (BM * G)), col: MCOL[i], lw: 2 })).filter((s) => !hide.has(s.n));
-    const rs = RES.map((n, j) => ({ n, v: R.so.map((o) => o.res[j]), col: RCOL[j], lw: 2, dash: true })).filter((s) => !hide.has(s.n));
-    panel(c, px, fy, pw, fhh, tr("rm_forces"), ms.length ? { lab: "BW", s: ms } : null, rs.length ? { lab: tr("rm_resAx"), s: rs } : null, fr);
+    const ms = MUS.map((m, i) => ({ n: m.n, v: R.so.map((o) => o.a[i] * 100), col: MCOL[i], lw: 2 })).filter((s) => !hide.has(s.n));
+    panel(c, px, fy, pw, fhh, tr("rm_actLines"), ms.length ? { lab: "%", s: ms.concat([{ v: [100], hide: true }]) } : null, null, fr);
     // activation bars now
     const by = fy + fhh + gap, items = MUS.map((m, i) => [m.n, so.a[i] * 100, MCOL[i], "%"]).concat(RES.map((n, j) => [n, so.res[j], RCOL[j], "N·m"])).filter((it) => !hide.has(it[0]));
     c.fillStyle = css("--card"); c.fillRect(px, by, pw, bh); c.strokeStyle = css("--line"); c.strokeRect(px, by, pw, bh);
