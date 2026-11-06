@@ -119,12 +119,12 @@ export function simHTML(ctx) {
     </div>
     ${ctx.quick ? quickHTML(ctx) : ""}
     ${ctx.err ? `<p class="note banner" style="margin:8px 0 0">${esc(ctx.err)}</p>` : ""}
+    ${ctx.quick ? "" : `<div class="simModel" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button type="button" class="ghost" data-c3d>${t("sim_c3d_btn")}</button><input type="file" ${acceptAttr(".c3d")} multiple data-c3dfile hidden>
+      <span class="sub">${t("sim_c3d_note")}</span>${c3dMsg ? `<span class="sub">${esc(c3dMsg)}</span>` : ""}</div>`}
     <div class="simTools">${sectionsHTML}</div>
     ${ctx.quick ? quickFooterHTML(ctx) : ""}
-    <p class="note" style="margin:10px 0 0">${t("sim_templatesNote")}</p>
-    ${ctx.quick ? "" : `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">
-      <button type="button" class="ghost" data-c3d>${t("sim_c3d_btn")}</button><input type="file" ${acceptAttr(".c3d")} multiple data-c3dfile hidden>
-      <span class="sub">${t("sim_c3d_note")}</span>${c3dMsg ? `<span class="sub">${esc(c3dMsg)}</span>` : ""}</div>`}`;
+    <p class="note" style="margin:10px 0 0">${t("sim_templatesNote")}</p>`;
 }
 
 /** A slot's label: a tool-specific key first (sim_slot_id_grf_mot), then the slot's, then the engine's English. */

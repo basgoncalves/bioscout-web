@@ -77,10 +77,26 @@ def _group_of(name):
 
 
 # ------------------------------------------------------------------ EMG
-def emg_envelopes(emg_path, t_out, muscles, log=print):
-    """-> (excitations (n, M) in [0,1] or NaN for muscles without EMG, {muscle: channel})."""
+def emg_envelopes(emg_path, t_out, muscles, log=print, emg_map=None):
+    """-> (excitations (n, M) in [0,1] or NaN for muscles without EMG, {muscle: channel}).
+    emg_map: {channel: [muscles]} (bioscout's session.yaml emg_map). With it the channels are
+    used exactly as given -- already filtered and normalised, as CEINMS.exe reads them -- and
+    mapped to exactly those muscles; without it the channels are recognised by name and
+    enveloped / normalised here."""
     cols, data, _ = read_sto(emg_path)
     t = data[:, cols.index("time")]
+    if emg_map:
+        out = np.full((len(t_out), len(muscles)), np.nan); used = {}
+        for ch, mus in emg_map.items():
+            if ch not in cols:
+                log(f"[ceinms] EMG channel {ch} not in {os.path.basename(emg_path)}")
+                continue
+            x = np.clip(np.interp(t_out, t, data[:, cols.index(ch)].astype(float)), 0, 1)
+            for mu in (mus if isinstance(mus, (list, tuple)) else [mus]):
+                if mu in muscles:
+                    out[:, muscles.index(mu)] = x; used[mu] = ch
+        log(f"[ceinms] EMG (emg_map): {len(set(used.values()))} channel(s) drive {len(used)} muscle(s)")
+        return out, used
     fs = 1.0 / np.median(np.diff(t))
     out = np.full((len(t_out), len(muscles)), np.nan); used = {}
     for ci, c in enumerate(cols):
@@ -127,7 +143,9 @@ def activation(u, t, A=-1.0, t_act=0.015, t_deact=0.05):
 
 # ------------------------------------------------------------------ the shared set-up
 class Problem:
-    def __init__(self, model_path, coords_mot, id_sto, emg_mot=None, t_range=None, cutoff=6.0, log=print):
+    def __init__(self, model_path, coords_mot, id_sto, emg_mot=None, t_range=None, cutoff=6.0, log=print, emg_map=None,
+                 weighting="ceinms", passive=False):
+        self.weighting = weighting
         model = model_path if isinstance(model_path, Model) else Model(model_path)
         self.model, self.log = model, log
         paths = Paths(model, model.path)
@@ -151,12 +169,20 @@ class Problem:
         lts = np.array([mu["lts"] for mu in self.mus]); a0 = np.array([mu["alpha"] for mu in self.mus])
         vmax = np.array([mu["vmax"] for mu in self.mus])
         lm = np.sqrt(np.maximum(L - lts, 1e-4) ** 2 + (lopt * np.sin(a0)) ** 2); cosa = np.maximum(L - lts, 1e-4) / lm
-        vm = np.gradient(lm, t, axis=0)
+        # fibre velocity from the joint velocities (as so.py): dL/dt = -sum_c R_c qdot_c. A finite
+        # difference of the length rings where a wrap object engages and gave single-frame spikes.
+        qd = np.gradient(Q[:, [model.coord_order.index(c) for c in coords]], t, axis=0)
+        vm = -np.einsum("ncm,nc->nm", R, qd) * cosa
         self.G = F0 * f_active(lm / lopt) * f_velocity(vm / (vmax * lopt)) * cosa      # force per unit activation
-        self.P = F0 * f_passive(lm / lopt) * cosa
+        # passive fibre force: off by default. With a rigid tendon the whole musculotendon stretch
+        # lands in the fibre, so e.g. soleus sits on its passive curve all trial (~1-1.5 kN each,
+        # ~4.5 kN summed over the legs on K2L walking) and the active muscles then fight it --
+        # contact forces far above in vivo. CEINMS.exe's elastic tendon takes that stretch (its
+        # passive forces stay near zero); OpenSim's static optimisation leaves passive out too.
+        self.P = F0 * f_passive(lm / lopt) * cosa if passive else np.zeros_like(self.G)
         self.u_emg = None; self.emg_map = {}
         if emg_mot:
-            self.u_emg, self.emg_map = emg_envelopes(emg_mot, t, self.names, log)
+            self.u_emg, self.emg_map = emg_envelopes(emg_mot, t, self.names, log, emg_map=emg_map)
         log(f"[ceinms] {len(t)} frames, {len(self.names)} muscles, {len(coords)} coordinates: {', '.join(coords)}")
 
     def a_emg(self, A):
@@ -168,25 +194,40 @@ class Problem:
                 out[:, k] = activation(self.u_emg[:, k], self.t, A)
         return out
 
-    def solve(self, alpha, beta, gamma, strength=None, A=-1.0, frames=None, delta=0.5):
-        """-> activations (n, M), forces (n, M), moments (n, C)."""
+    def solve(self, alpha, beta, gamma, strength=None, A=-1.0, frames=None, delta=None, weighting=None):
+        """-> activations (n, M), forces (n, M), moments (n, C).
+
+        weighting "ceinms" (default): CEINMS's hybrid objective as CEINMS.exe sums it, per frame
+            alpha * sum_dof (M_muscles - M_ID)^2 [N m]  +  beta * sum_m a^2  +  gamma * sum_emg (a - a_emg)^2
+          so the moment term (N m^2) outweighs the EMG term (activation^2) unless gamma is large,
+          as in CEINMS.exe. No smoothing term (delta 0).
+        weighting "normalised" (the earlier browser version): moments in fractions of each
+          coordinate's range, beta and gamma per muscle, plus a smoothing term delta (0.5)."""
+        weighting = weighting or self.weighting
+        if delta is None:
+            delta = 0.5 if weighting == "normalised" else 0.0
         s = np.ones(len(self.names)) if strength is None else strength
         G, P = self.G * s, self.P * s
         ae = self.a_emg(A)
         idx = range(len(self.t)) if frames is None else frames
         nM = len(self.names); X = np.zeros((len(self.t), nM)); prev = np.full(nM, 0.05)
-        sc = 1.0 / np.maximum(np.ptp(self.M, axis=0), 1.0)          # moments in fractions of each coordinate's range
+        if weighting == "normalised":
+            sc = 1.0 / np.maximum(np.ptp(self.M, axis=0), 1.0)          # moments in fractions of each coordinate's range
+            nb = np.sqrt(nM)
+        else:
+            sc = np.ones(len(self.coords)); nb = 1.0
         for i in idx:
             blocks, rhs = [], []
             if alpha > 0:
                 blocks.append(np.sqrt(alpha) * sc[:, None] * (self.R[i] * G[i][None])); rhs.append(np.sqrt(alpha) * sc * (self.M[i] - self.R[i] @ P[i]))
-            blocks.append(np.sqrt(beta + 1e-6) * np.eye(nM) / np.sqrt(nM)); rhs.append(np.zeros(nM))
+            blocks.append(np.sqrt(beta + 1e-6) * np.eye(nM) / nb); rhs.append(np.zeros(nM))
             if gamma > 0 and ae is not None:
                 have = np.isfinite(ae[i])
                 if have.any():
-                    blocks.append(np.sqrt(gamma) * np.eye(nM)[have] / np.sqrt(have.sum())); rhs.append(np.sqrt(gamma) * ae[i][have] / np.sqrt(have.sum()))
+                    ng = np.sqrt(have.sum()) if weighting == "normalised" else 1.0
+                    blocks.append(np.sqrt(gamma) * np.eye(nM)[have] / ng); rhs.append(np.sqrt(gamma) * ae[i][have] / ng)
             if delta > 0 and frames is None:
-                blocks.append(np.sqrt(delta) * np.eye(nM) / np.sqrt(nM)); rhs.append(np.sqrt(delta) * prev / np.sqrt(nM))
+                blocks.append(np.sqrt(delta) * np.eye(nM) / nb); rhs.append(np.sqrt(delta) * prev / nb)
             r = lsq_linear(np.vstack(blocks), np.concatenate(rhs), bounds=(0.0, 1.0), method="bvls")
             X[i] = prev = r.x
         F = X * G + P
@@ -204,8 +245,8 @@ class Problem:
 
 # ------------------------------------------------------------------ calibration
 def calibrate(model_path, coords_mot, id_sto, emg_mot, out_dir, approach="hybrid", alpha=None, beta=None, gamma=None,
-              shapes=(-3, -2, -1, -0.5, -0.01), t_range=None, log=print):
-    pb = Problem(model_path, coords_mot, id_sto, emg_mot, t_range, log=log)
+              shapes=(-3, -2, -1, -0.5, -0.01), t_range=None, log=print, emg_map=None):
+    pb = Problem(model_path, coords_mot, id_sto, emg_mot, t_range, log=log, emg_map=emg_map)
     a0, b0, g0 = APPROACHES.get(approach, APPROACHES["hybrid"])
     alpha, beta, gamma = (a0 if alpha is None else alpha), (b0 if beta is None else beta), (g0 if gamma is None else gamma)
     if pb.u_emg is None or not pb.emg_map:
@@ -283,8 +324,8 @@ def _write(pb, out_dir, tag, X, F, Mm, A):
 
 def execute(model_path, coords_mot, id_sto, out_dir, emg_mot=None, approach="hybrid", mode="execution",
             alpha=None, beta=None, gamma=None, gammas=(1, 10, 30, 100, 300), tol=None, calibration=None,
-            t_range=None, log=print):
-    pb = Problem(model_path, coords_mot, id_sto, emg_mot, t_range, log=log)
+            t_range=None, log=print, emg_map=None):
+    pb = Problem(model_path, coords_mot, id_sto, emg_mot, t_range, log=log, emg_map=emg_map)
     a0, b0, g0 = APPROACHES.get(approach, APPROACHES["hybrid"])
     alpha, beta, gamma = (a0 if alpha is None else alpha), (b0 if beta is None else beta), (g0 if gamma is None else gamma)
     A = -1.0

@@ -72,11 +72,17 @@ def _xyz(cols, data, ident, t_src, t_dst):
 
 
 def _lowpass(X, t, cutoff):
+    """As OpenSim's tools filter coordinates (Storage::pad(n/2) + lowpassIIR): pad each end with
+    half the signal, reflected about the end point, then a 3rd-order Butterworth forward and back."""
     if not cutoff or cutoff <= 0 or len(t) < 12:
         return X
     fs = 1.0 / np.median(np.diff(t))
-    b, a = butter(2, min(cutoff / (fs / 2), 0.99))
-    return filtfilt(b, a, X, axis=0, padlen=min(3 * max(len(a), len(b)), len(t) - 1))
+    b, a = butter(3, min(cutoff / (fs / 2), 0.99))
+    X = np.asarray(X, float); n = len(X); p = n // 2
+    pre = 2 * X[0] - X[p:0:-1]
+    post = 2 * X[-1] - X[-2:-p - 2:-1]
+    Y = filtfilt(b, a, np.concatenate([pre, X, post]), axis=0, padlen=0)
+    return Y[p:p + n]
 
 
 # ------------------------------------------------------------------ kinematics

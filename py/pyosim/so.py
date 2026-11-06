@@ -17,6 +17,7 @@ from .model import Model
 from .muscles import Paths
 from .io import read_sto, write_mot
 from . import id as idtool
+from . import millard
 
 
 def read_actuators(*paths):
@@ -45,7 +46,10 @@ def f_velocity(v):                     # v: fibre velocity / (vmax * lopt), shor
     return np.where(v <= 0, (1 + v) / (1 - v / 0.25), 1.8 - 0.8 * (1 + 0.0) / (1 + v * 7.56))
 
 
-def run(model_path, coords_mot, id_sto, out_dir, actuators=None, t_range=None, cutoff=6.0, log=print, prefix="SO"):
+def run(model_path, coords_mot, id_sto, out_dir, actuators=None, t_range=None, cutoff=6.0, log=print, prefix="SO",
+        passive=False):
+    """passive=False (default) matches OpenSim's StaticOptimization, which applies only the active
+    fibre force a * F0 * fl * fv * cos(pennation); True adds the passive fibre force on top."""
     model = model_path if isinstance(model_path, Model) else Model(model_path)
     osim = model_path if isinstance(model_path, str) else getattr(model, "path", None)
     paths = Paths(model, osim)
@@ -60,6 +64,7 @@ def run(model_path, coords_mot, id_sto, out_dir, actuators=None, t_range=None, c
     acts_on = {c for c, *_ in act.values()}
     names_c = [c for c in model.free if not model.coords[c].locked]
     L, R = paths.moment_arms(Q, names_c)                         # (n, M), (n, C, M)
+    R_all = R
     moves = (np.abs(R).max(axis=(0, 2)) > 1e-4) | np.array([c in acts_on for c in names_c])
     cidx = [k for k, c in enumerate(names_c) if moves[k]]
     coords = [names_c[k] for k in cidx]; R = R[:, cidx]
@@ -70,9 +75,25 @@ def run(model_path, coords_mot, id_sto, out_dir, actuators=None, t_range=None, c
     a0 = np.array([m["alpha"] for m in mus]); vmax = np.array([m["vmax"] for m in mus])
     h = lopt * np.sin(a0)
     lm = np.sqrt(np.maximum(L - lts, 1e-4) ** 2 + h ** 2); cosa = np.maximum(L - lts, 1e-4) / lm
-    vm = np.gradient(lm, t, axis=0)
-    Fa = F0 * f_active(lm / lopt) * f_velocity(vm / (vmax * lopt)) * cosa      # per unit activation
-    Fp = F0 * f_passive(lm / lopt) * cosa
+    # fibre velocity as OpenSim: musculotendon speed = -sum(moment arm x coordinate speed), coordinate
+    # speeds from a quintic spline of the filtered coordinates; with a rigid tendon the fibre moves
+    # at that speed x cos(pennation). Differentiating the length itself rings wherever a path
+    # jumps onto or off a wrap surface (a kink in the length), e.g. -9 l0/s for one frame of glmax1.
+    from scipy.interpolate import make_interp_spline
+    Qd = make_interp_spline(t, Q, k=5, axis=0).derivative()(t) if len(t) > 6 else np.gradient(Q, t, axis=0)
+    ci_all = [model.coord_order.index(c) for c in names_c]
+    vm = -np.einsum("ncm,nc->nm", R_all, Qd[:, ci_all]) * cosa
+    nl, nv = lm / lopt, vm / (vmax * lopt)
+    fl, fv = f_active(nl), f_velocity(nv)                                     # Thelen-type, for non-Millard muscles
+    curves = millard.curves_from_osim(osim) if osim else {}
+    for k, m in enumerate(mus):
+        if m["name"] in curves:                                               # the model's own Millard curves
+            cfl, cfv = curves[m["name"]]
+            fl[:, k] = cfl(nl[:, k]); fv[:, k] = cfv(nv[:, k])
+    Fa = F0 * fl * fv * cosa                                                  # per unit activation
+    Fp = F0 * f_passive(nl) * cosa if passive else np.zeros_like(Fa)
+    log(f"[so] {sum(m['name'] in curves for m in mus)}/{len(mus)} muscles on Millard curves; passive fibre force "
+        + ("included" if passive else "left out (as OpenSim)"))
     an = list(act); A_c = np.zeros((len(coords), len(an))); opt = np.array([act[a][1] for a in an])
     for j, a in enumerate(an):
         if act[a][0] in coords: A_c[coords.index(act[a][0]), j] = opt[j]

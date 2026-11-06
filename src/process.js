@@ -754,6 +754,15 @@ export function mountProcess(root, { t, download }) {
   const P = makeProcessor();
   const S = P.S;
   let colFilter = "", out = [];
+  /* The channel list is rebuilt on every render, which resets its scroll to
+   * the top -- so ticking the tenth channel used to throw the list back to the
+   * first. Remembered here and put back after the rebuild. */
+  let chanScroll = 0;
+  /* Series switched off by clicking the legend. Keyed by label, because that
+   * is what the legend shows and what survives a re-render. Separate from the
+   * tick boxes on purpose: a channel can stay ticked (and stay in the table
+   * and the export) while being hidden from a crowded plot. */
+  const hidden = new Set();
   const vis = { toolTab: 0, minmax: false, show3d: false, view: { yaw: 0.6, pitch: 0.35, zoom: 1, up: null, labels: false, frame: 0 }, playing: false, speed: 1, box: null, boxFor: null };
   const cursors = S.cursors;   // dataset name -> [tA, tB]; the engine reads them for "bw ab" / "quiet ab"
 
@@ -815,8 +824,59 @@ export function mountProcess(root, { t, download }) {
   }
 
   // ---- the plot card -------------------------------------------------------------
+  function legendOf(series) {
+    return  `<div class="sub prLegend" style="font-size:16px;display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 0">${series.map((s) => {
+      const off = hidden.has(s.label);
+      return `<button type="button" class="prLegItem" data-hide="${escX(s.label)}" title="${t(off ? "pr_legendShow" : "pr_legendHide")}"
+        style="background:none;border:0;padding:0;margin:0;width:auto;font:inherit;color:inherit;cursor:pointer;opacity:${off ? ".4" : "1"}">
+        <i style="display:inline-block;width:12px;height:0;border-top:2px ${s.dash ? (s.dash === "2 3" ? "dotted" : "dashed") : "solid"} ${s.color};vertical-align:middle"></i>
+        <span style="${off ? "text-decoration:line-through" : ""}">${escX(s.label)}</span></button>`;
+    }).join("")}</div>`;
+  }
+
+  /**
+   * Centre-of-pressure column pairs in this dataset.
+   *
+   * A CoP is two columns that belong together -- the x and the y of one plate
+   * -- and plotting them against time says almost nothing, while plotting them
+   * against each other is the standard picture of a quiet-standing trial: the
+   * sway path a clinician reads at a glance. The pairing is by name, which is
+   * how C3D and .mot files carry it (FP1 CoPx / FP1 CoPy, COP_x / COP_y,
+   * ground_force_px / _py).
+   */
+  function copPairs(ds) {
+    const cols = Object.keys(ds.cols || {});
+    const out2 = [];
+    for (const k of cols) {
+      const m = /^(.*?)(cop|cp|_p)[\s_]*x$/i.exec(k.trim());
+      if (!m) continue;
+      const y = cols.find((c) => c !== k && c.toLowerCase().replace(/\s+/g, "") === k.toLowerCase().replace(/\s+/g, "").replace(/x$/i, "y"));
+      if (y) out2.push({ x: k, y, label: (m[1] || k).trim() || k });
+    }
+    return out2;
+  }
+
+  /* The CoP sway path: x against y with equal axes, never against time. The
+   * plate's own millimetres, so the picture is the real size of the sway. */
+  function copPlotHTML(ds) {
+    const pairs = copPairs(ds);
+    const [i0, i1] = span(ds);
+    const series = pairs.map((p2, i) => ({
+      x: ds.cols[p2.x].slice(i0, i1), y: ds.cols[p2.y].slice(i0, i1),
+      color: COLORS[i % COLORS.length], label: p2.label,
+    })).filter((q) => q.x.some(fin) && q.y.some(fin));
+    const close = ` <button type="button" class="ghost" id="prCopClose" style="margin:0 0 0 6px;width:auto;padding:2px 10px;font-size:16px">${t("pr_backProc")}</button>`;
+    if (!series.length) return `<div class="prPlotTitle">${t("pr_copTitle")}${close}</div><p class="note prEmpty">${t("pr_copEmpty")}</p>`;
+    const shown = series.filter((q) => !hidden.has(q.label));
+    const u = ds.units[pairs[0].x] || "mm";
+    return `<div class="prPlotTitle">${t("pr_copTitle")}${close}</div>
+      <div class="prPlot">${chartSVG({ series: shown, xLabel: `x (${u})`, yLabel: `y (${u})`, equal: true, H: 300 }).svg}</div>
+      ${legendOf(series)}
+      <p class="note">${t("pr_copNote")}</p>`;
+  }
+
   function plotCardHTML(ds) {
-    if (!S.plot.cols.length && !S.plot.curves && !S.plot.xy) {
+    if (!S.plot.cols.length && !S.plot.curves && !S.plot.xy && !S.plot.cop) {
       let k = Object.keys(ds.cols)[0];
       try { if (D.verticalForceCandidates(ds).length) k = D.verticalForce(ds).col; } catch { /* no force */ }
       if (k) S.plot.cols = [k];
@@ -825,10 +885,20 @@ export function mountProcess(root, { t, download }) {
     const x = ds.time.slice(i0, i1), xr = [ds.time[i0], ds.time[i1 - 1]];
     const cur = curOf(ds);
     const marksFor = (keys) => (keys.includes(S.plot.markCol) ? S.plot.marks.filter(([tm]) => tm >= xr[0] && tm <= xr[1]) : []);
-    const legend = (series) => `<div class="sub" style="font-size:16px;display:flex;flex-wrap:wrap;gap:4px 12px;margin:2px 0 0">${series.map((s) => `<span><i style="display:inline-block;width:12px;height:0;border-top:2px ${s.dash ? (s.dash === "2 3" ? "dotted" : "dashed") : "solid"} ${s.color};vertical-align:middle"></i> ${escX(s.label)}</span>`).join("")}</div>`;
-    const plotBox = (id, title, series, unit, marks, extra = "", unitR = "") => `<div class="prPlotTitle">${title}${extra}</div>${series.length
-      ? `<div class="prPlot" id="${id}">${chartSVG({ series, xLabel: t("pr_timeS"), yLabel: unit, yLabelR: unitR, marks, cursors: cur, xRange: xr, H: 250 }).svg}<div class="prReadout sub" style="font-size:16px;min-height:16px;margin:2px 0 0"></div></div>${legend(series)}`
-      : `<p class="note prEmpty">${id === "prRaw" ? t("pr_tickToPlot") : t("pr_vNone")}</p>`}`;
+    /* Clicking a legend entry hides that line. With a dozen channels on one
+     * plot, finding the right tick box in the list is slower than tapping the
+     * line you want gone -- and the one you want gone is often the one off the
+     * top of the axis, whose tick box is nowhere near your eyes. */
+    const legend = legendOf;
+
+    /* The legend lists every series; only the shown ones are drawn, so a
+     * hidden line can be brought back from the same place it was dismissed. */
+    const plotBox = (id, title, series, unit, marks, extra = "", unitR = "") => {
+      const shown = series.filter((q) => !hidden.has(q.label));
+      return `<div class="prPlotTitle">${title}${extra}</div>${series.length
+        ? `<div class="prPlot" id="${id}">${chartSVG({ series: shown, xLabel: t("pr_timeS"), yLabel: unit, yLabelR: unitR, marks, cursors: cur, xRange: xr, H: 250 }).svg}<div class="prReadout sub" style="font-size:16px;min-height:16px;margin:2px 0 0"></div></div>${legend(series)}`
+        : `<p class="note prEmpty">${id === "prRaw" ? t("pr_tickToPlot") : t("pr_vNone")}</p>`}`;
+    };
     const rawSeries = pl.raw.map((r) => ({ x, y: r.y.slice(i0, i1), color: r.color, label: r.key }));
     // min / max of every curve between the cursors, marked on the plot (Basic tab)
     const mmMarks = (list) => {
@@ -849,6 +919,8 @@ export function mountProcess(root, { t, download }) {
         const series = pn.series.map((q, i) => ({ ...q, color: q.color || COLORS[i % COLORS.length] }));
         return `<div class="prPlotTitle">${escX(pn.title)}${pi === 0 ? clear : ""}</div><div class="prPlot">${chartSVG({ series, xLabel: pn.xLabel || "", H: 260 }).svg}</div>${legend(series.filter((q) => !q.band || q.label))}`;
       }).join("");
+    } else if (S.plot.cop) {
+      bottom = copPlotHTML(ds);
     } else if (S.plot.curves || S.plot.xy) {
       const clear = ` <button type="button" class="ghost" id="prResultClose" style="margin:0 0 0 6px;width:auto;padding:2px 8px;font-size:16px">${t("pr_backProc")}</button>`;
       let ch;
@@ -893,6 +965,11 @@ export function mountProcess(root, { t, download }) {
       <div class="prVis">
         <div class="prChanCol">
           <input id="prColFilter" type="search" placeholder="${t("pr_filterCols")}" value="${escX(colFilter)}">
+          <div class="row" style="gap:6px;margin:4px 0 2px">
+            <button type="button" class="ghost" id="prColAll" style="margin:0;width:auto;padding:4px 10px;font-size:15.5px">${t("pr_selectAll")}</button>
+            <button type="button" class="ghost" id="prColNone" style="margin:0;width:auto;padding:4px 10px;font-size:15.5px">${t("pr_clearSel")}</button>
+          </div>
+          ${copPairs(ds).length ? `<button type="button" class="ghost" id="prCop" style="margin:2px 0 4px;width:auto;padding:4px 10px;font-size:15.5px">${t("pr_copPlot")}</button>` : ""}
           <div class="prChanList">${chans.map((k) => `<label class="prCol"><input type="checkbox" data-col="${escX(k)}"${S.plot.cols.some((c) => rootOf(ds, c) === k) ? " checked" : ""}> ${escX(k)}${pl.tree.derived[k] ? ` <span class="sub" style="font-size:15px">→ ${pl.tree.derived[k].length}</span>` : ""}${ds.units[k] ? ` <span class="sub" style="font-size:15px">(${escX(ds.units[k])})</span>` : ""}</label>`).join("") || `<p class="note">${t("pr_noCols")}</p>`}</div>
           ${ds.meta?.text ? `<p class="note" style="margin:6px 0 0">${t("pr_textCols")}: ${Object.keys(ds.meta.text).map(escX).join(", ")}</p>` : ""}
         </div>
@@ -979,6 +1056,7 @@ export function mountProcess(root, { t, download }) {
         <b style="font-size:16px">${t("pr_title")}</b>
         <span style="display:flex;gap:6px">
           ${document.documentElement.dataset.fromSim ? `<button type="button" class="ghost labSimBtn" style="margin:0;width:auto;padding:6px 12px">${t("pr_backSim")}</button>` : ""}
+          <button type="button" class="ghost labBackBtn" style="margin:0;width:auto;padding:6px 12px">${t("labBack")}</button>
           <button type="button" class="ghost labHomeBtn" style="margin:0;width:auto;padding:6px 12px">${t("labHome")}</button>
         </span>
       </div>
@@ -1037,6 +1115,15 @@ export function mountProcess(root, { t, download }) {
       .replace(/<line class="prCursor"[^>]*\/>/g, "");
   }
 
+  /* "plot ..." resets the result views, which the tick boxes must not do --
+   * ticking a channel while a result is open should leave the result alone. */
+  function keepingResult(fn) {
+    const keep = { curves: S.plot.curves, xy: S.plot.xy, panels: S.plot.panels, cop: S.plot.cop };
+    fn();
+    Object.assign(S.plot, keep);
+    render();
+  }
+
   function wire(ds) {
     const q = (s) => root.querySelector(s);
     q("#prFiles").onchange = (e) => load([...e.target.files]);
@@ -1066,17 +1153,34 @@ export function mountProcess(root, { t, download }) {
     q("#prT0").onchange = setWin; q("#prT1").onchange = setWin;
     q("#prWinAll").onclick = () => exec("window all");
     if (q("#prZoomCur")) q("#prZoomCur").onclick = () => { const c = curOf(ds).slice().sort((x, y) => x - y); exec(`window ${r3(c[0])} ${r3(c[1])}`); };
-    if (q("#prResultClose")) q("#prResultClose").onclick = () => { S.plot.curves = null; S.plot.xy = null; S.plot.panels = null; render(); };
+    if (q("#prResultClose")) q("#prResultClose").onclick = () => { S.plot.curves = null; S.plot.xy = null; S.plot.panels = null; S.plot.cop = null; render(); };
     if (q("#prShow3d")) q("#prShow3d").onclick = () => { vis.show3d = !vis.show3d; vis.playing = false; render(); };
+    /* Put the channel list back where it was: a tick must not scroll the list. */
+    const list = root.querySelector(".prChanList");
+    if (list) { list.scrollTop = chanScroll; list.onscroll = () => { chanScroll = list.scrollTop; }; }
+    if (q("#prColAll")) q("#prColAll").onclick = () => {
+      // Everything the search box is currently showing, not every column in
+      // the file: with a filter typed, "select all" means all of these.
+      const ks = [...root.querySelectorAll("[data-col]")].map((c) => c.dataset.col);
+      keepingResult(() => exec(`plot ${ks.map(quote).join(" ")}`.trim()));
+    };
+    if (q("#prColNone")) q("#prColNone").onclick = () => { hidden.clear(); keepingResult(() => exec("plot")); };
+    if (q("#prCop")) q("#prCop").onclick = () => { S.plot.cop = true; S.plot.curves = null; S.plot.xy = null; S.plot.panels = null; render(); };
+    if (q("#prCopClose")) q("#prCopClose").onclick = () => { S.plot.cop = null; render(); };
+    root.querySelectorAll("[data-hide]").forEach((b) => {
+      b.onclick = () => {
+        const k = b.dataset.hide;
+        if (hidden.has(k)) hidden.delete(k); else hidden.add(k);
+        render();
+      };
+    });
     const f = q("#prColFilter");
     f.oninput = () => { colFilter = f.value; const pos = f.selectionStart; render(); const g = root.querySelector("#prColFilter"); g.focus(); g.setSelectionRange(pos, pos); };
     root.querySelectorAll("[data-col]").forEach((c) => {
       c.onchange = () => {
         const k = c.dataset.col, now = [...new Set(S.plot.cols.map((x) => rootOf(ds, x)))];
         const next = c.checked ? [...now.filter((x) => x !== k), k] : now.filter((x) => x !== k);
-        const keepRes = { curves: S.plot.curves, xy: S.plot.xy, panels: S.plot.panels };
-        exec(`plot ${next.map(quote).join(" ")}`.trim());
-        Object.assign(S.plot, keepRes); render();
+        keepingResult(() => exec(`plot ${next.map(quote).join(" ")}`.trim()));
       };
     });
     root.querySelectorAll("[data-ttab]").forEach((b) => { b.onclick = () => { vis.toolTab = +b.dataset.ttab; render(); }; });

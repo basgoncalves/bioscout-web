@@ -42,7 +42,7 @@ class Func:
             self.c = float(f.findtext("value"))
         elif f.tag in ("SimmSpline", "NaturalCubicSpline", "GCVSpline"):
             self.x = _vec(f.findtext("x")); self.y = _vec(f.findtext("y"))
-            self._spline()
+            self._fmm_spline() if f.tag == "SimmSpline" else self._spline()
         elif f.tag == "MultiplierFunction":
             self.inner = Func(f.find("function"))
             self.scale = float(f.findtext("scale") or 1)
@@ -51,7 +51,48 @@ class Func:
         else:
             raise NotImplementedError(f"function {f.tag}")
 
-    def _spline(self):          # natural cubic spline (SimmSpline is one)
+    def _fmm_spline(self):
+        """OpenSim's SimmSpline: the Forsythe-Malcolm-Moler cubic spline (SIMM's calc_spline_coefficients),
+        end conditions from the third derivative of the cubic through the first / last four points
+        (fewer than four points: the 'parabolic' ends). Coefficients as y + b dx + c dx^2 + d dx^3."""
+        x, y = self.x.astype(float), self.y.astype(float); n = len(x)
+        b = np.zeros(n); c = np.zeros(n); d = np.zeros(n)
+        if n < 2:
+            self.b, self.cc, self.d = b, c, d; return
+        if n < 3:
+            b[0] = b[1] = (y[1] - y[0]) / (x[1] - x[0])
+            self.b, self.cc, self.d = b, c, d; return
+        nm1 = n - 1
+        d[0] = x[1] - x[0]
+        c[1] = (y[1] - y[0]) / d[0]
+        for i in range(1, nm1):
+            d[i] = x[i + 1] - x[i]
+            b[i] = 2.0 * (d[i - 1] + d[i])
+            c[i + 1] = (y[i + 1] - y[i]) / d[i]
+            c[i] = c[i + 1] - c[i]
+        b[0] = -d[0]; b[nm1] = -d[n - 2]
+        c[0] = 0.0; c[nm1] = 0.0
+        if n > 3:
+            c[0] = c[2] / (x[3] - x[1]) - c[1] / (x[2] - x[0])
+            c[nm1] = c[n - 2] / (x[nm1] - x[n - 3]) - c[n - 3] / (x[n - 2] - x[n - 4])
+            c[0] = c[0] * d[0] * d[0] / (x[3] - x[0])
+            c[nm1] = -c[nm1] * d[n - 2] * d[n - 2] / (x[nm1] - x[n - 4])
+        for i in range(1, n):                                  # forward elimination
+            t = d[i - 1] / b[i - 1]
+            b[i] -= t * d[i - 1]
+            c[i] -= t * c[i - 1]
+        c[nm1] /= b[nm1]                                       # back substitution
+        for i in range(n - 2, -1, -1):
+            c[i] = (c[i] - d[i] * c[i + 1]) / b[i]
+        b[nm1] = (y[nm1] - y[n - 2]) / d[n - 2] + d[n - 2] * (c[n - 2] + 2.0 * c[nm1])
+        for i in range(nm1):
+            b[i] = (y[i + 1] - y[i]) / d[i] - d[i] * (c[i + 1] + 2.0 * c[i])
+            d[i] = (c[i + 1] - c[i]) / d[i]
+            c[i] = 3.0 * c[i]
+        c[nm1] = 3.0 * c[nm1]; d[nm1] = d[n - 2]
+        self.b, self.cc, self.d = b, c, d
+
+    def _spline(self):          # natural cubic spline (NaturalCubicSpline; GCVSpline approximated)
         x, y = self.x, self.y; n = len(x)
         if n < 3:
             self.b = np.zeros(n); self.cc = np.zeros(n); self.d = np.zeros(n)

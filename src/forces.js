@@ -218,10 +218,15 @@ export function predictForces(m, coords, nFrames, opts = {}) {
    * file that does not carry a block. */
   const pick = (pre) => m.targ.filter((n) => n.startsWith(pre));
   const actT = pick("act_"), momT = pick("mom_"), grfT = pick("grf_");
+  /* Muscle power. The model predicts a `pow_*` block for every muscle and
+   * this function used to drop it on the floor -- 80 predicted channels that
+   * never reached the app or the export. */
+  const powT = pick("pow_");
   const compT = m.targ.filter((n) => /^(hip|knee|ankle)_[rl]_f[xyz]$/.test(n));
   const idx = (names) => names.map((n) => m.targ.indexOf(n));
   const actI = idx(actT), momI = idx(momT), grfI = idx(grfT), compI = idx(compT);
-  const extra = { activations: [], moments: [], grf: [], jrfComp: [] };
+  const powI = idx(powT);
+  const extra = { activations: [], moments: [], grf: [], jrfComp: [], power: [] };
 
   for (let t = 0; t < nFrames; t++) {
     for (let j = 0; j < nIn; j++) {
@@ -236,6 +241,7 @@ export function predictForces(m, coords, nFrames, opts = {}) {
     extra.moments.push(Float64Array.from(momI, (i) => y[i] * massKg));      // N.m
     extra.grf.push(Float64Array.from(grfI, (i) => y[i] * bw));              // N
     extra.jrfComp.push(Float64Array.from(compI, (i) => y[i] * bw));         // N
+    extra.power.push(Float64Array.from(powI, (i) => y[i] * massKg));        // W
   }
   /* Zero-lag low-pass on every output series (default 6 Hz, 4th-order
    * Butterworth, forward-backward): the surrogate is evaluated frame by frame on
@@ -254,7 +260,8 @@ export function predictForces(m, coords, nFrames, opts = {}) {
         }
       };
       smoothRows(forces); smoothRows(jrf); smoothRows(loads);
-      smoothRows(extra.activations, true); smoothRows(extra.moments); smoothRows(extra.grf); smoothRows(extra.jrfComp);
+      smoothRows(extra.activations, true); smoothRows(extra.moments); smoothRows(extra.grf);
+      smoothRows(extra.jrfComp); smoothRows(extra.power);
     }
   }
   return { forces, muscleNames: m.muscles, jrf, jrfNames: m.jrfMagnitudes, missing,
@@ -262,7 +269,8 @@ export function predictForces(m, coords, nFrames, opts = {}) {
            activations: actT.length ? extra.activations : null, activationNames: actT.map((n) => n.slice(4)),
            moments: momT.length ? extra.moments : null, momentNames: momT.map((n) => n.slice(4) + "_moment"),
            grf: grfT.length ? extra.grf : null, grfNames: grfT,
-           jrfComp: compT.length ? extra.jrfComp : null, jrfCompNames: compT };
+           jrfComp: compT.length ? extra.jrfComp : null, jrfCompNames: compT,
+           power: powT.length ? extra.power : null, powerNames: powT.map((n) => n.slice(4)) };
 }
 
 /** The vector targets jointload.js needs, in the order `loads` rows carry them. */

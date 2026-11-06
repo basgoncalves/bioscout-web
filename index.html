@@ -626,13 +626,24 @@ try {
   .lmPreview { margin:0 2px 10px; }
   .lmPreview canvas { width:100%; max-width:480px; height:auto; display:block; border-radius:8px; background:#000; }
   dialog.lmReview { width:min(960px, 96vw); max-width:96vw; padding:12px; border-radius:12px; border:1px solid var(--line, #333); background:var(--card); color:var(--ink); }
-  dialog.lmReview canvas { width:100%; height:auto; display:block; background:#000; border-radius:8px; }
+  /* A portrait clip made this canvas ~1700 px tall, so on a phone the frame
+   * filled the screen and every control sat below the fold. Capped and
+   * letterboxed (canvas is a replaced element, so object-fit applies), with
+   * the dialog itself scrollable for the rest. */
+  dialog.lmReview { max-height:94vh; overflow:auto; }
+  dialog.lmReview canvas { width:100%; height:auto; max-height:52vh; object-fit:contain;
+                           display:block; margin:0 auto; background:#000; border-radius:8px; }
   dialog.lmReview .lmHead { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
   dialog.lmReview .lmX { width:auto; margin:0; padding:4px 10px; }
   dialog.lmReview .lmSlider { width:100%; margin:8px 0; }
   dialog.lmReview .lmCtl { display:flex; gap:8px; align-items:center; justify-content:space-between; }
   dialog.lmReview .lmCtl button { flex:1; margin:0; }
   dialog.lmReview .lmLabel { flex:1; text-align:center; font-variant-numeric:tabular-nums; }
+  /* The stage holds the canvas and the 1px decoder video (see lmreview.js). */
+  dialog.lmReview .lmStage { position:relative; }
+  /* The canvas takes the drag, so the browser must not treat it as a scroll. */
+  dialog.lmReview canvas { touch-action:none; cursor:crosshair; }
+  dialog.lmReview .lmApply:disabled { opacity:.45; }
   .lmReviewRow { margin-bottom:8px; }
   .glossLink { margin:12px 0 0; font-size:13px; }
   .glossLink a { color:var(--muted, inherit); }
@@ -851,6 +862,7 @@ try {
   .labDoor span { color:var(--muted); font-size:13px; line-height:1.4; }
   .labHead { display:flex; justify-content:space-between; align-items:center; gap:8px; }
   .labHead .labHomeBtn { margin:0; width:auto; padding:6px 12px; }
+  .labBackBtn { margin:0; width:auto; padding:6px 12px; }
   /* Process page (src/process.js) */
   .prDrop { display:block; border:1.5px dashed var(--line); border-radius:12px; padding:18px 12px; text-align:center;
             color:var(--muted); cursor:pointer; font-size:13.5px; }
@@ -906,6 +918,14 @@ try {
   .simFname { word-break:break-all; font-weight:600; }
   fieldset.simPreview { border:0; padding:0; margin:0; min-width:0; }
   fieldset.simPreview .simDrop { cursor:default; opacity:.75; }
+  /* Peak muscle force, one row per muscle, a bar per leg. */
+  .pfRows { display:flex; flex-direction:column; gap:7px; margin-top:6px; }
+  .pfRow { display:flex; align-items:center; gap:10px; }
+  .pfName { flex:0 0 86px; font-size:13px; color:var(--muted); }
+  .pfBars { flex:1; display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .pfBar { display:flex; align-items:center; gap:7px; }
+  .pfBar i { display:block; height:9px; border-radius:3px; }
+  .pfBar span { font-size:12px; font-variant-numeric:tabular-nums; color:var(--muted); }
   .simModel { border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-top:10px; }
   .simTool { border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-top:10px; }
   .simTool > summary { cursor:pointer; font-size:17px; }
@@ -1554,6 +1574,11 @@ try {
     <div class="card" id="summaryCard"></div>
   </section>
 
+  <!-- Developer mode: the page a finished session opens on. -->
+  <section id="viewSessionEnd" class="hidden">
+    <div class="card" id="sessionEndCard"></div>
+  </section>
+
   <section id="viewCycle" class="hidden">
     <div class="card" id="cycleCard"></div>
   </section>
@@ -1611,7 +1636,7 @@ try {
   <section id="viewPhysics" class="hidden">
     <div class="card">
       <div class="labHead"><b style="font-size:16px" data-i18n="doorPhysics">Physics playground</b>
-        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+        <button type="button" class="ghost labBackBtn" data-i18n="labBack" aria-label="Back">‹ Back</button><button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
       <div class="chips phTabs" id="phTabs"></div>
       <canvas id="phCv" class="phCv" aria-label="Simulation"></canvas>
       <div class="row bfbRow" id="phBtns"><button type="button" id="phPlay" data-i18n="ph_play">Play</button><button type="button" class="ghost" id="phReset" data-i18n="ph_reset">Reset</button></div>
@@ -1628,7 +1653,7 @@ try {
   <section id="viewBiofeedback" class="hidden">
     <div class="card">
       <div class="labHead"><b style="font-size:16px" data-i18n="doorBiofeedback">BioFeedback</b>
-        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+        <button type="button" class="ghost labBackBtn" data-i18n="labBack" aria-label="Back">‹ Back</button><button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
       <p class="note hidden bad" id="bfbNoSerial" data-i18n="bfb_noSerial">This browser cannot talk to USB devices. Use Chrome or Edge on a computer; the lamp is still shown on screen.</p>
 
       <div class="row bfbTop">
@@ -1731,7 +1756,6 @@ try {
         <small class="note" id="bfbLoadNote"></small>
       </div>
       <div class="row bfbRow">
-        <label><span data-i18n="bfb_metric">Metric</span><select id="bfbMetric"></select></label>
         <label><span data-i18n="bfb_when">Light when</span>
           <select id="bfbDir"><option value="above" data-i18n="bfb_above">above threshold</option><option value="below" data-i18n="bfb_below">below threshold</option></select></label>
       </div>
@@ -1812,6 +1836,9 @@ try {
       <canvas id="bfbAccCv" class="bfbPlot" style="height:170px" aria-label="Accelerometer"></canvas></div>
       <div id="bfbBars"></div>
       <canvas id="bfbPlot" class="bfbPlot" aria-label="Live plot"></canvas>
+      <div class="row bfbRow" id="bfbMetricRow" style="margin:2px 0 0">
+        <label><span data-i18n="bfb_metric">Metric</span><select id="bfbMetric"></select></label>
+      </div>
       <div id="bfbPlotPick" class="bfbChips"></div>
       <div id="bfbAnWrap" class="hidden"><p class="note" style="margin:10px 0 2px" data-i18n="bfb_anTitle">Live inputs (A0–A5)</p>
       <canvas id="bfbAnCv2" class="bfbPlot" style="height:110px" aria-label="Arduino inputs"></canvas>
@@ -1847,7 +1874,7 @@ try {
         <span style="display:flex;gap:6px"><button type="button" class="ghost" id="osimStep" data-i18n="sim_stepTab">Step-by-step</button>
         <button type="button" class="ghost" id="osimQuick" data-i18n="sq_tab">Quick run</button>
         <button type="button" class="ghost" id="osimBatch" data-i18n="ss_batch">Batch mode</button>
-        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></span></div>
+        <button type="button" class="ghost labBackBtn" data-i18n="labBack" aria-label="Back">‹ Back</button><button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></span></div>
       <button type="button" class="ghost hidden" id="osimToggle" style="margin:0" data-i18n="osimOpen">OpenSim trial (markers and force plates)</button>
       <div id="osimBody" class="hidden" style="margin-top:12px"></div>
     </div>
@@ -1862,7 +1889,7 @@ try {
   <section id="viewRecord" class="hidden">
     <div class="card hidden" id="labCard">
       <div class="labHead"><b data-i18n="labTitle">Lab demo</b>
-        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+        <button type="button" class="ghost labBackBtn" data-i18n="labBack" aria-label="Back">‹ Back</button><button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
       <p class="note" style="margin:4px 0 10px" data-i18n="labNote">Record a movement and read its joint angles, moments and estimated loads. No account, nothing uploaded: it all stays on this device. The numbers are estimates from video, not measurements, and this is not a medical device.</p>
       <div class="row" style="margin-bottom:11px">
         <div>
@@ -1879,8 +1906,7 @@ try {
            into the session folder open in Simulate's Batch mode. Nothing is kept in the browser. -->
       <div id="labTrialBar" class="hidden" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px">
         <div class="row" style="align-items:end">
-          <div><label for="labTrialName" data-i18n="lt_name">Trial name</label><input id="labTrialName" type="text"></div>
-          <div><button type="button" id="labTrialBtn" style="margin:0">Save trial</button></div>
+          <div style="flex:1"><label for="labTrialName" data-i18n="lt_name">Trial name</label><input id="labTrialName" type="text"></div>
         </div>
         <p class="note" id="labTrialNote" style="margin:6px 0 0" data-i18n="lt_note">The recording is kept only until this page closes: save it as a trial (2_experimental/&lt;trial&gt;/marker_experimental.trc, estimated grf.mot, video; 3_iterations/bioscout_web/&lt;trial&gt;/ joint angles and planar inverse dynamics). With a session folder open in Simulate → Batch mode, every recording is written into that session by itself.</p>
         <div class="status" id="labTrialStatus"></div>
@@ -1898,6 +1924,7 @@ try {
       <div>
         <label for="activity" data-i18n="movement">Movement</label>
         <select id="activity">
+          <option value="generic" data-i18n="generic" selected>Generic (whole trial)</option>
           <option value="auto" data-i18n="auto">Detect automatically</option>
           <option value="squat" data-i18n="squat">Squat</option>
           <option value="deadlift" data-i18n="deadlift">Deadlift / RDL</option>
@@ -1905,6 +1932,11 @@ try {
           <option value="slsquat" data-i18n="slsquat">Single-leg squat</option>
           <option value="sj" data-i18n="sj">Squat jump</option>
           <option value="cmj" data-i18n="cmj">Countermovement jump</option>
+          <!-- Gait before the sport-specific tasks: the three Bas reaches for
+               most often sat at the bottom behind a scroll. -->
+          <option value="walk" data-i18n="walk">Walking</option>
+          <option value="run" data-i18n="run">Running</option>
+          <option value="sidestep" data-i18n="sidestep">Side step</option>
           <option value="jumpshot" data-i18n="jumpshot">Basketball jump shot</option>
           <option value="kick" data-i18n="kick">Football kick</option>
           <option value="stroke" data-i18n="stroke">Tennis / padel strokes</option>
@@ -1921,9 +1953,6 @@ try {
           <option value="wallsit" data-i18n="wallsit">Wall sit</option>
           <option value="plank" data-i18n="plank">Plank</option>
           <option value="sideplank" data-i18n="sideplank">Side plank</option>
-          <option value="walk" data-i18n="walk">Walking</option>
-          <option value="run" data-i18n="run">Running</option>
-          <option value="sidestep" data-i18n="sidestep">Side step</option>
           <option value="neck" data-i18n="neck">Neck (close-up)</option>
         </select>
       </div>
@@ -1950,15 +1979,30 @@ try {
          button opens it and reads back what is set (paintLoadSummary). -->
     <button type="button" class="ghost trainOnly" id="loadBtn" style="margin-bottom:11px">
       <span id="loadSummary" data-i18n="addLoadBtn">Add load</span></button>
-    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin-bottom:11px;
-                  font-size:13.5px;color:var(--ink)">
-      <input type="checkbox" id="saveVideo" style="width:auto;margin:0">
-      <span data-i18n="keepVideo">Keep the video (export and clips)</span>
-    </label>
     <button id="startBtn" disabled data-i18n="startCamera">Start camera</button>
     <button class="ghost trainOnly" id="fileBtn" data-i18n="analyseFile">Analyse a video file</button>
     <button class="ghost trainOnly hidden" id="ytBtn" data-i18n="ytButton">From URL</button>
     <button class="ghost trainOnly hidden" id="screenRecBtn" data-i18n="srRecordScreen">Record the screen</button>
+    <!-- The tick boxes sit under the buttons they modify: with them in
+         between, the four ways to get a recording read as four unrelated
+         controls. -->
+    <div class="trainOnly" id="recOpts" style="margin:4px 2px 11px">
+    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin:0 0 8px;
+                  font-size:13.5px;color:var(--ink)">
+      <input type="checkbox" id="saveVideo" style="width:auto;margin:0">
+      <span data-i18n="keepVideo">Keep the video (export and clips)</span>
+    </label>
+    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin:0 0 8px;
+                  font-size:13.5px;color:var(--ink)">
+      <input type="checkbox" id="fileRoi" style="width:auto;margin:0">
+      <span data-i18n="fileRoi">Box the athlete first (small or crowded videos)</span>
+    </label>
+    <label class="trainOnly" style="display:flex;align-items:center;gap:8px;margin:0;
+                  font-size:13.5px;color:var(--ink)">
+      <input type="checkbox" id="camMoving" style="width:auto;margin:0">
+      <span data-i18n="camMoving">Camera was not stationary (handheld, panning)</span>
+    </label>
+    </div>
     <button class="ghost trainOnly" id="manualBtn" data-i18n="manualSet">Count reps by hand (no camera)</button>
     <div id="linkRow" class="hidden" style="margin-top:11px">
       <label for="linkUrl" data-i18n="videoLink">Video link</label>
@@ -2023,7 +2067,19 @@ try {
   </div>
 
   <div class="card hidden" id="controls">
-    <button id="recBtn" data-i18n="startRecording">Start recording</button>
+    <button id="recBtn" data-i18n="trackSet">Track set</button>
+    <div class="trainOnly" id="srcBox" style="display:flex;gap:16px;margin:10px 0 0;
+         font-size:13.5px;color:var(--ink)">
+      <label style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="useCamera" checked style="width:auto;margin:0">
+        <span data-i18n="useCamera">Camera</span></label>
+      <label style="display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="useAccel" style="width:auto;margin:0">
+        <span data-i18n="useAccel">Accelerometer</span></label>
+    </div>
+    <p class="note trainOnly" style="margin:2px 0 0" data-i18n="srcNote">The camera gives
+      angles, moments and the floor map. The accelerometer counts reps and tempo only —
+      useful when the phone is on you and nothing is filming.</p>
     <label style="display:flex;align-items:center;gap:8px;margin:10px 0 0;
                   font-size:13.5px;color:var(--ink)">
       <input type="checkbox" id="gestureOn" style="width:auto;margin:0">
@@ -2032,6 +2088,26 @@ try {
     <p class="note" style="margin:2px 0 0" data-i18n="gestureNote">Two quick fists, either hand.
       For when the phone is across the room.</p>
     <button class="ghost" id="stopBtn" data-i18n="closeCamera">Close camera</button>
+  </div>
+
+  <!-- Developer mode: the accelerometer runs for the whole session, so the
+       effort trace covers rest as well as sets (src/motionset.js). -->
+  <div class="card hidden trainOnly" id="motionCard">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">
+      <b data-i18n="motionTitle">Phone motion</b>
+      <span class="sub" id="motionState" data-i18n="motionOff">off</span>
+    </div>
+    <p class="note" style="margin:2px 0 8px" data-i18n="motionNote">Recording for the whole
+      session. Put the phone on your trunk (armband, belt or a tight pocket) and leave it
+      there. Needs https on the phone itself.</p>
+    <label style="display:flex;align-items:center;gap:8px;margin:10px 0 0;
+                  font-size:13.5px;color:var(--ink);opacity:.55">
+      <input type="checkbox" id="gpsOn" style="width:auto;margin:0" disabled>
+      <span data-i18n="gpsToggle">Also use GPS (outdoors)</span>
+    </label>
+    <p class="note" style="margin:2px 0 0" data-i18n="gpsNote">Not built yet. When it is,
+      ticking this asks for location access once. Indoors GPS is 10–50 m at best, so it
+      will only add anything outdoors.</p>
   </div>
 
   <!-- Rest between sets: a countdown, nothing saved (resttimer.js). -->
@@ -2196,8 +2272,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 131;
-window.BUILD_AT = "2026-11-05 13:59";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 159;
+window.BUILD_AT = "2026-11-05 13:37";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2242,8 +2318,17 @@ import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
          jointPositionsM } from "./src/kinematics.js";
 import { inverseDynamics } from "./src/dynamics.js";
 import { gradeReps } from "./src/repquality.js";
+import { floorPath, savePath, sessionPaths, pathMapSVG, liftReport,
+         leaderboardEntry, saveLeaderboardEntry } from "./src/postrack.js";
+import { makeEffortTrace, effortSummary, saveEffort as saveEffortTrace,
+         sessionEffort, effortTraceSVG, makeRepDetector, motionSummary,
+         saveMotionSet, sessionMotionSets, motionRepSVG } from "./src/motionset.js";
+import { sessionTotals, muscleLoad, spiderSVG, topViewSVG } from "./src/sessionreport.js";
+import { startMotion } from "./src/phonemotion.js";
 import { screenRecSupported, openScreenRecorder } from "./src/screenrec.js";
+import { makeShakeTracker, grayThumb, bodyBox as camBodyBox, stabilise } from "./src/camshake.js";
 import { jcfContributions, jcfContribSVG } from "./src/jcfcontrib.js";
+import { momentContributions, momContribSVG, MOM_DOFS } from "./src/momcontrib.js";
 import { ytSupported, openYouTubeClip } from "./src/ytclip.js";
 import { athleteSummary, taskStats, curveSummary, curveSVG, generalHTML, taskTableHTML,
          ASM_WINDOWS, ASM_METRICS, stats as asmStats, mr as asmMR } from "./src/athsummary.js";
@@ -2310,7 +2395,7 @@ import { cleanEngineUrl, engineFromSearch, fileKind, makeEngineClient, EngineErr
          pickAngles, pickMoments, markerErrors, topMuscles, worstReserve, reactionJoints,
          defaultReactionJoint, reactionForce, scaleRows, lineChartSVG, legendHTML,
          MUSCLE_COLORS } from "./src/osimlab.js";
-import { buildSessionFiles } from "./src/osimexport.js";
+import { buildSessionFiles, trialFiles } from "./src/osimexport.js";
 import { buildLabTrial, nextTrialName, saveTrialToSession } from "./src/labtrial.js";
 import { saveFiles } from "./src/savefiles.js";
 import { ballFor } from "./src/ballmodel.js";
@@ -2677,6 +2762,8 @@ window.__mlBooted = true;   // the watchdog above can stand down
 // offered as a choice: picking the wrong one silently renders a collapsed
 // figure in OpenSim. The force model is still fed Rajagopal signs internally.
 const OSIM_MODEL = "gpk";
+// The model file those coordinates belong to, shipped beside every export.
+const OSIM_FILE = "GPK_v4_016.osim";
 const DEMO = new URLSearchParams(location.search).get("demo");
 
 /* Lab demo is what everybody gets. The full app (athletes, dashboard,
@@ -5717,7 +5804,7 @@ $("mealShotFile").onchange = (e) => {
  * gets stored. The login screen writes to it rather than replacing it, so
  * there is still exactly one source of truth for the athlete.
  */
-const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat", "viewSummary",
+const VIEWS = ["viewLogin", "viewDash", "viewReaction", "viewFriends", "viewCycle", "viewRecord", "viewAssess", "viewSession", "viewFeed", "viewChat", "viewSummary", "viewSessionEnd",
                "viewHome", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback", "viewPhysics"];
 /* The lab demo's screens: a home with three doors, and what they open. */
 const LAB_VIEWS = ["viewHome", "viewRecord", "viewProcess", "viewSimulate", "viewAnalysis", "viewBiofeedback", "viewPhysics"];
@@ -5744,8 +5831,23 @@ function leaveRecorder() {
   if (stream || running) stopCamera();
 }
 
+/* The view we came from, for the lab demo's Back button.
+ *
+ * history.back() alone is not enough there: open the app straight on a door
+ * (a bookmark, a reload, the PWA's start_url) and there is nothing behind it,
+ * so Back would walk out of the app. This remembers the last view instead and
+ * falls back to the lab home. */
+let prevView = null;
+function goBack() {
+  const to = prevView && prevView !== currentView ? prevView : (LAB ? "viewHome" : "viewDash");
+  showView(to);
+  if (to === "viewDash") renderDash();
+}
+let currentView = null;
 function showView(id, push = true) {
   if (LAB && !LAB_VIEWS.includes(id)) id = "viewHome";   // the lab demo: home + its three doors
+  if (currentView && currentView !== id) prevView = currentView;
+  currentView = id;
   document.documentElement.classList.remove("booting");
   if (id !== "viewRecord") leaveRecorder();
   if (id !== "viewBiofeedback" && biofeedback) biofeedback.leave();
@@ -5767,6 +5869,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewReaction") openReaction(false);
   if (id === "viewFriends") renderFriends();
   if (id === "viewSummary") renderAthSummary();
+  if (id === "viewRecord") ensureMotion();
   if (id === "viewFeed") renderFeed();
   if (id === "viewChat") chat.open();
   if (id === "viewProcess") openProcess();
@@ -6804,6 +6907,228 @@ function renderRtp() {
   });
 }
 
+/* Developer mode: the floor map of every set in the session and the
+ * volume / intensity report per lift (src/postrack.js). */
+function devPositionHTML(sess) {
+  const paths = sessionPaths(sess.started);
+  const labels = Object.fromEntries(sess.sets.map((s) =>
+    [s.index, tr("setLabel", { n: s.index }) + " " + tr(s.activity)]));
+  const map = pathMapSVG(paths, labels);
+  const eff = sessionEffort(sess.started);
+  const dist = Object.values(paths).reduce((a, p) => a + (p?.distance_m || 0), 0);
+  const rows = liftReport(sess).map((r) => `<tr><td>${tr(r.activity)}</td><td>${r.sets}</td>
+      <td>${r.reps}</td><td>${r.volume_kg}</td><td>${r.mean_load_kg}</td>
+      <td>${r.rel_intensity ?? "—"}</td><td>${r.best_e1rm_kg ?? "—"}</td>
+      <td>${r.intensity_pct != null ? r.intensity_pct + "%" : "—"}</td></tr>`).join("");
+  return `<details class="devbox" style="margin-top:12px" open>
+    <summary><b>${tr("posTitle")}</b> <span class="note">(${tr("devOnly")})</span></summary>
+    ${map ? map + `<p class="note">${tr("posSummary", { d: dist.toFixed(1) })}</p>
+      <p class="note">${tr("posNote")}</p>` : `<p class="note">${tr("posNone")}</p>`}
+    ${eff?.ok ? `<h2 style="font-size:15px;margin:12px 0 4px">${tr("effortTitle")}</h2>
+      ${effortTraceSVG(eff)}
+      <p class="note">${tr("effortSummary", { work: Math.round(eff.work_s / 60),
+          rest: Math.round(eff.rest_s / 60), pct: eff.work_pct, idx: eff.effort_index })}</p>
+      <p class="note">${tr("effortTraceNote")}</p>` : ""}
+    <h2 style="font-size:15px;margin:12px 0 4px">${tr("liftReportTitle")}</h2>
+    <table><thead><tr><th>${tr("movement")}</th><th>${tr("set")}</th><th>${tr("reps")}</th>
+      <th>${tr("lrVolume")}</th><th>${tr("lrMeanLoad")}</th><th>${tr("lrRel")}</th>
+      <th>${tr("lrE1rm")}</th><th>${tr("lrPct")}</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="note">${tr("liftReportNote")}</p>
+  </details>`;
+}
+
+/* Developer mode: the accelerometer for the whole session.
+ *
+ * Deliberately NOT integrated into a position. Twice-integrated phone
+ * acceleration drifts quadratically and needs a drift-free orientation to
+ * remove gravity, so an inertial path over a session is not a measurement.
+ * Per-second bins of |a - 1g| need no integration and stay honest; the floor
+ * map comes from the camera (postrack.js), which has bounded error. */
+const motion = {
+  stop: null, trace: null, started: null, reps: null, setFrom: null,
+  failed: null,
+  get on() { return !!this.stop; },
+};
+
+function paintMotion() {
+  const card = $("motionCard");
+  if (!card) return;
+  card.classList.toggle("hidden", LAB || DEMO || !getSession());
+  const st = $("motionState");
+  if (!st) return;
+  st.textContent = motion.on
+    ? tr("motionOnFor", { s: Math.round((performance.now() - motion.started) / 1000) })
+    : motion.failed ? tr("motionUnavailable") : tr("motionOff");
+}
+
+/* The accelerometer runs for the WHOLE session, not per set: rest is as much
+ * a part of a session as the sets, and a trace with the gaps cut out cannot
+ * say what the work:rest ratio was. Started once, when a session opens. */
+async function ensureMotion() {
+  if (motion.on || motion.failed || LAB || DEMO || !getSession()) return;
+  motion.trace = makeEffortTrace();
+  try {
+    motion.stop = await startMotion((t, a) => {
+      motion.trace.push(t, a);
+      if (motion.reps) {
+        const r = motion.reps.push(t, a);
+        if (r) $("hudRight").textContent = tr("nRepsCount", { n: motion.reps.count() });
+      }
+    });
+    motion.started = performance.now();
+  } catch (e) {
+    /* A desktop has no accelerometer and plain http has no sensor API. Said
+     * once, in the card, rather than as an error on every session: the camera
+     * half of the app works perfectly well without it. */
+    motion.failed = e.message || String(e);
+    motion.trace = null;
+  }
+  paintMotion();
+}
+
+/** Stop the session trace and file it. Called when the session ends. */
+function closeMotion(sessionStarted) {
+  if (!motion.on) return null;
+  try { motion.stop(); } catch { /* already gone */ }
+  const sum = effortSummary(motion.trace.bins());
+  if (sessionStarted && sum.ok) saveEffortTrace(sessionStarted, sum);
+  motion.stop = null; motion.trace = null; motion.reps = null;
+  paintMotion();
+  return sum;
+}
+
+/* An accelerometer-only set: the phone is on the body, nothing is filming.
+ * Reps and tempo only -- there are no joint angles or moments without a
+ * camera, and the set is filed as a counted set (manual) so nothing
+ * downstream mistakes it for a measured one. */
+function startAccelSet() {
+  motion.reps = makeRepDetector();
+  motion.setFrom = performance.now();
+  $("hudRight").textContent = tr("nRepsCount", { n: 0 });
+}
+
+function finishAccelSet() {
+  const det = motion.reps;
+  motion.reps = null;
+  if (!det) return;
+  const sum = motionSummary(det.reps(), (performance.now() - motion.setFrom) / 1000);
+  const activity = $("activity").value;
+  if (!sum.ok) { say(tr("sayAccelNoReps"), true); return; }
+  try {
+    const badgesBefore = myAchievements();
+    const set = addManualSet(activity === "auto" ? "movement" : activity, sum.reps, {
+      profile: $("profile").value || null,
+      massKg: parseFloat($("mass").value) || null,
+      addedKg: parseFloat($("added").value) || 0,
+      assistKg: parseFloat($("assist").value) || 0,
+      loadDir: normLoadDir($("loadDir").value),
+    });
+    const sess = getSession();
+    if (sess) saveMotionSet(sess.started, set.index, sum);
+    announceBadges(newlyEarned(badgesBefore, myAchievements()));
+    scheduleSync();
+    say(tr("sayAccelSet", { n: sum.reps, tempo: sum.tempo_s, set: set.index }));
+    renderTraining();
+  } catch (err) {
+    say(tr("setNotSaved", { err: err.message || String(err) }), true);
+  }
+}
+
+/* End of session: close it, file it, and show what it added up to.
+ *
+ * The session is archived here, so the page is built from the numbers BEFORE
+ * the log is cleared -- a report assembled after archiving would find an empty
+ * session and show nothing. */
+/* Everything on the Record screen that belongs to the take just analysed.
+ *
+ * Ending a session archived the log and opened a fresh one, but left the last
+ * take's results card, its share buttons and the in-memory pageSets behind --
+ * so going back to Record showed the finished session's numbers under a new,
+ * empty one. */
+function clearLastTake() {
+  $("results").classList.add("hidden");
+  $("results").innerHTML = "";
+  const mp = $("mpResults"); if (mp) mp.classList.add("hidden");
+  const sb = $("shareSetBtn"); if (sb) sb.classList.add("hidden");
+  document.querySelectorAll(".lmReviewRow").forEach((x) => x.remove());
+  lastResult = null; shareSrc = null; shareFile = null; viewingSet = null;
+  reviewSrc = null;
+  pageSets.length = 0;
+  const bar = $("labTrialBar"); if (bar) bar.classList.add("hidden");
+}
+
+function endSession() {
+  const sess = getSession();
+  if (!sess || !sess.sets.length) return;
+  const started = sess.started;
+  const effort = closeMotion(started);
+  const paths = sessionPaths(started);
+  const msets = sessionMotionSets(started);
+  const totals = sessionTotals(sess, effort);
+  const groups = muscleLoad(sess);
+  const labels = Object.fromEntries(sess.sets.map((x) =>
+    [x.index, tr("setLabel", { n: x.index }) + " " + tr(x.activity)]));
+  // The leaderboard record, written once per finished session.
+  try { saveLeaderboardEntry(leaderboardEntry(sess, paths)); }
+  catch (e) { console.warn("leaderboard entry", e); }
+  const snapshot = { sess, effort, paths, msets, totals, groups, labels };
+  archiveSession();
+  newSession($("profile").value || null);
+  $("trainingCard").classList.add("hidden");
+  clearLastTake();
+  renderSessionEnd(snapshot);
+  showView("viewSessionEnd");
+}
+
+function renderSessionEnd(d) {
+  const { sess, effort, paths, msets, totals, groups, labels } = d;
+  const mm = Math.floor(totals.duration_s / 60), ss = totals.duration_s % 60;
+  /* Written out rather than built from the key, so the translation scanner
+   * can see every string that can reach the page. */
+  const MG = { hip_ext: () => tr("mg_hip_ext"), knee_ext: () => tr("mg_knee_ext"),
+               ankle_pf: () => tr("mg_ankle_pf"), knee_flex: () => tr("mg_knee_flex"),
+               hip_flex: () => tr("mg_hip_flex"), shoulder_ext: () => tr("mg_shoulder_ext"),
+               elbow_flex: () => tr("mg_elbow_flex"), elbow_ext: () => tr("mg_elbow_ext"),
+               shoulder_flex: () => tr("mg_shoulder_flex") };
+  const spider = spiderSVG(groups, (g) => (MG[g.key] ? MG[g.key]() : g.label));
+  const top = topViewSVG(paths, labels);
+  const motionRows = Object.entries(msets).map(([i, m]) =>
+    `<tr><td>${labels[i] || i}</td><td>${m.reps}</td><td>${m.tempo_s} s</td>
+      <td>${m.peak_g} g</td><td>${m.peak_drop_pct > 0 ? "−" + m.peak_drop_pct + "%" : "—"}</td></tr>`).join("");
+  $("sessionEndCard").innerHTML = `
+    <h1 style="font-size:19px;margin:0 0 2px">${tr("sessionDone")}</h1>
+    <p class="sub" style="margin-bottom:12px">${new Date(sess.started).toLocaleString()}</p>
+    <div style="display:flex;gap:10px;margin-bottom:6px">
+      <div class="card" style="flex:1;margin:0;text-align:center">
+        <div class="sub">${tr("duration")}</div>
+        <div style="font-size:26px;font-weight:600">${mm}:${String(ss).padStart(2, "0")}</div>
+      </div>
+      <div class="card" style="flex:1;margin:0;text-align:center">
+        <div class="sub">${tr("intensity")}</div>
+        <div style="font-size:26px;font-weight:600">${totals.density_kg_min}</div>
+        <div class="sub">${tr("kgPerMin")}</div>
+      </div>
+    </div>
+    <p class="note">${tr("sessionTotals", { sets: totals.sets, reps: totals.reps,
+       vol: totals.volume_kg })}${totals.effort_index != null
+       ? " " + tr("sessionEffortLine", { idx: totals.effort_index, pct: totals.work_pct }) : ""}</p>
+    ${spider ? `<h2 style="font-size:15px;margin:16px 0 2px">${tr("muscleLoadTitle")}</h2>
+      ${spider}<p class="note">${tr("muscleLoadNote")}</p>` : ""}
+    ${top ? `<h2 style="font-size:15px;margin:16px 0 2px">${tr("topViewTitle")}</h2>
+      ${top}<p class="note">${tr("topViewNote")}</p>` : ""}
+    ${effort?.ok ? `<h2 style="font-size:15px;margin:16px 0 2px">${tr("effortTitle")}</h2>
+      ${effortTraceSVG(effort)}<p class="note">${tr("effortSummary", {
+        work: Math.round(effort.work_s / 60), rest: Math.round(effort.rest_s / 60),
+        pct: effort.work_pct, idx: effort.effort_index })}</p>
+      <p class="note">${tr("effortTraceNote")}</p>` : ""}
+    ${motionRows ? `<h2 style="font-size:15px;margin:16px 0 2px">${tr("accelSetsTitle")}</h2>
+      <table><thead><tr><th>${tr("set")}</th><th>${tr("reps")}</th><th>${tr("tempoCol")}</th>
+        <th>${tr("peakGCol")}</th><th>${tr("fadeCol")}</th></tr></thead>
+        <tbody>${motionRows}</tbody></table>` : ""}
+    <button class="ghost" id="endDoneBtn" style="margin-top:14px">${tr("close")}</button>`;
+  $("endDoneBtn").onclick = () => goHome();
+}
+
 function renderTraining() {
   const card = $("trainingCard");
   const sess = getSession();
@@ -6814,6 +7139,7 @@ function renderTraining() {
   renderPlanNow();
   paintStrokeBox();
   paintRest();
+  paintMotion();
   if (!sess || !sess.sets.length) { card.classList.add("hidden"); return; }
   card.classList.remove("hidden");
   const vars = availablePeakVars(sess);
@@ -6855,8 +7181,9 @@ function renderTraining() {
     <div id="peakChartBox" style="margin-top:10px">${
       peakVar ? setChart(series, peakVar, pairSeries) : ""}</div>
     ${repEditorHTML(sess)}
-    <button id="summaryBtn" style="margin-top:10px">${tr("finishSummarise")}</button>
+    <button id="summaryBtn" style="margin-top:10px">${tr("endSession")}</button>
     <button class="ghost" id="newSessionBtn" style="margin-top:8px">${tr("newSession")}</button>
+    ${!LAB && !DEMO ? devPositionHTML(sess) : ""}
     <div id="summaryBox"></div>`;
   $("newSessionBtn").onclick = () => {
     // File the old one rather than dropping it: the export is only worth
@@ -6868,7 +7195,7 @@ function renderTraining() {
     say(tr("sayNewSession", {
       kept: tr(kept === 1 ? "nPastSession" : "nPastSessions", { n: kept }) }));
   };
-  $("summaryBtn").onclick = () => renderSummary();
+  $("summaryBtn").onclick = () => endSession();
   wireRepEditor(card, sess, renderTraining);
   renderDash();          // keeps the dashboard current behind the record view
   const pv = $("peakVar");
@@ -7164,7 +7491,7 @@ function syncRecLabel() {
   b.disabled = false;
   b.textContent = recording
     ? (assessStep ? tr("assessStopTest") : tr("stopAndAnalyse"))
-    : (assessStep ? tr("assessStartTest") : tr("startRecording"));
+    : (assessStep ? tr("assessStartTest") : tr("trackSet"));
 }
 let assessLeadTimer = null;
 
@@ -8083,7 +8410,6 @@ function enterLab() {
       $(to).dispatchEvent(new Event("change", { bubbles: true }));
     });
   }
-  $("labTrialBtn").onclick = () => labTrialSave();
   $("labNewBtn").onclick = () => {
     leaveRecorder();
     eraseAthlete(LAB_NAME);
@@ -8091,6 +8417,7 @@ function enterLab() {
   };
   const linked = osimInit();
   document.addEventListener("click", (e) => {
+    if (e.target.closest(".labBackBtn")) { goBack(); return; }
     if (e.target.closest(".labHomeBtn")) showView("viewHome");
     if (e.target.closest(".labSimBtn")) { showView("viewSimulate"); openSimulate(); }
   });
@@ -8383,7 +8710,7 @@ function stopCamera() {
   $("controls").classList.add("hidden");
   $("startBtn").classList.remove("hidden");
   $("fileBtn").classList.remove("hidden");
-  $("recBtn").textContent = tr("startRecording");
+  $("recBtn").textContent = tr("trackSet");
   // The zoom slider belongs to a track that no longer exists.
   $("zoomRow").classList.add("hidden");
   say(tr("sayCameraClosed"));
@@ -8456,6 +8783,7 @@ function loop(now, meta) {
         if (pf !== null && pf0 === null) pf0 = pf;
         frames.push({ i: pf !== null && pf0 !== null ? pf - pf0 : undefined, t: ts,
                       lm: named });
+        posFrameSize = { w: video.videoWidth, h: video.videoHeight };
         // During a test the athlete needs the rep count, not the frame count.
         // Both used to write here and the once-a-second counter lost every
         // time, fifty frames to one.
@@ -8466,6 +8794,14 @@ function loop(now, meta) {
   }
   schedule();
 }
+
+/* Frame size of the take being recorded, for the position map (postrack.js
+ * turns apparent body size into distance from the camera and needs it). */
+let posFrameSize = null;
+/* Set when a clip was analysed with "camera was not stationary": how much of
+ * the background could actually be matched, so the results can say whether the
+ * correction is worth trusting. */
+let camFix = null;
 
 function toNamed(lms, w, h) {
   const out = {};
@@ -8485,6 +8821,11 @@ const BONES = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],
  * tested without a camera; see there for why it is not the same check the
  * analysis runs afterwards. */
 const framing = framingWatcher();
+/* Which instruments the set in progress is using (the tick boxes under
+ * "Track set"). Read at the press, not at the stop, so changing a box
+ * mid-set cannot change how the set is filed. */
+let accelSet = false, cameraSet = true;
+const useAccelSet = () => !!($("useAccel") && $("useAccel").checked && motion.on);
 
 /* Two fists starts or stops the recording, so the walk to and from the phone
  * is not in the clip. On by default -- the phone being out of reach is the
@@ -8700,6 +9041,13 @@ $("recBtn").onclick = () => {
         say(tr(!framing.sawBody ? "assessNoBodyYet" : "assessBadFraming_" + bad), true);
       }
     }
+    /* Which instruments this set uses. Both ticked is a camera set that also
+     * counts reps from the phone; accelerometer alone needs no camera at all. */
+    accelSet = useAccelSet();
+    cameraSet = $("useCamera") ? $("useCamera").checked : true;
+    if (!cameraSet && !accelSet) { say(tr("sayPickASource"), true); return; }
+    if (!cameraSet && accelSet && !motion.on) { say(tr("sayAccelUnavailable", { err: motion.failed || "" }), true); return; }
+    if (accelSet) startAccelSet();
     frames = []; pf0 = null; recording = true;
     syncMulti(); mtrack = newTracker(); $("mpResults").classList.add("hidden");
     ballTracker.reset();
@@ -8773,7 +9121,7 @@ $("recBtn").onclick = () => {
     gesture.reset();
     clearInterval(assessTimer);
     liveHudStop();
-    $("recBtn").textContent = assessStep ? tr("assessStartTest") : tr("startRecording");
+    $("recBtn").textContent = assessStep ? tr("assessStartTest") : tr("trackSet");
     $("hudRight").textContent = "";
     if (multiOn) showMultiResults();
     if (recorder && recorder.state !== "inactive") {
@@ -8786,12 +9134,26 @@ $("recBtn").onclick = () => {
       };
       recorder.stop();
     }
-    finish();
+    if (accelSet && !cameraSet) finishAccelSet();
+    else {
+      if (accelSet) motion.reps = null;      // the camera's own reps are the record
+      finish();
+    }
   }
 };
 
 // --- video file ------------------------------------------------------------
 $("fileBtn").onclick = () => $("fileInput").click();
+/* "Box the athlete first": remembered, because whoever analyses broadcast or
+ * crowded clips will want it every time and nobody else ever. */
+{
+  const RKEY = "bioscout.fileroi.v1";
+  try { $("fileRoi").checked = localStorage.getItem(RKEY) === "1"; } catch { /* no storage */ }
+  $("fileRoi").onchange = (e) => { try { localStorage.setItem(RKEY, e.target.checked ? "1" : "0"); } catch { /* no storage */ } };
+  const MKEY = "bioscout.cammoving.v1";
+  try { $("camMoving").checked = localStorage.getItem(MKEY) === "1"; } catch { /* no storage */ }
+  $("camMoving").onchange = (e) => { try { localStorage.setItem(MKEY, e.target.checked ? "1" : "0"); } catch { /* no storage */ } };
+}
 /* A clip from a video that cannot be exported: record that part of the screen
  * (desktop browsers; phones have no screen capture for web pages). */
 if (screenRecSupported()) $("screenRecBtn").classList.remove("hidden");
@@ -9132,7 +9494,21 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
    * Player 1 is the body the single-athlete analysis follows. */
   const fileMulti = multiOn || $("activity").value === "stroke";
   let ftrack = fileMulti ? newTracker() : null;
-  const needsPage = fileMulti || $("activity").value === "kick";
+  /* The athlete's box (Bas, 2026-10-26: a pregame full-court shot from the
+   * stands -- the player ~40 px tall in a 1080 px frame, and the model fitted a
+   * "body" across the crowd). Asked only when there is no screen-recording
+   * crop already. The box follows the athlete frame to frame, so it needs each
+   * result before the next frame: the page's own model, not the worker. */
+  const roiWanted = !(crop && crop.w > 8 && crop.h > 8) && !!($("fileRoi") && $("fileRoi").checked);
+  /* Handheld clip: the camera's own motion is estimated from the background
+   * and taken off the landmarks afterwards (src/camshake.js). The box tracker
+   * is forced on with it, because a body that slides across the frame is
+   * exactly what makes the pose model lose the legs. */
+  const camMoving = !!($("camMoving") && $("camMoving").checked);
+  const shake = camMoving ? makeShakeTracker() : null;
+  const shakeSteps = [];
+  const shakeCv = camMoving ? document.createElement("canvas") : null;
+  const needsPage = fileMulti || $("activity").value === "kick" || roiWanted || camMoving;
   const pw = !needsPage && v.requestVideoFrameCallback && window.createImageBitmap && window.__bsNoWorker !== true
     ? await startPoseWorker() : null;
   vidAbort.pw = pw;
@@ -9168,7 +9544,59 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   const fw = cr ? Math.round(cr.w) : v.videoWidth, fh = cr ? Math.round(cr.h) : v.videoHeight;
   let cropCv = null, cropCx = null;
   if (cr) { cropCv = document.createElement("canvas"); cropCv.width = fw; cropCv.height = fh; cropCx = cropCv.getContext("2d"); }
-  const srcNow = () => { if (!cr) return v; cropCx.drawImage(v, cr.x, cr.y, cr.w, cr.h, 0, 0, fw, fh); return cropCv; };
+  /* The followed box, in the video's own pixels. The model sees only the box,
+   * drawn onto a canvas of fixed size (at least 512 px on its long side, so a
+   * small box is magnified); the landmarks are mapped back to the WHOLE frame,
+   * so everything downstream sees ordinary full-frame coordinates and does not
+   * care that the box moved. The box keeps its aspect ratio: it only moves,
+   * grows when the body fills it or is lost, and eases back to its drawn size. */
+  const VW = v.videoWidth, VH = v.videoHeight;
+  let roi = null, roiBase = null, roiLost = 0, roiCv = null, roiCx = null;
+  const roiPlace = (cx, cy, w) => {
+    let h = w * roiBase.h / roiBase.w;
+    const s = Math.min(1, VW / w, VH / h); w *= s; h *= s;
+    roi = { x: Math.min(VW - w, Math.max(0, cx - w / 2)), y: Math.min(VH - h, Math.max(0, cy - h / 2)), w, h };
+  };
+  const roiFollow = (named) => {
+    const pts = named ? Object.values(named) : [];
+    const ocx = roi.x + roi.w / 2, ocy = roi.y + roi.h / 2;
+    if (pts.length < 6) {
+      /* Lost: widen the search, but keep the centre where the athlete was last,
+       * and never past twice the drawn box -- widening to the whole picture
+       * undoes the magnification the box is for (Luka pregame clip,
+       * 2026-10-26: the box grew to the full court and found nobody). */
+      if (++roiLost >= 6) { roiPlace(ocx, ocy, Math.min(roi.w * 1.25, roiBase.w * 2)); roiLost = 3; }
+      return;
+    }
+    roiLost = 0;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const [x, y] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    const need = Math.max((x1 - x0) / roi.w, (y1 - y0) / roi.h);
+    let w = roi.w;
+    if (need > 0.8) w = roi.w * need / 0.7;
+    else if (roi.w > roiBase.w) w = Math.max(roiBase.w, roi.w * 0.97);
+    // Half-way towards the body each frame: follows a sprint, ignores jitter.
+    roiPlace(ocx + 0.5 * ((x0 + x1) / 2 - ocx), ocy + 0.5 * ((y0 + y1) / 2 - ocy), w);
+  };
+  const srcNow = () => {
+    if (roi) { roiCx.drawImage(v, roi.x, roi.y, roi.w, roi.h, 0, 0, roiCv.width, roiCv.height); return roiCv; }
+    if (!cr) return v; cropCx.drawImage(v, cr.x, cr.y, cr.w, cr.h, 0, 0, fw, fh); return cropCv;
+  };
+  if (roiWanted) {
+    await seekTo(seekOf(0));
+    say(tr("roiAsk"));
+    const roiKeys = { mpZonesTitle: "roiTitle", mpZonesHint: "roiHint", mpZonesAll: "roiAll" };
+    const z = await askZones({ src: v, n: 1, zones: [], tr: (k, p) => tr(roiKeys[k] || k, p) });
+    checkAbort();
+    if (z && z.length) {
+      roiBase = { w: z[0].w * VW, h: z[0].h * VH };
+      roi = { x: z[0].x * VW, y: z[0].y * VH, ...roiBase };
+      const up = Math.max(1, 512 / Math.max(roi.w, roi.h));
+      roiCv = document.createElement("canvas");
+      roiCv.width = Math.round(roi.w * up); roiCv.height = Math.round(roi.h * up);
+      roiCx = roiCv.getContext("2d");
+    }
+  }
   /* Player areas on this clip: drawn on its first frame (after any crop), when
    * the user asked for areas -- the view of a file is rarely the camera's. */
   if (ftrack && mpSet.use) {
@@ -9193,19 +9621,32 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
     const res = off.detectForVideo(src, Math.round(t * 1000));
     stats.detectMs += performance.now() - d0;
     if (ftrack) {
-      const p1 = ftrack.update(res.landmarks, t * 1000, fw, fh).find((p) => p.id === 1);
+      const p1 = ftrack.update(res.landmarks, t * 1000, roi ? roiCv.width : fw, roi ? roiCv.height : fh).find((p) => p.id === 1);
       res.landmarks = p1 ? [p1.lm] : [];
     }
-    const named = res.landmarks && res.landmarks.length
-      ? toNamed(res.landmarks[0], fw, fh) : null;
-    ballGrab(src, t * 1000, named);
-    if (named) preview.draw(src, named, fw, fh);
+    let lm0 = res.landmarks && res.landmarks.length ? res.landmarks[0] : null;
+    // Box-relative -> whole frame (fw, fh are the video's own size here).
+    if (lm0 && roi) lm0 = lm0.map((l) => ({ ...l, x: (roi.x + l.x * roi.w) / VW, y: (roi.y + l.y * roi.h) / VH, z: (l.z ?? 0) * roi.w / VW }));
+    const named = lm0 ? toNamed(lm0, fw, fh) : null;
+    if (roi) roiFollow(named);
+    const fsrc = roi ? v : src;
+    ballGrab(fsrc, t * 1000, named);
+    if (named) preview.draw(fsrc, named, fw, fh);
     if (named) {
       // `i` is the GRID index, and it is what the analysis keys off. A frame
       // the model found no body in is then a hole at its own place in time
       // rather than a frame quietly removed -- which used to shorten the clip
       // and speed up every movement in it by however many frames were missed.
       frames.push({ i, t: t * 1000, lm: named });
+      posFrameSize = { w: fw, h: fh };
+      /* One step per KEPT frame, so the steps line up with the frames they
+       * correct. The whole video frame is used, never the magnified box: the
+       * box moves with the athlete, so its background is not still even when
+       * the camera is. */
+      if (shake) {
+        try { shakeSteps.push(shake.step(grayThumb(v, shakeCv), camBodyBox(named, fw, fh))); }
+        catch { shakeSteps.push({ dx: 0, dy: 0, conf: 0 }); }
+      }
     }
     bar((i + 1) / n);
     if (i % 5 === 0) {
@@ -9324,6 +9765,7 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
         if (lms) {
           const lmN = toNamed(lms, vw, vh);
           frames.push({ i: k, t: tOf(k) * 1000, lm: lmN });
+          posFrameSize = { w: vw, h: vh };
           preview.draw(v, lmN, v.videoWidth, v.videoHeight, cr);
         }
         bar(Math.min(1, done / Math.max(1, stats.played)));
@@ -9415,8 +9857,30 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   try { v.pause(); URL.revokeObjectURL(v.src); } catch { /* already gone */ }
   vidAbort = null; bar(null);
   preview.hide();
-  reviewSrc = { file, fw, fh, crop: cr };
+  reviewSrc = { file, fw, fh, crop: cr, fps: fileFps };
+  /* Take the camera's own motion off the landmarks before anything reads them
+   * as body motion. Done here, once, rather than inside the tracking loop: the
+   * correction is cumulative, and a frame the background could not be read on
+   * must inherit the last good offset rather than guess its own. */
+  if (shake && frames.length) {
+    const st = stabilise(frames, shakeSteps, { frameW: fw, frameH: fh });
+    frames = st.frames;
+    camFix = { readable: st.readable, frames: frames.length };
+  } else camFix = null;
   finish();
+}
+
+/* What the handheld correction managed on this clip.
+ *
+ * Said plainly rather than hidden, because a corrected position is an estimate
+ * built on another estimate: where the background could not be matched there
+ * is no correction at all, and the reader should know which of the two they
+ * are looking at before trusting a travel distance or a jump height. */
+function camFixNote(res) {
+  const c = res && res.camFix;
+  if (!c) return "";
+  const pct = Math.round(c.readable * 100);
+  return `<p class="note banner">${tr(pct >= 70 ? "camFixGood" : pct >= 30 ? "camFixPartial" : "camFixPoor", { pct })}</p>`;
 }
 
 /** The horizontal load on the head for a neck set: the force, and the lateral
@@ -9515,7 +9979,6 @@ function neckHoldResultsHTML(res, fps) {
     ${neckMusclesHTML(res)}
     <div id="chartBox"></div>
     <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMotOnly")}</button>
-    <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
     <div class="status" id="zipStatus"></div>
     <p class="note">${tr("noteCervical")}</p>`;
 }
@@ -9607,18 +10070,29 @@ async function finish() {
     // timing: a file was sampled on a grid we chose, a camera delivered
     // whatever it managed.
     lastResult.fromFile = !!fromFile;
+    lastResult.camFix = camFix;
+    camFix = null;
     // How long tracking took and where the time went, so a slow clip can be
     // pinned on the decoder or on the pose model from the status line alone.
     lastResult.trackStats = fromFile ? lastTrackStats : null;
     lastTrackStats = null;
     await enrich(lastResult, poses, fps, heightM, activity);
-    if (lastResult.reps.length && !DEMO) {
+    /* A set with no reps found is still a set that happened.
+     *
+     * The athlete did the work, and dropping the row means the session log
+     * disagrees with their own memory of it -- and the take (landmarks, video,
+     * curves) was being thrown away with it, so there was nothing left to
+     * check WHY nothing was found. It is logged with 0 reps, which is honest:
+     * the analysis found none, and everything recorded is still there to
+     * inspect. Outside a session there is nothing to log it to. */
+    if ((lastResult.reps.length || getSession()) && !DEMO) {
       // Never let the training log take the analysis down with it: the results
       // are the point of the recording, the set row is a bonus on top.
       try {
         const badgesBefore = myAchievements();
         const set = addSet(lastResult, fps, { profile: $("profile").value || null,
                                              assess: assessStep });
+        if (!lastResult.reps.length) say(tr("sayZeroRepSet", { set: set.index }), true);
         if (!LAB) announceBadges(newlyEarned(badgesBefore, myAchievements()));
         scheduleSync();
         lastResult.setIndex = set.index;
@@ -9626,6 +10100,16 @@ async function finish() {
         pageSets.push({ index: set.index, res: lastResult, fps });
         const sess = getSession();
         if (sess) saveCurves(sess.started, set.index, lastResult);
+        // Developer mode only: where on the floor this set happened.
+        /* Not for a handheld clip whose background was mostly unreadable: the
+         * floor map is an absolute position, and without a trustworthy camera
+         * correction it would be the camera's path as much as the athlete's. */
+        if (sess && !LAB && !(lastResult.camFix && lastResult.camFix.readable < 0.3)) {
+          try {
+            savePath(sess.started, set.index, floorPath(frames, {
+              heightM, frameW: posFrameSize?.w, frameH: posFrameSize?.h }));
+          } catch (e) { console.warn("position path", e); }
+        }
         viewingSet = set.index;
         // The rest between sets is when the effort question gets asked, so
         // the prompt follows the set that was just recorded.
@@ -9683,7 +10167,19 @@ function addReviewButton(res) {
   row.innerHTML = `<button type="button" class="ghost" id="lmReviewBtn">${tr("lmReviewBtn")}</button>`;
   box.prepend(row);
   row.querySelector("button").onclick = () => openReview({
-    file: src.file, frames: fr, fw: src.fw, fh: src.fh, crop: src.crop, tr,
+    file: src.file, frames: fr, fw: src.fw, fh: src.fh, crop: src.crop,
+    fps: src.fps, tr,
+    /* Corrected points or a trimmed span: re-run the analysis on what the
+     * reviewer actually approved. fileFps is restored first so the re-run is
+     * stepped on the file's own grid -- inferring the rate from the wall clock
+     * would make a trimmed clip report the wrong durations. */
+    onApply: (kept, info) => {
+      if (kept.length < 20) { say(tr("sayTooFewFrames", { n: kept.length }), true); return; }
+      frames = kept;
+      fileFps = info.fps || src.fps || null;
+      say(tr("lmReanalysing", { n: kept.length }));
+      finish();
+    },
     onKeep: () => say(tr("lmKept")),
     onDiscard: () => {
       const sess = getSession();
@@ -9705,6 +10201,39 @@ const MCOLORS = ["#2f6fe4", "#e8871a", "#1d7a45", "#c0392b", "#7d5bbe"];
 /** Attach joint moments and muscle forces to each rep.
  *  Shared by the live path and ?demo, which is the only way to be sure the
  *  demo exercises the same code the camera does. */
+/* The surrogate needs an unbroken input, so bridge the holes before it runs.
+ *
+ * A joint the camera could not see for part of the clip is NaN on those
+ * frames, which is right for the plot and the export. It is NOT something a
+ * neural network can be handed: one NaN in the input makes that frame's
+ * outputs NaN, the 6 Hz smoothing spreads it over its whole window, and
+ * peakByMuscle -- a plain Math.max -- then returns NaN for EVERY muscle. The
+ * visible symptom was a muscle list of nothing but adductors (the ranking had
+ * collapsed, so it showed the first five in model order), peaks printed as
+ * 0 N, and an empty contributions plot.
+ *
+ * Bridged linearly between the frames either side and held flat at the ends.
+ * Only the model's copy is filled; what is plotted and exported keeps its
+ * gaps. */
+function fillGaps(arr) {
+  if (!arr || typeof arr.some !== "function" || !arr.some((v) => !Number.isFinite(v))) return arr;
+  const out = Array.from(arr, Number), n = out.length;
+  let i = 0;
+  while (i < n) {
+    if (Number.isFinite(out[i])) { i++; continue; }
+    let j = i; while (j < n && !Number.isFinite(out[j])) j++;
+    const a = i > 0 ? out[i - 1] : NaN, b = j < n ? out[j] : NaN;
+    for (let k = i; k < j; k++) {
+      if (Number.isFinite(a) && Number.isFinite(b)) out[k] = a + ((b - a) * (k - i + 1)) / (j - i + 1);
+      else out[k] = Number.isFinite(a) ? a : (Number.isFinite(b) ? b : 0);
+    }
+    i = j;
+  }
+  return out;
+}
+/** Every coordinate bridged, for anything that cannot take a hole. */
+const solidCoords = (c) => Object.fromEntries(Object.entries(c).map(([k, v]) => [k, fillGaps(v)]));
+
 async function enrich(res, poses, fps, heightM, activity) {
   const massKg = parseFloat($("mass").value) || 75;
   // Added and assistance are cumulative and signed: a loaded bar with a band
@@ -9773,7 +10302,9 @@ async function enrich(res, poses, fps, heightM, activity) {
     const side = activity === "jumpshot" ? (Fj._shootSide || null) : null;
     const tracks = isUpperBody(activity) ? armTracks(poses, side) : null;
     const angles = clipAngles(activity, spec, Fj, tracks,
-                              { ankleUsable: res.view?.ankle_usable !== false });
+                              { ankleUsable: res.view?.ankle_usable !== false,
+                                sides: !!res.sidesMeasured,
+                                ankleMask: res.view?.ankle_mask || null });
     const vels = clipVelocities(angles, fps);
     let armPrep = null;
     if (tracks) {
@@ -9897,7 +10428,7 @@ async function enrich(res, poses, fps, heightM, activity) {
       // its own established convention.
       mc.pelvis_tx = r.coords.pelvis_tz;
       mc.pelvis_tz = r.coords.pelvis_tx;
-      const out = predictForces(fm, mc, r.times.length,
+      const out = predictForces(fm, solidCoords(mc), r.times.length,
         { massKg, heightM, times: r.times });
       r.forces = out.forces;
       r.forceNames = out.muscleNames;
@@ -9912,7 +10443,8 @@ async function enrich(res, poses, fps, heightM, activity) {
       r.osimOut = { activations: out.activations, activationNames: out.activationNames,
                     moments: out.moments, momentNames: out.momentNames,
                     grf: out.grf, grfNames: out.grfNames,
-                    jrfComp: out.jrfComp, jrfCompNames: out.jrfCompNames };
+                    jrfComp: out.jrfComp, jrfCompNames: out.jrfCompNames,
+                    power: out.power, powerNames: out.powerNames };
     }
   } catch (err) {
     /* Say so on the page. A missing or refused force model used to remove the
@@ -9950,10 +10482,37 @@ function addArmMuscles(res, activity) {
 
 // A squat filmed face-on still yields plausible-looking knee and hip numbers
 // that are measuring the wrong plane, so say so rather than let them pass.
+/* The coordinates this result may honestly hand on -- and where to depends on
+ * where they are going.
+ *
+ * A .mot FILE is headed for OpenSim, which cannot read a column with holes in
+ * it, so a partly measurable joint is left out: analyse() already drops it
+ * from res.columns, and this is the fallback for a result rebuilt from
+ * storage, which predates that.
+ *
+ * Process is a different destination. It stays inside BioScout, its charts
+ * lift the pen on a non-finite sample, and its statistics ignore them -- so a
+ * joint measured for part of the trial is worth having there, gaps and all.
+ * Withholding it was treating one rule as if it covered both. */
+function motColumns(res, { forFile = true } = {}) {
+  const spec = ACTIVITIES[res && res.activity];
+  const all = (res && res.columns) || (spec && spec.columns) || [];
+  if (!forFile && res && (res.view?.ankle_usable ?? false)) {
+    // Put the ankle back for Process, in the order the model expects.
+    const full = (spec && spec.columns) || all;
+    return full.filter((c) => all.includes(c) || /^ankle_angle(_[lr])?$/.test(c));
+  }
+  return res && res.ankleMeasured === false
+    ? all.filter((c) => !/^ankle_angle(_[lr])?$/.test(c)) : all;
+}
+
 function viewNote(res) {
   const v = res.view || {};
   const bits = [];
   const spec = ACTIVITIES[res.activity] || {};
+  // Say what Generic did and did not do, so an empty rep count reads as a
+  // choice rather than a failed detection.
+  if (spec.wholeTrial) bits.push(tr("genericNote"));
   const sagittal = res.activity === "squat" || spec.jump || res.activity === "slsquat"
                    || spec.gait || spec.kickback || spec.kick;
   if (sagittal && (v.view === "frontal" || v.view === "oblique")) {
@@ -9964,8 +10523,12 @@ function viewNote(res) {
       && res.reps.length) {
     bits.push(tr("viewJumpHeight", { view: tr("view_" + v.view) }));
   }
-  if (sagittal && v.ankle_usable === false) {
+  /* Three states now, not two: measurable throughout, measurable for only
+   * part of the trial -- the athlete turned mid-clip -- or not at all. */
+  if (v.ankle_usable === false) {
     bits.push(tr("ankleNotMeasurable"));
+  } else if ((v.ankle_valid_frac ?? 1) < 0.8) {
+    bits.push(tr("anklePartlyMeasurable", { pct: Math.round((v.ankle_valid_frac || 0) * 100) }));
   }
   if (spec.travels) {
     bits.push(!spec.gait ? tr("sidestepNoKinetics")
@@ -10185,6 +10748,14 @@ const METRIC_META = {
   muscle: { title: "jmMuscleTitle", unit: "N", note: null, zero: true, src: "forces" },
   jrf:    { title: "jointContactForce", unit: "unitBodyweight", note: null, zero: true, src: "jrf" },
   contrib: { title: "jcfContribTitle", unit: "unitBodyweight", note: null, zero: true, src: "contrib" },
+  /* The moment plot restricted to one leg joint, with that joint's muscles on
+   * the same axis. Same drawing as `moment` -- the overlay was only reachable
+   * by ticking a single joint there, which nobody found. */
+  /* The ground reaction. It had a section of its own below the chart, which
+   * made it the one measured-ish curve you could not pick from the same menu
+   * as everything else. */
+  grf: { title: "grfTitle", unit: "N", note: null, zero: true, src: "grf" },
+  contribmom: { title: "jmContribMomTitle", unit: "N\u00b7m", note: null, zero: true, src: "contribmom" },
 };
 const jointSel = {};   // "<activity>|<metric>" -> joints ticked
 const muscleTicks = {};  // activity -> { muscles: [base], sides: ["l","r"] }
@@ -10196,6 +10767,13 @@ function metricAvailable(rep, res, metric) {
   if (src === "forces") return !!(rep.forces && rep.forces.length && rep.forceNames);
   if (src === "jrf") return !!(rep.jrf && rep.jrf.length && rep.jrfNames);
   if (src === "contrib") return !!(rep.jrf && rep.jrf.length && rep.forces && rep.forces.length && muscleJoints);
+  // Needs the moment, the muscle forces AND the moment-arm table: without the
+  // arms there is no force x arm to draw, which is why this used to show a
+  // "generate moment_arms.json" note instead of a plot.
+  if (src === "grf") return grfSources(rep.jm).length > 0;
+  if (src === "contribmom") {
+    return !!(rep.forces && rep.forces.length && rep.forceNames && momentArms && momentArms.joints);
+  }
   return jointOptions(rep.jm, metric, res.activity).length > 0;
 }
 
@@ -10333,6 +10911,67 @@ function jrfPlot(rep, res) {
     ${refs ? refNote(refCond) : ""}`;
 }
 
+/* Which DOF and which leg the moment-contribution figure is showing, kept per
+ * task like every other pick on this page. */
+const momSel = {};   // activity -> { dof, side }
+
+/**
+ * Muscle contributions to ONE joint moment, stacked.
+ *
+ * Three hip DOF, not one: the surrogate predicts hip flexion, adduction and
+ * rotation moments, and a sagittal-only figure left the adductors' real work
+ * -- the frontal plane -- off the page entirely.
+ */
+function momContribPlot(rep, res) {
+  const kept = momSel[res.activity] || {};
+  const sides = ["l", "r"].filter((s) => rep.forceNames.some((n) => n.endsWith(`_${s}`)));
+  if (!sides.length) return "";
+
+  const avail = MOM_DOFS.filter((d) => momentArms.joints[d.key]
+    && sides.some((s) => momentContributions(rep, { dof: d, side: s, arms: momentArms, muscleJoints })));
+  if (!avail.length) return "";
+  const dof = avail.find((d) => d.key === kept.dof) || avail[0];
+
+  /* Both legs, one under the other on a SHARED axis.
+   *
+   * The side used to be a radio button, which makes a left-right comparison a
+   * memory test: you look at one, click, and try to remember what the other
+   * looked like. Two panels with the same y range answer it by looking. */
+  const o = rep.osimOut;
+  const panels = sides.map((side) => {
+    let net = null;
+    if (o && o.moments && o.momentNames) {
+      const j = o.momentNames.indexOf(`${dof.coord}_${side}`);
+      if (j >= 0) net = o.moments.map((r) => r[j]);
+    }
+    return { side, c: momentContributions(rep, { dof, side, arms: momentArms, muscleJoints, net }), net };
+  }).filter((p) => p.c);
+  if (!panels.length) return "";
+
+  const lo = Math.min(...panels.map((p) => p.c.range[0]));
+  const hi = Math.max(...panels.map((p) => p.c.range[1]));
+  const pad = 0.05 * (hi - lo || 1);
+  const range = [lo - pad, hi + pad];
+
+  const marks = Number.isFinite(rep.contact_frac) ? [{ frac: rep.contact_frac, label: tr("jlEvContact") }]
+    : Number.isFinite(rep.release_frac) ? [{ frac: rep.release_frac, label: tr("jlEvRelease") }] : [];
+  const dofBtns = avail.map((d) => `<label class="${d.key === dof.key ? "on" : ""}"><input
+      type="radio" name="momdof" class="momdof" value="${d.key}"${
+      d.key === dof.key ? " checked" : ""}>${tr(d.label)}</label>`).join("");
+
+  const figs = panels.map((p) => momContribSVG(p.c, { t: (k) => tr(k), marks, range,
+    title: tr(p.side === "l" ? "leftLeg" : "rightLeg") })).join("");
+  const anyNeutral = panels.some((p) => !p.c.angleKnown);
+  const anyNet = panels.some((p) => p.net);
+
+  return `<h2>${tr("jmContribMomTitle")}</h2>
+    <div class="jmpick" role="group">${dofBtns}</div>
+    ${figs}
+    <p class="note" style="margin-top:2px">${tr("momContribNote")}</p>
+    ${anyNeutral ? `<p class="note banner">${tr("momNeutralNote")}</p>` : ""}
+    ${anyNet ? "" : `<p class="note">${tr("momNoNetNote")}</p>`}`;
+}
+
 function selectedJoints(activity, metric, opts) {
   const avail = opts.map((o) => o.joint);
   const kept = jointSel[`${activity}|${metric}`];
@@ -10406,6 +11045,8 @@ function metricPlot(rep, res, metric) {
   // The two that read their own arrays rather than rep.jm.
   if (metric === "muscle") return metricAvailable(rep, res, "muscle") ? musclePlot(rep, res) : "";
   if (metric === "jrf") return metricAvailable(rep, res, "jrf") ? jrfPlot(rep, res) : "";
+  if (metric === "grf") return grfPanel(rep, res);
+  if (metric === "contribmom") return metricAvailable(rep, res, "contribmom") ? momContribPlot(rep, res) : "";
   if (metric === "contrib") {
     if (!metricAvailable(rep, res, "contrib")) return "";
     const bwN = (res.massKg || parseFloat($("mass").value) || 75) * 9.80665;
@@ -10416,6 +11057,7 @@ function metricPlot(rep, res, metric) {
       <p class="note">${tr("jcfContribNote")}</p>` : "";
   }
   const jm = rep.jm;
+  const mkey = metric;
   const opts = jointOptions(jm, metric, res.activity);
   if (!opts.length) return "";
   const meta = METRIC_META[metric];
@@ -10441,16 +11083,16 @@ function metricPlot(rep, res, metric) {
       }
       series.push([label, jm[k], opt]);
       bands.push((sdj && sdj[k]) || null);
-      peaks.push(peakText(metric, label, jm[k], res.massKg));
+      peaks.push(peakText(mkey, label, jm[k], res.massKg));
     }
     // Gait: the right cycle's copy of a single sagittal estimate (moment and
     // power are not resolved per leg -- noteMomentOneSide says so).
-    const rk = `${o.joint}_${metric}`;
+    const rk = `${o.joint}_${mkey}`;
     if (gait && o.keys.length === 1 && !o.keys[0][1] && rep.jmRight && rep.jmRight[rk]) {
       const label = name + " " + tr("rightLeg");
       series.push([label, rep.jmRight[rk], { color: SIDE_R, ...JOINT_STYLE[o.joint] }]);
       bands.push(null);
-      peaks.push(peakText(metric, label, rep.jmRight[rk], res.massKg));
+      peaks.push(peakText(mkey, label, rep.jmRight[rk], res.massKg));
     }
   }
 
@@ -10459,7 +11101,7 @@ function metricPlot(rep, res, metric) {
    * are flexion positive, so it is flipped to sit on the same side. */
   const refCond = rep.isMean && res.activity === "squat" ? normCondition(res) : null;
   let refs = 0;
-  if (refCond && (metric === "angle" || metric === "moment")) {
+  if (refCond && (metric === "angle" || mkey === "moment")) {
     for (const j of ["knee", "hip", "ankle"]) {
       if (!sel.includes(j)) continue;
       const c = refCurve(refCond, metric === "angle" ? "joint_angle" : "joint_moment", j);
@@ -10474,7 +11116,7 @@ function metricPlot(rep, res, metric) {
 
   // One leg joint ticked on the moment plot: its muscles, on the same axis.
   let extra = "";
-  if (metric === "moment" && rep.forces) {
+  if (mkey === "moment" && rep.forces) {
     const legSel = sel.filter((j) => JOINTS.some((x) => x.key === j));
     if (sel.length === 1 && legSel.length === 1) {
       const mc = muscleContrib(rep, res, legSel[0]);
@@ -10503,7 +11145,8 @@ function metricPlot(rep, res, metric) {
     ${extra}
     ${refs ? refNote(refCond) : ""}
     ${meta.note ? `<p class="note" style="margin-top:2px">${tr(meta.note)}</p>` : ""}
-    ${gait && (metric === "moment" || metric === "power") && rep.jmRight
+    ${mkey === "moment" ? momentNotes(rep, res) : ""}
+    ${gait && (mkey === "moment" || metric === "power") && rep.jmRight
       ? `<p class="note" style="margin-top:2px">${tr("noteMomentOneSide")}</p>` : ""}`;
 }
 
@@ -10516,7 +11159,7 @@ function metricPlot(rep, res, metric) {
  * the product of two curves already on this menu and adds no independent
  * information -- and it carried the error of both (Bas, 2026-09-19).
  * jointmetrics.js still computes it; the export still contains it. */
-const PLOT_METRICS = ["angle", "vel", "moment", "power", "muscle", "jrf", "contrib"];
+const PLOT_METRICS = ["angle", "vel", "moment", "power", "grf", "muscle", "jrf", "contrib", "contribmom"];
 const metricSel = {};   // activity -> the metric last picked
 
 function drawMetric(box, rep, res) {
@@ -10540,6 +11183,25 @@ function drawMetric(box, rep, res) {
           tr(METRIC_META[m].title)}</option>`).join("")}</select></div>`
     : "") + html;
   box.classList.toggle("hidden", !html);
+  if (metric === "grf") {
+    const save = () => {
+      grfSel[res.activity] = {
+        src: box.querySelector("select.grfsrc")?.value,
+        sides: [...box.querySelectorAll('input[type="checkbox"]:checked')].map((x) => x.value),
+      };
+      drawMetric(box, rep, res);
+    };
+    const pick = box.querySelector("select.grfsrc");
+    if (pick) pick.onchange = save;
+    box.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.onchange = save; });
+  }
+  if (metric === "contribmom") {
+    const save = (k) => (e) => {
+      momSel[res.activity] = { ...(momSel[res.activity] || {}), [k]: e.target.value };
+      drawMetric(box, rep, res);
+    };
+    box.querySelectorAll("input.momdof").forEach((r) => { r.onchange = save("dof"); });
+  }
   if (metric === "muscle" || metric === "jrf") {
     /* Two independent groups in one box: WHAT to draw and WHICH LEGS. Reading
      * every checked box into one list, as the joint plots do, would mix them
@@ -10616,24 +11278,10 @@ function grfPanel(rep, res) {
     ${series.length ? curveChart(rep, res.activity, series, bands, { unit: "N", zero: true })
                     : `<p class="note">${tr("jmNoneTicked")}</p>`}
     ${peaks.length ? `<p class="jmpeaks">${peaks.join(" · ")}</p>` : ""}
-    <p class="note" style="margin-top:2px">${tr(note)}</p>`;
+    <p class="note" style="margin-top:2px">${tr(note)}</p>
+    ${src === "feet" && jm.feet_grf_split === "even"
+      ? `<p class="note banner">${tr("grfNoteEvenSplit")}</p>` : ""}`;
 }
-function drawGrf(box, rep, res) {
-  if (!box) return;
-  const html = grfPanel(rep, res);
-  box.innerHTML = html;
-  box.classList.toggle("hidden", !html);
-  const save = () => {
-    grfSel[res.activity] = {
-      src: box.querySelector("select.grfsrc")?.value,
-      sides: [...box.querySelectorAll('input[type="checkbox"]:checked')].map((x) => x.value),
-    };
-    drawGrf(box, rep, res);
-  };
-  box.querySelector("select.grfsrc")?.addEventListener("change", save);
-  box.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.onchange = save; });
-}
-
 /* Joint-load summary (src/jointload.js): poses at the task's key instants, the
  * vertical GRF, and a hip/knee/ankle contact-force dial per instant. A
  * sagittal/frontal toggle and an L/R leg toggle, kept per task like jointSel. */
@@ -10838,7 +11486,11 @@ function lineChart(t, series, unit, palette, bandsIn, opts) {
     const b = bands && bands[i];
     return b ? v.flatMap((x, j) => [x + b[j], x - b[j]]) : v;
   }).concat(hlines.map((h) => h.y));
-  const y0 = Math.min(...all), y1 = Math.max(...all);
+  /* Only the measured points set the range. A series may have GAPS -- a joint
+   * the camera could see for part of the clip and not the rest -- and those
+   * are non-finite, which would make the whole range NaN. */
+  const finVals = all.filter(Number.isFinite);
+  const y0 = finVals.length ? Math.min(...finVals) : 0, y1 = finVals.length ? Math.max(...finVals) : 1;
   const pad = (y1 - y0) * 0.08 || 1, lo = y0 - pad, hi = y1 + pad;
   const sx = (v) => P.l + ((v - t[0]) / (t[t.length - 1] - t[0] || 1)) * (W - P.l - P.r);
   const sy = (v) => H - P.b - ((v - lo) / (hi - lo)) * (H - P.t - P.b);
@@ -10861,9 +11513,27 @@ function lineChart(t, series, unit, palette, bandsIn, opts) {
     const o = sopt[i], col = o.color || pal[i % pal.length];
     const dash = o.dash ? ' stroke-dasharray="4 3"'
                : o.dot ? ` stroke-dasharray="${SIDE_DASH}"` : "";
-    g += `<polyline fill="none" stroke="${col}" stroke-width="${o.dash ? 1.4 : 1.7}"${
-      dash} stroke-linejoin="round" points="${
-      vals.map((v, j) => `${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}"/>`;
+    /* One polyline per unbroken run of measured points. A single polyline
+     * would either bridge a gap -- drawing a straight line through frames
+     * nobody measured -- or, with NaN in its points list, fail to render at
+     * all. A break in the line is the honest picture. */
+    let run = [];
+    const flush = () => {
+      if (run.length > 1) {
+        g += `<polyline fill="none" stroke="${col}" stroke-width="${o.dash ? 1.4 : 1.7}"${
+          dash} stroke-linejoin="round" points="${run.join(" ")}"/>`;
+      } else if (run.length === 1) {
+        // A lone measured frame between two gaps: a dot, or it would vanish.
+        const [cx0, cy0] = run[0].split(",");
+        g += `<circle cx="${cx0}" cy="${cy0}" r="1.6" fill="${col}"/>`;
+      }
+      run = [];
+    };
+    vals.forEach((v, j) => {
+      if (Number.isFinite(v)) run.push(`${sx(t[j]).toFixed(1)},${sy(v).toFixed(1)}`);
+      else flush();
+    });
+    flush();
   });
   // Walking hip and walking knee sit 0.2 xBW apart, so their labels landed on
   // top of each other and neither could be read. Draw the lines where they
@@ -11060,6 +11730,17 @@ function armSeries(joint, muscle, angles) {
     const f = (a - g[i]) / (g[i + 1] - g[i] || 1);
     return arm[i] + (arm[i + 1] - arm[i]) * f;
   });
+}
+
+/* Which coordinate a joint's angle curve comes from. With two measured legs
+ * the right and left are different curves and both are drawn; with one, the
+ * single curve is drawn once and labelled as covering both sides, rather than
+ * two identical lines that look like a left-right comparison. */
+function jointCoords(res, j) {
+  const base = j.coord.replace(/_r$/, "");
+  return res && res.sidesMeasured
+    ? [{ coord: `${base}_r`, suffix: " (R)" }, { coord: `${base}_l`, suffix: " (L)" }]
+    : [{ coord: j.coord, suffix: "" }];
 }
 
 const JOINTS = [
@@ -11283,7 +11964,7 @@ function armSideOn(res) {
   return res.activity === "jumpshot" || (res.view?.view ?? "sagittal") === "sagittal";
 }
 
-function momentPanel(rep, res) {
+function momentNotes(rep, res) {
   const opts = jointOptions(rep.jm, "moment", res.activity);
   if (!opts.length) return "";
   const d = rep.dyn, jm = rep.jm;
@@ -11298,8 +11979,7 @@ function momentPanel(rep, res) {
     bits.push(`${tr("peakHandForceLabel")} ${(Math.max(...jm.hand_force_n) / sysN).toFixed(2)} ${tr("timesSystemWeight")}`);
   }
   return `
-    <h1 style="font-size:16px;margin:16px 0 2px">${tr("jmKineticsTitle")}</h1>
-    <p class="sub" style="margin-bottom:4px">${bits.join(" · ")} ${loadNote(res)}</p>
+    <p class="sub" style="margin:6px 0 4px">${bits.join(" · ")} ${loadNote(res)}</p>
     ${res.massKg + res.externalKg <= 0
       ? `<p class="note banner">${tr("noteAssistExceeds", { kg: res.assistKg })}</p>` : ""}
     ${legs ? `<p class="note">${tr("noteInverseDynamics")} ${limitsLink()}</p>` : ""}
@@ -11330,13 +12010,27 @@ function forcePanel(rep, res) {
   // problem -- it reads as one muscle with four curves.
   const groups = groupBySide(rep.forceNames, (n) => allPeaks.get(n) || 0)
                    .slice(0, MCOLORS.length);
-  const cell = (g, side) => {
-    if (!g[side]) return "—";
-    const v = g[side].peak;
-    return `<span${v > MAX_PLAUSIBLE_FORCE_N ? ' style="color:var(--warn)"' : ""}>${v.toFixed(0)}</span>`;
+  /* The same peaks as a paired bar chart.
+   *
+   * Two columns of four-digit numbers is a table you have to read; two bars
+   * per muscle is a left-right difference you can see. Right red, left green,
+   * the same two colours the curves use everywhere else, and the value at the
+   * end of its own bar so nothing has to be looked up. */
+  const peakMax = Math.max(1, ...groups.flatMap((g) => ["r", "l"].map((s) => (g[s] ? g[s].peak : 0))));
+  const bar = (g, side) => {
+    if (!g[side]) return "";
+    const v = g[side].peak, w = Math.max(1.5, (100 * v) / peakMax);
+    const over = v > MAX_PLAUSIBLE_FORCE_N;
+    return `<div class="pfBar"><i style="width:${w.toFixed(1)}%;background:${
+      side === "l" ? SIDE_L : SIDE_R}"></i><span${
+      over ? ' style="color:var(--warn)"' : ""}>${v.toFixed(0)}</span></div>`;
   };
-  const rows = groups.map((g) =>
-    `<tr><td>${g.base}</td><td>${cell(g, "r")}</td><td>${cell(g, "l")}</td></tr>`).join("");
+  const peakBars = `<div class="pfRows">${groups.map((g) => `<div class="pfRow">
+      <span class="pfName">${g.base}</span>
+      <span class="pfBars">${bar(g, "r")}${bar(g, "l")}</span></div>`).join("")}</div>
+    <p class="jmpeaks"><span class="lgd"><i class="swatch" style="background:${SIDE_R}"></i>${
+      tr("rightLeg")}</span> <span class="lgd"><i class="swatch" style="background:${SIDE_L}"></i>${
+      tr("leftLeg")}</span> N</p>`;
 
   const jrfPeaks = new Map((rep.jrf ? peakJRF(rep.jrf, rep.jrfNames) : [])
     .map(([n, v]) => [n, v]));
@@ -11433,8 +12127,7 @@ function forcePanel(rep, res) {
       r2j: r2j == null ? "—" : r2j.toFixed(2) })} ${limitsLink()}</p>
     ${impulseBars}
     <h1 style="font-size:14px;margin:14px 0 2px">${tr("musclePeakTitle")}</h1>
-    <table><thead><tr><th>${tr("muscle")}</th><th>${tr("rightPeakN")}</th><th>${tr("leftPeakN")}</th></tr></thead>
-      <tbody>${rows}</tbody></table>
+    ${peakBars}
     <h1 style="font-size:14px;margin:14px 0 2px">${tr("jointContactForce")}</h1>
     <table class="jcf"><thead><tr><th>${tr("joint")}</th><th>${tr("right")}</th><th>${tr("left")}</th>
       <th class="ref">${refCondT ? tr("refSuffix", { cond: refCondT }) : tr("squatRef")}</th>
@@ -11536,163 +12229,6 @@ async function summaryFigures(res) {
   return out;
 }
 
-async function exportZip(res, fps) {
-  const st = $("zipStatus");
-  const note = (t) => { st.textContent = t; };
-  try {
-    note("Collecting…");
-    const files = [];
-    const cols = ACTIVITIES[res.activity].columns;
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-
-    // Plots: page through the reps so each one's charts are in the DOM.
-    note("Rendering plots…");
-    const pages = shownItems.length || res.reps.length;
-    for (let i = 0; i < pages; i++) {
-      if (selectRep) selectRep(i);
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const svgs = document.querySelectorAll("#results svg.chart");
-      let k = 0;
-      for (const svg of svgs) {
-        const png = await svgToPng(svg, 1100);
-        if (!png) continue;
-        // Name each plot from its own legend, so the files are self-describing
-        // rather than rep1_02.png.
-        const leg = svg.nextElementSibling;
-        const labels = leg && leg.classList.contains("legend")
-          ? [...leg.querySelectorAll("span")].map((x) => x.textContent.trim())
-              .filter((t) => t && !/^N(·m)?$/.test(t))
-          : [];
-        const slug = (labels.slice(0, 3).join("_") || `chart${++k}`)
-          .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
-        /* Named from the ITEM on screen, not from res.reps[i].
-         *
-         * On gait the panels are no longer one per rep -- they are one per
-         * stride cycle, plus a mean and the whole run -- so indexing back into
-         * res.reps read past the end and threw mid-export, after the analysis
-         * had already been written into the zip. */
-        const it = shownItems[i];
-        const who = !it ? `rep${i + 1}`
-          : it.wholeTrial ? "whole_trial"
-          : it.cycle ? `stride${it.cycle}`
-          : it.isMean ? "mean"
-          : `rep${it.rep ?? i + 1}`;
-        files.push({ name: `plots/${who}_${String(++k).padStart(2, "0")}_${slug}.png`,
-                     data: await blobBytes(png) });
-      }
-    }
-
-    const video = videoBlob && videoBlob.size
-      ? { name: "video." + extFor(videoBlob.type), data: await blobBytes(videoBlob) } : null;
-
-    const summary = {
-      generated: new Date().toISOString(),
-      activity: res.activity, osim_model: res.osimModel,
-      fps: +fps.toFixed(2), pose_coverage: +res.coverage.toFixed(3),
-      px_per_m: +res.pxPerM.toFixed(2), camera_view: res.view,
-      body_mass_kg: res.massKg, added_kg: res.addedKg, assistance_kg: res.assistKg,
-      net_external_kg: res.externalKg,
-      reps: res.reps.map((r) => ({
-        rep: r.rep, duration_s: +r.duration_s.toFixed(3),
-        // Every joint that has a moment -- the arms' on the arm tasks, the
-        // legs' where the inverse dynamics ran.
-        quality: r.quality || null,
-        quality_notes: (r.qualityNotes || []).map((q) => `${q.code}:${q.v}`),
-        peak_moments_Nm: jmPeaks(r.jm, "moment"),
-        peak_power_W: jmPeaks(r.jm, "power"),
-      })),
-    };
-    files.push({ name: "session.json", data: JSON.stringify(summary, null, 2) });
-
-    // The whole training session, not just this set: every set recorded so
-    // far, plus the first-to-last trends.
-    const training = getSession();
-    if (training && training.sets.length) {
-      files.push({ name: "training/sets.json", data: JSON.stringify(training, null, 2) });
-      const past = listArchive();
-      if (past.length) {
-        files.push({ name: "training/history.json", data: JSON.stringify(past, null, 2) });
-      }
-      const ts = summariseSession(training);
-      files.push({ name: "training/summary.json", data: JSON.stringify(ts, null, 2) });
-      const hdr = ["set", "activity", "reps", "added_kg", "assist_kg", "at"];
-      const rows = training.sets.map((x) => [x.index, x.activity, x.reps,
-        x.addedKg ?? 0, x.assistKg ?? 0, x.at].join(","));
-      files.push({ name: "training/sets.csv", data: hdr.join(",") + "\n" + rows.join("\n") + "\n" });
-    }
-    files.push({ name: "README.txt", data:
-`BioScout Web export — ${stamp}
-Activity: ${res.activity}   frame rate: ${fps.toFixed(1)} fps
-Camera view: ${res.view?.view ?? "?"} (frontality ${res.view?.frontality ?? "?"})
-
-LAYOUT                   The zip is a bioscout session folder, <athlete>/<YY_MM_DD>/,
-                         the same layout the Python pipeline writes for a Vicon
-                         session. Trial files are under
-                         3_iterations/bioscout_web/<Trial>/ (one folder per rep,
-                         plus the whole clip for gait); this README, the charts
-                         and the training data are in 4_outputs/.
-external_biomechanics/joint_angles.mot   OpenSim coordinates, signed for ${res.osimModel}
-                         (knee flexion NEGATIVE). pelvis_ty is an ABSOLUTE
-                         height above the floor, not a displacement.
-external_biomechanics/inverse_dynamics.sto     net joint moments (N.m), OpenSim names
-external_biomechanics/inverse_dynamics_2d.sto  planar inverse dynamics from video (N.m, N)
-static_optimisation/StaticOptimization_force.sto       muscle forces (N) + predicted GRF
-static_optimisation/StaticOptimization_activation.sto  muscle activations (0-1)
-joint_contact_forces/output_so.sto             joint reaction forces (N), components + resultants
-2_experimental/<Trial>/marker_experimental.trc pose landmarks in metres (depth is the pose
-                         model's guess), and the video when it was kept.
-4_outputs/               summary figures, every chart in the app (plots/), session.json,
-                         training/ (the whole training session).
-All .sto/.mot open in the OpenSim GUI (File > Load Motion / Preview Experimental Data).
-Forces, activations, moments and joint loads come from the static-optimisation
-surrogate, not from an OpenSim solve; each file's header says so.
-
-WHAT TO TRUST
-  Joint angles, range of motion, rep count and depth are measured.
-  Joint moments are inverse dynamics from body mass; the ground reaction is
-  derived from whole-body centre-of-mass acceleration, not assumed. Centre of
-  pressure is taken as the midfoot and the legs are assumed symmetric.
-  Durations depend on the frame rate the browser delivered — treat as
-  approximate.
-  Left and right are mirrored: one camera cannot separate the sides.
-
-WHAT NOT TO TRUST
-  The muscle forces come from a surrogate that FAILS ITS OWN AUDIT: on a real
-  trial from its own gait training set it predicts 113,250 N, where the largest
-  human muscle produces a few thousand. The waveform SHAPES look plausible; the
-  magnitudes are wrong by orders of magnitude. Do not publish these numbers.
-
-  Sagittal angles are only valid filmed from the side. This session was
-  ${res.view?.view ?? "?"}.
-` });
-
-    note("Packing…");
-    /* Laid out like a lab session from the Python pipeline (osimexport.js):
-     * the trial's OpenSim files under 3_iterations/bioscout_web, everything
-     * above (charts, summaries, training) under 4_outputs. */
-    note("Writing OpenSim files…");
-    for (const fig of await summaryFigures(res)) files.push(fig);
-    const built = buildSessionFiles({
-      athlete: currentAthlete() || "athlete",
-      date: getSession()?.started || new Date(),
-      massKg: res.massKg,
-      set: { res, fps, setIndex: res.setIndex ?? 1,
-             frames: res === lastResult ? frames : null, video },
-      extra: files,
-    });
-    const blob = makeZip(built.files);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `bioscout_${res.activity}_${stamp}.zip`;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
-    note(tr("savedFiles", { n: files.length, mb: (blob.size / 1e6).toFixed(1) }));
-  } catch (err) {
-    note(tr("exportFailedShort", { err: err.message }));
-  }
-}
 
 /** Dropdown over the sets recorded since the page loaded. Sets from an earlier
  *  page are listed but disabled: their summaries survived in storage, their
@@ -11737,7 +12273,7 @@ async function restoreLoads(res) {
         mc.knee_angle_l = (r.coords.knee_angle_l || r.coords.knee_angle_r).map((v) => -v);
       }
       mc.pelvis_tx = r.coords.pelvis_tz; mc.pelvis_tz = r.coords.pelvis_tx;   // as enrich()
-      const out = predictForces(fm, mc, r.times.length, { massKg, heightM, times: r.times });
+      const out = predictForces(fm, solidCoords(mc), r.times.length, { massKg, heightM, times: r.times });
       Object.assign(r, { forces: out.forces, forceNames: out.muscleNames, jrf: out.jrf, jrfNames: out.jrfNames,
         loads: out.loads, loadNames: out.loadNames, forceMissing: out.missing, forceModel: fm,
         forceImplausible: implausibleFraction(out.forces) });
@@ -11925,7 +12461,6 @@ function labTrialReady(res, fps) {
   const bar = $("labTrialBar"); if (!bar) return;
   bar.classList.remove("hidden");
   $("labTrialName").value = nextTrialName(res.activity, res.setIndex);
-  $("labTrialBtn").textContent = labSession.root && labSession.session ? tr("lt_write", { s: `${labSession.subject}/${labSession.session}` }) : tr("lt_zip");
   $("labTrialStatus").textContent = "";
   if (labSession.root && labSession.session) labTrialSave();   // in a session every recording is filed by itself
 }
@@ -12001,7 +12536,6 @@ function render(res, fps) {
       ["lateral bend", sum("roll1", "roll2")],
       ["rotation", sum("yaw1", "yaw2")]], "deg", null, null);
     wireSetSwitcher();
-    $("zipBtn").onclick = () => exportZip(res, fps);
     $("dlBtn").onclick = () => {
       const txt = writeMot("joint_angles", ACTIVITIES.neck.columns, r.times, r.coords);
       const u = URL.createObjectURL(new Blob([txt], { type: "text/plain" }));
@@ -12040,7 +12574,6 @@ function render(res, fps) {
       <div class="tabs" id="repTabs" style="margin-top:14px"></div>
       <div id="chartBox"></div>
       <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMotOnly")}</button>
-      <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
       <div class="status" id="zipStatus"></div>
       <p class="note">${tr("noteCervical")}</p>`;
     const meanN = ensembleRep(res.reps);
@@ -12073,7 +12606,6 @@ function render(res, fps) {
     selN(0);
     wireSetSwitcher();
     wireRepRemoval(el, res, fps);
-    $("zipBtn").onclick = () => exportZip(res, fps);
     $("dlBtn").onclick = () => {
       const txt = writeMot("joint_angles", ACTIVITIES.neck.columns,
                            res.reps[0].times, res.reps[0].coords);
@@ -12459,6 +12991,10 @@ function render(res, fps) {
     ${isStroke ? strokePanel(res) : ""}
     ${isFoot ? kickPanel(res) : ""}
     ${runPanel}
+    ${camFixNote(res)}
+    ${res.sidesMeasured === false && ACTIVITIES[res.activity]?.columns?.some((c) => /_l$/.test(c))
+      ? `<p class="note">${tr("sidesMirroredNote")}</p>`
+      : res.sidesMeasured ? `<p class="note">${tr("sidesMeasuredNote")}</p>` : ""}
     ${suspect.length ? `<p class="note banner">${
       tr("heightsDisagree", { n: suspect.length, total: n })}</p>` : ""}
     ${mismatched.length ? `<p class="note banner">${
@@ -12472,9 +13008,6 @@ function render(res, fps) {
          what you open when the summary raises a question. -->
     <div id="loadBox" class="jmplot hidden"></div>
     <div id="chartBox"></div>
-    <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMot")}</button>
-    <button class="ghost" id="zipBtn" style="margin-top:8px">${tr("downloadZip")}</button>
-    <div class="status" id="zipStatus"></div>
     ${res.detection ? `<p class="note" style="border-left:3px solid var(--good);
         padding-left:11px;color:var(--good)">${tr("detectedAs", {
           activity: tr(res.activity),
@@ -12484,11 +13017,15 @@ function render(res, fps) {
           ? tr(res.detection.reasonKey, res.detection.reasonVals || {})
           : res.detection.reason}.</p>` : ""}
     ${viewNote(res)}
-    <div id="dynBox"></div>
     <div id="forceBox"></div>
     ${isJump ? `<p class="note">${tr("noteTwoHeights")}</p>` : ""}
     <p class="note">${tr(res.fromFile ? "noteAnglesFile" : "noteAnglesMeasured",
-                          { fps: fps.toFixed(1), ms: (1000 / fps).toFixed(0) })}</p>`;
+                          { fps: fps.toFixed(1), ms: (1000 / fps).toFixed(0) })}</p>
+    <!-- Last, after everything the trial produced: you download once you have
+         read it, not before (Bas, 2026-11-04). -->
+    <button class="ghost" id="dlBtn" style="margin-top:12px">${tr("downloadMot")}</button>
+    <button class="ghost" id="procBtn" style="margin-top:8px">${tr("openInProcess")}</button>
+    <div class="status" id="zipStatus"></div>`;
 
   const tabs = $("repTabs");
   items.forEach((r, i) => {
@@ -12539,10 +13076,10 @@ function render(res, fps) {
                     { n: items[i].nReps }) + tr("noteMeanBand")}</p>`
            : "");
     wireMetrics($("chartBox"), items[i], res);
-    $("dynBox").innerHTML = momentPanel(items[i], res)
-      + `<div class="grfplot jmplot"></div>`;
-    drawGrf($("dynBox").querySelector(".grfplot"), items[i], res);
-    wireMetrics($("dynBox"), items[i], res);
+    /* "Moments and power" and the ground-reaction section are both gone: all
+     * of it is on the plot menu above, so the sections repeated entries under
+     * headings of their own. The moment's caveats moved onto the moment plot
+     * itself (momentNotes). */
     $("forceBox").innerHTML = forcePanel(items[i], res);
     drawJointLoad($("loadBox"), items[i], res);
   }
@@ -12567,37 +13104,139 @@ function render(res, fps) {
     };
   });
 
-  $("zipBtn").onclick = () => exportZip(res, fps);
 
-  $("dlBtn").onclick = () => {
-    const cols = ACTIVITIES[res.activity].columns;
+  /* Straight from a recorded set into Process, without the download-then-
+   * upload round trip: the same .mot files the download button writes are
+   * handed to Process in memory. Every rep goes, so the curves can be
+   * compared there rather than one rep at a time. */
+  $("procBtn").onclick = () => {
+    /* The SAME writer the download uses, so Process sees everything the trial
+     * produced -- angles, both inverse-dynamics flavours, the 3D ground
+     * reaction, muscle forces, activations, power, contact forces and their
+     * contributions -- instead of only angles and moments, which is all this
+     * handler used to build by hand. */
+    const cols = motColumns(res, { forFile: false });
+    const bwN = (res.massKg || parseFloat($("mass").value) || 75) * 9.80665;
+    const files = [];
     res.reps.forEach((r, i) => {
-      const txt = writeMot("joint_angles", cols, r.times, r.coords);
-      if (r.dyn) {
-        const dcols = ["hip_moment", "knee_moment", "ankle_moment",
-                       "grf_vertical", "grf_horizontal"];
-        const sto = writeMot("joint_moments", dcols, r.times,
-          Object.fromEntries(dcols.map((k) => [k, r.dyn[k]])));
-        const du = URL.createObjectURL(new Blob([sto], { type: "text/plain" }));
-        const da = document.createElement("a");
-        da.href = du; da.download = `${res.activity}_rep${r.rep}_joint_moments.sto`;
-        document.body.appendChild(da);
-        setTimeout(() => { da.click(); setTimeout(() => { URL.revokeObjectURL(du); da.remove(); }, 4000); }, i * 350 + 150);
+      const trial = `${res.activity}_${String(i + 1).padStart(2, "0")}`;
+      const contrib = muscleJoints ? jcfContributions(r, muscleJoints, bwN) : null;
+      for (const f of trialFiles(trial, r, { columns: cols, osimModel: res.osimModel,
+                                             massKg: res.massKg, contrib })) {
+        const leaf = f.name.split("/").pop().replace(/^output_so\.sto$/, "joint_contact_forces.sto");
+        files.push(new File([f.data], `${trial}_${leaf}`, { type: "text/plain" }));
       }
-      const url = URL.createObjectURL(new Blob([txt], { type: "text/plain" }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${res.activity}_rep${r.rep}_${res.osimModel}_joint_angles.mot`;
-      // The anchor must be in the document, the clicks must be staggered (a
-      // burst of downloads gets suppressed), and the URL must outlive the
-      // click -- revoking straight away cancels the download.
-      document.body.appendChild(a);
-      setTimeout(() => {
-        a.click();
-        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 4000);
-      }, i * 350);
     });
+    if (!files.length) { say(tr("sayNothingToProcess"), true); return; }
+    showView("viewProcess"); openProcess();
+    processMounted.then((m) => m && m.load(files));
   };
+
+  /* One folder per trial, every trial holding the SAME file names.
+   *
+   * The old download wrote one flat pile of files whose names carried the rep
+   * number (cmj_rep1_joint_angles.mot), which is the wrong way round for the
+   * lab layout: <participant>/<trial>/, where every trial folder holds
+   * joint_angles.mot and inverse_dynamics.sto under those exact names, so a
+   * script or a person can walk the folders and read the same file from each.
+   * A browser cannot write a folder tree from a plain download, so it goes out
+   * as one zip holding that tree. */
+  $("dlBtn").onclick = async () => {
+    const cols = motColumns(res);
+    const who = ($("profile").value || currentAthlete() || "athlete")
+      .trim().replace(/[^A-Za-z0-9._-]+/g, "_") || "athlete";
+    const files = [];
+    res.reps.forEach((r, i) => {
+      // cmj_01, cmj_02 … numbered by position, so the folders sort in order
+      // even when reps have been removed and the rep numbers have gaps.
+      const trial = `${res.activity}_${String(i + 1).padStart(2, "0")}`;
+      /* Everything the trial produced, not just the angles.
+       *
+       * trialFiles() is the writer the full session export uses, so a trial
+       * folder holds what the Python pipeline would write: angles, both
+       * inverse-dynamics flavours, muscle forces and activations, and the
+       * joint contact forces -- whichever of them this rep actually has. Its
+       * subfolders are flattened so every trial folder still holds the same
+       * short list of file names. */
+      const contrib = muscleJoints ? jcfContributions(r, muscleJoints, (res.massKg || 75) * 9.80665) : null;
+      for (const f of trialFiles(trial, r, { columns: cols, osimModel: res.osimModel, massKg: res.massKg, contrib })) {
+        const leaf = f.name.split("/").pop().replace(/^output_so\.sto$/, "joint_contact_forces.sto");
+        files.push({ name: `${who}/${trial}/${leaf}`, data: f.data });
+      }
+    });
+    if (!files.length) { say(tr("sayNothingToProcess"), true); return; }
+    /* The model the angles are signed for, shipped with them.
+     *
+     * A .mot is only coordinate values: without the model whose coordinates
+     * they are, OpenSim has nothing to apply them to, and picking the wrong
+     * one silently plays the motion against a different sign convention. The
+     * generic model is enough -- joint ANGLES do not depend on segment
+     * lengths, so scaling changes how big the skeleton looks and nothing
+     * about the movement. */
+    let modelName = null;
+    try {
+      const mr = await fetch(`data/opensim/models/${OSIM_FILE}`);
+      if (mr.ok) {
+        modelName = OSIM_FILE;
+        files.push({ name: `${who}/${OSIM_FILE}`, data: new Uint8Array(await mr.arrayBuffer()) });
+      }
+    } catch { /* offline: the .mot still goes out, the README says what is missing */ }
+    files.push({ name: `${who}/README.txt`, data:
+`BioScout Web — ${res.activity}, ${new Date().toISOString().slice(0, 19).replace("T", " ")}
+
+${modelName ? `${modelName}             the OpenSim model these angles belong to.
+                         In the GUI: File > Open Model, then File > Load Motion
+                         and pick a trial's joint_angles.mot. It is the GENERIC
+                         model, not scaled to you -- joint angles do not depend
+                         on segment lengths, so the movement is identical; only
+                         the skeleton's size is nominal. Scale it in Simulate if
+                         you need a subject-specific model.
+` : `(the OpenSim model could not be included -- you were offline. It is
+ data/opensim/models/${OSIM_FILE} in the app.)
+`}
+One folder per trial, each holding whatever that trial produced:
+  joint_angles.mot                   OpenSim coordinates, signed for ${res.osimModel}
+  inverse_dynamics.sto               net joint moments (N.m), surrogate
+  inverse_dynamics_2d.sto            planar moments and ground reaction from
+                                     video and body mass
+  StaticOptimization_force.sto       muscle forces (N), surrogate
+  StaticOptimization_activation.sto  activations 0-1, surrogate
+  muscle_power.sto                   muscle power (W), surrogate
+  ground_reaction.mot                3D ground reaction per foot (N), surrogate:
+                                     fx fore-aft, fy vertical, fz medio-lateral
+  joint_contact_forces.sto           joint reaction forces (N), surrogate
+  contributions_so.sto               each muscle group's share of the contact
+                                     force (BW), approximate -- see the note
+                                     in the file
+
+Not in here: muscle and tendon LENGTHS. The surrogate predicts forces,
+activations, moments and contact loads; it has no length, fibre or moment-arm
+outputs, and lengths cannot be recovered from the angles in the browser
+without the model's muscle paths. Run the .mot through OpenSim's Analyze tool
+(MuscleAnalysis) against the shipped model to get them.
+
+The trunk: one camera sees a single shoulder-to-hip line and cannot tell a
+pelvis that tilted from a spine that flexed, so the whole measured lean drives
+pelvis_tilt and lumbar_extension stays at 0. Ankle dorsiflexion is referenced
+to your own quiet stance in this clip, because knee-ankle-toe carries a
+subject-specific offset that is foot shape, not ankle angle.
+
+Angles, range and timing are measured. Moments come from body mass with the
+ground reaction derived from centre-of-mass acceleration; centre of pressure is
+taken as the midfoot and the legs are assumed symmetric. Left and right are
+mirrored: one camera cannot separate the sides.
+`});
+    const blob = makeZip(files);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${who}_${res.activity}_${new Date().toISOString().slice(0, 10)}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 5000);
+    say(tr("sayTrialFolders", { n: res.reps.length, who }));
+  };
+
 }
 
 // --- demo mode (last: everything above must be initialised first) ----------
@@ -12723,13 +13362,41 @@ if ("serviceWorker" in navigator && location.protocol === "https:") {
       if (served && served !== window.BUILD && !pinnedBuild()) ready(true, served);
     } catch { /* offline */ }
   }, 2500));
+  /** Resolve once a new worker has finished installing, or give up. */
+  const waitInstalled = (reg, ms) => new Promise((res) => {
+    if (!reg || reg.waiting) return res(!!(reg && reg.waiting));
+    const w = reg.installing;
+    if (!w) return res(false);
+    const t = setTimeout(() => res(!!reg.waiting), ms);
+    w.addEventListener("statechange", () => {
+      if (w.state === "installed" || w.state === "activated") { clearTimeout(t); res(true); }
+      if (w.state === "redundant") { clearTimeout(t); res(false); }
+    });
+  });
   $("updateLink").onclick = async (e) => {
     e.preventDefault();
+    const a = $("updateLink");
     const reg = window.__bsReg || await navigator.serviceWorker.getRegistration();
-    try { if (reg) await Promise.race([reg.update(), new Promise((r) => setTimeout(r, 2500))]); } catch { /* offline */ }
+    /* Wait for the install, do not race it.
+     *
+     * This used to give up after 2.5 s and fall through to location.reload(),
+     * which the OLD worker answers from its own cache -- so the page came back
+     * on the same build and the button looked broken. A new build has a whole
+     * shell to precache, which on a phone takes far longer than 2.5 s, so the
+     * only honest thing is to say "updating" and wait for it. */
+    a.textContent = tr("updating");
+    try { if (reg) await Promise.race([reg.update(), new Promise((r) => setTimeout(r, 8000))]); } catch { /* offline */ }
     if (pinnedBuild()) await setPin(null);
-    if (applyWaiting(reg)) return;                    // reloads on controllerchange
-    location.reload();
+    if (!applyWaiting(reg)) {
+      await waitInstalled(reg, 60000);
+      if (!applyWaiting(reg)) {
+        /* Nothing new to activate: either this IS the newest build, or the
+         * worker could not be fetched. A reload at least re-checks, and the
+         * link goes back to its normal label rather than lying. */
+        a.textContent = tr("updateLink");
+        location.reload();
+      }
+    }
   };
   /* Older builds: the small arrow after the build. builds.json lists them
    * (build -> commit); the worker serves the chosen one's files from the

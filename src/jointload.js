@@ -220,19 +220,17 @@ export function loadEvents(rep, activity, spec, side, grf, kneeSign = 1) {
       if (apex < n - 2) push("jlEvLanding", argmax(grf, apex + 1, n - 1));
     }
   } else {
+    /* A squat is three postures, not four: standing, the bottom, standing
+     * again. "Peak descent" and "peak load on the ascent" are instants on a
+     * curve, not positions -- the stick figures at them look like the frames
+     * either side of the bottom, so the row read as four nearly identical
+     * poses (Bas, 2026-11-05). The curve underneath still shows where the
+     * load peaked; the figures show the positions. */
     const bottom = tyOk ? argmin(ty) : (knee ? argmax(knee) : -1);
     if (bottom > 1 && bottom < n - 2) {
-      const vel = tyOk ? diff(smooth(ty, 5), t) : diff(smooth(knee, 5), t).map((v) => -v);
       push("jlEvStart", 0);
-      push("jlEvPeakDescent", argmin(vel, 1, bottom));
       push("jlEvBottom", bottom);
-      // Peak load on the way up -- unless it IS the bottom (it often is: the
-      // turnaround is where the body is decelerated hardest), in which case a
-      // second column for the same instant says nothing, and the fastest part
-      // of the ascent is shown instead.
-      const pl = argmax(grf, bottom + 1, n - 1);
-      if (pl - bottom >= 3) push("jlEvPeakLoadUp", pl);
-      else push("jlEvPeakAscent", argmax(vel, bottom + 1, n - 2));
+      push("jlEvStand", n - 1);
     }
   }
 

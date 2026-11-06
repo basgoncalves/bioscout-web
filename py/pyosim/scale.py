@@ -138,10 +138,20 @@ def write_scaled(generic_path, out_path, factors, mass=None, preserve_mass=False
         for g in b.iter("scale_factors"):
             _scale_vec_text(g, s)
     # frames fixed to a body (joint offset frames) and every point on a body
+    _up = {c: p for p in m.iter() for c in p}                    # child -> parent element
+
+    def _owner_body(el):                                         # the <Body> a component sits in
+        e = _up.get(el)
+        while e is not None and e.tag != "Body":
+            e = _up.get(e)
+        return e.get("name") if e is not None else None
+
     for el in m.iter():
         parent = None
         if el.tag == "PhysicalOffsetFrame":
-            parent = _path_name(el.findtext("socket_parent"))
+            sp = (el.findtext("socket_parent") or "").strip()
+            # ".." = the body this frame is declared in (e.g. a body's geometry frame): scaled with it, as OpenSim does
+            parent = _owner_body(el) if sp in ("..", "../") else _path_name(sp)
             tr = el.find("translation")
         elif el.tag in ("PathPoint", "ConditionalPathPoint", "Marker"):
             parent = _path_name(el.findtext("socket_parent_frame"))
@@ -229,8 +239,36 @@ def _attach_extra(model, T, exp, max_d=0.2):
     return out
 
 
+def _scale_muscle_lengths(generic_path, scaled_path, log=print):
+    """As OpenSim's Muscle::postScale: optimal fibre length and tendon slack length scale with
+    the musculotendon length change in the default pose (generic -> scaled)."""
+    from .muscles import Paths
+    def lengths(path):
+        m = Model(path)
+        q = m.full_q({})
+        P = Paths(m, path)
+        return dict(zip(P.names, P.lengths(np.array([[q[n] for n in m.coord_order]]))[0]))
+    lg, ls = lengths(generic_path), lengths(scaled_path)
+    tree = ET.parse(scaled_path)
+    n = 0
+    for el in tree.getroot().iter():
+        name = el.get("name")
+        if name in lg and name in ls and lg[name] > 0 and el.find("optimal_fiber_length") is not None:
+            r = ls[name] / lg[name]
+            for tag in ("optimal_fiber_length", "tendon_slack_length"):
+                t = el.find(tag)
+                if t is not None and (t.text or "").strip():
+                    t.text = f" {float(t.text) * r:.12g}"
+            n += 1
+    tree.write(scaled_path, encoding="UTF-8", xml_declaration=True)
+    log(f"[scale] optimal fibre + tendon slack lengths of {n} muscles scaled with their path length")
+
+
 def run(generic_path, static_trc, out_osim, setup_path=None, mass=None, markerset=None,
-        aliases=None, t_range=None, placer=None, log=print, out_dir=None, all_markers=True):
+        aliases=None, t_range=None, placer=None, log=print, out_dir=None, all_markers=True,
+        placer_exclude=None):
+    """placer_exclude: marker names left out of the marker-placement IK (e.g. joint centres
+    estimated by regression, which should drive scaling but not the static pose)."""
     cfg = read_setup(setup_path) if setup_path else {"measurements": [], "manual": {}, "mass": None,
                                                      "time_range": None, "preserve_mass": False, "placer": True}
     mass = mass or cfg["mass"]
@@ -263,13 +301,19 @@ def run(generic_path, static_trc, out_osim, setup_path=None, mass=None, markerse
         tree.write(tmp_generic, encoding="UTF-8", xml_declaration=True)
     write_scaled(tmp_generic, work, factors, mass, cfg["preserve_mass"])
     log(f"[scale] scaled {len(factors)} bodies" + (f", mass {mass:g} kg" if mass else ""))
+    _scale_muscle_lengths(tmp_generic, work, log)
     placed, defaults = None, None
     if placer:
         sm = Model(work)
-        names = [n for n in sm.markers if n in exp and np.isfinite(exp[n]).all()]
-        t0 = np.array([0.0]); mk = {n: exp[n][None] for n in names}
-        _, qs, errs, used, _per = _ik.solve(sm, t0, mk, {n: 1.0 for n in names}, log=log)
-        q = qs[0]
+        skip = {str(n).upper() for n in (placer_exclude or ())}
+        names = [n for n in sm.markers if n in exp and np.isfinite(exp[n]).all() and n.upper() not in skip]
+        if skip:
+            log(f"[scale] marker placer: {len([n for n in sm.markers if n.upper() in skip])} marker(s) left out of the static-pose IK")
+        # IK on every static frame, then the mean pose (bioscout's marker registration does the same;
+        # one IK on the averaged markers lands ~0.2-0.5 mm away from it)
+        mk = {n: frames[n] for n in names}
+        _, qs, errs, used, _per = _ik.solve(sm, np.asarray(ts, float), mk, {n: 1.0 for n in names}, log=lambda *a: None)
+        q = {k: float(np.mean([qq[k] for qq in qs])) for k in qs[0]}
         T = sm.body_transforms(q)
         placed = {}
         for n in used:

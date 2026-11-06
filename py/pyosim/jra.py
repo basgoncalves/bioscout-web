@@ -23,7 +23,9 @@ from .io import read_sto, write_mot
 from . import id as idtool
 
 
-def run(model_path, coords_mot, forces_sto, loads_xml, out_sto, loads_mot=None, cutoff=6.0, log=print):
+def _prepare(model_path, coords_mot, forces_sto, loads_xml, loads_mot=None, cutoff=6.0, log=print):
+    """Everything that does not depend on which muscles pull: kinematics, every body's inertial
+    and gravity wrench, the external loads, and each muscle's force on each body it attaches to."""
     model = model_path if isinstance(model_path, Model) else Model(model_path)
     osim = model_path if isinstance(model_path, str) else model.path
     fc, fd, _ = read_sto(forces_sto)
@@ -80,7 +82,7 @@ def run(model_path, coords_mot, forces_sto, loads_xml, out_sto, loads_mot=None, 
             apply(bidx[f["body"]], F, P, T)
 
     TB = kin.bodies(Q)
-    mforce = {}                                   # muscle -> [(body, force on it (n,3))], for the contributions
+    mpull = {}                                    # muscle -> [(body, force on it (n,3), at point (n,3))]
     gpt = lambda b, loc: TB[b][1] + (TB[b][0] @ loc)
     for mu in mus:
         Fmag = np.interp(t, tf, fd[:, fc.index(mu["name"])])
@@ -91,16 +93,29 @@ def run(model_path, coords_mot, forces_sto, loads_xml, out_sto, loads_mot=None, 
             if b not in bidx:
                 continue
             d = (U[i] if i < len(U) else 0) - (U[i - 1] if i > 0 else 0)       # tension pulls toward both neighbours
-            apply(bidx[b], Fmag[:, None] * d, X[i])
-            mforce.setdefault(mu["name"], []).append((bidx[b], Fmag[:, None] * d))
+            mpull.setdefault(mu["name"], []).append((bidx[b], Fmag[:, None] * d, X[i]))
+    return dict(model=model, t=t, n=n, bidx=bidx, TB=TB, Fm=Fm, Mm=Mm, mpull=mpull)
 
-    # subtree sums, leaves first
+
+def _with_muscles(st, keep):
+    """Body wrenches with only the muscles in `keep` pulling (None = all)."""
+    Fm, Mm = st["Fm"].copy(), st["Mm"].copy()
+    for name, parts in st["mpull"].items():
+        if keep is not None and name not in keep:
+            continue
+        for b, F, P in parts:
+            Fm[:, b] -= F; Mm[:, b] -= np.cross(P, F)
+    return Fm, Mm
+
+
+def _joint_table(st, Fm, Mm):
+    """Subtree sums -> every joint's reaction on its child, in the child: (cols, data, Fs)."""
+    model, bidx, TB, n, t = st["model"], st["bidx"], st["TB"], st["n"], st["t"]
     Fs, Ms = Fm.copy(), Mm.copy()
-    for j in reversed(model.joints):
+    for j in reversed(model.joints):                                        # leaves first
         c, p = bidx.get(model._body_of(j.child)), bidx.get(model._body_of(j.parent))
         if c is not None and p is not None:
             Fs[:, p] += Fs[:, c]; Ms[:, p] += Ms[:, c]
-
     cols, out = ["time"], [t]
     for j in model.joints:
         cb = model._body_of(j.child); c = bidx[cb]
@@ -116,13 +131,34 @@ def run(model_path, coords_mot, forces_sto, loads_xml, out_sto, loads_mot=None, 
                 cols.append(f"{base}_{lab}{ax}"); out.append(v[:, a])
         for a, ax in enumerate("xyz"):
             cols.append(f"{base}_p{ax}"); out.append(np.full(n, loc[a]))
-    write_mot(out_sto, cols, np.column_stack(out), name="Joint Reaction Loads", degrees=False)
+    return cols, np.column_stack(out), Fs
+
+
+def run(model_path, coords_mot, forces_sto, loads_xml, out_sto, loads_mot=None, cutoff=6.0, log=print):
+    st = _prepare(model_path, coords_mot, forces_sto, loads_xml, loads_mot, cutoff, log)
+    cols, data, Fs = _joint_table(st, *_with_muscles(st, None))
+    write_mot(out_sto, cols, data, name="Joint Reaction Loads", degrees=False)
     try:
-        _contributions(model, bidx, Fs, mforce, t, out_sto.replace(".sto", "_contrib.sto"), log)
+        mforce = {m: [(b, F) for b, F, _ in parts] for m, parts in st["mpull"].items()}
+        _contributions(st["model"], st["bidx"], Fs, mforce, st["t"], out_sto.replace(".sto", "_contrib.sto"), log)
     except Exception as e:                                   # the figure is optional
         log(f"[jra] contributions not written: {e}")
     log(f"[jra] wrote {os.path.basename(out_sto)}")
-    return t, cols
+    return st["t"], cols
+
+
+def run_subsets(model_path, coords_mot, forces_sto, loads_xml, subsets, loads_mot=None, cutoff=6.0, log=print):
+    """The joint reaction loads with only some muscles pulling, for many muscle sets at once:
+    {tag: set of muscle names} -> {tag: (cols, data)}, each exactly what run() would write with
+    the other muscles' forces set to zero. The loads are linear in the muscle forces, so the
+    kinematics, inertia and external loads are computed once and each set only adds its muscles."""
+    st = _prepare(model_path, coords_mot, forces_sto, loads_xml, loads_mot, cutoff, log)
+    out = {}
+    for tag, keep in subsets.items():
+        cols, data, _ = _joint_table(st, *_with_muscles(st, set(keep)))
+        out[tag] = (cols, data)
+    log(f"[jra] {len(out)} muscle sets from one pass")
+    return out
 
 
 # ------------------------------------------------------------------ contributions

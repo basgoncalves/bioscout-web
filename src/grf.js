@@ -126,6 +126,86 @@ export function clipGrf(poses, activity, { pxPerM, heightM, systemKg, fps, trave
   const floor = rollingMedian(lowest, Math.max(3, Math.round(fps)));
   const band = 0.04 * bodyPx;
 
+  /* Can the camera tell the two feet apart at all?
+   *
+   * Filmed side-on -- which is how a squat is filmed -- the far foot sits
+   * behind the near one, so both feet are at the same place in the picture and
+   * the pose model's far-side landmarks are a guess. The per-foot contact test
+   * below then flickers: the guessed foot drifts out of the floor band for a
+   * few frames, that foot is called airborne, and the whole body weight jumps
+   * to the other leg. The result was a squat whose legs alternated between 0
+   * and 1.4 BW -- not a left-right difference, just noise given a side each.
+   *
+   * So: measure how far apart the feet actually are in the image over the clip.
+   * Below a stance's worth of separation the split is not measurable, and the
+   * honest answer is half each, every frame. */
+  const seps = [];
+  for (let i = 0; i < n; i++) {
+    const a = footX(at(i), "left"), b = footX(at(i), "right");
+    if (isNum(a) && isNum(b)) seps.push(Math.abs(b - a));
+  }
+  seps.sort((p, q) => p - q);
+  const sepMed = seps.length ? seps[seps.length >> 1] : 0;
+  const splitMeasurable = sepMed >= 0.08 * bodyPx;
+  out.sidesSplit = splitMeasurable ? "lever" : "even";
+  out.footSepFrac = bodyPx > 0 ? sepMed / bodyPx : 0;
+
+  /* Contact, de-bounced. A foot does not leave and retake the floor within a
+   * frame or two; a landmark does. Majority vote over a 5-frame window turns a
+   * one-frame drop-out back into contact instead of a weight transfer. */
+  /* Each foot against ITS OWN floor, not a floor shared by both.
+   *
+   * A camera is almost never level with the ground, so in a front view the two
+   * feet sit at different heights in the picture by pure perspective: in a
+   * squat filmed face-on the two differed by a CONSTANT 11% of body height
+   * while the contact band is 4% (Bas, squat_02.mp4). With one floor taken
+   * from the lower foot, the other foot was above the band in every single
+   * frame, was called airborne for the whole clip, and the left leg was handed
+   * 100% of body weight from start to finish while the right read zero.
+   *
+   * Its own rolling median is where that foot sits when it is down, whatever
+   * perspective does to it, so the comparison is against that. */
+  const floorL = rollingMedian(lowL, Math.max(3, Math.round(fps)));
+  const floorR = rollingMedian(lowR, Math.max(3, Math.round(fps)));
+  const rawContact = (low, fl) => low.map((v, i) => isNum(v) && fl[i] - v < band);
+  const debounce = (b) => b.map((_, i) => {
+    let on = 0, tot = 0;
+    for (let k = Math.max(0, i - 2); k <= Math.min(b.length - 1, i + 2); k++) { tot++; if (b[k]) on++; }
+    return on * 2 > tot;
+  });
+  let contactL = debounce(rawContact(lowL, floorL)), contactR = debounce(rawContact(lowR, floorR));
+
+  /* One foot held off the floor for the WHOLE clip -- a front-on single-leg
+   * squat -- has no transition for the test above to find: its own floor
+   * follows it up and it reads as grounded. The only evidence left is the
+   * other foot, so compare where each foot gets to at its lowest.
+   *
+   * The threshold has to clear perspective, which put a measured 11% of body
+   * height between two feet that were both flat on the floor. 15% is above
+   * that and below a real lift. It errs towards splitting a single-leg squat
+   * rather than towards writing off a leg that is carrying the athlete, which
+   * is the failure that was actually on the page. */
+  const pct = (a, q) => {
+    const v = a.filter(isNum).sort((x, y) => x - y);
+    return v.length ? v[Math.min(v.length - 1, Math.floor(q * v.length))] : NaN;
+  };
+  const deepL = pct(lowL, 0.9), deepR = pct(lowR, 0.9);   // the lowest each gets
+  if (isNum(deepL) && isNum(deepR)) {
+    const gap = 0.15 * bodyPx;
+    if (deepL - deepR > gap) contactR = contactR.map(() => false);
+    else if (deepR - deepL > gap) contactL = contactL.map(() => false);
+  }
+
+  /* The overlapping case is the opposite: with both feet at the same place in
+   * the picture there is no perspective offset between them, so a height
+   * difference IS one foot off the floor. That branch keeps the SHARED floor
+   * -- a per-foot floor would follow a foot held up for the whole clip and
+   * call a single-leg squat two-legged -- with a lift big enough to mean it,
+   * because the far foot's landmarks are a guess. */
+  const strictBand = 1.5 * band;
+  const strict = (low) => debounce(low.map((v, i) => isNum(v) && floor[i] - v < strictBand));
+  const strictL = strict(lowL), strictR = strict(lowR);
+
   if (hands) { out.hands_l = new Array(n).fill(NaN); out.hands_r = new Array(n).fill(NaN); }
   if (feet) { out.feet_l = new Array(n).fill(NaN); out.feet_r = new Array(n).fill(NaN); }
 
@@ -145,8 +225,19 @@ export function clipGrf(poses, activity, { pxPerM, heightM, systemKg, fps, trave
     if (hands) [out.hands_l[i], out.hands_r[i]] = lever(handT, xc[i], hl, hr, minSep);
     if (!feet) continue;
     if (hands) { [out.feet_l[i], out.feet_r[i]] = lever(footT, xc[i], fl, fr, minSep); continue; }
-    const cl = isNum(lowL[i]) && floor[i] - lowL[i] < band;
-    const cr = isNum(lowR[i]) && floor[i] - lowR[i] < band;
+    if (!splitMeasurable) {
+      /* The feet are at the same place in the picture, so a left-right split
+       * cannot be measured -- but a foot held clearly OFF the floor still can.
+       * That needs a much bigger lift than the contact band uses, because the
+       * far foot's landmarks are a guess: only a deliberate lift counts, not
+       * the few centimetres of jitter that were flipping the load leg to leg.
+       * Anything short of that is half each. */
+      if (strictL[i] && !strictR[i]) { out.feet_l[i] = footT; out.feet_r[i] = 0; }
+      else if (strictR[i] && !strictL[i]) { out.feet_l[i] = 0; out.feet_r[i] = footT; }
+      else { out.feet_l[i] = footT / 2; out.feet_r[i] = footT / 2; }
+      continue;
+    }
+    const cl = contactL[i], cr = contactR[i];
     if (cl && cr) [out.feet_l[i], out.feet_r[i]] = lever(footT, xc[i], fl, fr, minSep);
     else if (cl) { out.feet_l[i] = footT; out.feet_r[i] = 0; }
     else if (cr) { out.feet_l[i] = 0; out.feet_r[i] = footT; }
@@ -171,6 +262,8 @@ export function grfForRep(clip, bounds) {
       if (a) o[`${src}_grf_${s}`] = a.slice(b0, b1 + 1);
     }
   }
+  // Were the feet far enough apart in the picture to split the load at all?
+  if (clip.sidesSplit) o.feet_grf_split = clip.sidesSplit;
   return o;
 }
 
