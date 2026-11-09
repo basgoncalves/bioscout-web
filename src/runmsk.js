@@ -222,7 +222,7 @@ export function initRunMsk({ host, tr }) {
         k === "@misM" ? `<label class="phSl">${tr("rm_misM")}<select data-rm>${MK.map((m) => `<option${S.scale.misM === m ? " selected" : ""}>${m}</option>`).join("")}</select></label>` :
         `<div class="phSl"><span>${lab} <b data-rv="${t}:${k}">${get(t, k)}</b> ${u}</span><input type="range" min="${mn}" max="${mx}" step="${st}" value="${get(t, k)}" data-rk="${t}:${k}"></div>`).join("")}
       <p class="note">${tr("rm_n_" + t)}</p></details>`;
-    host.innerHTML = `<div class="rmWrap"><div class="rmSide">${TABS.map(sec).join("")}</div>
+    host.innerHTML = `<div class="rmWrap rmRun"><div class="rmSide">${TABS.map(sec).join("")}</div>
       <div class="rmMain"><canvas class="phCv rmCv" id="rmCv"></canvas>
       <div class="rmLeg" id="rmLeg">${legend()}</div>
       <div class="row bfbRow"><button type="button" id="rmPlay">${tr(S.play ? "ph_pause" : "ph_play")}</button></div>

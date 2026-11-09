@@ -608,6 +608,22 @@ try {
   .viMA { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; margin-bottom:8px; } .rmCv { height:1180px; }
   .rmLeg { display:flex; flex-wrap:wrap; gap:4px; margin:6px 0; align-items:center; } .rmLeg button { width:auto; margin:0; padding:3px 8px; font-size:12px; display:inline-flex; gap:5px; align-items:center; }
   .rmLeg button i { width:12px; height:4px; border-radius:2px; display:inline-block; } .rmLeg button.off { opacity:.35; text-decoration:line-through; }
+  /* running playground: compact one-line sliders; on wide screens the settings sit in a scrolling column beside the plots */
+  .rmRun .rmDet .phSl { display:grid; grid-template-columns:minmax(7.5em,40%) 1fr; align-items:center; gap:2px 8px; margin:1px 0; font-size:12px; }
+  .rmRun .rmDet .phSl span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rmRun .rmDet input[type=range] { height:16px; margin:0; padding:0; }
+  .rmRun .rmDet .rmSec { margin:6px 0 2px; font-size:12px; font-weight:600; }
+  .rmRun .rmDet .note { font-size:11px; margin:4px 0; }
+  .rmRun .rmDet .rmAll input { height:26px; padding:2px 6px; } .rmRun .rmDet .rmAll button { padding:2px 8px; font-size:12px; }
+  .rmRun .rmRes { grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); }
+  .rmRun .rmDet:not([open]) { padding:2px 10px; }
+  @media (min-width:1100px) {
+    .rmWrap.rmRun { flex-direction:row; align-items:flex-start; max-width:1500px; }
+    .rmRun .rmSide { flex:0 0 340px; width:340px; position:sticky; top:8px; max-height:calc(100vh - 16px); overflow:auto; }
+  }
+  @media (max-width:1099px) {
+    .rmRun .rmDet[open] { max-height:42vh; overflow:auto; }
+  }
   .rmAll { display:flex; gap:6px; align-items:center; margin:4px 0; } .rmAll input { width:64px; } .rmAll button { width:auto; margin:0; padding:4px 10px; }
   @media (max-width:760px) { .rmWrap { flex-direction:column; } .rmSide { flex-basis:auto; width:100%; max-height:none; } .rmCv { height:1180px; } }
   .phLock { display:inline-flex; align-items:center; gap:2px; margin:0 0 0 8px; font-size:12px; color:var(--muted); cursor:pointer; }
@@ -2290,8 +2306,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 167;
-window.BUILD_AT = "2026-11-09 13:25";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 168;
+window.BUILD_AT = "2026-11-09 13:36";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
