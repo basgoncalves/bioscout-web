@@ -77,6 +77,22 @@ def _group_of(name):
 
 
 # ------------------------------------------------------------------ EMG
+def _env(x, t):
+    """Raw EMG -> envelope normalised to its 99.5th percentile; an envelope already in [0, 1] is kept."""
+    if not (np.nanmax(np.abs(x)) > 1.5 or np.nanmin(x) < -0.05):
+        return x
+    fs = 1.0 / np.median(np.diff(t))
+    x = np.where(np.abs(x) >= 0.98 * np.nanmax(np.abs(x)), 0.0, x)
+    if np.allclose(x, 0):
+        return None
+    if fs > 200:
+        b, a = butter(2, [20 / (fs / 2), min(450 / (fs / 2), 0.99)], "band"); x = filtfilt(b, a, x)
+    x = np.abs(x - np.mean(x))
+    b, a = butter(2, 6 / (fs / 2)); x = filtfilt(b, a, x)
+    top = np.percentile(x, 99.5)
+    return x / top if top > 0 else None
+
+
 def emg_envelopes(emg_path, t_out, muscles, log=print, emg_map=None):
     """-> (excitations (n, M) in [0,1] or NaN for muscles without EMG, {muscle: channel}).
     emg_map: {channel: [muscles]} (bioscout's session.yaml emg_map). With it the channels are
@@ -91,7 +107,11 @@ def emg_envelopes(emg_path, t_out, muscles, log=print, emg_map=None):
             if ch not in cols:
                 log(f"[ceinms] EMG channel {ch} not in {os.path.basename(emg_path)}")
                 continue
-            x = np.clip(np.interp(t_out, t, data[:, cols.index(ch)].astype(float)), 0, 1)
+            x = _env(data[:, cols.index(ch)].astype(float), t)
+            if x is None:
+                log(f"[ceinms] EMG channel {ch} is flat or saturated -- skipped")
+                continue
+            x = np.clip(np.interp(t_out, t, x), 0, 1)
             for mu in (mus if isinstance(mus, (list, tuple)) else [mus]):
                 if mu in muscles:
                     out[:, muscles.index(mu)] = x; used[mu] = ch
@@ -323,7 +343,7 @@ def _write(pb, out_dir, tag, X, F, Mm, A):
 
 
 def execute(model_path, coords_mot, id_sto, out_dir, emg_mot=None, approach="hybrid", mode="execution",
-            alpha=None, beta=None, gamma=None, gammas=(1, 10, 30, 100, 300), tol=None, calibration=None,
+            alpha=None, beta=None, gamma=None, gammas=(1, 10, 30, 100, 300), tol=None, calibration=None, alphas=None, betas=None,
             t_range=None, log=print, emg_map=None):
     pb = Problem(model_path, coords_mot, id_sto, emg_mot, t_range, log=log, emg_map=emg_map)
     a0, b0, g0 = APPROACHES.get(approach, APPROACHES["hybrid"])
@@ -348,7 +368,7 @@ def execute(model_path, coords_mot, id_sto, out_dir, emg_mot=None, approach="hyb
         return X, F, Mm
 
     if mode == "loop":
-        runs = [one(alpha, beta, g, f"_a{alpha:g}_b{beta:g}_g{g:g}") for g in gammas]
+        runs = [one(a_, b_, g, f"_a{a_:g}_b{b_:g}_g{g:g}") for a_ in (alphas or [alpha]) for b_ in (betas or [beta]) for g in gammas]
         X, F, Mm = (np.median(np.stack([r[k] for r in runs]), 0) for k in range(3))
         log(f"[ceinms] loop: {len(runs)} runs; CEINMS_forces.sto is their median")
     elif mode == "optimise":

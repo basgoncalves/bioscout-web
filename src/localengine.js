@@ -203,7 +203,8 @@ export function makeLocalClient(spec) {
     const emg = files[`${tool}:emg_mot`] || files["ceinms_cal:emg_mot"] || files["ceinms:emg_mot"] || null;
     const o = { ...((job.options || {})[tool] || {}) };
     const payload = { "ik.mot": await ikf.arrayBuffer(), "id.sto": await idf.arrayBuffer() };
-    const args = { cmd: tool, ik: "ik.mot", id: "id.sto", approach: o.approach, alpha: o.alpha, beta: o.beta, gamma: o.gamma, mode: o.mode, gammas: o.gammas, tol: o.tol };
+    const args = { cmd: tool, ik: "ik.mot", id: "id.sto", approach: o.approach, alpha: o.alpha, beta: o.beta, gamma: o.gamma, mode: o.mode, gammas: o.gammas, alphas: o.alphas, betas: o.betas, tol: o.tol };
+    const em = files[`${tool}:emg_map`] || files["ceinms_cal:emg_map"]; if (em) { payload["emg_map.json"] = await em.arrayBuffer(); args.emg_map = "emg_map.json"; }
     if (emg) { payload["emg.mot"] = await emg.arrayBuffer(); args.emg = "emg.mot"; }
     return { ikf, payload, args };
   }

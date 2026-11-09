@@ -47,13 +47,13 @@ const JRF_GROUPS = [[/glut.*max/i, 0], [/glut.*(med|min)/i, 1], [/semimem|semite
   [/rectus_fem/i, 6], [/vast/i, 7], [/triceps_surae|gastro|soleus/i, 9], [/tibialis_anterior|dorsi/i, 10]];
 function jrfLabel(sname) {                             // contribution source -> legend label (muscle groups share the moment-view names)
   if (/reserve/i.test(sname)) return "Reserve";
-  if (/non-muscle/i.test(sname)) return "Non-muscle (gravity, GRF, residuals)";
+  if (/non-muscle|intersegmental/i.test(sname)) return "Non-muscle (gravity, GRF, residuals)";
   if (/total/i.test(sname)) return "Total";
   const g = JRF_GROUPS.find(([re]) => re.test(sname)); if (g) return /triceps_surae/i.test(sname) ? "Triceps surae" : GROUPS[g[1]][0];
   return OTHER[0];
 }
 function jrfCol(sname) {
-  if (/reserve/i.test(sname)) return RCOL; if (/non-muscle/i.test(sname)) return "#5c636a";
+  if (/reserve/i.test(sname)) return RCOL; if (/non-muscle|intersegmental/i.test(sname)) return "#5c636a";
   const g = JRF_GROUPS.find(([re]) => re.test(sname)); return g ? GROUPS[g[1]][2] : OTHER[2];
 }
 // ---------- cropping a session to a time window ----------
@@ -152,11 +152,16 @@ export function buildModel(F, side, win) {
   // joint reaction forces (BW): each source's component along the total, which sums to the total magnitude
   let jrf = null;
   if (F.jrc) {
-    const bw = F.jrc.bw || 1, J = ["hip", "knee", "ankle"].map((j) => `${j}_${side}`);
-    const srcs = [...new Set(F.jrc.names.filter((n) => n.endsWith("/along") && n.startsWith(J[0] + "/")).map((n) => n.slice(J[0].length + 1, -6)))];
-    const mine = srcs.filter((sname) => !/total/i.test(sname));   // every source the file attributes to this joint; together they sum to total_mag
-    jrf = { bw, src: mine.map((sname) => ({ n: jrfLabel(sname), col: jrfCol(sname), res: /reserve|non-muscle/i.test(sname), v: J.map((j) => (at(F.jrc, `${j}/${sname}/along`) || new Float64Array(N)).map((x) => x / bw)) })),
-      total: J.map((j) => { const a = at(F.jrc, `${j}/total_mag`) || at(F.jrc, `${j}/total_mag/along`); return a ? a.map((x) => x / bw) : null; }),
+    const bw = F.jrc.bw || F.bodyWeightN || 1, J = ["hip", "knee", "ankle"].map((j) => `${j}_${side}`);
+    const pipe = F.jrc.names.some((n) => n.includes("|"));
+    const col = (j, sname) => at(F.jrc, pipe ? `${j}|${sname}` : `${j}/${sname}/along`);
+    const srcs = pipe ? [...new Set(F.jrc.names.filter((n) => J.some((j) => n.startsWith(j + "|"))).map((n) => n.split("|").slice(1).join("|")))]
+      : [...new Set(F.jrc.names.filter((n) => n.endsWith("/along") && n.startsWith(J[0] + "/")).map((n) => n.slice(J[0].length + 1, -6)))];
+    const mine = srcs.filter((sname) => !/total/i.test(sname));   // every source the file attributes to this joint; together they sum to the total
+    const src = mine.map((sname) => ({ n: jrfLabel(sname), col: jrfCol(sname), res: /reserve|non-muscle|intersegmental/i.test(sname), v: J.map((j) => (col(j, sname) || new Float64Array(N)).map((x) => x / bw)) }));
+    jrf = { bw, src,
+      total: J.map((j, k) => { const a = pipe ? null : at(F.jrc, `${j}/total_mag`) || at(F.jrc, `${j}/total_mag/along`); if (a) return a.map((x) => x / bw);
+        if (!pipe) return null; const t = new Float64Array(N); for (const x of src) for (let i = 0; i < N; i++) t[i] += x.v[k][i] || 0; return t; }),
       invivo: ["hip", "knee", "ankle"].map((j) => (F.invivo && (!F.measuredSide || F.measuredSide === side) ? at(F.invivo, `${j}_measured_f_BW`) : null)) };
     // merge sources that share a label (e.g. the small deep rotators all go to "Other muscles")
     const by = new Map(); for (const sObj of jrf.src) { const o = by.get(sObj.n); if (!o) by.set(sObj.n, sObj); else o.v = o.v.map((arr, k) => arr.map((x, i) => x + sObj.v[k][i])); }
@@ -178,7 +183,7 @@ export function buildModel(F, side, win) {
 
 // ---------- UI ----------
 export function initVisualise({ host, tr }) {
-  const S = { crop: null, view: "mom", speed: 0.25, emgFile: "", emgMap: {}, E: null, mode: "session", side: "r", fr: 0, play: false, files: null, sess: null, iter: "", trial: "", cycle: "", M: null, err: "" };
+  const S = { src: "so", crop: null, view: "mom", speed: 0.25, emgFile: "", emgMap: {}, E: null, mode: "session", side: "r", fr: 0, play: false, files: null, sess: null, iter: "", trial: "", cycle: "", M: null, err: "" };
   const hide = new Set(), hideA = new Set(), css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#888";
   const f = (x, n = 1) => (Number.isFinite(x) ? x.toFixed(n) : "–");
   let raf = 0, last = 0;
@@ -192,7 +197,7 @@ export function initVisualise({ host, tr }) {
     for (const fl of list) { const p = (fl.webkitRelativePath || fl.name).replace(/\\/g, "/"); byPath.set(p, fl); }
     const iters = {}, exp = {};
     for (const p of byPath.keys()) {
-      let m = p.match(/^(.*?)3_iterations\/([^/]+)\/([^/]+)\/external_biomechanics\/joint_angles\.mot$/);
+      let m = p.match(/^(.*?)3_iterations\/([^/]+)\/([^/]+)\/external_biomechanics\/(?:joint_angles|ik)\.mot$/);
       if (m) { root = m[1]; (iters[m[2]] = iters[m[2]] || []).push(m[3]); }
       m = p.match(/^(.*?)2_experimental\/([^/]+)\//); if (m) exp[m[2]] = true;
     }
@@ -205,18 +210,24 @@ export function initVisualise({ host, tr }) {
     try { return parseSto(await fl.text()); } catch (e) { (S.unread = S.unread || []).push(`${fl.webkitRelativePath || fl.name}: ${e.message}`); return null; }
   };
   const findIn = (dir, re) => { const pre = S.sess.root + dir; for (const [p, fl] of S.sess.byPath) if (p.startsWith(pre) && re.test(p.slice(pre.length))) return fl; return null; };
+  const hasCeinms = () => !!(S.sess && S.iter && S.trial && findIn(`3_iterations/${S.iter}/${S.trial}/ceinms/`, /^CEINMS_forces\.sto$/));
   async function loadSession() {
+    if (S.src === "ceinms" && !hasCeinms()) S.src = "so";
     const it = S.iter, tl = S.trial, b = `3_iterations/${it}/${tl}/`, side = S.side;
     const F = {
-      ik: await read(sessFile(b + "external_biomechanics/joint_angles.mot")), id: await read(sessFile(b + "external_biomechanics/inverse_dynamics.sto")),
-      act: await read(sessFile(b + "static_optimisation/StaticOptimization_activation.sto") || findIn(b + "static_optimisation/", /^[^/]*StaticOptimization_activation\.sto$/)),
-      force: await read(sessFile(b + "static_optimisation/StaticOptimization_force.sto") || findIn(b + "static_optimisation/", /^[^/]*StaticOptimization_force\.sto$/)),
-      jrc: await read(sessFile(b + "joint_contact_forces/contributions_so.sto")), invivo: await read(sessFile(`2_experimental/${tl}/invivo_jcf.mot`)),
+      ik: await read(sessFile(b + "external_biomechanics/joint_angles.mot") || sessFile(b + "external_biomechanics/ik.mot")), id: await read(sessFile(b + "external_biomechanics/inverse_dynamics.sto")),
+      ...(S.src === "ceinms" ? {
+        act: await read(findIn(b + "ceinms/", /^CEINMS_activations\.sto$/)), force: await read(findIn(b + "ceinms/", /^CEINMS_forces\.sto$/)),
+        jrc: await read(sessFile(b + "joint_contact_forces/contributions_ceinms.sto") || sessFile(b + "joint_contact_forces/jra_ceinms_contrib.sto")) } : {
+        act: await read(sessFile(b + "static_optimisation/StaticOptimization_activation.sto") || findIn(b + "static_optimisation/", /^[^/]*StaticOptimization_activation\.sto$/)),
+        force: await read(sessFile(b + "static_optimisation/StaticOptimization_force.sto") || findIn(b + "static_optimisation/", /^[^/]*StaticOptimization_force\.sto$/)),
+        jrc: await read(sessFile(b + "joint_contact_forces/contributions_so.sto") || sessFile(b + "joint_contact_forces/jra_so_contrib.sto")) }), invivo: await read(sessFile(`2_experimental/${tl}/invivo_jcf.mot`)),
       mk: await read(sessFile(b + "external_biomechanics/_ik_model_marker_locations.sto")), grf: await read(sessFile(`2_experimental/${tl}/grf.mot`)), ma: {},
     };
     for (const d of DOFS) F.ma[d] = await read(sessFile(`${b}muscle_analysis/_MuscleAnalysis_MomentArm_${d}_${side}.sto`));
     const sy = sessFile("session.yaml");
     const syText = sy ? await sy.text() : "";
+    const bm = syText.match(/^body_mass:\s*['"]?([\d.]+)/m); F.bodyWeightN = bm ? +bm[1] * 9.81 : null;   // for contributions saved in N
     S.emgMap = parseEmgMap(syText);
     const ms = syText.match(/^measured_side:\s*['"]?([lr])/mi);       // instrumented-implant side; in vivo data belong to that leg only
     F.measuredSide = ms ? ms[1].toLowerCase() : null;
@@ -255,7 +266,8 @@ export function initVisualise({ host, tr }) {
       ${S.sess ? `<div class="phCtl"><label class="phSl">${tr("vi_iter")}<select data-vs="iter">${opt(it, S.iter)}</select></label>
       <label class="phSl">${tr("vi_trial")}<select data-vs="trial">${opt(trials, S.trial)}</select></label>
       <label class="phSl">${tr("vi_cycle")}<select data-vs="cycle"><option value="">${tr("vi_whole")}</option>${(S.cycles || []).map((c) => `<option value="${c.name}"${c.name === S.cycle ? " selected" : ""}>${c.name} (${c.side || "?"}, ${f(c.t0, 2)}–${f(c.t1, 2)} s)</option>`).join("")}</select></label>
-      <label class="phSl">${tr("vi_side")}<select data-vs="side"><option value="r"${S.side === "r" ? " selected" : ""}>${tr("vi_right")}</option><option value="l"${S.side === "l" ? " selected" : ""}>${tr("vi_left")}</option></select></label></div>` : ""}`;
+      <label class="phSl">${tr("vi_side")}<select data-vs="side"><option value="r"${S.side === "r" ? " selected" : ""}>${tr("vi_right")}</option><option value="l"${S.side === "l" ? " selected" : ""}>${tr("vi_left")}</option></select></label>
+      ${hasCeinms() ? `<label class="phSl">${tr("vi_src")}<select data-vs="src"><option value="so"${S.src === "so" ? " selected" : ""}>${tr("vi_srcSo")}</option><option value="ceinms"${S.src === "ceinms" ? " selected" : ""}>CEINMS</option></select></label>` : ""}</div>` : ""}`;
   }
   const chip = (key, n, col, set, dash) => `<button type="button" class="ghost${set.has(n) ? " off" : ""}" data-${key}="${n}"><i style="background:${col}${dash ? ";height:2px" : ""}"></i>${n}</button>`;
   const legendT = () => !S.M ? "" : chip("mu", tr("vi_angle"), css("--accent"), hide) + chip("mu", tr("vi_idMom"), "#f4a261", hide).replace(`>${tr("vi_idMom")}<`, `>${S.view === "jrf" ? tr("vi_jrfTot") : tr("vi_idMom")}<`) + (S.view === "jrf" && S.M.jrf && S.M.jrf.invivo.some(Boolean) ? `<span class="note">- - ${tr("vi_invivo")}</span>` : "");
@@ -293,7 +305,7 @@ export function initVisualise({ host, tr }) {
         <button type="button" class="ghost" data-cset="0">${tr("vi_cStart")}</button><button type="button" class="ghost" data-cset="1">${tr("vi_cEnd")}</button>
         ${S.crop ? `<button type="button" class="ghost" data-creset>${tr("vi_cReset")}</button>` : ""}
         ${S.mode === "session" ? `<button type="button" data-csave>${tr("vi_cSave")}</button>` : ""}<span class="note" data-cmsg></span></div>
-      <div class="viAWrap"><canvas class="phCv viCvA" id="viCvA"></canvas><div class="viViews" id="viViews"><button type="button" class="ghost${S.view === "mom" ? " on" : ""}" data-view="mom">${tr("vi_vMom")}</button><button type="button" class="ghost${S.view === "jrf" ? " on" : ""}" data-view="jrf"${S.M.jrf ? "" : " disabled title=\"" + tr("vi_noJrf") + "\""}>${tr("vi_vJrf")}</button></div></div><div class="rmLeg">${legendT()}</div>
+      <div class="viAWrap"><canvas class="phCv viCvA" id="viCvA"></canvas><div class="viViews" id="viViews"><button type="button" class="ghost${S.view === "mom" ? " on" : ""}" data-view="mom">${tr("vi_vMom")}</button><button type="button" class="ghost${S.view === "jrf" ? " on" : ""}" data-view="jrf"${S.M.jrf ? "" : " disabled title=\"" + tr("vi_noJrf") + "\""}>${tr("vi_vJrf")}</button>${S.mode === "session" && hasCeinms() ? `<span style="width:12px"></span><button type="button" class="ghost${S.src === "so" ? " on" : ""}" data-src="so">SO</button><button type="button" class="ghost${S.src === "ceinms" ? " on" : ""}" data-src="ceinms">CEINMS</button>` : ""}</div></div><div class="rmLeg">${legendT()}</div>
       <div class="viSelRow"><select data-extra class="viTitleSel"><option value="">${tr("vi_actDefault")}</option>${ex.filter((r) => !r.endsWith(act)).map((r) => `<option value="${r}"${r === S.extra ? " selected" : ""}>${r.replace(/^3_iterations\/[^/]+\/[^/]+\//, "").replace(/^2_experimental\/[^/]+\//, "exp / ")}</option>`).join("")}</select>${!S.extra && S.mode === "session" ? `<select data-emg class="viTitleSel" style="margin-left:8px"><option value="">${tr("vi_noEmg")}</option>${ex.filter((r) => r.startsWith(`2_experimental/${S.trial}/`)).sort((a, b) => (/emg/i.test(b) ? 1 : 0) - (/emg/i.test(a) ? 1 : 0)).map((r) => `<option value="${r}"${r === S.emgFile ? " selected" : ""}>${tr("vi_emgVs")} ${r.split("/").pop()}</option>`).join("")}</select>` : ""}</div>
       <canvas class="phCv viCvB" id="viCvB"></canvas>${S.X ? `<div class="rmLeg">${legendA()}</div>` : ""}<div class="rmLeg">${legendJ()}</div></div>` : ""}</div>`;
     draw();
@@ -478,6 +490,7 @@ export function initVisualise({ host, tr }) {
     if (e.target.closest("[data-creset]")) { S.crop = null; refresh(); return; }
     if (e.target.closest("[data-csave]")) { saveCropped(); return; }
     const vw = e.target.closest("[data-view]"); if (vw && !vw.disabled) { S.view = vw.dataset.view; render(); return; }
+    const sb = e.target.closest("[data-src]"); if (sb) { S.src = sb.dataset.src; refresh(); return; }
     const sp = e.target.closest("[data-sp]"); if (sp) { const L = [0.1, 0.25, 0.5, 1, 2, 5], i = Math.max(0, Math.min(L.length - 1, L.indexOf(S.speed) + +sp.dataset.sp)); S.speed = L[i]; host.querySelector("[data-spv]").textContent = S.speed + "×"; return; }
     if (e.target.closest("[data-pickdir]")) { host.querySelector("[data-dir]").click(); return; }
     const ma = e.target.closest("[data-ma]"); if (ma) { const n = ma.dataset.ma; hideA.has(n) ? hideA.delete(n) : hideA.add(n); ma.classList.toggle("off", hideA.has(n)); drawB(); return; }
@@ -508,6 +521,12 @@ export function initVisualise({ host, tr }) {
   render();                                          // fill the page now, so it is never blank however the view was reached
   return {
     open() { render(); },
+    /** Show a session handed over as File objects carrying their path in `webkitRelativePath` (e.g. from Simulate). */
+    async loadFiles(list, dirName) {
+      S.mode = "session"; S.dirName = dirName || "session"; S.cycle = ""; S.crop = null;
+      try { S.sess = indexSession(list); S.iter = Object.keys(S.sess.iters)[0]; S.trial = S.sess.iters[S.iter][0]; } catch (err) { S.sess = null; S.err = err.message; render(); return; }
+      await refresh();
+    },
     leave() { play(false); },
   };
 }

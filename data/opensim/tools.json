@@ -320,12 +320,7 @@
   {
    "id": "ceinms_cal",
    "label": "CEINMS calibration (Python version)",
-   "options": {
-    "approach": "Approach: hybrid, emg_informed, emg_driven or static_optimisation",
-    "alpha": "alpha (moment tracking) -- default: from the approach",
-    "beta": "beta (effort) -- default: from the approach",
-    "gamma": "gamma (EMG tracking) -- default: from the approach"
-   },
+   "options": {},
    "slots": [
     {
      "id": "emg_mot",
@@ -366,20 +361,8 @@
      "required": false
     }
    ],
-   "defaults": {
-    "approach": "hybrid",
-    "alpha": "100",
-    "beta": "0.5",
-    "gamma": "100"
-   },
-   "choices": {
-    "approach": [
-     "hybrid",
-     "emg_informed",
-     "emg_driven",
-     "static_optimisation"
-    ]
-   },
+   "defaults": {},
+   "choices": {},
    "presets": {
     "approach": {
      "hybrid": {
@@ -409,11 +392,13 @@
    "id": "ceinms",
    "label": "CEINMS execution (Python version)",
    "options": {
+    "mode": "Run: execution (one solve), loop (every alpha x beta x gamma listed) or optimise (gamma searched)",
     "approach": "Approach: hybrid, emg_informed, emg_driven or static_optimisation",
     "alpha": "alpha (moment tracking) -- default: from the approach",
     "beta": "beta (effort) -- default: from the approach",
     "gamma": "gamma (EMG tracking) -- default: from the approach",
-    "mode": "Run: execution (one solve), loop (one per gamma) or optimise (gamma searched)",
+    "alphas": "Loop alphas, e.g. 100",
+    "betas": "Loop betas, e.g. 0.5 1",
     "gammas": "Loop gammas, e.g. 1 10 30 100 300",
     "tol": "Optimise: moment RMSE allowed (% of range) -- default 5",
     "jra": "Also joint reaction loads (1 = yes, 0 = no) -- default 1"
@@ -475,7 +460,9 @@
     "mode": "execution",
     "gammas": "1 10 30 100 300",
     "tol": "5",
-    "jra": "1"
+    "jra": "1",
+    "alphas": "100",
+    "betas": "0.5"
    },
    "choices": {
     "approach": [

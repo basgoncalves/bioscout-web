@@ -374,7 +374,11 @@ export function readC3d(buf, fileName) {
     labels.slice(0, nPts).forEach((lb, p) => ["X", "Y", "Z"].forEach((ax, k) => {
       const key = `${lb || "P" + (p + 1)} ${ax}`; cols[key] = pts[3 * p + k]; units[key] = ptUnits;
     }));
-    out.push({ name: `${fileName} · markers`, kind: "c3d", fs: ptRate, units, meta: { markers: labels.slice(0, nPts), first },
+    // EVENT group: TIMES are [minutes, seconds] pairs from the start of the capture; shifted onto this file's clock (0 at its first frame)
+    const evT = numv("EVENT", "TIMES", []), evL = strs("EVENT", "LABELS"), evC = strs("EVENT", "CONTEXTS"), events = [];
+    for (let k = 0; 2 * k + 1 < evT.length; k++) { const tAbs = evT[2 * k] * 60 + evT[2 * k + 1]; if (Number.isFinite(tAbs)) events.push({ label: evL[k] || "", context: evC[k] || "", t: +(tAbs - (first - 1) / ptRate).toFixed(5) }); }
+    events.sort((x, y) => x.t - y.t);
+    out.push({ name: `${fileName} · markers`, kind: "c3d", fs: ptRate, units, meta: { markers: labels.slice(0, nPts), first, events },
       time: Float64Array.from({ length: nFrames }, (_, i) => i / ptRate), cols });
   }
   if (nAn) {

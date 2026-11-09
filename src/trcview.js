@@ -106,7 +106,16 @@ function axesOf(names, P, n) {
   return { up, fwd, side };
 }
 
-export function viewTrc(t, trc, range) {
+/** grf.mot -> { t, series: [{name, y}] } of the vertical forces (columns ending vy / _fy / force_y). */
+export function parseGrfMot(text) {
+  const L = text.split(/\r?\n/); let h = L.findIndex((l) => /^endheader/i.test(l.trim()));
+  const head = L[h + 1].split(/\t/).map((s) => s.trim()), rows = L.slice(h + 2).filter((l) => l.trim()).map((l) => l.split(/\s+/).filter(Boolean).map(Number));
+  const ti = Math.max(0, head.findIndex((c) => /^time$/i.test(c)));
+  const cols = head.map((c, i) => [c, i]).filter(([c]) => /(_?vy|_fy|force_y|ground_force_vy)$/i.test(c) && !/torque|moment|_p[xyz]$/i.test(c));
+  return { t: Float64Array.from(rows, (r) => r[ti]), series: cols.map(([c, i]) => ({ name: c, y: Float64Array.from(rows, (r) => r[i]) })) };
+}
+
+export function viewTrc(t, trc, range, grf = null) {
   const { names, P } = trc, T = trc.t, n = T.length;
   const idx = (time) => { let k = 0; while (k < n - 1 && T[k] < time - 1e-9) k++; return k; };
   let i0 = range && isFinite(range[0]) ? idx(range[0]) : 0;
@@ -145,7 +154,7 @@ export function viewTrc(t, trc, range) {
           <option value="3d">${esc(t("sim_v_3d"))}</option><option value="sag">${esc(t("sim_v_sag"))}</option>
           <option value="front">${esc(t("sim_v_front"))}</option><option value="top">${esc(t("sim_v_top"))}</option></select></label>
         <span class="sub" data-info></span></div>
-      <div class="tvBody"><div class="tvPlots"><canvas data-c></canvas><div class="note" data-hint>${esc(t("sim_v_hint"))}</div></div>
+      <div class="tvBody"><div class="tvPlots"><canvas data-c></canvas>${grf && grf.series.length ? `<canvas data-g style="width:100%;margin-top:6px"></canvas>` : ""}<div class="note" data-hint>${esc(t("sim_v_hint"))}</div></div>
         <div class="tvSide"><div class="sub">${esc(t("sim_v_markers"))}</div>
           <div class="twBar"><button type="button" class="ghost" data-all="1">${esc(t("sim_tw_all"))}</button><button type="button" class="ghost" data-all="0">${esc(t("sim_tw_none"))}</button></div>
           <div class="tvList">${names.map((m) => `<label><input type="checkbox" data-m="${esc(m)}"${on.has(m) ? " checked" : ""}> ${esc(m)}</label>`).join("")}</div></div></div>
@@ -164,7 +173,7 @@ export function viewTrc(t, trc, range) {
         pen ? g.lineTo(X(s[0]), Y(s[1])) : g.moveTo(X(s[0]), Y(s[1])); pen = true;
       }
     }
-    function draw() {
+    let draw = function () {
       q("[data-frt]").textContent = T[fr].toFixed(3) + " s";
       q("[data-t0]").textContent = T[i0].toFixed(3) + " s";
       q("[data-t1]").textContent = T[i1].toFixed(3) + " s";
@@ -204,6 +213,26 @@ export function viewTrc(t, trc, range) {
         if (hl) { g.font = "11px system-ui"; g.fillText(m, X(p[0]) + 7, Y(p[1]) - 5); }
       }
     }
+    const gc = q("[data-g]"), COLS = ["#4ab", "#e95", "#9c6", "#c7e", "#eb4", "#6ae"];
+    function drawGrf() {
+      if (!gc) return;
+      const dpr = window.devicePixelRatio || 1, W = gc.clientWidth || 500, H = 130;
+      gc.width = W * dpr; gc.height = H * dpr; gc.style.height = H + "px";
+      const g = gc.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+      const ta = T[0], tb = T[n - 1], X = (x) => 4 + (W - 8) * (x - ta) / ((tb - ta) || 1);
+      let ymax = 1; for (const s of grf.series) for (const v of s.y) if (isFinite(v)) ymax = Math.max(ymax, Math.abs(v));
+      const Y = (v) => H - 14 - (H - 24) * v / ymax;
+      g.fillStyle = C.acc; g.globalAlpha = 0.12; g.fillRect(X(T[i0]), 0, X(T[i1]) - X(T[i0]), H); g.globalAlpha = 1;
+      g.strokeStyle = C.line; g.strokeRect(0.5, 0.5, W - 1, H - 1);
+      grf.series.forEach((s, j) => {
+        g.beginPath(); g.strokeStyle = COLS[j % COLS.length]; g.lineWidth = 1.2; let pen = false;
+        for (let k = 0; k < grf.t.length; k++) { const x = grf.t[k]; if (x < ta || x > tb || !isFinite(s.y[k])) { pen = false; continue; } pen ? g.lineTo(X(x), Y(s.y[k])) : g.moveTo(X(x), Y(s.y[k])); pen = true; }
+        g.stroke(); g.fillStyle = g.strokeStyle; g.font = "10px system-ui"; g.fillText(s.name, 6 + j * 110, H - 3);
+      });
+      g.strokeStyle = C.fg; g.beginPath(); g.moveTo(X(T[fr]), 0); g.lineTo(X(T[fr]), H); g.stroke();
+      g.fillStyle = C.sub; g.font = "10px system-ui"; g.fillText(`GRF (N) · max ${ymax.toFixed(0)}`, 6, 12);
+    }
+    const draw3 = draw; draw = () => { draw3(); drawGrf(); };
     // mouse / touch: drag to rotate (3D), wheel or pinch to zoom
     let drag = null;
     cv.addEventListener("pointerdown", (e) => { drag = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId); });

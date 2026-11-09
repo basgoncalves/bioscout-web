@@ -15,20 +15,21 @@
  * Only the keys this page needs are read; the rest of the file is left as it
  * is (blocks are added as text, never by rewriting the file).
  */
-import { c3dToOpenSim } from "./c3dexport.js";
+import { c3dToOpenSim, c3dEvents } from "./c3dexport.js";
 
 let T = (k) => k;
+export const setT = (t) => { T = t; };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 export const S = {           // the one open project + session
-  root: null, name: "", simDir: "simulations", hasProject: false, newSub: false, subjects: [], subject: "", sessions: [], session: "", ses: "",   // ses = simDir/subject/session
+  root: null, name: "", simDir: "simulations", hasProject: false, newSub: false, subjects: [], all: [], batchSel: new Set(), batchLog: [], subject: "", sessions: [], session: "", ses: "",   // ses = simDir/subject/session
   yaml: "", cfg: null, trials: [], iterations: [], iteration: "", trial: "",
   c3dDir: "1_c3dfiles", c3ds: [], msg: "", busy: false, runLog: [], newIt: null, weight: null,
   skip: new Set(["rra", "ceinms_cal", "ceinms"]),   // the steps' skip ticks, as in Quick run
-  exportSkip: false,                                 // step 0: 1_c3dfiles -> 2_experimental (only trials not exported yet)
+  exportSkip: false, useEvents: false,               // step 0: time_range of each trial from its C3D events                                 // step 0: 1_c3dfiles -> 2_experimental (only trials not exported yet)
   pick: null,                                        // ticked trials (Set); null = every non-static trial
 };
-const sp = (rel) => `${S.ses}/${rel}`;                       // session-relative -> project-relative
+const sp = (rel) => (S.ses ? `${S.ses}/${rel}` : rel);       // session-relative -> project-relative (a single session folder is its own root)
 /** session.yaml `c3d_dir` (relative to the session folder, {subject}/{session} filled in) ->
  *  project-relative path; null when it points outside the project folder (or is absolute). */
 export function resolveC3dDir(ses, value, subject, session) {
@@ -101,6 +102,24 @@ export function parseYaml(text) {
   }
   return cfg;
 }
+/** trials: <trial>: <key>: <value> (block made from "{}" when needed; value null removes the key). */
+export function setTrialKey(text, trial, key, value) {
+  const L = text.split(/\r?\n/), ti = L.findIndex((l) => /^trials:/.test(l));
+  if (ti < 0) return text;
+  if (/^trials:\s*\{\s*\}\s*$/.test(L[ti])) L[ti] = "trials:";
+  let i = ti + 1; while (i < L.length && !(new RegExp(`^  ${trial.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`).test(L[i])) && !/^\S/.test(L[i])) i++;
+  if (i >= L.length || /^\S/.test(L[i])) { L.splice(i, 0, `  ${trial}:`); }
+  L[i] = `  ${trial}:`;                                   // "{}" -> block
+  let j = i + 1, at = -1; while (j < L.length && (/^    /.test(L[j]) || !L[j].trim())) { if (new RegExp(`^    ${key}:`).test(L[j])) at = j; j++; }
+  if (value == null) { if (at >= 0) L.splice(at, 1); }
+  else if (at >= 0) L[at] = `    ${key}: ${value}`; else L.splice(i + 1, 0, `    ${key}: ${value}`);
+  if (value == null && !(L[i + 1] || "").startsWith("    ")) L[i] = `  ${trial}: {}`;
+  return L.join("\n");
+}
+export async function setTrialFlag(trial, key, on) {
+  S.yaml = setTrialKey(S.yaml, trial, key, on ? "true" : null); await writeFile(S.root, sp("session.yaml"), S.yaml); S.cfg = parseYaml(S.yaml);
+}
+export const trialFlag = (trial, key) => String(((S.cfg && S.cfg.trials[trial]) || {})[key] || "") === "true";
 /** As bioscout.session.config.scaffold_session_yaml: trials from the c3d names, no guessed
  *  trial type, body_mass only when known, project_dir relative (<project>/simulations/<subject>/<session>). */
 export function scaffoldYaml({ subject, session, bodyMass, staticTrial, trials, modelsDir = "", setupDir = "", c3dDir = "1_c3dfiles" }) {
@@ -142,6 +161,7 @@ export function addIterationYaml(text, name, fields) {
 // ------------------------------------------------------------------ open / refresh
 async function firstDir(root, names) { for (const d of names) { try { await dirAt(root, d); return d; } catch { /* next */ } } return null; }
 export async function openProject(root) {
+  S.single = false;
   S.root = root; S.name = root.name; S.msg = "";
   S.hasYaml = !!(await readFile(root, "project.yaml"));
   // a project is the layout, not the yaml: simulations/ next to models/ or setupFiles/ (older projects
@@ -149,8 +169,11 @@ export async function openProject(root) {
   S.hasProject = S.hasYaml || (!!(await firstDir(root, ["simulations", "Simulations"])) && !!(await firstDir(root, ["models", "setupFiles", "setup_files"])));
   S.simDir = await firstDir(root, ["simulations", "Simulations"]) || "simulations";
   S.subjects = await listDirs(root, S.simDir);
+  S.all = [];
+  for (const sub of S.subjects) for (const ses of await listDirs(root, `${S.simDir}/${sub}`)) S.all.push(`${sub}/${ses}`);
   if (!S.subjects.includes(S.subject)) S.subject = S.subjects[0] || "";
   await openSubject();
+  S.batchSel = new Set(S.subject && S.session ? [`${S.subject}/${S.session}`] : []);
 }
 export async function openSubject() {
   S.sessions = S.subject ? await listDirs(S.root, `${S.simDir}/${S.subject}`) : [];
@@ -158,7 +181,7 @@ export async function openSubject() {
   await openSession();
 }
 export async function openSession() {
-  S.ses = `${S.simDir}/${S.subject}/${S.session}`;
+  S.ses = S.single ? "" : `${S.simDir}/${S.subject}/${S.session}`;
   S.yaml = ""; S.cfg = { top: {}, trials: {}, iterations: {} }; S.trials = []; S.iterations = []; S.c3ds = [];
   if (!S.subject || !S.session) return;
   const root = S.root;
@@ -167,6 +190,7 @@ export async function openSession() {
   const exported = await listDirs(root, sp("2_experimental"));
   S.iterations = await listDirs(root, sp("3_iterations"));
   S.cfg = parseYaml(S.yaml);
+  S.iterations = [...new Set([...S.iterations, ...Object.keys(S.cfg.iterations || {})])].sort();   // an iteration in the yaml counts even before its folder exists
   // the c3d folder: session.yaml `c3d_dir` when set, else 1_c3dfiles / c3dfiles in the session
   S.c3dWarn = "";
   if (S.cfg.top.c3d_dir) {
@@ -175,7 +199,7 @@ export async function openSession() {
     if (!S.c3dAbs) S.c3dWarn = T("ss_c3dOutside", { dir: S.c3dDir });
   } else {
     const d = await firstDir(root, C3D_DIRS.map(sp));
-    S.c3dDir = d ? d.slice(S.ses.length + 1) : C3D_DIRS[0];
+    S.c3dDir = d ? (S.ses ? d.slice(S.ses.length + 1) : d) : C3D_DIRS[0];
     S.c3dAbs = sp(S.c3dDir);
   }
   S.c3ds = S.c3dAbs ? await listFiles(root, S.c3dAbs, /\.c3d$/i) : [];
@@ -217,6 +241,23 @@ export async function initProject(log) {
     log("project.yaml written");
   }
   await openProject(S.root);
+}
+/** Step-by-step: one folder holding .c3d files becomes a bioscout SESSION folder by itself --
+ *  the captures copied into 1_c3dfiles/, session.yaml scaffolded, 2_experimental/ and 3_iterations/<it>/
+ *  written next to them. The folder's name is the session (and, until changed, the subject). */
+export async function openSingleSession(root, log = () => {}) {
+  S.single = true; S.root = root; S.name = root.name; S.simDir = ""; S.subject = "subject";
+  S.session = root.name; S.subjects = [S.subject]; S.sessions = [S.session]; S.hasProject = false; S.msg = "";
+  // loose .c3d files in the folder go to 1_c3dfiles/ (copied, never moved or deleted)
+  const c3dDirName = await firstDir(root, C3D_DIRS) || C3D_DIRS[0];
+  for await (const [n, h] of root.entries()) {
+    if (h.kind !== "file" || !/\.c3d$/i.test(n)) continue;
+    if (await readFile(root, `${c3dDirName}/${n}`)) continue;
+    await writeFile(root, `${c3dDirName}/${n}`, await h.getFile()); log(`${n} → ${c3dDirName}/`);
+  }
+  await openSession();
+  // a lone session folder is its own project root (the scaffold assumes simulations/<subject>/<session>)
+  if (/^project_dir:\s*\.\.\/\.\.\/\.\.\s*$/m.test(S.yaml)) { S.yaml = setTopKey(S.yaml, "project_dir", "."); await writeFile(root, "session.yaml", S.yaml); S.cfg = parseYaml(S.yaml); }
 }
 /** simulations/<subject>/<session>/1_c3dfiles + its session.yaml (scaffolded by openSession). */
 export async function newSubjectSession(subject, session, log) {
@@ -276,22 +317,42 @@ export async function addC3d(files, log) {
   await refresh();
 }
 /** 1_c3dfiles/*.c3d -> 2_experimental/<stem>/ (marker_experimental.trc, grf.mot, emg.mot), as bioscout's export. */
-export async function exportC3d(log, { onlyMissing = true } = {}) {
+export async function exportC3d(log, { onlyMissing = true, only = null } = {}) {
   let n = 0;
   for (const name of S.c3ds) {
     const stem = name.replace(/\.c3d$/i, "");
+    if (only && !only.has(stem)) continue;                  // only the ticked trials (+ static)
     if (onlyMissing && await readFile(S.root, sp(`2_experimental/${stem}/marker_experimental.trc`))) { log(`${stem}: already exported`); continue; }
     const f = await readFile(S.root, `${S.c3dAbs}/${name}`); if (!f) continue;
     log(`${stem}: reading ${(f.size / 1e6).toFixed(1)} MB`);
     const out = c3dToOpenSim(await f.arrayBuffer(), f.name);
     for (const [fn, text] of Object.entries(out)) await writeFile(S.root, sp(`2_experimental/${stem}/${fn}`), text);
     log(`${stem}: ${Object.keys(out).join(", ")} → 2_experimental/${stem}`); n++;
+    if (S.useEvents) await eventWindow(stem, f, log);
     // a trial exported for the first time gets its yaml entry
     if (!(S.cfg.trials || {})[stem]) { S.yaml = addTrialYaml(S.yaml, stem); await writeFile(S.root, sp("session.yaml"), S.yaml); S.cfg = parseYaml(S.yaml); }
   }
   if (!S.c3ds.length) log(S.c3dWarn || T("ss_noC3d", { dir: S.c3dDir }));
   await refresh();
   return n;
+}
+/** time_range of one trial = its first to last C3D event (or removed, when events are off / absent). */
+export async function eventWindow(stem, file, log = () => {}) {
+  if (!file) { const c = S.c3ds.find((n) => n.replace(/\.c3d$/i, "") === stem); file = c && S.c3dAbs ? await readFile(S.root, `${S.c3dAbs}/${c}`) : null; }
+  if (!file) return;
+  if (!(S.cfg.trials || {})[stem]) S.yaml = addTrialYaml(S.yaml, stem);
+  let ev = []; if (S.useEvents) { try { ev = c3dEvents(await file.arrayBuffer(), file.name); } catch { ev = []; } }
+  ev = ev.filter((e) => e.t >= 0);
+  const span = ev.length >= 2 ? ev[ev.length - 1].t - ev[0].t : 0;
+  if (S.useEvents && span >= 0.05) {                       // events all at one instant (e.g. placeholders at 0 s) are no window
+    const t0 = ev[0].t, t1 = ev[ev.length - 1].t;
+    S.yaml = setTrialKey(S.yaml, stem, "time_range", `[${t0}, ${t1}]`);
+    log(`${stem}: ${ev.length} events → ${t0}–${t1} s (${ev.map((e) => `${e.context} ${e.label}`.trim()).join(", ")})`);
+  } else {
+    S.yaml = setTrialKey(S.yaml, stem, "time_range", null);
+    if (S.useEvents) log(`${stem}: ${!ev.length ? "no events" : ev.length === 1 ? "one event only" : `${ev.length} events all at ${ev[0].t} s`} — whole trial`);
+  }
+  await writeFile(S.root, sp("session.yaml"), S.yaml); S.cfg = parseYaml(S.yaml);
 }
 export function addTrialYaml(text, name) {
   const L = text.split(/\r?\n/);
@@ -339,6 +400,98 @@ export async function setStaticTrial(name) {
 }
 
 /** Put the chosen iteration + trial into the step sections. hooks: send(key, file), setDir(tool, handle), setGeneric(file), setScaled(file) */
+/* EMG channel -> model muscle stems (same rules as pyosim/ceinms.py EMG_MAP) */
+const EMG_RULES = [[/tib.?ant|\bta\b/, ["tibant", "tib_ant"]], [/gas\w*.?med|gastro.?med|\bgm\b|med.?gas/, ["gasmed", "med_gas"]],
+  [/gas\w*.?lat|gastro.?lat|\bgl\b|lat.?gas/, ["gaslat", "lat_gas"]], [/sol/, ["soleus"]], [/vas\w*.?lat|\bvl\b/, ["vaslat", "vasint", "vas_lat", "vas_int"]],
+  [/vas\w*.?med|\bvm\b/, ["vasmed", "vas_med"]], [/rec\w*.?fem|\brf\b/, ["recfem", "rect_fem"]], [/bic\w*.?fem|biceps|\bbf\b|lat.?ham/, ["bflh", "bfsh", "bifemlh", "bifemsh"]],
+  [/semit|semim|\bst\b|med.?ham/, ["semiten", "semimem"]], [/glu\w*.?max|glmax/, ["glmax", "glut_max"]], [/glu\w*.?med|glmed/, ["glmed", "glut_med"]],
+  [/add\w*.?long/, ["addlong", "add_long"]], [/tfl|tens/, ["tfl"]], [/per\w*.?lon/, ["perlong", "per_long"]]];
+export function autoEmgMap(channels, muscles) {
+  const out = {};
+  for (const c of channels) {
+    const lab = c.split(".").pop().toLowerCase();
+    const m = lab.match(/(?:^|[_\s-])([lr])(?:[_\s-]|$)/) || lab.match(/^([lr])/); if (!m) continue;
+    const rule = EMG_RULES.find(([re]) => re.test(lab)); if (!rule) continue;
+    const mus = muscles.filter((mu) => (mu.match(/_([rl])\d*$/) || [])[1] === m[1] && rule[1].some((s) => mu.replace(/_[rl]\d*$/, "").startsWith(s)));
+    if (mus.length) out[c] = mus;
+  }
+  return out;
+}
+const emgMapPath = () => (S.iteration ? sp(`3_iterations/${S.iteration}/emg_map.json`) : null);
+/** EMG channels (first calibration trial, else first trial with emg.mot), model muscles, saved and automatic maps. */
+export async function emgMapInfo() {
+  const cand = [...S.trials.filter((x) => trialFlag(x, "calibration")), ...S.trials];
+  let channels = [], trial = "";
+  for (const x of cand) {
+    const f = await readFile(S.root, sp(`2_experimental/${x}/emg.mot`)); if (!f) continue;
+    const L = (await f.text()).split(/\r?\n/), h = L.findIndex((l) => /^endheader/i.test(l.trim()));
+    channels = L[h + 1].split(/\t/).map((s) => s.trim()).filter((c) => c && !/^time$/i.test(c)); trial = x; break;
+  }
+  const c = (S.cfg.iterations || {})[S.iteration] || {};
+  const mp = itPath(S.iteration, "model_scaled", c.model_scaled), gp = itPath(S.iteration, "model_generic", c.model_generic);
+  const mf = (mp && await readFile(S.root, mp)) || (gp && await readFile(S.root, gp));
+  const muscles = mf ? [...new Set([...(await mf.text()).matchAll(/<(\w*Muscle\w*)\s+name="([^"]+)"/g)].map((m) => m[2]))] : [];
+  const auto = autoEmgMap(channels, muscles);
+  const p = emgMapPath(), f = p && await readFile(S.root, p);
+  let map = auto; if (f) { try { map = JSON.parse(await f.text()); } catch { /* auto */ } }
+  return { channels, muscles, auto, map, trial };
+}
+export async function saveEmgMap(map) { const p = emgMapPath(); if (p) await writeFile(S.root, p, new Blob([JSON.stringify(map, null, 1)])); }
+
+/** Trials (static excluded) with their session.yaml time_range as [t0, t1] or null. */
+export function timeRanges() {
+  return S.trials.filter((x) => x !== S.cfg.top.static_trial).map((x) => {
+    const m = String(((S.cfg.trials || {})[x] || {}).time_range || "").match(/[-\d.eE]+/g);
+    return { trial: x, range: m && m.length === 2 ? [+m[0], +m[1]] : null };
+  });
+}
+/** {trial: [t0, t1] | null} -> session.yaml (null removes time_range: whole trial). */
+export async function saveTimeRanges(map) {
+  for (const [x, r] of Object.entries(map)) S.yaml = setTrialKey(S.yaml, x, "time_range", r ? `[${r[0]}, ${r[1]}]` : null);
+  await writeFile(S.root, sp("session.yaml"), S.yaml); S.cfg = parseYaml(S.yaml);
+}
+/** The exported marker / force files of a trial (2_experimental/<trial>/). */
+export async function trialData(trial) {
+  const b = sp(`2_experimental/${trial}/`);
+  const trc = await readFile(S.root, b + "marker_experimental.trc"), grf = await readFile(S.root, b + "grf.mot");
+  return { trc: trc ? await trc.text() : null, grf: grf ? await grf.text() : null };
+}
+/** The iteration's SO reserve actuators (session.yaml so_actuators, else 3_iterations/<it>/actuators_so.xml). */
+export function actuatorsPath() {
+  const it = S.iteration; if (!S.root || !it) return null;
+  const c = (S.cfg.iterations || {})[it] || {};
+  return itPath(it, "so_actuators", c.so_actuators || "actuators_so.xml");
+}
+export async function readActuators() {
+  const p = actuatorsPath(); if (!p) return null;
+  await ensureFile(p, new URL("../data/opensim/setup_files/actuators_so.xml", import.meta.url));
+  const f = await readFile(S.root, p); return f ? f.text() : "";
+}
+export async function saveActuators(text) { const p = actuatorsPath(); if (p) await writeFile(S.root, p, new Blob([text.replace(/\s*$/, "\n")])); }
+
+/** Batch: every ticked subject/session of the project, with this session's iteration settings and ticked steps. */
+export async function runSelected(ctx, hooks) {
+  const list = S.all.filter((k) => S.batchSel.has(k));
+  if (!list.length) return;
+  const it = S.iteration, tpl = { ...((S.cfg.iterations || {})[it] || {}) };
+  S.batchRun = true; S.batchCancel = false; S.batchLog = [];
+  try {
+    for (const [i, key] of list.entries()) {
+      if (S.batchCancel) { S.batchLog.push("■ " + T("sim_cancelled")); break; }
+      const [sub, ses] = key.split("/");
+      S.subject = sub; S.session = ses; S.pick = null;
+      S.sessions = await listDirs(S.root, `${S.simDir}/${sub}`);
+      await openSession();
+      if (it && !S.iterations.includes(it)) await createIteration(it, { ...tpl }, { genericFile: hooks.genericFile(), markersetFile: hooks.markersetFile() });
+      S.iteration = it;
+      S.batchLog.push(`${i + 1}/${list.length} · ${key} …`); hooks.repaint();
+      await runAll(ctx, hooks);
+      S.batchLog[S.batchLog.length - 1] = `${i + 1}/${list.length} · ${key}: ${S.runLog.slice(-1)[0] || ""}`;
+      if (S.cancel) S.batchCancel = true;
+    }
+  } finally { S.batchRun = false; hooks.repaint(); }
+}
+
 export async function applySelection(hooks) {
   if (!S.root || !S.session) return;
   const it = S.iteration, cfg = (S.cfg.iterations || {})[it] || {};
@@ -351,21 +504,26 @@ export async function applySelection(hooks) {
     const gname = gp ? gp.split("/").pop() : null;
     hooks.setRenames("scale", scaled && gname ? { [gname.replace(/\.osim$/i, "") + "_scaled.osim"]: scaled.split("/").pop(),
       [gname.replace(/\.osim$/i, "") + "_scaled_scale_factors.xml"]: scaled.split("/").pop().replace(/\.osim$/i, "") + "_scale_factors.xml" } : {});
-    const mp = itPath(it, "markerset", cfg.markerset); if (mp) { const f = await readFile(S.root, mp); if (f) hooks.send("scale:markerset", f); }
-    const stp = itPath(it, "scale_tool", cfg.scale_tool); if (stp) { const f = await readFile(S.root, stp); if (f) hooks.send("scale:scale_setup", f); }
+    const mp = itPath(it, "markerset", cfg.markerset); if (mp) { const f = await readFile(S.root, mp); if (f) await hooks.send("scale:markerset", f); }
+    const stp = itPath(it, "scale_tool", cfg.scale_tool); if (stp) { const f = await readFile(S.root, stp); if (f) await hooks.send("scale:scale_setup", f); }
+    { const p = emgMapPath(), f = p && await readFile(S.root, p); if (f) { await hooks.send("ceinms_cal:emg_map", f); await hooks.send("ceinms:emg_map", f); } }
+    const ap = actuatorsPath(); if (ap) { const f = await readFile(S.root, ap); if (f) await hooks.send("so:actuators", f); }
     if (gp) { const f = await readFile(S.root, gp); if (f) hooks.setGeneric(f); }
     if (scaled) { const f = await readFile(S.root, scaled); hooks.setScaled(f || null); }
   }
   const st = S.cfg.top.static_trial;
-  if (st) { const f = await readFile(S.root, sp(`2_experimental/${st}/marker_experimental.trc`)); if (f) hooks.send("scale:static_trc", f); }
+  if (st) { const f = await readFile(S.root, sp(`2_experimental/${st}/marker_experimental.trc`)); if (f) await hooks.send("scale:static_trc", f); }
+  if (it && S.single) hooks.setDir("ceinms_cal", await dirAt(S.root, sp(`3_iterations/${it}/ceinms_calibration`), true));
   if (S.cfg.top.body_mass) hooks.setOption("scale", "mass", String(+S.cfg.top.body_mass));
   if (S.trial) {
     const base = sp(`2_experimental/${S.trial}/`);
     const trc = await readFile(S.root, base + "marker_experimental.trc"), grf = await readFile(S.root, base + "grf.mot"), xml = await readFile(S.root, base + "GRF.xml");
-    if (trc) hooks.send("ik:motion_trc", trc);
-    if (grf) hooks.send("id:grf_mot", grf);
-    if (xml) hooks.send("id:grf_xml", xml);
+    if (trc) await hooks.send("ik:motion_trc", trc);
+    if (grf) await hooks.send("id:grf_mot", grf);
+    if (xml) await hooks.send("id:grf_xml", xml);
     if (it) { const out = await dirAt(S.root, sp(`3_iterations/${it}/${S.trial}/external_biomechanics`), true); hooks.setDir("ik", out); hooks.setDir("id", out); }
+    if (it && S.single) hooks.setRenames("ik", { "ik.mot": "joint_angles.mot" });   // bioscout's name for the IK result
+    if (it && S.single) for (const [tool, sub] of [["ma", "muscle_analysis"], ["so", "static_optimisation"], ["ceinms", "ceinms"]]) hooks.setDir(tool, await dirAt(S.root, sp(`3_iterations/${it}/${S.trial}/${sub}`), true));
     const tr = ((S.cfg.trials || {})[S.trial] || {}).time_range;
     if (tr) { const m = String(tr).match(/[-\d.]+/g); if (m && m.length === 2) { hooks.setOption("ik", "t0", m[0]); hooks.setOption("ik", "t1", m[1]); } }
   }
@@ -401,11 +559,13 @@ const STALE = ["id:ik_mot", "so:ik_mot", "ma:ik_mot", "ceinms_cal:ik_mot", "cein
 export async function runAll(ctx, hooks) {
   const { client, job } = ctx, id = job.id, it = S.iteration;
   const have = new Set((ctx.health && ctx.health.tools) || STEP_ORDER);
-  S.busy = true; S.runLog = [];
+  S.busy = true; S.cancel = false; S.runLog = []; S.progress = { done: 0, total: 1, label: "" };
   const log = (s) => { S.runLog.push(s); hooks.repaint(); };
+  const tick = (label) => { S.progress.done++; S.progress.label = label; hooks.repaint(); };
   const wait = async (tool) => { for (;;) { await new Promise((r) => setTimeout(r, 1000)); const st = (await client.status(id)).tools[tool]; if (st.state === "done" || st.state === "error") return st; } };
   const run = async (tool, label) => {
-    log(`${label}: ${tool} …`);
+    if (S.cancel) throw new Error(T("sim_cancelled"));     // stops between steps; a step already running finishes first
+    log(`${label}: ${tool} …`); S.progress.label = `${label}: ${tool}`; hooks.repaint();
     await client.toolRun(id, tool);
     const st = await wait(tool);
     if (st.state === "error") { log(`${label}: ${tool} failed — ${st.error}`); return false; }
@@ -413,45 +573,50 @@ export async function runAll(ctx, hooks) {
   };
   const store = async (tool, trial) => {                 // every output into its bioscout folder
     for (const o of await hooks.outputs(tool)) {
-      const path = tool === "ceinms_cal" ? sp(`3_iterations/${it}/ceinms_calibration/${o.path}`) : `${trialDir(it, trial, folderOf(tool, o.path))}/${o.path}`;
+      const name = o.path === "ik.mot" ? "joint_angles.mot" : o.path;   // bioscout's name for the IK result (later steps read either)
+      const path = tool === "ceinms_cal" ? sp(`3_iterations/${it}/ceinms_calibration/${name}`) : `${trialDir(it, trial, folderOf(tool, o.path))}/${name}`;
       await writeFile(S.root, path, new Blob([o.data]));
     }
   };
   try {
     if (!it) throw new Error(T("ss_noIteration"));
     // 0. c3d export (only the trials not exported yet)
-    if (!S.exportSkip && S.c3ds.length) await exportC3d(log);
-    const trials = pickedTrials();
+    if (!S.exportSkip && S.c3ds.length) await exportC3d(log, S.single ? { only: new Set([S.cfg.top.static_trial, ...pickedTrials(), ...S.trials.filter((t) => trialFlag(t, "calibration"))].filter(Boolean)) } : {});
+    const cal = S.trials.filter((t) => trialFlag(t, "calibration") && t !== S.cfg.top.static_trial);
+    const trials = [...new Set([...(S.skip.has("ceinms_cal") ? [] : cal), ...pickedTrials()])];
     if (!trials.length) throw new Error(T("ss_noTrials"));
+    if (!S.skip.has("ceinms_cal") && cal.length) log(`CEINMS calibration: ${cal[0]}`);
+    { const steps = STEP_ORDER.slice(1).filter((x) => !S.skip.has(x) && have.has(x) && x !== "ceinms_cal").length;
+      S.progress = { done: 0, total: Math.max(1, (S.skip.has("scale") ? 0 : 1) + trials.length * steps + (S.skip.has("ceinms_cal") ? 0 : 1)), label: "" }; }
     // 1. scale, once for the iteration
     await applySelection(hooks); await new Promise((r) => setTimeout(r, 300));
-    if (!S.skip.has("scale")) { if (await run("scale", it)) await hooks.save("scale"); else throw new Error("scale failed"); }
+    if (!S.skip.has("scale")) { if (await run("scale", it)) { await hooks.save("scale"); tick(`${it}: scale`); } else throw new Error("scale failed"); }
     else log(`${it}: scale ${T("sq_skipped")} — ${T("ss_usingScaled")}`);
     let calibrated = false;
     for (const trial of trials) {
       S.trial = trial;
-      for (const k of STALE) { const [tl, slot] = k.split(":"); hooks.clear(tl, slot); }
+      for (const k of STALE) { const [tl, slot] = k.split(":"); await hooks.clear(tl, slot); }
       await applySelection(hooks); await new Promise((r) => setTimeout(r, 300));
       const eb = trialDir(it, trial, "external_biomechanics"), exp = sp(`2_experimental/${trial}`);
       // inputs every later step can use
-      const emg = await fileIn(`${exp}/emg.mot`); if (emg) { hooks.send("ceinms_cal:emg_mot", emg); hooks.send("ceinms:emg_mot", emg); }
-      const bp = await fileIn(`${eb}/body_positions.sto`); if (bp) hooks.send("so:bodies", bp);
+      const emg = await fileIn(`${exp}/emg.mot`); if (emg) { await hooks.send("ceinms_cal:emg_mot", emg); await hooks.send("ceinms:emg_mot", emg); }
+      const bp = await fileIn(`${eb}/body_positions.sto`); if (bp) await hooks.send("so:bodies", bp);
       let ok = true;
       for (const tool of STEP_ORDER.slice(1)) {
         if (S.skip.has(tool)) {
           // a skipped step's results already in the trial folder stand in for it
-          if (tool === "ik") { const f = await fileIn(`${eb}/ik.mot`) || await fileIn(`${eb}/joint_angles.mot`); if (f) { for (const k of ["id", "so", "ma", "ceinms_cal", "ceinms"]) hooks.send(`${k}:ik_mot`, f); } else { log(`${trial}: no ik.mot in ${eb} — trial skipped`); ok = false; break; } }
-          if (tool === "id") { const f = await fileIn(`${eb}/inverse_dynamics.sto`); if (f) for (const k of ["so", "ceinms_cal", "ceinms"]) hooks.send(`${k}:id_sto`, f); }
-          if (tool === "so") { const f = await fileIn(`${trialDir(it, trial, "static_optimisation")}/SO_StaticOptimization_force.sto`); if (f) hooks.send("ma:so_force", f); }
+          if (tool === "ik") { const f = await fileIn(`${eb}/ik.mot`) || await fileIn(`${eb}/joint_angles.mot`); if (f) { for (const k of ["id", "so", "ma", "ceinms_cal", "ceinms"]) await hooks.send(`${k}:ik_mot`, f); } else { log(`${trial}: no ik.mot in ${eb} — trial skipped`); ok = false; break; } }
+          if (tool === "id") { const f = await fileIn(`${eb}/inverse_dynamics.sto`); if (f) for (const k of ["so", "ceinms_cal", "ceinms"]) await hooks.send(`${k}:id_sto`, f); }
+          if (tool === "so") { const f = await fileIn(`${trialDir(it, trial, "static_optimisation")}/SO_StaticOptimization_force.sto`); if (f) await hooks.send("ma:so_force", f); }
           if (tool === "ceinms_cal" && !calibrated) {
             const cd = sp(`3_iterations/${it}/ceinms_calibration`), cj = await fileIn(`${cd}/calibration.json`);
-            if (cj) { hooks.send("ceinms:calibration", cj); try { for await (const [n, h] of (await dirAt(S.root, cd)).entries()) if (/_calibrated\.osim$/i.test(n)) hooks.send("ceinms:model", await h.getFile()); } catch { /* none */ } }
+            if (cj) { await hooks.send("ceinms:calibration", cj); try { for await (const [n, h] of (await dirAt(S.root, cd)).entries()) if (/_calibrated\.osim$/i.test(n)) await hooks.send("ceinms:model", await h.getFile()); } catch { /* none */ } }
           }
           continue;
         }
         if (!have.has(tool)) { log(`${trial}: ${tool} ${T("sq_needsEngine")}`); continue; }
         if (tool === "ceinms_cal" && calibrated) continue;   // one calibration per iteration (the first trial)
-        const done = await run(tool, trial);
+        const done = await run(tool, trial); tick(`${trial}: ${tool}`);
         if (!done) { if (tool === "ik") { ok = false; break; } continue; }
         await store(tool, trial);
         if (tool === "ceinms_cal") calibrated = true;
@@ -459,8 +624,8 @@ export async function runAll(ctx, hooks) {
       if (ok) log(`${trial}: ✓ → ${trialDir(it, trial)}`);
     }
     log(T("ss_allDone"));
-  } catch (e) { log("✗ " + e.message); }
-  finally { S.busy = false; hooks.repaint(); }
+  } catch (e) { log((S.cancel ? "■ " : "✗ ") + e.message); }
+  finally { S.busy = false; if (S.progress && !S.cancel) S.progress.done = S.progress.total; hooks.repaint(); }
 }
 
 /** Every figure of the ticked trials again from their folders; nothing re-run. */
@@ -563,11 +728,19 @@ export function sessionHTML(ctx) {
       <div style="display:flex;gap:4px 14px;flex-wrap:wrap;margin-top:4px">${S.trials.filter((x) => x !== top.static_trial).map((x) => `<label class="simOpt" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-ss-tick="${esc(x)}"${!S.pick || S.pick.has(x) ? " checked" : ""}> ${esc(x)}</label>`).join("") || `<span class="sub">—</span>`}</div>
       <label class="simOpt" style="display:inline-flex;gap:6px;align-items:center;margin-top:6px"><input type="checkbox" data-ss-exportskip${S.exportSkip ? " checked" : ""}> ${t("ss_exportSkip")}</label>
     </div>
+    <div style="margin-top:10px"><span class="sub">${t("ss_batchSessions")}</span>
+      <a href="#" data-ss-ball="1">${t("sim_all")}</a> · <a href="#" data-ss-ball="0">${t("sim_none")}</a>
+      <div style="display:flex;gap:4px 14px;flex-wrap:wrap;margin-top:4px">${(S.all || []).map((k) => `<label class="simOpt" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-ss-bsel="${esc(k)}"${S.batchSel && S.batchSel.has(k) ? " checked" : ""}> ${esc(k)}</label>`).join("")}</div>
+      <p class="note" style="margin:4px 0 0">${t("ss_batchNote")}</p>
+    </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center">
-      <button type="button" data-ss-runall${S.busy || !S.iteration ? " disabled" : ""}>${t("ss_runAll")}</button>
+      <button type="button" data-ss-runsel${S.busy || S.batchRun || !S.iteration || !(S.batchSel && S.batchSel.size) ? " disabled" : ""}>${t("ss_runSelected", { n: S.batchSel ? S.batchSel.size : 0 })}</button>
+      ${S.busy || S.batchRun ? `<button type="button" class="ghost" data-ss-cancel>${t("sim_cancel")}</button>` : ""}
+      <button type="button" class="ghost" data-ss-runall${S.busy || !S.iteration ? " disabled" : ""}>${t("ss_runAll")}</button>
       <button type="button" class="ghost" data-ss-figs${S.busy || !S.iteration ? " disabled" : ""}>${t("sq_figs")}</button>
       ${S.msg ? `<span class="sub">${esc(S.msg)}</span>` : ""}
     </div>
+    ${S.batchLog && S.batchLog.length ? `<div class="osimLog" style="margin-top:8px">${S.batchLog.map(esc).join("\n")}</div>` : ""}
     ${S.runLog.length ? `<div class="osimLog" style="margin-top:8px">${S.runLog.map(esc).join("\n")}</div>` : ""}` : ""}
   </div>`;
 }
@@ -621,6 +794,10 @@ export function sessionWire(box, ctx, hooks) {
     if (path === "project.yaml") await openProject(S.root); else await openSession();
     S.msg = T("ss_yamlSaved", { file: path.split("/").pop() }); await applySelection(hooks); hooks.repaint();
   });
+  on("[data-ss-runsel]", "onclick", () => runSelected(ctx, hooks));
+  on("[data-ss-cancel]", "onclick", () => { S.cancel = true; S.batchCancel = true; hooks.repaint(); });
+  box.querySelectorAll("[data-ss-bsel]").forEach((cb) => { cb.onchange = () => { cb.checked ? S.batchSel.add(cb.dataset.ssBsel) : S.batchSel.delete(cb.dataset.ssBsel); hooks.repaint(); }; });
+  box.querySelectorAll("[data-ss-ball]").forEach((a) => { a.onclick = (e) => { e.preventDefault(); S.batchSel = new Set(a.dataset.ssBall === "1" ? S.all : []); hooks.repaint(); }; });
   on("[data-ss-exportskip]", "onchange", (e) => { S.exportSkip = e.target.checked; });
   box.querySelectorAll("[data-ss-tick]").forEach((cb) => {
     cb.onchange = () => {

@@ -24,6 +24,11 @@ const toOsim = (v) => [v[0], v[2], -v[1]];
 
 const fmt = (v) => (Number.isFinite(v) ? v.toFixed(8) : "nan");
 
+/** The C3D's events ({label, context, t}) on the exported files' clock, sorted by time; [] when it has none. */
+export function c3dEvents(buf, fileName = "") {
+  const mk = readC3d(buf, fileName).find((d) => d.meta.markers);
+  return (mk && mk.meta.events) || [];
+}
 export function c3dToOpenSim(buf, fileName, { emgPattern = /emg|voltage/i, forceThreshold = 10 } = {}) {
   const ds = readC3d(buf, fileName);
   const mk = ds.find((d) => d.meta.markers), an = ds.find((d) => d.meta.platesRaw);

@@ -225,6 +225,7 @@ try {
   details.simTool.skipped { opacity:.45; }
   details.simTool.skipped > summary { pointer-events:none; }
   details.simTool.skipped > summary .simSkip { pointer-events:auto; }
+  details.simTool.skipped > summary:has(.simIncl) { pointer-events:auto; }   /* step-by-step: an unticked step can still be opened and re-ticked */
   button.simGo { width:100%; padding:14px; font-size:18px; font-weight:700; background:var(--accent); color:#111; border:none; border-radius:12px; }
   button.simGo:disabled { opacity:.5; }
   button.faceBtn.on .eye { fill:#fff; }
@@ -602,7 +603,7 @@ try {
   .rmDet[open] summary { color:var(--accent); } .rmDet .phSl { margin:6px 0; } .rmDet select { width:100%; }
   .rmRes { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin:6px 0; font-size:12px; } .rmRes div { border:1px solid var(--line); border-radius:6px; padding:4px 6px; } .rmRes span { display:block; color:var(--muted); font-size:10px; }
   .rmMain { flex:1 1 auto; min-width:0; }
-  .viCvA { height:max(520px, 62vh); } .viCvB { height:max(240px, 30vh); } .viBar { display:flex; gap:10px; align-items:center; } .viBar #viPlay { margin:0; } .viAWrap { position:relative; } .viStep { display:flex; align-items:center; gap:6px; } .viStep input { flex:1; } .viStep button { width:34px; margin:0; padding:3px 0; font-size:12px; } .viCrop { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:4px 0 8px; font-size:13px; } .viCrop input { width:90px; margin:0; } .viCrop button { width:auto; margin:0; padding:4px 10px; } .viViews { position:absolute; left:50%; transform:translateX(-50%); display:flex; gap:6px; } .viViews button { width:auto; margin:0; padding:3px 12px; font-size:12px; } .viViews button.on { background:var(--accent); color:#fff; border-color:var(--accent); } .viViews button[disabled] { opacity:.4; } .viSpeed { display:flex; align-items:center; gap:6px; } .viSpeed button { width:36px; margin:0; padding:4px 0; font-size:18px; } .viSpeed b { min-width:44px; text-align:center; }
+  .viCvA { height:max(520px, 62vh); } .viCvB { height:max(240px, 30vh); } .viBar { display:flex; gap:10px; align-items:center; } .viBar #viPlay { margin:0; } .viAWrap { position:relative; } .simProg { display:flex; align-items:center; gap:10px; margin-top:8px; } .simProgBar { flex:1; height:10px; border-radius:6px; background:var(--line); overflow:hidden; } .simProgBar i { display:block; height:100%; background:var(--accent); transition:width .3s; } .simTrials { margin-top:10px; border:1px solid var(--line); border-radius:8px; padding:8px 10px; } .simTrialsHead { display:flex; gap:8px; align-items:baseline; font-size:13px; margin-bottom:6px; } .simTrialsList { display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:2px 10px; max-height:180px; overflow:auto; font-size:13px; } .simTrialRow { display:flex; align-items:center; justify-content:space-between; gap:4px; } .simInspect { text-decoration:none; font-size:12px; opacity:.75; } .simInspect:hover { opacity:1; } .simTrialsList label { display:flex; gap:6px; align-items:center; margin:0; } .simTrialsList input { width:auto; margin:0; } .simIncl { width:16px !important; height:16px; margin:0 10px 0 4px !important; vertical-align:middle; flex:none; cursor:pointer; } .viStep { display:flex; align-items:center; gap:6px; } .viStep input { flex:1; } .viStep button { width:34px; margin:0; padding:3px 0; font-size:12px; } .viCrop { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:4px 0 8px; font-size:13px; } .viCrop input { width:90px; margin:0; } .viCrop button { width:auto; margin:0; padding:4px 10px; } .viViews { position:absolute; left:50%; transform:translateX(-50%); display:flex; gap:6px; } .viViews button { width:auto; margin:0; padding:3px 12px; font-size:12px; } .viViews button.on { background:var(--accent); color:#fff; border-color:var(--accent); } .viViews button[disabled] { opacity:.4; } .viSpeed { display:flex; align-items:center; gap:6px; } .viSpeed button { width:36px; margin:0; padding:4px 0; font-size:18px; } .viSpeed b { min-width:44px; text-align:center; }
   .viSelRow { margin:10px 0 4px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; } .viSelRow select { margin:0 !important; } .viTitleSel { font-weight:700; font-size:14px; padding:6px 10px; width:auto; max-width:100%; }
   .viMA { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; margin-bottom:8px; } .rmCv { height:1180px; }
   .rmLeg { display:flex; flex-wrap:wrap; gap:4px; margin:6px 0; align-items:center; } .rmLeg button { width:auto; margin:0; padding:3px 8px; font-size:12px; display:inline-flex; gap:5px; align-items:center; }
@@ -868,6 +869,7 @@ try {
   .labDoor span { color:var(--muted); font-size:13px; line-height:1.4; }
   .labHead { display:flex; justify-content:space-between; align-items:center; gap:8px; }
   .labHead .labHomeBtn { margin:0; width:auto; padding:6px 12px; }
+  .labHead button { white-space:nowrap; }   /* "‹ Back", "Step-by-step" stay on one line */
   .labBackBtn { margin:0; width:auto; padding:6px 12px; }
   /* Process page (src/process.js) */
   .prDrop { display:block; border:1.5px dashed var(--line); border-radius:12px; padding:18px 12px; text-align:center;
@@ -1879,7 +1881,6 @@ try {
     <div class="card" id="osimCard">
       <div class="labHead"><b style="font-size:16px" data-i18n="doorSimulate">Simulate</b>
         <span style="display:flex;gap:6px"><button type="button" class="ghost" id="osimStep" data-i18n="sim_stepTab">Step-by-step</button>
-        <button type="button" class="ghost" id="osimQuick" data-i18n="sq_tab">Quick run</button>
         <button type="button" class="ghost" id="osimBatch" data-i18n="ss_batch">Batch mode</button>
         <button type="button" class="ghost labBackBtn" data-i18n="labBack" aria-label="Back">‹ Back</button><button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></span></div>
       <button type="button" class="ghost hidden" id="osimToggle" style="margin:0" data-i18n="osimOpen">OpenSim trial (markers and force plates)</button>
@@ -1893,7 +1894,8 @@ try {
   <section id="viewVisualise" class="hidden">
     <div class="card">
       <div class="labHead"><b style="font-size:16px" data-i18n="doorVisualise">Visualise</b>
-        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></div>
+        <span style="display:flex;gap:6px"><button type="button" class="ghost hidden" id="visBackSim" data-i18n="vi_backSim">‹ Simulate</button>
+        <button type="button" class="ghost labHomeBtn" data-i18n="labHome">Home</button></span></div>
       <div id="visHost"></div>
     </div>
   </section>
@@ -2288,8 +2290,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 166;
-window.BUILD_AT = "2026-11-06 17:39";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 167;
+window.BUILD_AT = "2026-11-09 13:25";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2405,7 +2407,7 @@ import { SPORT_IDS, allowedIn, sportActivities, MULTI_PLAYER_SPORTS } from "./sr
 import { createMultiTracker, MAX_PLAYERS } from "./src/multiplayer.js";
 import { askZones, loadZoneSettings, saveZoneSettings } from "./src/playerzones.js";
 import { makeBallTracker, ballAfterStrokes, bodyBox, strokeSummary } from "./src/balltrack.js";
-import { loadSpec as loadSimSpec, simHTML, simWire } from "./src/simtools.js";
+import { loadSpec as loadSimSpec, simHTML, simWire, resetSim } from "./src/simtools.js";
 import { makeLocalClient } from "./src/localengine.js";
 import { cleanEngineUrl, engineFromSearch, fileKind, makeEngineClient, EngineError,
          pickAngles, pickMoments, markerErrors, topMuscles, worstReserve, reactionJoints,
@@ -5895,6 +5897,7 @@ window.addEventListener("popstate", (e) => {
   if (id === "viewFeed") renderFeed();
   if (id === "viewChat") chat.open();
   if (id === "viewProcess") openProcess();
+  if (id === "viewHome") { osim.resetNext = true; delete document.documentElement.dataset.fromSim; }   // Home ends a Simulate visit; Process (Inspect) and back does not
   if (id === "viewSimulate") openSimulate();
   if (id === "viewAnalysis") openAnalysis();
   if (id === "viewBiofeedback") biofeedback.open();
@@ -8314,12 +8317,14 @@ function renderOsim() {
   const ctx = {
     t: tr, esc, client: osim.client, health: h, job: st, outputs: osim.toolOut, open: osim.open, err: osim.err, batch: osim.batch, quick: osim.quick,
     act: (fn) => osimDo(fn),
+    reset: () => simulateReset(),
+    openInVisualise: (files, name) => { $("visBackSim").classList.remove("hidden"); $("visBackSim").onclick = () => { $("visBackSim").classList.add("hidden"); showView("viewSimulate"); }; showView("viewVisualise"); if (visualise) visualise.loadFiles(files, name); },
     refreshOutputs: async () => { for (const [tool, sp] of Object.entries(osim.job.tools || {})) if (sp.state === "done" && osim.toolOut[tool] === undefined) { try { osim.toolOut[tool] = (await osim.client.toolOutputs(osim.job.id, tool)).files; } catch { osim.toolOut[tool] = []; } } },
     openInProcess: (file) => {
       // Process gets a "back to Simulate" button; the Simulate job stays as it is
       document.documentElement.dataset.fromSim = "1";
       showView("viewProcess"); openProcess();
-      processMounted.then((m) => m && m.load([file]));
+      processMounted.then((m) => m && m.load(Array.isArray(file) ? file : [file]));
     },
   };
   box.innerHTML = `<p class="sub" style="font-size:15px;margin:0">${tr(h.local ? "sim_localOn" : "simConnected")}
@@ -8347,10 +8352,9 @@ function osimInit() {
   };
   $("osimToggle").onclick = open;
   // three modes, one at a time: step-by-step (each section run by hand), quick run (one c3d), batch (a project)
-  const osimMode = () => { $("osimBatch").classList.toggle("on", osim.batch); $("osimQuick").classList.toggle("on", osim.quick); $("osimStep").classList.toggle("on", !osim.batch && !osim.quick); renderOsim(); };
+  const osimMode = () => { $("osimBatch").classList.toggle("on", osim.batch); $("osimStep").classList.toggle("on", !osim.batch && !osim.quick); renderOsim(); };
   $("osimStep").onclick = () => { osim.batch = false; osim.quick = false; osimMode(); };
   $("osimBatch").onclick = () => { osim.batch = true; osim.quick = false; osimMode(); };
-  $("osimQuick").onclick = () => { osim.quick = true; osim.batch = false; osimMode(); };
   $("osimStep").classList.toggle("on", !osim.batch && !osim.quick);
   open();
   // Arriving by the engine's own link opens the card already connected.
@@ -8392,7 +8396,16 @@ function openProcess() {
  * when idle, so the first health check is retried while it wakes up. A lab
  * engine link (?engine=&code=) still wins. */
 let osimAuto = null;
+/* Reset Simulate: forget files, models and results, and start a new in-browser job. */
+async function simulateReset(opts) {
+  await resetSim(opts);
+  clearTimeout(osim.timer);
+  osim.client = null; osim.job = null; osim.res = {}; osim.toolOut = {}; osim.err = null; osim.open = new Set(); osim.localStarting = false;
+  renderOsim();
+}
 function openSimulate() {
+  // coming back from Home starts clean; coming back from Process (Inspect) keeps the work
+  if (osim.resetNext) { osim.resetNext = false; simulateReset(); return; }
   renderOsim();
   if (osim.client || osimAuto || engineFromSearch(location.search)) return;
   osimAuto = (async () => {
