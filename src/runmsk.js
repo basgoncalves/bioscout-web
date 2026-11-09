@@ -150,12 +150,13 @@ export function doID(q, L, o = {}) {
   }
   return out;
 }
-// 4. SO: min sum a^p + sum reserve^p subject to moment balance, 0<=a<=1. Solved on the Lagrange multipliers.
+// 4. SO: min sum a^p + sum reserve^p subject to moment balance, 0<=a<=1, |reserve control|<=resMax (0 = no limit).
+// With a limit the balance can become impossible: the moment left over is reported as `gap` (N·m per joint).
 export function doSO(mom, o) {
   const p = o.p, qe = 1 / (p - 1), cols = MUS.map((m, i) => m.r.map((r) => r * m.F * o.str / 100 * (o.w[m.n] / 100)));
-  const R = o.res, act = (lam) => {
+  const R = o.res, L = o.resMax > 0 ? o.resMax : Infinity, act = (lam) => {
     const a = cols.map((c) => { const g = c[0] * lam[0] + c[1] * lam[1] + c[2] * lam[2]; return g <= 0 ? 0 : Math.min(1, (g / p) ** qe); });
-    const rs = lam.map((l) => { const g = R * l; return Math.sign(g) * (Math.abs(g) / p) ** qe; });
+    const rs = lam.map((l) => { const g = R * l; return Math.sign(g) * Math.min(L, (Math.abs(g) / p) ** qe); });
     return { a, rs };
   };
   const resid = (lam, Mj) => { const { a, rs } = act(lam); return [0, 1, 2].map((j) => a.reduce((s, v, i) => s + v * cols[i][j], 0) + R * rs[j] - Mj[j]); };
@@ -171,7 +172,7 @@ export function doSO(mom, o) {
       if (!ok) break;
     }
     const { a, rs } = act(lam);
-    out.push({ a, F: a.map((v, i) => v * MUS[i].F * o.str / 100 * (o.w[MUS[i].n] / 100)), res: rs.map((v) => v * R), cost: a.reduce((s, v) => s + v ** p, 0) + rs.reduce((s, v) => s + Math.abs(v) ** p, 0) });
+    out.push({ gap: r.map((v) => -v), a, F: a.map((v, i) => v * MUS[i].F * o.str / 100 * (o.w[MUS[i].n] / 100)), res: rs.map((v) => v * R), cost: a.reduce((s, v) => s + v ** p, 0) + rs.reduce((s, v) => s + Math.abs(v) ** p, 0) });
   }
   return out;
 }
@@ -184,7 +185,7 @@ export function initRunMsk({ host, tr }) {
     scale: { w: W1(), mis: 0, misM: "KNE", noise: 1 },
     ik: { w: W1(), sta: 0, noise: 2 },
     id: { mag: 100, cop: 0, hx: 100, inert: 1 },
-    so: { p: 2, str: 100, w: Object.fromEntries(MUS.map((m) => [m.n, 100])), res: 10, kn: 0, kf: 3 },
+    so: { p: 2, str: 100, w: Object.fromEntries(MUS.map((m) => [m.n, 100])), res: 10, resMax: 0, kn: 0, kf: 3 },
   };
   let R = null, raf = 0, last = 0;
   const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#888";
@@ -209,7 +210,7 @@ export function initRunMsk({ host, tr }) {
     ik: () => [["#", tr("rm_secErr")], ["sta", 0, 4, 0.25, "cm", tr("rm_sta")], ["noise", 0, 10, 0.5, "mm", tr("rm_noise")], ["#", tr("rm_secW")], ...wSl()],
     id: () => [["mag", 50, 150, 5, "%", tr("rm_grf")], ["hx", 0, 200, 10, "%", tr("rm_grfx")], ["cop", -6, 6, 0.5, "cm", tr("rm_cop")], ["inert", 0, 1, 1, "", tr("rm_inert")]],
     so: () => [["#", tr("rm_secKin")], ["kn", 0, 5, 0.25, "° / mm", tr("rm_kn")], ["kf", 0, 8, 1, "", tr("rm_kf")],
-      ["#", tr("rm_secOpt")], ["p", 1.5, 4, 0.5, "", tr("rm_p")], ["res", 1, 100, 1, "N·m", tr("rm_res")],
+      ["#", tr("rm_secOpt")], ["p", 1.5, 4, 0.5, "", tr("rm_p")], ["res", 1, 100, 1, "N·m", tr("rm_res")], ["resMax", 0, 100, 1, "", tr("rm_resMax")],
       ["#", tr("rm_secStr")], ["str", 10, 500, 10, "%", tr("rm_str")], ...MUS.map((m) => ["w." + m.n, 10, 500, 10, "%", m.n])],
   };
   const get = (t, k) => (k.startsWith("w.") ? S[t].w[k.slice(2)] : S[t][k]);
@@ -282,7 +283,8 @@ export function initRunMsk({ host, tr }) {
       [tr("rm_lever"), [Fm.hip, Fm.knee, Fm.ank].map((P) => f(lev(P) * 100, 1)).join(" · ") + " cm"]]);
     const so = R.so[fr], pkR = Math.max(...R.so.map((o) => Math.max(...o.res.map(Math.abs)))), mxA = Math.max(...R.so.map((o) => Math.max(...o.a)));
     const sumF = R.so.map((o) => o.F.reduce((s, v) => s + v, 0));
-    put("so", [[tr("rm_maxAct"), f(mxA * 100, 0) + " %"], [tr("rm_resPk"), f(pkR, 1) + " N·m"], [tr("rm_sumF"), f(Math.max(...sumF) / (BM * G), 1) + " BW"], [tr("rm_cost"), f(so.cost, 3)]]);
+    put("so", [[tr("rm_maxAct"), f(mxA * 100, 0) + " %"], [tr("rm_resPk"), f(pkR, 1) + " N·m"], [tr("rm_sumF"), f(Math.max(...sumF) / (BM * G), 1) + " BW"], [tr("rm_cost"), f(so.cost, 3)]]
+      .concat(R.so.some((o) => o.gap && o.gap.some((v) => Math.abs(v) > 0.5)) ? [[tr("rm_gap"), f(Math.max(...R.so.map((o) => Math.max(...o.gap.map(Math.abs)))), 1) + " N·m"]] : []));
   }
 
   // ---- one view: leg on the left; on the right, time-aligned from top: hip, knee, ankle (angle + moment, two axes), muscle forces + reserves, activation bars ----
