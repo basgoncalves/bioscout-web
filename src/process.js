@@ -594,6 +594,57 @@ export function markerTriplets(ds) {
 }
 
 /**
+ * A new marker computed from existing ones, frame by frame (a missing marker rebuilt):
+ *   { method: "avg", from: [names], off: [dx, dy, dz] }        mean of the markers + a fixed offset (lab axes, file units)
+ *   { method: "avg", from: [A, B, C, ...], off, local: true }   the offset is in the frame of the first three markers
+ *                                                               (e1 = A->B, e3 = e1 x A->C, e2 = e3 x e1), so the new
+ *                                                               marker keeps its place RELATIVE to them as they move
+ *   { method: "mirror", src, a, b, off }                        src reflected across the plane half-way between a and b,
+ *                                                               perpendicular to a->b (e.g. RTHI mirrored with LASI / RASI)
+ * -> { x, y, z } Float64Arrays (NaN where an input is missing).
+ */
+export function virtualMarker(ds, mk, spec) {
+  const n = ds.time.length, by = Object.fromEntries(mk.map((m) => [m.name, m]));
+  const at = (nm, i) => { const m = by[nm]; return m ? [ds.cols[m.x][i], ds.cols[m.y][i], ds.cols[m.z][i]] : [NaN, NaN, NaN]; };
+  const off = (spec.off || [0, 0, 0]).map((v) => +v || 0), out = [new Float64Array(n), new Float64Array(n), new Float64Array(n)];
+  for (let i = 0; i < n; i++) {
+    let p = [NaN, NaN, NaN];
+    if (spec.method === "mirror") {
+      const s = at(spec.src, i), a = at(spec.a, i), b = at(spec.b, i);
+      const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = Math.hypot(...d);
+      if (L > 0) {
+        const u = d.map((v) => v / L), c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+        const k = 2 * ((s[0] - c[0]) * u[0] + (s[1] - c[1]) * u[1] + (s[2] - c[2]) * u[2]);
+        p = [s[0] - k * u[0], s[1] - k * u[1], s[2] - k * u[2]];
+      }
+    } else {
+      const ps = (spec.from || []).map((nm) => at(nm, i));
+      if (ps.length) p = [0, 1, 2].map((j) => ps.reduce((t, q) => t + q[j], 0) / ps.length);
+      if (spec.local && ps.length >= 3) {
+        const sub = (u, w) => [u[0] - w[0], u[1] - w[1], u[2] - w[2]], cr = (u, w) => [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+        const nz = (u) => { const L = Math.hypot(...u); return L > 0 ? u.map((v) => v / L) : [NaN, NaN, NaN]; };
+        const e1 = nz(sub(ps[1], ps[0])), e3 = nz(cr(e1, sub(ps[2], ps[0]))), e2 = cr(e3, e1);
+        for (let j = 0; j < 3; j++) out[j][i] = p[j] + off[0] * e1[j] + off[1] * e2[j] + off[2] * e3[j];
+        continue;
+      }
+    }
+    for (let j = 0; j < 3; j++) out[j][i] = p[j] + off[j];
+  }
+  return { x: out[0], y: out[1], z: out[2] };
+}
+/** Every marker triplet as an OpenSim .trc (units of the file, mm by default). */
+export function markersToTrc(ds, mk, name = "markers.trc") {
+  const n = ds.time.length, fs = ds.fs || (n > 1 ? 1 / (ds.time[1] - ds.time[0]) : 100), u = (ds.units && ds.units[mk[0] && mk[0].x]) || "mm";
+  const L = [`PathFileType\t4\t(X/Y/Z)\t${name}`, "DataRate\tCameraRate\tNumFrames\tNumMarkers\tUnits\tOrigDataRate\tOrigDataStartFrame\tOrigNumFrames",
+    `${+fs.toFixed(4)}\t${+fs.toFixed(4)}\t${n}\t${mk.length}\t${u}\t${+fs.toFixed(4)}\t1\t${n}`,
+    ["Frame#", "Time", ...mk.flatMap((m) => [m.name, "", ""])].join("\t"),
+    ["", "", ...mk.flatMap((m, k) => [`X${k + 1}`, `Y${k + 1}`, `Z${k + 1}`])].join("\t")];
+  const f = (v) => (Number.isFinite(v) ? (+v.toFixed(5)).toString() : "");
+  for (let i = 0; i < n; i++) L.push([i + 1, (+ds.time[i]).toFixed(5), ...mk.flatMap((m) => [f(ds.cols[m.x][i]), f(ds.cols[m.y][i]), f(ds.cols[m.z][i])])].join("\t"));
+  return L.join("\n") + "\n";
+}
+
+/**
  * Draw one frame of markers on a 2-D canvas: orthographic view, rotated by
  * yaw about the vertical axis and pitched toward the viewer.
  * view: { yaw, pitch, zoom, up: "z"|"y", labels, frame }
@@ -624,14 +675,15 @@ export function drawMarkers(ctx, W, H, ds, mk, view, box) {
   for (const m of mk) {
     const p = [ds.cols[m.x][f], ds.cols[m.y][f], ds.cols[m.z][f]];
     if (!p.every(Number.isFinite)) continue;
-    const q = P(p); pts.push([q, m.name]);
+    const q = P(p); pts.push([q, m.name, m.hl]);
   }
   pts.sort((a, b) => a[0][2] - b[0][2]);
   ctx.font = "11px system-ui, sans-serif";
-  for (const [q, name] of pts) {
-    const side = /^(L|l_|left)/.test(name) ? "#2f6fe4" : /^(R|r_|right)/.test(name) ? "#e8871a" : "#1d7a45";
-    ctx.fillStyle = side; ctx.beginPath(); ctx.arc(q[0], q[1], 4, 0, 2 * Math.PI); ctx.fill();
-    if (view.labels) { ctx.fillStyle = "rgba(128,128,128,.95)"; ctx.fillText(name, q[0] + 6, q[1] - 4); }
+  for (const [q, name, hl] of pts) {
+    const side = hl ? "#e0218a" : /^(L|l_|left)/.test(name) ? "#2f6fe4" : /^(R|r_|right)/.test(name) ? "#e8871a" : "#1d7a45";
+    ctx.fillStyle = side; ctx.beginPath(); ctx.arc(q[0], q[1], hl ? 7 : 4, 0, 2 * Math.PI); ctx.fill();
+    if (hl) { ctx.strokeStyle = side; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(q[0], q[1], 11, 0, 2 * Math.PI); ctx.stroke(); }
+    if (view.labels || hl) { ctx.fillStyle = hl ? side : "rgba(128,128,128,.95)"; ctx.fillText(name, q[0] + 6, q[1] - 4); }
   }
   return pts.length;
 }
@@ -998,7 +1050,34 @@ export function mountProcess(root, { t, download }) {
       <div class="row" style="gap:12px;align-items:center;margin-top:6px;font-size:15px">
         <label>${t("pr_up")} <select id="prUp" style="width:auto;display:inline-block">${["z", "y"].map((a) => `<option${vis.view.up === a ? " selected" : ""}>${a}</option>`).join("")}</select></label>
         <label>${t("pr_speed")} <select id="prSpeed" style="width:auto;display:inline-block">${[0.25, 0.5, 1, 2].map((v) => `<option value="${v}"${vis.speed === v ? " selected" : ""}>${v}×</option>`).join("")}</select></label>
-        <label><input type="checkbox" id="prLabels"${vis.view.labels ? " checked" : ""} style="width:auto;display:inline-block;min-height:0"> ${t("pr_labels")}</label></div></div>`;
+        <label><input type="checkbox" id="prLabels"${vis.view.labels ? " checked" : ""} style="width:auto;display:inline-block;min-height:0"> ${t("pr_labels")}</label>
+        <button type="button" class="ghost" id="prTrc" style="margin:0;width:auto;padding:4px 10px">${t("pr_saveTrc")}</button></div>
+      ${addMarkerHTML(mk)}</div>`;
+  }
+  function addMarkerHTML(mk) {
+    const a = vis.add, names = mk.map((m) => m.name);
+    const opt = (cur) => names.map((nm) => `<option${nm === cur ? " selected" : ""}>${escX(nm)}</option>`).join("");
+    if (!a) return `<button type="button" class="ghost" id="prAddMk" style="margin:8px 0 0;width:auto;padding:6px 12px">＋ ${t("pr_addMk")}</button>`;
+    const loc = a.method === "avg" && a.local && a.from.length >= 3;
+    const ax = loc ? [`${a.from[0]}→${a.from[1]}`, "⊥ (in plane)", `⊥ ${a.from[0]}-${a.from[1]}-${a.from[2]}`] : (vis.view.up === "y" ? ["X", "Y (up)", "Z"] : ["X", "Y", "Z (up)"]);
+    return `<div class="prAddMk" style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
+      <b>${t("pr_addMk")}</b> <span class="sub" style="font-size:14px">${t("pr_addMkNote")}</span>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:6px">
+        <label>${t("pr_mkName")} <input id="prMkName" type="text" value="${escX(a.name)}" style="width:110px"></label>
+        <label>${t("pr_mkMethod")} <select id="prMkMethod" style="width:auto"><option value="avg"${a.method === "avg" ? " selected" : ""}>${t("pr_mkAvg")}</option><option value="mirror"${a.method === "mirror" ? " selected" : ""}>${t("pr_mkMirror")}</option></select></label>
+      </div>
+      ${a.method === "mirror" ? `<div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px">
+        <label>${t("pr_mkSrc")} <select id="prMkSrc" style="width:auto">${opt(a.src)}</select></label>
+        <label>${t("pr_mkPlane")} <select id="prMkA" style="width:auto">${opt(a.a)}</select> – <select id="prMkB" style="width:auto">${opt(a.b)}</select></label></div>`
+      : `<div style="margin-top:6px"><span class="sub" style="font-size:14px">${t("pr_mkFrom")}</span>
+        <div style="display:flex;flex-wrap:wrap;gap:2px 12px;max-height:120px;overflow:auto;margin-top:2px">${names.map((nm) => `<label style="font-size:14px"><input type="checkbox" data-mkfrom="${escX(nm)}"${a.from.includes(nm) ? " checked" : ""} style="width:auto;min-height:0"> ${escX(nm)}${a.from.includes(nm) ? ` <small class="sub">${a.from.indexOf(nm) + 1}</small>` : ""}</label>`).join("")}</div>
+        <label style="font-size:14px;display:block;margin-top:4px"><input type="checkbox" id="prMkLocal"${a.local ? " checked" : ""} style="width:auto;min-height:0"> ${t("pr_mkLocal")}</label>
+        ${a.local && a.from.length < 3 ? `<p class="sub" style="font-size:14px;margin:2px 0">${t("pr_mkLocal3")}</p>` : ""}</div>`}
+      <div style="margin-top:6px">${[0, 1, 2].map((j) => `<div class="row" style="gap:8px;align-items:center;margin:2px 0"><span style="min-width:110px;font-size:14px">${t("pr_mkOff")} ${ax[j]}</span>
+        <input type="range" min="-300" max="300" step="1" value="${a.off[j]}" data-mkoff="${j}" style="flex:1"><input type="number" step="1" value="${a.off[j]}" data-mkoffn="${j}" style="width:80px"> <span class="sub" style="font-size:14px">mm</span></div>`).join("")}</div>
+      <p class="sub" id="prMkInfo" style="font-size:14px;margin:4px 0"></p>
+      <div class="row" style="gap:8px"><button type="button" id="prMkSave" style="margin:0;width:auto;padding:6px 14px">${t("pr_mkSave")}</button>
+        <button type="button" class="ghost" id="prMkCancel" style="margin:0;width:auto;padding:6px 14px">${t("cancel")}</button></div></div>`;
   }
 
   // ---- tools: one row each, the button first --------------------------------------
@@ -1270,7 +1349,15 @@ export function mountProcess(root, { t, download }) {
       const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
       cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
       const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      if (vis.box) drawMarkers(ctx, r.width, r.height, ds, mk, vis.view, vis.box);
+      let dsD = ds, mkD = mk;
+      if (vis.add) {                                  // the marker being built, drawn live in pink
+        const v = virtualMarker(ds, mk, vis.add), nm = (vis.add.name || "NEW") + " *";
+        dsD = { ...ds, cols: { ...ds.cols, [nm + " X"]: v.x, [nm + " Y"]: v.y, [nm + " Z"]: v.z } };
+        mkD = [...mk, { name: nm, x: nm + " X", y: nm + " Y", z: nm + " Z", hl: true }];
+        const info = root.querySelector("#prMkInfo"), f = vis.view.frame;
+        if (info) info.textContent = Number.isFinite(v.x[f]) ? `${t("pr_mkAt")}: ${[v.x[f], v.y[f], v.z[f]].map((q) => q.toFixed(1)).join(", ")} · ${Array.from(v.x).filter(Number.isFinite).length}/${v.x.length} ${t("pr_samples")}` : t("pr_mkNone");
+      }
+      if (vis.box) drawMarkers(ctx, r.width, r.height, dsD, mkD, vis.view, vis.box);
       const fr = root.querySelector("#prFrame"), ft = root.querySelector("#prFrameT");
       if (fr) fr.value = vis.view.frame; if (ft) ft.textContent = `${(+ds.time[vis.view.frame]).toFixed(2)} s`;
     };
@@ -1284,6 +1371,32 @@ export function mountProcess(root, { t, download }) {
     root.querySelector("#prUp").onchange = (e) => { vis.view.up = e.target.value; render(); };
     root.querySelector("#prSpeed").onchange = (e) => { vis.speed = +e.target.value; };
     root.querySelector("#prLabels").onchange = (e) => { vis.view.labels = e.target.checked; draw(); };
+    const q = (sel) => root.querySelector(sel);
+    q("#prTrc").onclick = () => download(`${ds.name.replace(/ · .*/, "").replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "_")}.trc`, markersToTrc(ds, markerTriplets(ds), ds.name));
+    if (q("#prAddMk")) q("#prAddMk").onclick = () => {
+      const nm = mk.map((m) => m.name), pick = (re) => nm.find((x) => re.test(x)) || nm[0];
+      vis.add = { name: "NEW", method: "avg", from: [], local: true, off: [0, 0, 0], src: nm[0], a: pick(/^L.*ASI/i), b: pick(/^R.*ASI/i) }; render();
+    };
+    if (vis.add) {
+      const A = vis.add;
+      q("#prMkName").oninput = (e) => { A.name = e.target.value.trim().replace(/\s+/g, "_"); draw(); };
+      q("#prMkMethod").onchange = (e) => { A.method = e.target.value; render(); };
+      for (const [id, k] of [["#prMkSrc", "src"], ["#prMkA", "a"], ["#prMkB", "b"]]) if (q(id)) q(id).onchange = (e) => { A[k] = e.target.value; draw(); };
+      root.querySelectorAll("[data-mkfrom]").forEach((c) => { c.onchange = () => { const nmk = c.dataset.mkfrom; A.from = c.checked ? [...A.from, nmk] : A.from.filter((x) => x !== nmk); render(); }; });
+      if (q("#prMkLocal")) q("#prMkLocal").onchange = (e) => { A.local = e.target.checked; render(); };
+      root.querySelectorAll("[data-mkoff]").forEach((r2) => { r2.oninput = () => { const j = +r2.dataset.mkoff; A.off[j] = +r2.value; q(`[data-mkoffn="${j}"]`).value = r2.value; draw(); }; });
+      root.querySelectorAll("[data-mkoffn]").forEach((r2) => { r2.oninput = () => { const j = +r2.dataset.mkoffn; A.off[j] = +r2.value || 0; q(`[data-mkoff="${j}"]`).value = A.off[j]; draw(); }; });
+      q("#prMkCancel").onclick = () => { vis.add = null; render(); };
+      q("#prMkSave").onclick = () => {
+        const nm = A.name || "NEW";
+        if (mk.some((m) => m.name === nm)) { alert(t("pr_mkExists", { name: nm })); return; }
+        const v = virtualMarker(ds, mk, A), u = ds.units[mk[0].x] || "mm";
+        for (const [ax, arr] of [["X", v.x], ["Y", v.y], ["Z", v.z]]) { ds.cols[`${nm} ${ax}`] = arr; ds.units[`${nm} ${ax}`] = u; }
+        const how = A.method === "mirror" ? `mirror ${A.src} ${A.a} ${A.b}` : `${A.local && A.from.length >= 3 ? "relative to" : "avg"} ${A.from.join(" ")}`;
+        say({ ok: true, msg: `${nm}: ${how}${A.off.some(Boolean) ? ` + [${A.off.join(", ")}] mm` : ""}` }, `addmarker ${nm}`);
+        vis.add = null; vis.boxFor = null; render();
+      };
+    }
     root.querySelector("#prPlay").onclick = (e) => {
       vis.playing = !vis.playing; e.target.textContent = vis.playing ? t("pr_pause") : t("pr_play");
       if (!vis.playing) return;

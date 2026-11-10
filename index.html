@@ -1237,7 +1237,7 @@ try {
 
   <dialog id="termsDlg">
     <h2 style="font-size:16px;margin:0 0 10px" data-i18n="termsTitle">Terms &amp; privacy</h2>
-    <div class="termsText note" data-i18n-html="termsBody"><b>What BioScout is.</b> A training tool that estimates movement and joint-load figures from phone video. It is <b>not a medical device</b>: it does not diagnose, treat or give medical advice, and its numbers are estimates. Use it at your own risk and ask a professional about anything health-related. It is made by one person, Dr. Basílio Gonçalves, and provided as it is, without warranty.<br><br><b>Without an account</b> everything stays on this device. Videos are analysed here and never uploaded; profiles and logs live in this browser's storage, so clearing it or uninstalling the app deletes them. Export your data if you want to keep it.<br><br><b>With an account</b> (optional), the athlete you mark as you is also kept in your account on servers in the EU (Supabase, Frankfurt) so your devices can sync: training sessions and their summaries, meals, diary and mood, sleep, weight, vitals, water and coffee, cycle, assessments, reaction tests and imported activities. Some of this is health data; by creating an account and syncing you agree to it being stored for that purpose. Only you can read it. Videos, motion curves and meal photos are not uploaded.<br><br><b>The feed.</b> A post is a picture or short clip you choose plus up to 42 characters, shown with your username. A profile picture, if you add one, is shown next to your name to the same people. If your account is <b>open</b>, anyone signed in to BioScout can see your posts; if it is <b>private</b>, only you and your friends can. <b>Friends</b> are mutual (one asks, the other accepts) and see your posts and name, never your logs. Anyone signed in can find you by your username, which is chosen once and cannot be changed. Post only what you have the right to share, never other people without their consent, and nothing illegal, hateful or sexual; posts and accounts that break this can be removed. You keep the rights to what you post and let BioScout show it in the app.<br><br><b>Your data, your choice.</b> Export it any time (Edit profile → Export), correct it in the app, and delete your account with everything in it, posts included (Edit profile → Account → Delete my account) — which also withdraws your consent. Questions or requests: basilio.goncalves7@gmail.com. You can also complain to the Austrian Data Protection Authority (dsb.gv.at).<br><br><b>Age.</b> You must be at least 14 to create an account; younger athletes need a parent or guardian to agree for them.<br><br><b>Also:</b> Help &amp; chat runs on this device and is not stored; "Talk to a professional" opens your own email or WhatsApp. Strava and video-link imports go through a helper on your own computer. Nothing is sold, and there are no ads or trackers. When these terms change, the app asks you to agree again. <a href="./privacy.html" target="_blank" rel="noopener">Full privacy notice</a></div>
+    <div class="termsText note" data-i18n-html="termsBody"><b>What BioScout is.</b> A training tool that estimates movement and joint-load figures from phone video. It is <b>not a medical device</b>: it does not diagnose, treat or give medical advice, and its numbers are estimates. Use it at your own risk and ask a professional about anything health-related. It is made by one person, Dr. Basílio Gonçalves, and provided as it is, without warranty.<br><br><b>Without an account</b> everything stays on this device. Videos are analysed here and never uploaded; profiles and logs live in this browser's storage, so clearing it or uninstalling the app deletes them. Export your data if you want to keep it.<br><br><b>With an account</b> (optional), the athlete you mark as you is also kept in your account on servers in the EU (Supabase, Frankfurt) so your devices can sync: training sessions and their summaries, meals, diary and mood, sleep, weight, vitals, water and coffee, cycle, assessments, reaction tests and imported activities. Some of this is health data; by creating an account and syncing you agree to it being stored for that purpose. Only you can read it. Videos, motion curves and meal photos are not uploaded.<br><br><b>The feed.</b> A post is a picture or short clip you choose plus up to 42 characters, shown with your username. A profile picture, if you add one, is shown next to your name to the same people. If your account is <b>open</b>, anyone signed in to BioScout can see your posts; if it is <b>private</b>, only you and your friends can. <b>Friends</b> are mutual (one asks, the other accepts) and see your posts and name, never your logs. Anyone signed in can find you by your username, which is chosen once and cannot be changed. Post only what you have the right to share, never other people without their consent, and nothing illegal, hateful or sexual; posts and accounts that break this can be removed. You keep the rights to what you post and let BioScout show it in the app.<br><br><b>Your data, your choice.</b> Export it any time (Edit profile → Export), correct it in the app, and delete your account with everything in it, posts included (Edit profile → Account → Delete my account) — which also withdraws your consent. Questions or requests: basilio.goncalves7@gmail.com. You can also complain to the Austrian Data Protection Authority (dsb.gv.at).<br><br><b>Age.</b> You must be at least 14 to create an account; younger athletes need a parent or guardian to agree for them.<br><br><b>Also:</b> Help &amp; chat runs on this device and is not stored; "Talk to a professional" opens your own email or WhatsApp. Video-link imports go through a helper on your own computer. Nothing is sold, and there are no ads or trackers. When these terms change, the app asks you to agree again. <a href="./privacy.html" target="_blank" rel="noopener">Full privacy notice</a></div>
     <button class="ghost" id="termsAgreeBtn" data-i18n="termsAgree">I agree</button>
   </dialog>
 
@@ -2313,8 +2313,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 170;
-window.BUILD_AT = "2026-11-10 12:44";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 171;
+window.BUILD_AT = "2026-11-10 13:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2416,8 +2416,6 @@ import { renderDashboard, mealFormHTML, diaryFormHTML,
          cycleFormHTML, cycleViewHTML, dayKey, allSessions,
          collectDays, percentile, achievementsHTML } from "./src/dashboard.js";
 import { probe as probeHelper, fetchClip } from "./src/fetcher.js";
-import { probe as probeStrava, authorise as authoriseStrava,
-         fetchActivities, toCardioAll } from "./src/strava.js";
 import { DEFAULT_TAGS, liveTags, toggleTag, stepTag, quickMoodAt } from "./src/diary.js";
 import { collectWeights, weightNear, latestWeight } from "./src/weight.js";
 import { measureFrame, combineFrames, circumferences, bodyFatEstimate,
@@ -4415,10 +4413,6 @@ function setChart(points, key, pairPoints) {
  * person tries it, it fails, and they learn the app is broken rather than that
  * a helper is not running.
  */
-// declared before the first refreshStrava(): on iPhone the probe can settle while the module is still
-// running, and a `let` further down was then still in its dead zone ("Cannot access stravaHealth before initialization")
-let stravaHealth = null;
-refreshStrava().catch(() => {});
 
 probeHelper().then((info) => {
   if (!info) return;
@@ -6563,80 +6557,6 @@ function defaultDashView() {
            summaryChart: sum.chart || "weight", summaryWin: sum.win || "month" };
 }
 
-/* --- Strava, through the local helper -------------------------------------
- *
- * Same self-declaring rule as the YouTube link box: probe once, and offer a
- * control only if the helper answered. The health is cached for the life of
- * the page because renderDash runs on every save, and a probe per render
- * would mean a loopback request every time somebody logs a meal.
- *
- * Note what is NOT here: any token, any credential, any call to strava.com.
- * The page asks the helper for activities and that is the whole of its
- * access -- see src/strava.js for why that boundary is deliberate.
- */
-async function refreshStrava() {
-  stravaHealth = await probeStrava();
-  paintStrava();
-}
-
-function paintStrava() {
-  const note = $("stravaNote"), connect = $("stravaConnect"), imp = $("stravaImport");
-  if (!note || !connect || !imp) return;        // dashboard not on screen
-  connect.hidden = imp.hidden = true;
-
-  const h = stravaHealth;
-  // No helper: leave the standing note, which already says that importing
-  // from another app is not something the page can do by itself.
-  if (!h) return;
-  if (!h.configured) { note.textContent = tr("stravaNotConfigured"); return; }
-
-  if (!h.authorised) {
-    note.textContent = tr("stravaNeedsAuth");
-    connect.hidden = false;
-    connect.onclick = async () => {
-      try {
-        await authoriseStrava();
-        note.textContent = tr("stravaAuthOpened");
-        // They approve on Strava's own site in another tab. Re-probing when
-        // this one gets focus again beats guessing at a delay.
-        window.addEventListener("focus", refreshStrava, { once: true });
-      } catch (err) {
-        note.textContent = tr("stravaFailed", { error: err.message || String(err) });
-      }
-    };
-    return;
-  }
-
-  note.textContent = h.athlete
-    ? tr("stravaConnectedAs", { name: h.athlete })
-    : tr("stravaConnectedPlain");
-  imp.hidden = false;
-  imp.onclick = importStrava;
-}
-
-async function importStrava() {
-  const imp = $("stravaImport");
-  if (imp) imp.disabled = true;
-  try {
-    $("stravaNote").textContent = tr("stravaImporting");
-    // Only what has happened since the newest activity already stored: a
-    // daily import is then one request rather than the whole history again.
-    const rows = await fetchActivities({ after: latestCardioAt(currentAthlete()) });
-    const { added, updated } = mergeCardio(toCardioAll(rows, currentAthlete()));
-    // Re-render FIRST -- it replaces the very element the message goes in --
-    // and only then say what happened.
-    if (added || updated) renderDash();
-    $("stravaNote").textContent = (added || updated)
-      ? tr("stravaImported", { n: added, u: updated })
-      : tr("stravaNothingNew");
-  } catch (err) {
-    $("stravaNote").textContent = tr("stravaFailed", { error: err.message || String(err) });
-  } finally {
-    const b = $("stravaImport");
-    if (b) b.disabled = false;
-  }
-}
-
 /* - / + beside a number field. A tap moves it by data-step; holding repeats,
  * after a short pause, so 83.0 to 81.5 is one press rather than fifteen. The
  * field is never focused by this, so the phone's keyboard stays down. */
@@ -6686,7 +6606,6 @@ function renderDash(fromSync = false) {
   card.innerHTML = renderDashboard(dashboardData(), myMeals(), myDiary(),
                                    myWeights(), myCycle(), mySleep(), myVitals(),
                                    myCardio(), myWater(), myCoffee(), view);
-  paintStrava();
   $("whoName").textContent = currentAthlete() || tr("noProfile");
   paintWhoAvatar();
   $("whoSince").textContent = tr("dashboardSub", { first: monthLabel(dashView) });
@@ -9438,9 +9357,21 @@ function askTrim(file, dt, duration) {
  * status line still on screen, which is indistinguishable from a hang. The
  * work is in analyseVideoFile(); this wrapper's only job is that a failure
  * ends up on the page. */
+let videoTracked = false;       // analyseVideoFile got as far as tracking (the clip decoded)
 async function analyseVideoBlob(file, opts = {}) {
   try {
+    videoTracked = false;
     await analyseVideoFile(file, opts);
+    /* Not one body in the whole clip, from a clip that decoded fine: on iPhone (Safari) the fast paths -- the pose
+     * model in a worker fed with createImageBitmap(video), and playing the clip frame by frame -- can come back
+     * empty (students' iPhone clips, 2026-11-10). Once more on the plain path: the page's own model, a seek per frame. */
+    if (videoTracked && frames.length === 0 && !opts._retry) {
+      if (vidAbort && vidAbort.pw) { try { vidAbort.pw.terminate(); } catch { /* gone */ } vidAbort.pw = null; }
+      const w = window.__bsNoWorker, pl = window.__bsNoPlay;
+      window.__bsNoWorker = true; window.__bsNoPlay = true;
+      try { console.warn("no pose found on the fast path; retrying on the seek path"); await analyseVideoFile(file, { ...opts, _retry: true }); }
+      finally { window.__bsNoWorker = w; window.__bsNoPlay = pl; }
+    }
   } catch (err) {
     if (err instanceof AnalysisCancelled) { say(tr("sayAnalysisCancelled")); bar(null); return; }
     console.error("video analysis failed:", err);
@@ -9600,6 +9531,7 @@ async function analyseVideoFile(file, { trim = true, crop = null } = {}) {
   const seekOf = (i) => Math.min(tOf(i) + half, Math.max(0, duration - 1e-3));
   const stats = { frames: n, seeks: 0, seekMs: 0, detectMs: 0, played: 0, mode: "seek" };
   const t0 = performance.now();
+  videoTracked = true;
   /* A screen recording may carry a crop (the area the person drew): the model
    * sees only that rectangle, and the landmarks are in its pixels. */
   const cr = crop && crop.w > 8 && crop.h > 8 ? crop : null;
