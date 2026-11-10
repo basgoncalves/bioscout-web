@@ -1086,6 +1086,51 @@ export function jointPositionsM(F, rep, pxPerM, floorY) {
   };
 }
 
+/* A runner crossing the frame: the scale is measured EVERY frame instead of once.
+ *
+ * Moving towards or away from the camera changes the pixels per metre, and a
+ * single pxPerM then turns that into fake vertical and fore-aft acceleration,
+ * which inverse dynamics reads as ground reaction. The leg itself is a ruler
+ * that travels with the athlete: thigh + shank in pixels, smoothed over about
+ * a second (the distance changes slowly; the leg's own bending averages out
+ * over a stride), gives each frame its own scale. Positions are then built
+ * relative to the hip in that frame's scale, and the hip is carried forward by
+ * its frame-to-frame displacement in the scale of the frame it happened in, and
+ * up from a floor that is also found locally (the lowest foot within +-0.6 s)
+ * -- so neither the drift in scale nor the far end of the frame being lower in
+ * the picture becomes an acceleration. */
+export function travelScale(F, pxPerM, fps) {
+  const hx = interpNan(F.hip_cx), hy = interpNan(F.hip_cy), kx = interpNan(F.knee_cx), ky = interpNan(F.knee_cy);
+  const ax = interpNan(F.ankle_cx), ay = interpNan(F.ankle_cy), n = hx.length;
+  const leg = Array.from({ length: n }, (_, i) => Math.hypot(hx[i] - kx[i], hy[i] - ky[i]) + Math.hypot(kx[i] - ax[i], ky[i] - ay[i]));
+  const win = (arr, h, fn) => arr.map((_, i) => fn(arr.slice(Math.max(0, i - h), Math.min(n, i + h + 1)).filter(Number.isFinite)));
+  const med = (a) => { if (!a.length) return NaN; const b = [...a].sort((x, y) => x - y); return b[b.length >> 1]; };
+  const mean = (a) => (a.length ? a.reduce((s2, v) => s2 + v, 0) / a.length : NaN);
+  const h = Math.max(2, Math.round(0.5 * fps));
+  const legS = win(win(leg, h, med), h, mean), ref = med(legS.filter(Number.isFinite));
+  const s = legS.map((v) => (Number.isFinite(v) && ref > 0 ? pxPerM * v / ref : pxPerM));
+  const foot = Array.from({ length: n }, (_, i) => Math.max(...[ay[i], F.toe_cy ? interpNan(F.toe_cy)[i] : NaN].filter(Number.isFinite)));
+  const floor = win(foot, Math.max(2, Math.round(0.6 * fps)), (a) => (a.length ? Math.max(...a) : NaN));
+  const X = new Float64Array(n);
+  for (let i = 1; i < n; i++) X[i] = X[i - 1] + (hx[i] - hx[i - 1]) / ((s[i] + s[i - 1]) / 2);
+  const Y = Float64Array.from({ length: n }, (_, i) => (floor[i] - hy[i]) / s[i]);
+  return { s, hipX: X, hipY: Y, hx, hy, scaleRange: [Math.min(...s), Math.max(...s)] };
+}
+/** jointPositionsM for a travelling athlete: each frame in its own scale, about the carried-forward hip. */
+export function jointPositionsTravel(F, rep, T) {
+  const [t0, , t1] = rep;
+  const grab = (xk, yk) => {
+    const x = interpNan(F[xk]), y = interpNan(F[yk]), out = [];
+    for (let i = t0; i <= t1; i++) out.push([T.hipX[i] + (x[i] - T.hx[i]) / T.s[i], T.hipY[i] + (T.hy[i] - y[i]) / T.s[i]]);
+    return out;
+  };
+  return {
+    ankle: grab("ankle_cx", "ankle_cy"), knee: grab("knee_cx", "knee_cy"),
+    hip: grab("hip_cx", "hip_cy"), shoulder: grab("shoulder_cx", "shoulder_cy"),
+    toe: grab("toe_cx", "toe_cy"),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // orchestration
 // ---------------------------------------------------------------------------

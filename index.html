@@ -2313,8 +2313,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 171;
-window.BUILD_AT = "2026-11-10 13:48";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 172;
+window.BUILD_AT = "2026-11-10 16:18";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -2355,7 +2355,7 @@ if (/(access_token|error_code)=/.test(BOOT_HASH)) {
   history.replaceState(null, "", location.pathname + location.search);
 }
 import { LANDMARK_NAMES, analyse, writeMot, ACTIVITIES, KNEE_SIGN,
-         buildSquatFeatures, buildJumpFeatures, computePxPerM,
+         buildSquatFeatures, buildJumpFeatures, computePxPerM, travelScale, jointPositionsTravel,
          jointPositionsM } from "./src/kinematics.js";
 import { inverseDynamics } from "./src/dynamics.js";
 import { gradeReps } from "./src/repquality.js";
@@ -10267,18 +10267,24 @@ async function enrich(res, poses, fps, heightM, activity) {
   // same derived ground reaction, so the legs get the same inverse dynamics.
   const canDoDynamics = (activity === "squat" || spec.jump || spec.shot
                          || activity === "slsquat"
-                         || (ACTIVITIES[activity]?.gait && res.travel?.stationary))
-                        && (!spec.travels || res.travel?.stationary);
+                         || ACTIVITIES[activity]?.gait)
+                        && (!spec.travels || res.travel?.stationary || spec.gait);
+  /* Running or walking across the frame: the scale is measured per frame from the leg (travelScale) instead of once. */
+  const travelling = !!(spec.travels && spec.gait && !res.travel?.stationary);
+  let travelT = null;
   if (canDoDynamics && res.reps.length) {
     try {
       const F = spec.jump ? buildJumpFeatures(poses) : buildSquatFeatures(poses);
       const { pxPerM } = computePxPerM(poses, heightM);
+      if (travelling) { travelT = travelScale(F, pxPerM, fps); res.travelScale = travelT.scaleRange.map((v) => v / pxPerM); }
       // The whole-trial curve is one more window over the same clip, so it gets
       // the same treatment: without this its panel would show angles and then
       // an empty space where every other panel has moments.
       for (const r of [...res.reps, ...(res.whole ? [res.whole] : [])]) {
+        const pos = travelT ? jointPositionsTravel(F, r.bounds, travelT) : jointPositionsM(F, r.bounds, pxPerM, F._floorY);
+        if (travelT) r.travelHip = pos.hip;           // the muscle-force surrogate reads the same compensated pelvis
         r.dyn = inverseDynamics(
-          jointPositionsM(F, r.bounds, pxPerM, F._floorY), massKg, fps,
+          pos, massKg, fps,
           { barMassKg: res.externalKg });
       }
     } catch (err) { console.warn("dynamics failed", err); }
@@ -10349,7 +10355,7 @@ async function enrich(res, poses, fps, heightM, activity) {
    * reads pelvis translations in metres, so it inherits the drifting
    * pixel-to-metre scale exactly as the ground reaction does. A travelling clip
    * gets kinematics and timing; a stationary one gets everything. */
-  if (spec.travels && !res.travel?.stationary) return;
+  if (spec.travels && !res.travel?.stationary && !spec.gait) return;
   /* An open-chain task -- the kick back -- has no ground reaction under the
    * working leg, and its posture (on all fours, or one leg swinging free) is
    * nothing like the standing, weight-bearing tasks the muscle surrogate was
@@ -10422,6 +10428,13 @@ async function enrich(res, poses, fps, heightM, activity) {
       // its own established convention.
       mc.pelvis_tx = r.coords.pelvis_tz;
       mc.pelvis_tz = r.coords.pelvis_tx;
+      /* A runner crossing the frame: the pelvis path in the per-frame scale (travelScale), not the drifting one. */
+      if (r.travelHip && r.travelHip.length === (r.coords.pelvis_ty || []).length) {
+        const x0 = r.travelHip[0][0], y0 = r.coords.pelvis_ty[0] - r.travelHip[0][1];
+        mc.pelvis_tx = r.travelHip.map((p) => Math.abs(p[0] - x0));
+        mc.pelvis_ty = r.travelHip.map((p) => p[1] + y0);
+        mc.pelvis_tz = r.coords.pelvis_tz.map(() => 0);
+      }
       const out = predictForces(fm, solidCoords(mc), r.times.length,
         { massKg, heightM, times: r.times });
       r.forces = out.forces;
@@ -10527,7 +10540,7 @@ function viewNote(res) {
   if (spec.travels) {
     bits.push(!spec.gait ? tr("sidestepNoKinetics")
               : res.travel?.stationary ? tr("runStationaryKinetics")
-              : tr("runNoKinetics"));
+              : tr("runTravelKinetics", { a: res.travelScale ? Math.round(100 * (res.travelScale[1] / res.travelScale[0] - 1)) : 0 }));
   }
   if (res.activity === "run" && res.reps.some((r) => r.walking)) {   // not for walk: that is the task
     const w = res.reps.filter((r) => r.walking).length;
