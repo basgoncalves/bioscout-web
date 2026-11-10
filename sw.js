@@ -45,7 +45,7 @@
  * served for ever. The served index.html said 144 and the running app said
  * 136. Deriving the cache name from the build keeps the two in step and
  * guarantees the file differs on every release. */
-const BUILD = 173;
+const BUILD = 174;
 const SHELL_CACHE = "bioscout-shell-b" + BUILD;
 const HEAVY_CACHE = "bioscout-heavy-v1";
 const PIN_CACHE = "bioscout-pin";        // which old build the person chose (one entry), and its files

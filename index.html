@@ -2314,8 +2314,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 173;
-window.BUILD_AT = "2026-11-10 17:15";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 174;
+window.BUILD_AT = "2026-11-10 17:53";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -10691,7 +10691,7 @@ function chart(rep, activity, res) {
   const marks = [];
   if (pct) {
     const isJump = !!ACTIVITIES[activity]?.jump;
-    if (rep.topPct != null) marks.push([rep.topPct, isJump ? "take-off" : "turnaround"]);
+    if (rep.topPct != null) marks.push([rep.topPct, isJump ? "take-off" : ACTIVITIES[activity]?.gait ? "toe-off" : "turnaround"]);
     if (rep.landPct != null) marks.push([rep.landPct, "touch-down"]);
   } else {
     const tt = t[rep.bounds[1] - rep.bounds[0]];
@@ -11456,7 +11456,7 @@ function curveChart(rep, activity, allSeries, allBandsIn, { unit = "", zero = fa
   const marks = [];
   if (pct) {
     const isJump = !!ACTIVITIES[activity]?.jump;
-    if (rep.topPct != null) marks.push([rep.topPct, isJump ? "take-off" : "turnaround"]);
+    if (rep.topPct != null) marks.push([rep.topPct, isJump ? "take-off" : ACTIVITIES[activity]?.gait ? "toe-off" : "turnaround"]);
     if (rep.landPct != null) marks.push([rep.landPct, "touch-down"]);
   } else if (rep.bounds) {
     const tt = t[rep.bounds[1] - rep.bounds[0]];
