@@ -610,7 +610,14 @@ try {
   .rmLeg button i { width:12px; height:4px; border-radius:2px; display:inline-block; } .rmLeg button.off { opacity:.35; text-decoration:line-through; }
   /* running playground: compact one-line sliders; on wide screens the settings sit in a scrolling column beside the plots */
   .rmRun .rmDet .phSl { display:grid; grid-template-columns:minmax(7.5em,40%) 1fr; align-items:center; gap:2px 8px; margin:1px 0; font-size:12px; }
-  .rmRun .rmDet .phSl span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rmRun .rmDet .phSl.rmSl { grid-template-columns:minmax(0,1fr) auto 20px 42%; gap:2px 6px; }
+  .rmRun .rmDet .rmLab { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  .rmRun .rmDet .rmVal { white-space:nowrap; font-size:12px; } .rmRun .rmDet .rmVal small { color:var(--muted); }
+  .rmI { width:18px; height:18px; min-height:0; margin:0; padding:0; border-radius:50%; border:1px solid var(--line); background:transparent; color:var(--accent);
+    font:italic 600 11px/16px Georgia, serif; cursor:pointer; }
+  .rmI:hover { background:var(--accent); color:var(--bg, #111); }
+  .rmTip { position:relative; margin:2px 0 6px; padding:6px 9px; border:1px solid var(--accent); border-radius:8px; background:var(--card, #1b1e24); font-size:12px; line-height:1.4; }
+  .rmTip::before { content:""; position:absolute; top:-6px; right:calc(42% + 14px); border:6px solid transparent; border-top:0; border-bottom-color:var(--accent); }
   .rmRun .rmDet input[type=range] { height:16px; margin:0; padding:0; }
   .rmRun .rmDet .rmSec { margin:6px 0 2px; font-size:12px; font-weight:600; }
   .rmRun .rmDet .note { font-size:11px; margin:4px 0; }
@@ -2306,8 +2313,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 169;
-window.BUILD_AT = "2026-11-09 13:44";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 170;
+window.BUILD_AT = "2026-11-10 12:44";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -4408,7 +4415,10 @@ function setChart(points, key, pairPoints) {
  * person tries it, it fails, and they learn the app is broken rather than that
  * a helper is not running.
  */
-refreshStrava();
+// declared before the first refreshStrava(): on iPhone the probe can settle while the module is still
+// running, and a `let` further down was then still in its dead zone ("Cannot access stravaHealth before initialization")
+let stravaHealth = null;
+refreshStrava().catch(() => {});
 
 probeHelper().then((info) => {
   if (!info) return;
@@ -6564,8 +6574,6 @@ function defaultDashView() {
  * The page asks the helper for activities and that is the whole of its
  * access -- see src/strava.js for why that boundary is deliberate.
  */
-let stravaHealth = null;
-
 async function refreshStrava() {
   stravaHealth = await probeStrava();
   paintStrava();
