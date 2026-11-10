@@ -610,6 +610,7 @@ try {
   .rmLeg button i { width:12px; height:4px; border-radius:2px; display:inline-block; } .rmLeg button.off { opacity:.35; text-decoration:line-through; }
   /* running playground: compact one-line sliders; on wide screens the settings sit in a scrolling column beside the plots */
   .rmRun .rmDet .phSl { display:grid; grid-template-columns:minmax(7.5em,40%) 1fr; align-items:center; gap:2px 8px; margin:1px 0; font-size:12px; }
+  .dropOver { outline:2px dashed var(--accent); outline-offset:4px; }
   .rmRun .rmDet .phSl.rmSl { grid-template-columns:minmax(0,1fr) auto 20px 42%; gap:2px 6px; }
   .rmRun .rmDet .rmLab { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
   .rmRun .rmDet .rmVal { white-space:nowrap; font-size:12px; } .rmRun .rmDet .rmVal small { color:var(--muted); }
@@ -2313,8 +2314,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 172;
-window.BUILD_AT = "2026-11-10 16:18";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 173;
+window.BUILD_AT = "2026-11-10 17:15";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -9204,8 +9205,29 @@ $("screenRecBtn").onclick = () => openScreenRecorder({
 }
 $("fileInput").onchange = async (e) => {
   const file = e.target.files[0];
+  e.target.value = "";                         // the same file picked again still fires
   if (file) await analyseVideoBlob(file);
 };
+/* On a desktop, accept="video/*" makes the Windows file dialog look up every video type the system knows before
+ * it opens -- several seconds of "nothing happens" (Bas, 2026-11-10). A plain list of extensions opens at once.
+ * Phones keep video/*, which is what offers the camera roll. */
+if (!/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || ""))
+  $("fileInput").accept = ".mp4,.mov,.m4v,.webm,.mkv,.avi,.3gp,.mpg,.mpeg,.wmv";
+/* Drag a video onto the recorder: the same as picking it with "Analyse a video file". */
+{
+  const zone = () => { const b = $("fileBtn"); return b && !b.classList.contains("hidden") && b.offsetParent ? b.closest(".card") || b.parentElement : null; };
+  const isVid = (dt) => dt && [...(dt.items || [])].some((it) => it.kind === "file" && (/^video\//.test(it.type) || it.type === ""));
+  window.addEventListener("dragover", (e) => { const z = zone(); if (!z || !isVid(e.dataTransfer)) return; e.preventDefault(); z.classList.add("dropOver"); });
+  window.addEventListener("dragleave", (e) => { if (e.relatedTarget) return; const z = zone(); if (z) z.classList.remove("dropOver"); });
+  window.addEventListener("drop", (e) => {
+    const z = zone(); if (!z) return;
+    z.classList.remove("dropOver");
+    const f = [...(e.dataTransfer?.files || [])].find((x) => /^video\//.test(x.type) || /\.(mp4|mov|m4v|webm|mkv|avi|3gp|mpe?g|wmv)$/i.test(x.name));
+    if (!f) return;
+    e.preventDefault();
+    analyseVideoBlob(f);
+  });
+}
 
 /**
  * Track a video from anywhere: the file picker, or the local fetch helper.
@@ -10428,6 +10450,19 @@ async function enrich(res, poses, fps, heightM, activity) {
       // its own established convention.
       mc.pelvis_tx = r.coords.pelvis_tz;
       mc.pelvis_tz = r.coords.pelvis_tx;
+      /* Gait filmed side-on: ONE leg is measured and written to both sides, so the model was fed two legs moving in
+       * step -- a two-footed hop, not a walk -- and its contact forces had no stance/swing pattern at all (Bas,
+       * 2026-11-10: flat 4-6 BW hip over the whole cycle, ankle carried by "other muscles"). A stride rep is one
+       * cycle of the measured leg, and in steady gait the other leg runs the same cycle half a stride later, so the
+       * contralateral side is the measured one shifted by half the rep. */
+      if (ACTIVITIES[activity]?.gait && !res.sidesMeasured && r !== res.whole && r.stance_side) {
+        const me = r.stance_side, other = me === "r" ? "l" : "r";
+        for (const j of ["hip_flexion", "knee_angle", "ankle_angle", "hip_adduction", "hip_rotation"]) {
+          const src = mc[`${j}_${me}`]; if (!src || !src.length) continue;
+          const n = src.length, h = Math.round(n / 2);
+          mc[`${j}_${other}`] = Array.from({ length: n }, (_, i) => src[(i + h) % n]);
+        }
+      }
       /* A runner crossing the frame: the pelvis path in the per-frame scale (travelScale), not the drifting one. */
       if (r.travelHip && r.travelHip.length === (r.coords.pelvis_ty || []).length) {
         const x0 = r.travelHip[0][0], y0 = r.coords.pelvis_ty[0] - r.travelHip[0][1];
