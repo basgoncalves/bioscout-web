@@ -610,6 +610,7 @@ try {
   .rmLeg button i { width:12px; height:4px; border-radius:2px; display:inline-block; } .rmLeg button.off { opacity:.35; text-decoration:line-through; }
   /* running playground: compact one-line sliders; on wide screens the settings sit in a scrolling column beside the plots */
   .rmRun .rmDet .phSl { display:grid; grid-template-columns:minmax(7.5em,40%) 1fr; align-items:center; gap:2px 8px; margin:1px 0; font-size:12px; }
+  .bfbMotTick { display:inline-flex; align-items:center; gap:3px; font-size:12px; margin-right:6px; white-space:nowrap; } .bfbMotTick input { width:auto; min-height:0; margin:0; }
   .dropOver { outline:2px dashed var(--accent); outline-offset:4px; }
   .rmRun .rmDet .phSl.rmSl { grid-template-columns:minmax(0,1fr) auto 20px 42%; gap:2px 6px; }
   .rmRun .rmDet .rmLab { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
@@ -1799,7 +1800,7 @@ try {
       <div class="bfbThrRow">
         <label class="bfbThrLbl"><input type="checkbox" id="bfbThrOn1"> <input type="color" class="bfbCol" data-col="0" aria-label="Colour 1"> <span data-i18n="bfb_threshold">Threshold</span> (<span id="bfbUnit">°</span>)</label>
         <input class="bfbThrTxt" data-lamptxt="1" maxlength="16" spellcheck="false" autocomplete="off" data-i18n-placeholder="bfb_thrTxtPh" placeholder="Text on screen" aria-label="Text on screen">
-        <span class="bfbThrMeta"><span class="bfbLim" data-row="1"></span> <button type="button" class="ghost bfbColReset" data-colreset data-i18n-title="bfb_colReset" title="Default colours" aria-label="Default colours">↺</button></span>
+        <span class="bfbThrMeta"><label class="bfbMotTick" data-i18n-title="bfb_motTick" title="Run the motor when this lamp lights"><input type="checkbox" data-motrow="1"> <span data-i18n="bfb_motor">Motor</span></label> <span class="bfbLim" data-row="1"></span> <button type="button" class="ghost bfbColReset" data-colreset data-i18n-title="bfb_colReset" title="Default colours" aria-label="Default colours">↺</button></span>
         <div class="bfbThrCtl">
           <input type="range" id="bfbThr" min="0" max="180" step="1" aria-label="Threshold">
           <input type="number" id="bfbThrN" min="0" max="180" step="1" aria-label="Threshold">
@@ -1808,7 +1809,7 @@ try {
       <div class="bfbThrRow">
         <label class="bfbThrLbl"><input type="checkbox" id="bfbThrOn2"> <input type="color" class="bfbCol" data-col="1" aria-label="Colour 2"> <span data-i18n="bfb_thr2">Threshold 2</span></label>
         <input class="bfbThrTxt" data-lamptxt="2" maxlength="16" spellcheck="false" autocomplete="off" data-i18n-placeholder="bfb_thrTxtPh" placeholder="Text on screen" aria-label="Text on screen">
-        <span class="bfbThrMeta"><select class="bfbThrMet" id="bfbThrMet2" aria-label="Metric"></select> <span class="bfbLim" data-row="2"></span></span>
+        <span class="bfbThrMeta"><label class="bfbMotTick" data-i18n-title="bfb_motTick" title="Run the motor when this lamp lights"><input type="checkbox" data-motrow="2"> <span data-i18n="bfb_motor">Motor</span></label> <select class="bfbThrMet" id="bfbThrMet2" aria-label="Metric"></select> <span class="bfbLim" data-row="2"></span></span>
         <div class="bfbThrCtl">
           <input type="range" id="bfbThr2" min="0" max="180" step="1" aria-label="Orange threshold">
           <input type="number" id="bfbThrN2" min="0" max="180" step="1" aria-label="Orange threshold">
@@ -1817,7 +1818,7 @@ try {
       <div class="bfbThrRow">
         <label class="bfbThrLbl"><input type="checkbox" id="bfbThrOn3"> <input type="color" class="bfbCol" data-col="2" aria-label="Colour 3"> <span data-i18n="bfb_thr3">Threshold 3</span></label>
         <input class="bfbThrTxt" data-lamptxt="3" maxlength="16" spellcheck="false" autocomplete="off" data-i18n-placeholder="bfb_thrTxtPh" placeholder="Text on screen" aria-label="Text on screen">
-        <span class="bfbThrMeta"><select class="bfbThrMet" id="bfbThrMet3" aria-label="Metric"></select> <span class="bfbLim" data-row="3"></span></span>
+        <span class="bfbThrMeta"><label class="bfbMotTick" data-i18n-title="bfb_motTick" title="Run the motor when this lamp lights"><input type="checkbox" data-motrow="3"> <span data-i18n="bfb_motor">Motor</span></label> <select class="bfbThrMet" id="bfbThrMet3" aria-label="Metric"></select> <span class="bfbLim" data-row="3"></span></span>
         <div class="bfbThrCtl">
           <input type="range" id="bfbThr3" min="0" max="180" step="1" aria-label="Red threshold">
           <input type="number" id="bfbThrN3" min="0" max="180" step="1" aria-label="Red threshold">
@@ -2314,8 +2315,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 174;
-window.BUILD_AT = "2026-11-10 17:53";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 175;
+window.BUILD_AT = "2026-11-12 14:14";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

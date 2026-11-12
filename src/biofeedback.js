@@ -827,7 +827,8 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
     if (ln.startsWith("AN ")) {
       const v = ln.slice(3).split(",").map(Number); if (v.length !== 6) return true;
       emgStep(v); lcdVolt(v);
-      v.forEach((x, i) => { v[i] = x * AN_V * anScale(i); AN_LIVE[i] = v[i]; });   // volts (0-5 V) x factor anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
+      v.forEach((x, i) => { v[i] = x * AN_V * anScale(i); AN_LIVE[i] = v[i]; });   // volts (0-5 V) x factor
+      anHist.push({ t: performance.now(), v }); anPlot(); anLamps();
       for (const i of cfg.an || []) for (const el of document.querySelectorAll(`[data-anv="${i}"]`)) el.textContent = Math.round(v[i] * 100) / 100;
       return true;                                   // not logged: 25 lines a second
     }
@@ -901,7 +902,11 @@ export function initBiofeedback({ $, tr, getLandmarker }) {
   }
   $("bfbMotPin").innerHTML = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].map((n) => `<option>${n}</option>`).join("");
   $("bfbMotLamp").value = String(cfg.motor.lamp); $("bfbMotPin").value = String(cfg.motor.pin); $("bfbMotSecs").value = cfg.motor.secs;
-  $("bfbMotLamp").onchange = () => { cfg.motor.lamp = +$("bfbMotLamp").value; save(); };
+  /* The motor's lamp is set in the Arduino window or with the motor tick on each threshold row; the two stay in step. */
+  const paintMotTicks = () => { for (const cb of document.querySelectorAll("[data-motrow]")) cb.checked = +cfg.motor.lamp === +cb.dataset.motrow; $("bfbMotLamp").value = String(cfg.motor.lamp); };
+  $("bfbMotLamp").onchange = () => { cfg.motor.lamp = +$("bfbMotLamp").value; save(); paintMotTicks(); };
+  for (const cb of document.querySelectorAll("[data-motrow]")) cb.onchange = () => { cfg.motor.lamp = cb.checked ? +cb.dataset.motrow : 0; save(); paintMotTicks(); };
+  paintMotTicks();
   $("bfbMotPin").onchange = () => { writeLine(`T${cfg.motor.pin}:0`, true); cfg.motor.pin = +$("bfbMotPin").value; save(); };
   $("bfbMotSecs").onchange = () => { const s = +$("bfbMotSecs").value; cfg.motor.secs = Number.isFinite(s) && s > 0 ? Math.min(30, s) : 2; $("bfbMotSecs").value = cfg.motor.secs; save(); };
   $("bfbMotTest").onclick = () => {
