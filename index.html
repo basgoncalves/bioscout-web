@@ -1899,7 +1899,13 @@ try {
     </div>
   </section>
   <section id="viewProcess" class="hidden">
+    <!-- Process modes: data files (src/process.js) or images (src/usimage.js, L06 ultrasound). -->
+    <div class="prModeBar" style="display:flex;gap:8px;margin:0 0 10px">
+      <button type="button" id="prModeData" style="width:auto" data-i18n="pr_modeData">Data files</button>
+      <button type="button" id="prModeImages" class="ghost" style="width:auto" data-i18n="pr_modeImages">Images (ultrasound)</button>
+    </div>
     <div id="processRoot"><p class="note" data-i18n="loading">Loading…</p></div>
+    <div id="imagesRoot" class="hidden"></div>
   </section>
 
   <section id="viewSimulate" class="hidden">
@@ -2315,8 +2321,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 175;
-window.BUILD_AT = "2026-11-12 14:14";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 176;
+window.BUILD_AT = "2026-11-17 08:50";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.
@@ -8324,6 +8330,26 @@ function openAnalysis() {
     },
   })).catch((e) => { analysisMounted = null; $("analysisRoot").innerHTML = `<p class="note banner">${esc(e.message)}</p>`; });
 }
+/* Process > Images (src/usimage.js): ultrasound measuring for BD2II L06,
+ * imported the first time the Images mode is chosen. */
+let imagesMounted = null;
+function setProcessMode(images) {
+  $("processRoot").classList.toggle("hidden", images);
+  $("imagesRoot").classList.toggle("hidden", !images);
+  $("prModeData").classList.toggle("ghost", images);
+  $("prModeImages").classList.toggle("ghost", !images);
+  if (images && !imagesMounted) {
+    imagesMounted = import("./src/usimage.js").then((m) => m.mountImages($("imagesRoot"), {
+      t: tr,
+      download(name, data) {
+        const blob = data instanceof Blob ? data : new Blob([data], { type: "text/plain" });
+        const url = URL.createObjectURL(blob), a = document.createElement("a");
+        a.href = url; a.download = name; document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 10000);
+      },
+    })).catch((e) => { imagesMounted = null; $("imagesRoot").innerHTML = `<p class="note banner">${esc(e.message)}</p>`; });
+  }
+}
 function openProcess() {
   if (processMounted) return;
   processMounted = import("./src/process.js").then((m) => m.mountProcess($("processRoot"), {
@@ -8404,6 +8430,8 @@ function enterLab() {
   });
   $("doorRecord").onclick = () => showView("viewRecord");
   $("doorProcess").onclick = () => { showView("viewProcess"); openProcess(); };
+  $("prModeData").onclick = () => setProcessMode(false);
+  $("prModeImages").onclick = () => setProcessMode(true);
   $("doorAnalysis").onclick = () => { showView("viewAnalysis"); openAnalysis(); };
   $("doorBiofeedback").onclick = () => { showView("viewBiofeedback"); biofeedback.open(); };
   $("doorPhysics").onclick = () => { showView("viewPhysics"); physics && physics.open(); };
