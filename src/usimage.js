@@ -124,7 +124,7 @@ export function mountImages(root, { t, download }) {
     </div>
     <p class="sub" id="usHint" style="min-height:1.3em;margin:4px 0"></p>
     <div style="position:relative;width:100%;height:min(70vh,620px);background:#000;border-radius:10px;overflow:hidden;touch-action:none">
-      <canvas id="usCv" style="width:100%;height:100%;display:block;cursor:crosshair"></canvas>
+      <canvas id="usCv" style="width:100%;height:100%;display:block;cursor:crosshair;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none"></canvas>
     </div>
     <div id="usItems" style="margin-top:8px"></div>
   </div>
@@ -160,8 +160,8 @@ export function mountImages(root, { t, download }) {
   }
   $("usCond").onchange = (e) => { I().cond = e.target.value; renderThumbs(); renderResults(); };
   $("usAngle").onchange = (e) => { I().angle = e.target.value ? +e.target.value : ""; renderThumbs(); renderResults(); };
-  $("usB").oninput = (e) => { adj.b = +e.target.value; draw(); };
-  $("usC").oninput = (e) => { adj.c = +e.target.value; draw(); };
+  $("usB").oninput = (e) => { adj.b = +e.target.value; drawSoon(); };
+  $("usC").oninput = (e) => { adj.c = +e.target.value; drawSoon(); };
   $("usFit").onclick = () => { fit(); draw(); };
 
   // ---- tools ----
@@ -188,16 +188,52 @@ export function mountImages(root, { t, download }) {
     const sx = (e.clientX - r.left) * d, sy = (e.clientY - r.top) * d, f = e.deltaY < 0 ? 1.15 : 1 / 1.15;
     view.x = sx - (sx - view.x) * f; view.y = sy - (sy - view.y) * f; view.k *= f; draw();
   }, { passive: false });
+  /* Pointers. A point is placed where the finger (or mouse button) is LIFTED,
+   * and follows it while pressed -- on a phone there is no hover, and the
+   * finger covers the spot, so press, slide to the exact place, release.
+   * Two fingers pinch-zoom and pan; Shift/right/middle mouse or Move pans. */
+  const touches = new Map();
+  let pending = null, pinch = null;
+  const screenPt = (e) => { const r = cv.getBoundingClientRect(), d = devicePixelRatio || 1; return { x: (e.clientX - r.left) * d, y: (e.clientY - r.top) * d }; };
+  function startPinch() {
+    const [a, b] = [...touches.values()];
+    pinch = { d: Math.hypot(b.x - a.x, b.y - a.y) || 1, cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, k: view.k, vx: view.x, vy: view.y };
+  }
   cv.addEventListener("pointerdown", (e) => {
     if (!I()) return;
-    if (tool === "pan" || e.button === 1 || e.button === 2 || e.shiftKey) { drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }; cv.setPointerCapture(e.pointerId); return; }
-    click(toImg(e));
+    e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch { /* old Safari */ }
+    if (e.pointerType === "touch") {
+      touches.set(e.pointerId, screenPt(e));
+      if (touches.size === 2) { pending = null; drag = null; startPinch(); draw(); return; }
+      if (touches.size > 2) return;
+    }
+    if (tool === "pan" || e.button === 1 || e.button === 2 || e.shiftKey) { drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }; return; }
+    pending = toImg(e); hover = pending; draw();
   });
   cv.addEventListener("pointermove", (e) => {
+    if (e.pointerType === "touch" && touches.has(e.pointerId)) touches.set(e.pointerId, screenPt(e));
+    if (pinch && touches.size >= 2) {
+      const [a, b] = [...touches.values()], d = Math.hypot(b.x - a.x, b.y - a.y) || 1, f = d / pinch.d;
+      const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+      view.k = pinch.k * f; view.x = cx - (pinch.cx - pinch.vx) * f; view.y = cy - (pinch.cy - pinch.vy) * f; draw(); return;
+    }
     if (drag) { const d = devicePixelRatio || 1; view.x = drag.vx + (e.clientX - drag.x) * d; view.y = drag.vy + (e.clientY - drag.y) * d; draw(); return; }
-    hover = toImg(e); if (pts.length) draw();
+    hover = toImg(e);
+    if (pending) pending = hover;
+    if (pending || pts.length) draw();
   });
-  cv.addEventListener("pointerup", () => { drag = null; });
+  const up = (e) => {
+    if (e.pointerType === "touch") {
+      touches.delete(e.pointerId);
+      if (pinch) { if (!touches.size) pinch = null; return; }   // no point after a pinch
+    }
+    drag = null;
+    if (pending && e.type === "pointerup") { const p = pending; pending = null; click(p); }
+    pending = null;
+  };
+  cv.addEventListener("pointerup", up);
+  cv.addEventListener("pointercancel", up);
   cv.addEventListener("contextmenu", (e) => e.preventDefault());
   window.addEventListener("resize", () => { if (I() && root.offsetParent) { fit(); draw(); } });
   window.addEventListener("keydown", (e) => {
@@ -236,7 +272,7 @@ export function mountImages(root, { t, download }) {
     const m = I(); if (!m) return;
     const sc = fin(m.mmPerPx) ? `${t("us_scale")}: ${m.scaleMm} mm = ${r1(m.scaleMm / m.mmPerPx)} px (${(m.mmPerPx * 1000).toFixed(1)} µm/px)` : t("us_noScale");
     const rows = m.items.map((it, i) => {
-      const v = it.type === "length" ? `${r1(it.mm)} mm` : it.type === "angle" ? `${r1(it.deg)}°`
+      const v = it.type === "length" ? (fin(it.mm) ? `${r1(it.mm)} mm` : `${r1(it.px)} px`) : it.type === "angle" ? `${r1(it.deg)}°`
         : `L<sub>f</sub> ${r1(it.lenMm)} mm · ${t("us_pen")} ${r1(it.pen)}°${it.extrapolated || it.beyondDrawn ? ` <i>(${t("us_extrap")})</i>` : ""}`;
       return `<tr><td>${i + 1}</td><td>${t("us_t_" + it.type)}</td><td>${v}</td><td><button type="button" class="ghost" data-del="${i}" style="width:auto;padding:0 8px">✕</button></td></tr>`;
     }).join("");
@@ -292,20 +328,38 @@ export function mountImages(root, { t, download }) {
   }
 
   // ---- drawing ----
+  /* Brightness/contrast baked into a cached copy of the pixels, so it looks
+   * the same everywhere (ctx.filter is missing in Safari before 18). */
+  function adjusted(m) {
+    if (adj.b === 100 && adj.c === 100) return m.el;
+    const key = adj.b + "/" + adj.c;
+    if (m.adjKey === key) return m.adjCv;
+    const c = m.adjCv || document.createElement("canvas"); c.width = m.w; c.height = m.h;
+    const g = c.getContext("2d"); g.drawImage(m.el, 0, 0);
+    try {
+      const im = g.getImageData(0, 0, m.w, m.h), a = im.data, B = adj.b / 100, C = adj.c / 100;
+      const lut = new Uint8ClampedArray(256); for (let i = 0; i < 256; i++) lut[i] = (i * B - 128) * C + 128;
+      for (let i = 0; i < a.length; i += 4) { a[i] = lut[a[i]]; a[i + 1] = lut[a[i + 1]]; a[i + 2] = lut[a[i + 2]]; }
+      g.putImageData(im, 0, 0);
+    } catch { return m.el; }
+    m.adjCv = c; m.adjKey = key; return c;
+  }
+  let raf = 0;
+  const drawSoon = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); };
   function draw() { const m = I(); if (!m || !m.w) return; size(); paint(ctx, view, m, false); }
   function paint(g, v, m, still) {
     g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = "#000"; g.fillRect(0, 0, g.canvas.width, g.canvas.height);
     g.setTransform(v.k, 0, 0, v.k, v.x, v.y);
-    g.filter = `brightness(${adj.b}%) contrast(${adj.c}%)`; g.drawImage(m.el, 0, 0); g.filter = "none";
+    g.drawImage(adjusted(m), 0, 0);
     const lw = Math.max(1.5, 2 / v.k) * (still ? 1.5 : (devicePixelRatio || 1)), fs = 14 * (still ? 1.6 : (devicePixelRatio || 1)) / v.k;
-    const line = (a, b, col, dash) => { g.strokeStyle = col; g.lineWidth = lw; g.setLineDash(dash ? [6 / v.k, 5 / v.k] : []); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.setLineDash([]); };
-    const dot = (p, col) => { g.fillStyle = col; g.beginPath(); g.arc(p.x, p.y, 3.5 * lw, 0, 7); g.fill(); };
-    const label = (p, s, col) => { g.font = `bold ${fs}px system-ui,sans-serif`; g.lineWidth = fs / 4; g.strokeStyle = "#000"; g.strokeText(s, p.x + fs / 2, p.y - fs / 2); g.fillStyle = col; g.fillText(s, p.x + fs / 2, p.y - fs / 2); };
+    const line = (a, b, col, dash) => { if (!a || !b) return; g.strokeStyle = col; g.lineWidth = lw; g.setLineDash(dash ? [6 / v.k, 5 / v.k] : []); g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke(); g.setLineDash([]); };
+    const dot = (p, col) => { if (!p) return; g.fillStyle = col; g.beginPath(); g.arc(p.x, p.y, 3.5 * lw, 0, 7); g.fill(); };
+    const label = (p, s, col) => { if (!p) return; g.font = `bold ${fs}px system-ui,sans-serif`; g.lineWidth = fs / 4; g.strokeStyle = "#000"; g.strokeText(s, p.x + fs / 2, p.y - fs / 2); g.fillStyle = col; g.fillText(s, p.x + fs / 2, p.y - fs / 2); };
     const ext = (a, b, len) => { const L = dist(a, b) || 1, ux = (b.x - a.x) / L, uy = (b.y - a.y) / L; return [{ x: a.x - ux * len, y: a.y - uy * len }, { x: b.x + ux * len, y: b.y + uy * len }]; };
     if (m.scalePts) { line(m.scalePts[0], m.scalePts[1], "#7CFC00"); m.scalePts.forEach((p) => dot(p, "#7CFC00")); label(m.scalePts[1], `${m.scaleMm} mm`, "#7CFC00"); }
     const drawItem = (it, live) => {
       const P = it.pts;
-      if (it.type === "length") { line(P[0], P[1] || hover, "#2fd3ff"); if (!live) label(P[1], `${r1(it.mm)} mm`, "#2fd3ff"); }
+      if (it.type === "length") { line(P[0], P[1] || hover, "#2fd3ff"); if (!live) label(P[1], fin(it.mm) ? `${r1(it.mm)} mm` : `${r1(it.px)} px`, "#2fd3ff"); }
       if (it.type === "angle") { line(P[1] ?? hover, P[0], "#ffd400"); if (P[1]) line(P[1], P[2] ?? hover, "#ffd400"); if (!live) label(P[1], `${r1(it.deg)}°`, "#ffd400"); }
       if (it.type === "fascicle") {
         for (let j = 0; j < 3; j++) {
@@ -316,12 +370,13 @@ export function mountImages(root, { t, download }) {
         }
         if (!live && it.iD && it.iS) {
           line(it.iD, it.iS, LINE_COL[0], true); dot(it.iD, LINE_COL[1]); dot(it.iS, LINE_COL[2]);
-          label({ x: (it.iD.x + it.iS.x) / 2, y: (it.iD.y + it.iS.y) / 2 }, `${r1(it.lenMm)} mm · ${r1(it.pen)}°`, LINE_COL[0]);
+          label({ x: (it.iD.x + it.iS.x) / 2, y: (it.iD.y + it.iS.y) / 2 }, `${fin(it.lenMm) ? r1(it.lenMm) + " mm" : r1(it.lenPx) + " px"} · ${r1(it.pen)}°`, LINE_COL[0]);
         }
       }
       P.forEach((p) => dot(p, "#fff"));
     };
     m.items.forEach((it) => drawItem(it, false));
+    if (!still && pending && I() === m) dot(pending, "#ff3b30");
     if (!still && pts.length && I() === m) {
       if (tool === "scale") { line(pts[0], hover || pts[0], "#7CFC00"); dot(pts[0], "#7CFC00"); }
       else drawItem({ type: tool, pts }, true);
