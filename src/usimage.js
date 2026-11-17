@@ -96,13 +96,13 @@ export function guessMeta(name) {
 }
 
 // ---- page ---------------------------------------------------------------------------
-const TOOLS = ["scale", "length", "angle", "fascicle", "pan"];
+const TOOLS = ["scale", "length", "angle", "pan"];   // "fascicle" (three-line tool) kept in code, not offered
 const NEED = { scale: 2, length: 2, angle: 3, fascicle: 6 };
 const LINE_COL = ["#ffd400", "#2fd3ff", "#ff5fa2"];   // fascicle, deep, superficial
 
 export function mountImages(root, { t, download }) {
   const imgs = [];            // {name, url, el, w, h, cond, angle, mmPerPx, items: [], scalePts}
-  let cur = -1, tool = "fascicle", pts = [], view = { k: 1, x: 0, y: 0 }, adj = { b: 100, c: 100 };
+  let cur = -1, tool = "length", pts = [], view = { k: 1, x: 0, y: 0 }, adj = { b: 100, c: 100 };
   let drag = null, hover = null, msg = "";
 
   root.innerHTML = `
@@ -280,13 +280,13 @@ export function mountImages(root, { t, download }) {
     $("usItems").querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => { m.items.splice(+b.dataset.del, 1); renderItems(); renderResults(); renderThumbs(); draw(); }));
   }
 
-  /* One fascicle per image goes to the template: the mean of the fascicle
-   * measurements on that image (students often measure two or three). */
+  /* Per image: fascicle length = mean of its Length measurements, pennation
+   * = mean of its Angle measurements (students often measure two or three). */
   function results() {
     return imgs.map((m) => {
-      const f = m.items.filter((it) => it.type === "fascicle");
-      const mean = (k) => { const v = f.map((x) => x[k]).filter(fin); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : NaN; };
-      return { name: m.name, cond: m.cond, angle: m.angle, n: f.length, lf: mean("lenMm"), pen: mean("pen"), extrap: f.some((x) => x.extrapolated || x.beyondDrawn) };
+      const mean = (type, k) => { const v = m.items.filter((x) => x.type === type).map((x) => x[k]).filter(fin); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : NaN; };
+      const nL = m.items.filter((x) => x.type === "length").length, nA = m.items.filter((x) => x.type === "angle").length;
+      return { name: m.name, cond: m.cond, angle: m.angle, n: nL + nA, nL, nA, lf: mean("length", "mm"), pen: mean("angle", "deg"), extrap: false };
     });
   }
   function renderResults() {
@@ -295,8 +295,8 @@ export function mountImages(root, { t, download }) {
     box.style.display = "";
     const T = toTemplateRows(R);
     box.innerHTML = `<b>${t("us_resTitle")}</b>
-      <table><thead><tr><th>${t("us_file")}</th><th>${t("us_cond")}</th><th>${t("us_angle")}</th><th>n</th><th>L<sub>f</sub> (mm)</th><th>${t("us_pen")} (°)</th></tr></thead><tbody>
-      ${R.filter((r) => r.n).map((r) => `<tr><td>${esc(r.name)}</td><td>${r.cond ? t("us_" + r.cond) : "<b style='color:#c0392b'>?</b>"}</td><td>${r.angle || "<b style='color:#c0392b'>?</b>"}</td><td>${r.n}</td><td>${r1(r.lf)}${r.extrap ? "*" : ""}</td><td>${r1(r.pen)}</td></tr>`).join("")}
+      <table><thead><tr><th>${t("us_file")}</th><th>${t("us_cond")}</th><th>${t("us_angle")}</th><th>n (L/∠)</th><th>L<sub>f</sub> (mm)</th><th>${t("us_pen")} (°)</th></tr></thead><tbody>
+      ${R.filter((r) => r.n).map((r) => `<tr><td>${esc(r.name)}</td><td>${r.cond ? t("us_" + r.cond) : "<b style='color:#c0392b'>?</b>"}</td><td>${r.angle || "<b style='color:#c0392b'>?</b>"}</td><td>${r.nL}/${r.nA}</td><td>${r1(r.lf)}${r.extrap ? "*" : ""}</td><td>${r1(r.pen)}</td></tr>`).join("")}
       </tbody></table>
       <p class="sub" style="margin-top:10px">${t("us_tplTitle")}</p>
       <table><thead><tr><th>${t("us_angle")}</th><th>${t("us_relaxed")} L<sub>f</sub></th><th>${t("us_relaxed")} ${t("us_pen")}</th><th>${t("us_contracted")} L<sub>f</sub></th><th>${t("us_contracted")} ${t("us_pen")}</th></tr></thead>
@@ -313,8 +313,8 @@ export function mountImages(root, { t, download }) {
       hint();
     };
     $("usCsv").onclick = () => {
-      const lines = ["file,condition,knee_angle_deg,n_fascicles,fascicle_length_mm,pennation_deg,extrapolated,mm_per_px"];
-      R.filter((r) => r.n).forEach((r, i) => lines.push([JSON.stringify(r.name), r.cond, r.angle, r.n, r1(r.lf), r1(r.pen), r.extrap ? 1 : 0, imgs.find((m) => m.name === r.name)?.mmPerPx?.toFixed(5) ?? ""].join(",")));
+      const lines = ["file,condition,knee_angle_deg,n_lengths,n_angles,fascicle_length_mm,pennation_deg,mm_per_px"];
+      R.filter((r) => r.n).forEach((r, i) => lines.push([JSON.stringify(r.name), r.cond, r.angle, r.nL, r.nA, r1(r.lf), r1(r.pen), imgs.find((m) => m.name === r.name)?.mmPerPx?.toFixed(5) ?? ""].join(",")));
       lines.push("", "knee_angle_deg,relaxed_Lf_mm,relaxed_pennation_deg,contracted_Lf_mm,contracted_pennation_deg");
       T.forEach((row) => lines.push(row.map((v) => (fin(v) ? r1(v) : "")).join(",")));
       download("L06_ultrasound_measurements.csv", lines.join("\n"));
