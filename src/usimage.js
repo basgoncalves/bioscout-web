@@ -175,7 +175,13 @@ export function mountImages(root, { t, download }) {
 
   root.innerHTML = `
   <div class="card">
-    <b>${t("us_title")}</b>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <b>${t("us_title")}</b>
+      <span style="display:flex;gap:6px">
+        <button type="button" class="ghost labBackBtn" style="margin:0;width:auto;padding:6px 12px">${t("labBack")}</button>
+        <button type="button" class="ghost labHomeBtn" style="margin:0;width:auto;padding:6px 12px">${t("labHome")}</button>
+      </span>
+    </div>
     <p class="note">${t("us_intro")}</p>
     <label class="ghost usDrop" style="display:inline-block;cursor:pointer;padding:8px 14px;border:1px dashed currentColor;border-radius:10px">
       ${t("us_open")}<input type="file" id="usFile" accept="image/*" multiple style="display:none"></label>
@@ -184,8 +190,6 @@ export function mountImages(root, { t, download }) {
   <div class="card" id="usWork" style="display:none">
     <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center" id="usTools"></div>
     <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:8px 0">
-      <label>${t("us_cond")} <select id="usCond"><option value="">–</option><option value="relaxed">${t("us_relaxed")}</option><option value="contracted">${t("us_contracted")}</option></select></label>
-      <label>${t("us_angle")} <select id="usAngle"><option value="">–</option>${[30, 45, 60, 75, 90].map((a) => `<option>${a}</option>`).join("")}</select></label>
       <label>${t("us_bright")} <input type="range" id="usB" min="40" max="250" value="100" style="width:110px"></label>
       <label>${t("us_contrast")} <input type="range" id="usC" min="40" max="300" value="100" style="width:110px"></label>
       <button type="button" class="ghost" id="usFit" style="width:auto">${t("us_fit")}</button>
@@ -219,17 +223,28 @@ export function mountImages(root, { t, download }) {
     renderThumbs();
   }
   function renderThumbs() {
-    $("usThumbs").innerHTML = imgs.map((m, i) => `<button type="button" data-i="${i}" class="ghost" style="width:auto;padding:4px;border:2px solid ${i === cur ? "#2f6fe4" : "transparent"};border-radius:8px;text-align:left">
-      <img src="${m.url}" style="height:64px;display:block;border-radius:4px"><small>${esc(m.name.slice(0, 22))}<br>${m.cond ? t("us_" + m.cond) : "?"} · ${m.angle || "?"}° · ${m.items.length} ✓</small></button>`).join("");
-    $("usThumbs").querySelectorAll("button").forEach((b) => (b.onclick = () => select(+b.dataset.i)));
+    $("usThumbs").innerHTML = imgs.map((m, i) => `<div style="position:relative">
+      <button type="button" data-i="${i}" class="ghost" style="width:auto;padding:4px;border:2px solid ${i === cur ? "#2f6fe4" : "transparent"};border-radius:8px;text-align:left">
+      <img src="${m.url}" style="height:64px;display:block;border-radius:4px"><small>${esc(m.name.slice(0, 22))}<br>${m.items.length} ✓</small></button>
+      <button type="button" data-rm="${i}" title="${esc(t("us_remove"))}" aria-label="${esc(t("us_remove"))}"
+        style="position:absolute;top:-6px;right:-6px;width:24px;height:24px;min-height:0;padding:0;margin:0;border-radius:50%;background:#c0392b;color:#fff;border:2px solid #fff;font-size:13px;line-height:1;cursor:pointer">✕</button></div>`).join("");
+    $("usThumbs").querySelectorAll("[data-i]").forEach((b) => (b.onclick = () => select(+b.dataset.i)));
+    $("usThumbs").querySelectorAll("[data-rm]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); removeImage(+b.dataset.rm); }));
+  }
+  /* The X on a thumbnail: drop the image and its measurements (asks first
+   * when there are measurements to lose). */
+  function removeImage(i) {
+    const m = imgs[i]; if (!m) return;
+    if (m.items.length && !confirm(t("us_removeAsk", { name: m.name, n: m.items.length }))) return;
+    imgs.splice(i, 1); try { URL.revokeObjectURL(m.url); } catch { /* */ }
+    pts = [];
+    if (!imgs.length) { cur = -1; $("usWork").style.display = "none"; renderThumbs(); renderResults(); return; }
+    select(i < cur || cur >= imgs.length ? Math.max(0, Math.min(cur - (i < cur ? 1 : 0), imgs.length - 1)) : Math.min(cur, imgs.length - 1));
   }
   function select(i) {
     cur = i; pts = []; $("usWork").style.display = "";
-    $("usCond").value = I().cond; $("usAngle").value = I().angle;
     fit(); renderThumbs(); renderTools(); renderItems(); renderResults(); draw();
   }
-  $("usCond").onchange = (e) => { I().cond = e.target.value; renderThumbs(); renderResults(); };
-  $("usAngle").onchange = (e) => { I().angle = e.target.value ? +e.target.value : ""; renderThumbs(); renderResults(); };
   $("usB").oninput = (e) => { adj.b = +e.target.value; drawSoon(); };
   $("usC").oninput = (e) => { adj.c = +e.target.value; drawSoon(); };
   $("usFit").onclick = () => { fit(); draw(); };
@@ -291,6 +306,7 @@ export function mountImages(root, { t, download }) {
       $("usHint").innerHTML = (c ? `${swatch(c.hex)} ${esc(colourText(c))} <span class="sub">(x ${c.x}, y ${c.y})</span><br>` : "") + `<span class="sub">${esc(h)}</span>`;
       return;
     }
+    if (!msg && m && m.items.length && !pts.length) h += " " + t("us_h_edit");
     $("usHint").textContent = msg || h; msg = "";
   }
 
@@ -324,6 +340,7 @@ export function mountImages(root, { t, download }) {
       if (touches.size > 2) return;
     }
     if (tool === "pan" || e.button === 1 || e.button === 2 || e.shiftKey) { drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }; return; }
+    if (!pts.length) { const h = handleAt(toImg(e)); if (h) { edit = h; draw(); return; } }   // grab a set point to move it
     pending = toImg(e); hover = pending;
     if (tool === "colour" && roiShape === "rect" && !pts.length) pts = [pending];   // ROI: first corner where the press starts
     draw();
@@ -335,6 +352,8 @@ export function mountImages(root, { t, download }) {
       const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
       view.k = pinch.k * f; view.x = cx - (pinch.cx - pinch.vx) * f; view.y = cy - (pinch.cy - pinch.vy) * f; draw(); return;
     }
+    if (edit) { const q = toImg(e); edit.pt.x = q.x; edit.pt.y = q.y; refresh(edit, false); draw(); return; }
+    if (!pts.length && !pending && e.pointerType === "mouse") cv.style.cursor = handleAt(toImg(e)) ? "move" : "crosshair";
     if (drag) { const d = devicePixelRatio || 1; view.x = drag.vx + (e.clientX - drag.x) * d; view.y = drag.vy + (e.clientY - drag.y) * d; draw(); return; }
     hover = toImg(e);
     if (pending) pending = hover;
@@ -342,6 +361,7 @@ export function mountImages(root, { t, download }) {
     if (pending || pts.length) draw();
   });
   const up = (e) => {
+    if (edit) { refresh(edit, true); edit = null; if (e.pointerType === "touch") touches.delete(e.pointerId); return; }
     if (e.pointerType === "touch") {
       touches.delete(e.pointerId);
       if (pinch) { if (!touches.size) pinch = null; return; }   // no point after a pinch
@@ -364,6 +384,31 @@ export function mountImages(root, { t, download }) {
     if (e.key === "Escape") { pts = []; draw(); hint(); }
     if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); $("usUndo").click(); }
   });
+
+  // ---- editing set points ----
+  /* Every point already set (scale, length, angle, ROI corners) can be
+   * dragged to a new place; the measurement updates as it moves. */
+  let edit = null;
+  function handleAt(p) {
+    const m = I(); if (!m) return null;
+    const R = 14 * (devicePixelRatio || 1) / view.k;   // ~14 screen px
+    let best = null, bd = R;
+    const test = (pt, it) => { const d = dist(pt, p); if (d < bd) { bd = d; best = { pt, it }; } };
+    m.items.forEach((it) => it.pts.forEach((pt) => test(pt, it)));
+    if (m.scalePts) m.scalePts.forEach((pt) => test(pt, "scale"));
+    return best;
+  }
+  function refresh(h, final) {
+    const m = I();
+    if (h.it === "scale") {
+      imgs.filter((o) => o.scalePts === m.scalePts).forEach((o) => { o.mmPerPx = scaleFrom(o.scalePts[0], o.scalePts[1], o.scaleMm); o.items.forEach((it) => recompute(o, it)); });
+    } else {
+      if (h.it.type === "colour") { if (!final) return; h.it.st = null; }   // colour stats once, on release
+      recompute(m, h.it);
+    }
+    if (final) { renderItems(); renderResults(); renderThumbs(); hint(); }
+    draw();
+  }
 
   // ---- measuring ----
   function click(p) {
@@ -400,7 +445,7 @@ export function mountImages(root, { t, download }) {
     const m = I(); if (!m) return;
     const sc = fin(m.mmPerPx) ? `${t("us_scale")}: ${m.scaleMm} mm = ${r1(m.scaleMm / m.mmPerPx)} px (${(m.mmPerPx * 1000).toFixed(1)} µm/px)` : t("us_noScale");
     const rows = m.items.map((it, i) => {
-      const v = it.type === "colour" ? (it.st ? `${swatch(it.st.hex)} ${it.shape === "poly" ? `${t("us_poly")}, ${it.pts.length} ${t("us_points")}` : `${it.st.w} × ${it.st.h} px`} (n = ${it.st.n})
+      const v = it.type === "colour" ? (it.st ? `${swatch(it.st.hex)} ${it.shape === "poly" ? `${t("us_poly")}, ${it.pts.length} ${t("us_points")}` : `${it.st.w} × ${it.st.h} px`} (n = ${it.st.n}) · <b>${it.st.hex}</b> · ${t("us_rgbSum")} <b>${r1(it.st.ch[0].mean + it.st.ch[1].mean + it.st.ch[2].mean)}</b>
           <table style="margin-top:4px"><thead><tr><th></th><th>${t("us_mean")}</th><th>${t("us_median")}</th><th>min</th><th>max</th><th>SD</th></tr></thead><tbody>
           ${it.st.ch.map((q) => `<tr><td>${q.name === "grey" ? t("us_grey") : q.name}</td><td>${r1(q.mean)}</td><td>${r1(q.median)}</td><td>${q.min}</td><td>${q.max}</td><td>${r1(q.sd)}</td></tr>`).join("")}</tbody></table>` : "–")
         : it.type === "length" ? (fin(it.mm) ? `${r1(it.mm)} mm` : `${r1(it.px)} px`) : it.type === "angle" ? `${r1(it.deg)}°`
@@ -411,12 +456,14 @@ export function mountImages(root, { t, download }) {
     $("usItems").innerHTML = `<p class="sub">${sc}</p>${rows ? `<table><tbody>${rows}</tbody></table>` : ""}`
       + (anyCol ? `<button type="button" class="ghost" id="usColCsv" style="width:auto;margin-top:6px">${t("us_colCsv")}</button>` : "");
     if (anyCol) $("usColCsv").onclick = () => {
-      const head = ["file", "condition", "knee_angle_deg", "roi", "shape", "x_px", "y_px", "width_px", "height_px", "n_pixels", "mean_hex", "RGB_mean_sum"];
-      ["R", "G", "B", "grey"].forEach((c) => ["mean", "median", "min", "max", "sd"].forEach((k) => head.push(`${c}_${k}`)));
+      const head = ["file", "roi", "shape", "x_px", "y_px", "width_px", "height_px", "n_pixels", "mean_hex", "RGB_mean_sum"];
+      // grouped by statistic: R_mean, G_mean, B_mean, grey_mean, R_median, ...
+      const STATS = ["mean", "median", "min", "max", "sd"];
+      STATS.forEach((k) => ["R", "G", "B", "grey"].forEach((c) => head.push(`${c}_${k}`)));
       const L = [head.join(",")];
       imgs.forEach((o) => o.items.filter((x) => x.type === "colour" && x.st).forEach((x, i) => {
         const q = x.st;
-        L.push([JSON.stringify(o.name), o.cond, o.angle, i + 1, x.shape === "poly" ? "polygon" : "rectangle", q.x, q.y, q.w, q.h, q.n, q.hex, r1(q.ch[0].mean + q.ch[1].mean + q.ch[2].mean), ...q.ch.flatMap((c) => [r1(c.mean), r1(c.median), c.min, c.max, r1(c.sd)])].join(","));
+        L.push([JSON.stringify(o.name), i + 1, x.shape === "poly" ? "polygon" : "rectangle", q.x, q.y, q.w, q.h, q.n, q.hex, r1(q.ch[0].mean + q.ch[1].mean + q.ch[2].mean), ...STATS.flatMap((k) => q.ch.map((c) => (k === "min" || k === "max" ? c[k] : r1(c[k]))))].join(","));
       }));
       download("image_colour_roi.csv", L.join("\n"));
     };
@@ -509,7 +556,8 @@ export function mountImages(root, { t, download }) {
         g.setLineDash([]); g.strokeStyle = "#000"; g.lineWidth = lw * 2.2; path(); g.stroke();
         g.strokeStyle = "#fff"; g.lineWidth = lw; path(); g.stroke();
         if (live && Q.length >= 3) line(Q[Q.length - 1], Q[0], "#fff", true);   // where it will close
-        if (live) { P.forEach((q) => dot(q, "#fff")); if (P[0]) { g.strokeStyle = "#ff3b30"; g.lineWidth = lw; g.beginPath(); g.arc(P[0].x, P[0].y, 14 / v.k, 0, 7); g.stroke(); } }
+        P.forEach((q) => dot(q, "#fff"));
+        if (live) { if (P[0]) { g.strokeStyle = "#ff3b30"; g.lineWidth = lw; g.beginPath(); g.arc(P[0].x, P[0].y, 14 / v.k, 0, 7); g.stroke(); } }
         if (!live && it.st) label(P.reduce((a, q) => (q.y < a.y ? q : a), P[0]), it.st.hex, it.st.hex);
         return;
       }
@@ -520,6 +568,7 @@ export function mountImages(root, { t, download }) {
         g.setLineDash(live ? [6 / v.k, 4 / v.k] : []);
         g.strokeStyle = "#000"; g.lineWidth = lw * 2.2; g.strokeRect(x, y, w, h);
         g.strokeStyle = "#fff"; g.lineWidth = lw; g.strokeRect(x, y, w, h); g.setLineDash([]);
+        if (!live) P.forEach((q) => dot(q, "#fff"));
         if (!live && it.st) label({ x, y: y + 4 * lw }, `${it.st.hex}`, it.st.hex);
         return;
       }
