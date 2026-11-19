@@ -1,5 +1,5 @@
 // Geometry behind Process > Images (src/usimage.js): node tests/test_usimage.mjs
-import { lineIntersect, acuteAngle, vertexAngle, fascicleFromLines, scaleFrom, toTemplateRows, guessMeta } from "../src/usimage.js";
+import { sampleMean, rgbToHex, greyOf, rgbToHsv, lineIntersect, acuteAngle, vertexAngle, fascicleFromLines, scaleFrom, toTemplateRows, guessMeta } from "../src/usimage.js";
 
 let bad = 0;
 const ok = (c, m) => { if (!c) { bad++; console.log("FAIL", m); } };
@@ -38,6 +38,15 @@ ok(Number.isNaN(T[1][1]), "empty angle -> NaN");
 const g = guessMeta("VL_contracted_75deg.png"); ok(g.cond === "contracted" && g.angle === 75, "guess contracted 75");
 const g2 = guessMeta("relaxed-30.jpg"); ok(g2.cond === "relaxed" && g2.angle === 30, "guess relaxed 30");
 ok(guessMeta("IMG_0012.png").angle === "", "no false angle");
+
+// pixel colour
+const px = new Uint8ClampedArray(4 * 9); for (let i = 0; i < 9; i++) { px[4 * i] = i * 10; px[4 * i + 1] = 100; px[4 * i + 2] = 255; px[4 * i + 3] = 255; }
+ok(sampleMean(px, 3, 3, 1, 1, 1)[0] === 40, "one pixel");
+near(sampleMean(px, 3, 3, 1, 1, 3)[0], 40, 1e-9, "3x3 mean");
+near(sampleMean(px, 3, 3, 0, 0, 3)[0], (0 + 10 + 30 + 40) / 4, 1e-9, "edge clipped");
+ok(rgbToHex([255, 0, 16]) === "#ff0010", "hex");
+near(greyOf([255, 255, 255]), 255, 1e-9, "grey white");
+const hsv = rgbToHsv([0, 0, 255]); near(hsv[0], 240, 1e-9, "hue blue"); near(hsv[1], 100, 1e-9, "sat");
 
 console.log(bad ? `${bad} failed` : "usimage: all passed");
 process.exit(bad ? 1 : 0);

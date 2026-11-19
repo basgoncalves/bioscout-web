@@ -71,6 +71,28 @@ export function fascicleFromLines(fas, deep, sup, mmPerPx, box) {
     extrapolated: !!(out(iD) || out(iS)), beyondDrawn: along(iD) || along(iS) };
 }
 
+/** Mean colour of a size x size square centred on (x, y) in RGBA pixel data. */
+export function sampleMean(data, w, h, x, y, size = 1) {
+  const r = Math.floor(size / 2), cx = Math.round(x), cy = Math.round(y);
+  let R = 0, G = 0, B = 0, n = 0;
+  for (let j = cy - r; j <= cy + r; j++) for (let i = cx - r; i <= cx + r; i++) {
+    if (i < 0 || j < 0 || i >= w || j >= h) continue;
+    const k = 4 * (j * w + i); R += data[k]; G += data[k + 1]; B += data[k + 2]; n++;
+  }
+  return n ? [R / n, G / n, B / n] : null;
+}
+export const rgbToHex = (c) => "#" + c.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
+/** Grey level (0-255), ITU-R BT.601 luma -- what ImageJ's 8-bit conversion gives. */
+export const greyOf = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+/** Hue (deg), saturation and value (%) of an RGB colour. */
+export function rgbToHsv([r, g, b]) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, mx ? (100 * d) / mx : 0, 100 * mx];
+}
+
 /** mm per pixel from two points and the real distance between them. */
 export const scaleFrom = (p1, p2, mm) => (dist(p1, p2) > 0 && mm > 0 ? mm / dist(p1, p2) : NaN);
 
@@ -96,14 +118,14 @@ export function guessMeta(name) {
 }
 
 // ---- page ---------------------------------------------------------------------------
-const TOOLS = ["scale", "length", "angle", "pan"];   // "fascicle" (three-line tool) kept in code, not offered
-const NEED = { scale: 2, length: 2, angle: 3, fascicle: 6 };
+const TOOLS = ["scale", "length", "angle", "colour", "pan"];   // "fascicle" (three-line tool) kept in code, not offered
+const NEED = { scale: 2, length: 2, angle: 3, colour: 1, fascicle: 6 };
 const LINE_COL = ["#ffd400", "#2fd3ff", "#ff5fa2"];   // fascicle, deep, superficial
 
 export function mountImages(root, { t, download }) {
   const imgs = [];            // {name, url, el, w, h, cond, angle, mmPerPx, items: [], scalePts}
   let cur = -1, tool = "length", pts = [], view = { k: 1, x: 0, y: 0 }, adj = { b: 100, c: 100 };
-  let drag = null, hover = null, msg = "";
+  let drag = null, hover = null, msg = "", sampleSize = 1;
 
   root.innerHTML = `
   <div class="card">
@@ -121,6 +143,7 @@ export function mountImages(root, { t, download }) {
       <label>${t("us_bright")} <input type="range" id="usB" min="40" max="250" value="100" style="width:110px"></label>
       <label>${t("us_contrast")} <input type="range" id="usC" min="40" max="300" value="100" style="width:110px"></label>
       <button type="button" class="ghost" id="usFit" style="width:auto">${t("us_fit")}</button>
+      <label id="usSampleL" style="display:none">${t("us_sample")} <select id="usSample">${[1, 3, 5, 9, 15].map((n) => `<option value="${n}">${n === 1 ? t("us_onePx") : n + " × " + n + " px"}</option>`).join("")}</select></label>
     </div>
     <p class="sub" id="usHint" style="min-height:1.3em;margin:4px 0"></p>
     <div style="position:relative;width:100%;height:min(70vh,620px);background:#000;border-radius:10px;overflow:hidden;touch-action:none">
@@ -163,19 +186,42 @@ export function mountImages(root, { t, download }) {
   $("usB").oninput = (e) => { adj.b = +e.target.value; drawSoon(); };
   $("usC").oninput = (e) => { adj.c = +e.target.value; drawSoon(); };
   $("usFit").onclick = () => { fit(); draw(); };
+  $("usSample").onchange = (e) => { sampleSize = +e.target.value; hint(); };
+
+  /* The ORIGINAL pixels (not the brightness/contrast view) -- colour readings
+   * must not change when a student moves the sliders. */
+  function pixels(m) {
+    if (m.px) return m.px;
+    try { const c = document.createElement("canvas"); c.width = m.w; c.height = m.h; const g = c.getContext("2d"); g.drawImage(m.el, 0, 0); m.px = g.getImageData(0, 0, m.w, m.h).data; }
+    catch { m.px = null; }
+    return m.px;
+  }
+  function colourAt(m, p) {
+    const d = pixels(m); if (!d || !p) return null;
+    const c = sampleMean(d, m.w, m.h, p.x, p.y, sampleSize); if (!c) return null;
+    return { rgb: c, hex: rgbToHex(c), grey: greyOf(c), hsv: rgbToHsv(c), size: sampleSize, x: Math.round(p.x), y: Math.round(p.y) };
+  }
+  const colourText = (c) => `RGB ${c.rgb.map((v) => Math.round(v)).join(", ")} · ${c.hex} · ${t("us_grey")} ${r1(c.grey)} · HSV ${Math.round(c.hsv[0])}°, ${Math.round(c.hsv[1])} %, ${Math.round(c.hsv[2])} %`;
+  const swatch = (hex) => `<i style="display:inline-block;width:1.1em;height:1.1em;vertical-align:-0.2em;border:1px solid #888;border-radius:3px;background:${hex}"></i>`;
 
   // ---- tools ----
   function renderTools() {
     $("usTools").innerHTML = TOOLS.map((k) => `<button type="button" data-k="${k}" class="${k === tool ? "" : "ghost"}" style="width:auto">${t("us_t_" + k)}</button>`).join("")
       + `<button type="button" class="ghost" id="usUndo" style="width:auto">${t("us_undo")}</button>`;
     $("usTools").querySelectorAll("[data-k]").forEach((b) => (b.onclick = () => { tool = b.dataset.k; pts = []; renderTools(); draw(); }));
+    $("usSampleL").style.display = tool === "colour" ? "" : "none";
     $("usUndo").onclick = () => { if (pts.length) pts.pop(); else if (I().items.length) I().items.pop(); renderItems(); renderResults(); renderThumbs(); draw(); };
     hint();
   }
   function hint() {
     const m = I();
     let h = tool === "pan" ? t("us_h_pan") : t("us_h_" + tool + (tool === "fascicle" ? Math.floor(pts.length / 2) : ""));
-    if (tool !== "scale" && tool !== "pan" && m && !fin(m.mmPerPx)) h = t("us_h_noscale") + " " + h;
+    if (tool !== "scale" && tool !== "pan" && tool !== "colour" && m && !fin(m.mmPerPx)) h = t("us_h_noscale") + " " + h;
+    if (tool === "colour" && !msg && m) {
+      const c = colourAt(m, pending || hover);
+      $("usHint").innerHTML = c ? `${swatch(c.hex)} ${esc(colourText(c))} <span class="sub">(x ${c.x}, y ${c.y})</span>` : esc(h);
+      return;
+    }
     $("usHint").textContent = msg || h; msg = "";
   }
 
@@ -221,6 +267,7 @@ export function mountImages(root, { t, download }) {
     if (drag) { const d = devicePixelRatio || 1; view.x = drag.vx + (e.clientX - drag.x) * d; view.y = drag.vy + (e.clientY - drag.y) * d; draw(); return; }
     hover = toImg(e);
     if (pending) pending = hover;
+    if (tool === "colour") hint();
     if (pending || pts.length) draw();
   });
   const up = (e) => {
@@ -265,6 +312,7 @@ export function mountImages(root, { t, download }) {
     const k = m.mmPerPx;
     if (it.type === "length") { it.px = dist(it.pts[0], it.pts[1]); it.mm = it.px * k; }
     if (it.type === "angle") it.deg = vertexAngle(it.pts[0], it.pts[1], it.pts[2]);
+    if (it.type === "colour" && !it.c) it.c = colourAt(m, it.pts[0]);
     if (it.type === "fascicle") Object.assign(it, fascicleFromLines([it.pts[0], it.pts[1]], [it.pts[2], it.pts[3]], [it.pts[4], it.pts[5]], k, { w: m.w, h: m.h }));
   }
 
@@ -272,11 +320,21 @@ export function mountImages(root, { t, download }) {
     const m = I(); if (!m) return;
     const sc = fin(m.mmPerPx) ? `${t("us_scale")}: ${m.scaleMm} mm = ${r1(m.scaleMm / m.mmPerPx)} px (${(m.mmPerPx * 1000).toFixed(1)} µm/px)` : t("us_noScale");
     const rows = m.items.map((it, i) => {
-      const v = it.type === "length" ? (fin(it.mm) ? `${r1(it.mm)} mm` : `${r1(it.px)} px`) : it.type === "angle" ? `${r1(it.deg)}°`
+      const v = it.type === "colour" ? (it.c ? `${swatch(it.c.hex)} ${esc(colourText(it.c))}${it.c.size > 1 ? ` <span class="sub">(${it.c.size}×${it.c.size} px)</span>` : ""}` : "–")
+        : it.type === "length" ? (fin(it.mm) ? `${r1(it.mm)} mm` : `${r1(it.px)} px`) : it.type === "angle" ? `${r1(it.deg)}°`
         : `L<sub>f</sub> ${r1(it.lenMm)} mm · ${t("us_pen")} ${r1(it.pen)}°${it.extrapolated || it.beyondDrawn ? ` <i>(${t("us_extrap")})</i>` : ""}`;
       return `<tr><td>${i + 1}</td><td>${t("us_t_" + it.type)}</td><td>${v}</td><td><button type="button" class="ghost" data-del="${i}" style="width:auto;padding:0 8px">✕</button></td></tr>`;
     }).join("");
-    $("usItems").innerHTML = `<p class="sub">${sc}</p>${rows ? `<table><tbody>${rows}</tbody></table>` : ""}`;
+    const anyCol = imgs.some((o) => o.items.some((x) => x.type === "colour" && x.c));
+    $("usItems").innerHTML = `<p class="sub">${sc}</p>${rows ? `<table><tbody>${rows}</tbody></table>` : ""}`
+      + (anyCol ? `<button type="button" class="ghost" id="usColCsv" style="width:auto;margin-top:6px">${t("us_colCsv")}</button>` : "");
+    if (anyCol) $("usColCsv").onclick = () => {
+      const L = ["file,condition,knee_angle_deg,x_px,y_px,sample_px,R,G,B,hex,grey,hue_deg,saturation_pct,value_pct"];
+      imgs.forEach((o) => o.items.filter((x) => x.type === "colour" && x.c).forEach((x) => {
+        const c = x.c; L.push([JSON.stringify(o.name), o.cond, o.angle, c.x, c.y, c.size, ...c.rgb.map((v) => r1(v)), c.hex, r1(c.grey), ...c.hsv.map((v) => r1(v))].join(","));
+      }));
+      download("image_colour_samples.csv", L.join("\n"));
+    };
     $("usItems").querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => { m.items.splice(+b.dataset.del, 1); renderItems(); renderResults(); renderThumbs(); draw(); }));
   }
 
@@ -359,6 +417,13 @@ export function mountImages(root, { t, download }) {
     if (m.scalePts) { line(m.scalePts[0], m.scalePts[1], "#7CFC00"); m.scalePts.forEach((p) => dot(p, "#7CFC00")); label(m.scalePts[1], `${m.scaleMm} mm`, "#7CFC00"); }
     const drawItem = (it, live) => {
       const P = it.pts;
+      if (it.type === "colour") {
+        const p = P[0], half = Math.max(it.c ? it.c.size / 2 : 0.5, 4 * lw);
+        g.strokeStyle = "#fff"; g.lineWidth = lw; g.strokeRect(p.x - half, p.y - half, 2 * half, 2 * half);
+        g.strokeStyle = "#000"; g.strokeRect(p.x - half - lw, p.y - half - lw, 2 * half + 2 * lw, 2 * half + 2 * lw);
+        if (!live && it.c) label(p, it.c.hex, it.c.hex);
+        return;
+      }
       if (it.type === "length") { line(P[0], P[1] || hover, "#2fd3ff"); if (!live) label(P[1], fin(it.mm) ? `${r1(it.mm)} mm` : `${r1(it.px)} px`, "#2fd3ff"); }
       if (it.type === "angle") { line(P[1] ?? hover, P[0], "#ffd400"); if (P[1]) line(P[1], P[2] ?? hover, "#ffd400"); if (!live) label(P[1], `${r1(it.deg)}°`, "#ffd400"); }
       if (it.type === "fascicle") {
