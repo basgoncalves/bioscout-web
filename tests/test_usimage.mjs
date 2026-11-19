@@ -1,5 +1,5 @@
 // Geometry behind Process > Images (src/usimage.js): node tests/test_usimage.mjs
-import { roiStats, sampleMean, rgbToHex, greyOf, rgbToHsv, lineIntersect, acuteAngle, vertexAngle, fascicleFromLines, scaleFrom, toTemplateRows, guessMeta } from "../src/usimage.js";
+import { polyStats, pointInPoly, roiStats, sampleMean, rgbToHex, greyOf, rgbToHsv, lineIntersect, acuteAngle, vertexAngle, fascicleFromLines, scaleFrom, toTemplateRows, guessMeta } from "../src/usimage.js";
 
 let bad = 0;
 const ok = (c, m) => { if (!c) { bad++; console.log("FAIL", m); } };
@@ -57,6 +57,14 @@ near(st.ch[0].sd, Math.sqrt(750), 1e-9, "roi sd");
 const st2 = roiStats(px, 3, 3, P(2, 2), P(0, 1));   // corners in any order -> x 0-1, y 1
 ok(st2.n === 2 && st2.ch[0].median === 35, "even-n median");
 ok(roiStats(px, 3, 3, P(5, 5), P(9, 9)) === null, "roi off the image");
+
+// polygon ROI: lower-left triangle of the 3x3 image -> pixel centres with y > x
+ok(pointInPoly(1, 1, [P(0, 0), P(2, 0), P(2, 2), P(0, 2)]) && !pointInPoly(3, 1, [P(0, 0), P(2, 0), P(2, 2), P(0, 2)]), "point in poly");
+const tri = polyStats(px, 3, 3, [P(0, 0), P(0, 3), P(3, 3)]);
+ok(tri && tri.n === 3, "triangle pixels: " + (tri && tri.n));   // (0,1) (0,2) (1,2)
+near(tri.ch[0].mean, (30 + 60 + 70) / 3, 1e-9, "triangle mean");
+ok(polyStats(px, 3, 3, [P(0, 0), P(1, 1)]) === null, "needs 3 points");
+const sq = polyStats(px, 3, 3, [P(0, 0), P(3, 0), P(3, 3), P(0, 3)]); ok(sq.n === 9 && sq.ch[0].median === 40, "square polygon = rectangle");
 
 console.log(bad ? `${bad} failed` : "usimage: all passed");
 process.exit(bad ? 1 : 0);

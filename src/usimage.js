@@ -86,18 +86,20 @@ export function sampleMean(data, w, h, x, y, size = 1) {
  * to the image). Per channel R, G, B and grey: mean, median, min, max, SD,
  * from 256-bin histograms so the median is exact for 8-bit images.
  */
-export function roiStats(data, w, h, a, b) {
+export function roiStats(data, w, h, a, b, inside = null) {
   const x0 = Math.max(0, Math.floor(Math.min(a.x, b.x))), x1 = Math.min(w - 1, Math.ceil(Math.max(a.x, b.x)) - 1);
   const y0 = Math.max(0, Math.floor(Math.min(a.y, b.y))), y1 = Math.min(h - 1, Math.ceil(Math.max(a.y, b.y)) - 1);
   if (x1 < x0 || y1 < y0) return null;
   const H = [0, 1, 2, 3].map(() => new Float64Array(256)), S = [0, 0, 0, 0], Q = [0, 0, 0, 0];
   let n = 0;
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    if (inside && !inside(x + 0.5, y + 0.5)) continue;   // pixel centre in the polygon
     const k = 4 * (y * w + x), v = [data[k], data[k + 1], data[k + 2]];
     v.push(Math.round(0.299 * v[0] + 0.587 * v[1] + 0.114 * v[2]));
     for (let c = 0; c < 4; c++) { H[c][v[c]]++; S[c] += v[c]; Q[c] += v[c] * v[c]; }
     n++;
   }
+  if (!n) return null;
   const median = (hist) => {          // mean of the two middle values when n is even
     const at = (r) => { let cum = 0; for (let i = 0; i < 256; i++) { cum += hist[i]; if (cum > r) return i; } return 255; };
     return n % 2 ? at((n - 1) / 2) : (at(n / 2 - 1) + at(n / 2)) / 2;
@@ -108,6 +110,22 @@ export function roiStats(data, w, h, a, b) {
     return { name, mean, median: median(H[c]), min: mn, max: mx, sd: n > 1 ? Math.sqrt(Math.max(0, (Q[c] - n * mean * mean) / (n - 1))) : 0 };
   });
   return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1, n, ch, hex: rgbToHex(ch.slice(0, 3).map((q) => q.mean)) };
+}
+/** Even-odd rule: is (x, y) inside the polygon? */
+export function pointInPoly(x, y, poly) {
+  let inn = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inn = !inn;
+  }
+  return inn;
+}
+/** Colour statistics inside a polygon (>= 3 points): the pixels whose centre lies inside. */
+export function polyStats(data, w, h, poly) {
+  if (!poly || poly.length < 3) return null;
+  const xs = poly.map((p) => p.x), ys = poly.map((p) => p.y);
+  const st = roiStats(data, w, h, { x: Math.min(...xs), y: Math.min(...ys) }, { x: Math.max(...xs), y: Math.max(...ys) }, (x, y) => pointInPoly(x, y, poly));
+  return st && Object.assign(st, { shape: "polygon" });
 }
 export const rgbToHex = (c) => "#" + c.map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
 /** Grey level (0-255), ITU-R BT.601 luma -- what ImageJ's 8-bit conversion gives. */
@@ -153,7 +171,7 @@ const LINE_COL = ["#ffd400", "#2fd3ff", "#ff5fa2"];   // fascicle, deep, superfi
 export function mountImages(root, { t, download }) {
   const imgs = [];            // {name, url, el, w, h, cond, angle, mmPerPx, items: [], scalePts}
   let cur = -1, tool = "length", pts = [], view = { k: 1, x: 0, y: 0 }, adj = { b: 100, c: 100 };
-  let drag = null, hover = null, msg = "", sampleSize = 1;
+  let drag = null, hover = null, msg = "", sampleSize = 1, roiShape = "rect";
 
   root.innerHTML = `
   <div class="card">
@@ -171,6 +189,8 @@ export function mountImages(root, { t, download }) {
       <label>${t("us_bright")} <input type="range" id="usB" min="40" max="250" value="100" style="width:110px"></label>
       <label>${t("us_contrast")} <input type="range" id="usC" min="40" max="300" value="100" style="width:110px"></label>
       <button type="button" class="ghost" id="usFit" style="width:auto">${t("us_fit")}</button>
+      <label id="usShapeL" style="display:none">${t("us_shape")} <select id="usShape"><option value="rect">${t("us_rect")}</option><option value="poly">${t("us_poly")}</option></select></label>
+      <button type="button" id="usClosePoly" style="width:auto;display:none">${t("us_closePoly")}</button>
     </div>
     <p class="sub" id="usHint" style="min-height:1.3em;margin:4px 0"></p>
     <div style="position:relative;width:100%;height:min(70vh,620px);background:#000;border-radius:10px;overflow:hidden;touch-action:none">
@@ -213,6 +233,18 @@ export function mountImages(root, { t, download }) {
   $("usB").oninput = (e) => { adj.b = +e.target.value; drawSoon(); };
   $("usC").oninput = (e) => { adj.c = +e.target.value; drawSoon(); };
   $("usFit").onclick = () => { fit(); draw(); };
+  $("usShape").onchange = (e) => { roiShape = e.target.value; pts = []; hint(); draw(); };
+  $("usClosePoly").onclick = () => finishPoly();
+  /* Polygon ROI: click the corners; close it by clicking the first point
+   * again, double-clicking, or the Close button. */
+  function finishPoly() {
+    const P = pts.filter((p, i) => !i || dist(p, pts[i - 1]) * view.k > 3);   // drop double-click duplicates
+    if (P.length < 3) { msg = t("us_polyNeed3"); hint(); return; }
+    pts = [];
+    const it = { type: "colour", shape: "poly", pts: P }; recompute(I(), it); I().items.push(it);
+    renderItems(); renderResults(); renderThumbs(); hint(); draw();
+  }
+  cv.addEventListener("dblclick", (e) => { if (tool === "colour" && roiShape === "poly") { e.preventDefault(); finishPoly(); } });
 
   /* The ORIGINAL pixels (not the brightness/contrast view) -- colour readings
    * must not change when a student moves the sliders. */
@@ -242,13 +274,21 @@ export function mountImages(root, { t, download }) {
     const m = I();
     let h = tool === "pan" ? t("us_h_pan") : t("us_h_" + tool + (tool === "fascicle" ? Math.floor(pts.length / 2) : ""));
     if (tool !== "scale" && tool !== "pan" && tool !== "colour" && m && !fin(m.mmPerPx)) h = t("us_h_noscale") + " " + h;
+    $("usShapeL").style.display = tool === "colour" ? "" : "none";
+    $("usClosePoly").style.display = tool === "colour" && roiShape === "poly" && pts.length >= 3 ? "" : "none";
+    if (tool === "colour" && roiShape === "poly") h = t("us_h_poly");
     if (tool === "colour" && !msg && m) {
-      if (pts.length === 1 && (pending || hover)) {
-        const st = roiStats(pixels(m) || [], m.w, m.h, pts[0], pending || hover);
+      const live = pending || hover;
+      if (roiShape === "poly" && pts.length >= 2 && live) {
+        const st = polyStats(pixels(m) || [], m.w, m.h, [...pts, live]);
+        if (st) { $("usHint").innerHTML = `${swatch(st.hex)} ${t("us_poly")} ${pts.length + 1} ${t("us_points")}, n = ${st.n} px · ${t("us_mean")} RGB ${st.ch.slice(0, 3).map((q) => Math.round(q.mean)).join(", ")} · ${t("us_grey")} ${r1(st.ch[3].mean)}`; return; }
+      }
+      if (roiShape === "rect" && pts.length === 1 && live) {
+        const st = roiStats(pixels(m) || [], m.w, m.h, pts[0], live);
         if (st) { $("usHint").innerHTML = `${swatch(st.hex)} ROI ${st.w} × ${st.h} px · ${t("us_mean")} RGB ${st.ch.slice(0, 3).map((q) => Math.round(q.mean)).join(", ")} · ${t("us_grey")} ${r1(st.ch[3].mean)}`; return; }
       }
-      const c = colourAt(m, pending || hover);
-      $("usHint").innerHTML = c ? `${swatch(c.hex)} ${esc(colourText(c))} <span class="sub">(x ${c.x}, y ${c.y})</span>` : esc(h);
+      const c = colourAt(m, live);
+      $("usHint").innerHTML = (c ? `${swatch(c.hex)} ${esc(colourText(c))} <span class="sub">(x ${c.x}, y ${c.y})</span><br>` : "") + `<span class="sub">${esc(h)}</span>`;
       return;
     }
     $("usHint").textContent = msg || h; msg = "";
@@ -285,7 +325,7 @@ export function mountImages(root, { t, download }) {
     }
     if (tool === "pan" || e.button === 1 || e.button === 2 || e.shiftKey) { drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y }; return; }
     pending = toImg(e); hover = pending;
-    if (tool === "colour" && !pts.length) pts = [pending];   // ROI: first corner where the press starts
+    if (tool === "colour" && roiShape === "rect" && !pts.length) pts = [pending];   // ROI: first corner where the press starts
     draw();
   });
   cv.addEventListener("pointermove", (e) => {
@@ -310,7 +350,7 @@ export function mountImages(root, { t, download }) {
     if (pending && e.type === "pointerup") {
       const p = pending; pending = null;
       // a press without a drag on the first ROI corner: wait for a second click
-      if (tool === "colour" && pts.length === 1 && dist(pts[0], p) * view.k < 8) { hint(); draw(); return; }
+      if (tool === "colour" && roiShape === "rect" && pts.length === 1 && dist(pts[0], p) * view.k < 8) { hint(); draw(); return; }
       click(p);
     }
     pending = null;
@@ -328,6 +368,10 @@ export function mountImages(root, { t, download }) {
   // ---- measuring ----
   function click(p) {
     if (tool === "pan") return;
+    if (tool === "colour" && roiShape === "poly") {
+      if (pts.length >= 3 && dist(p, pts[0]) * view.k < 14) { finishPoly(); return; }
+      pts.push(p); hint(); draw(); return;
+    }
     pts.push(p);
     if (pts.length < NEED[tool]) { hint(); draw(); return; }
     const m = I(), P = pts; pts = [];
@@ -348,7 +392,7 @@ export function mountImages(root, { t, download }) {
     const k = m.mmPerPx;
     if (it.type === "length") { it.px = dist(it.pts[0], it.pts[1]); it.mm = it.px * k; }
     if (it.type === "angle") it.deg = vertexAngle(it.pts[0], it.pts[1], it.pts[2]);
-    if (it.type === "colour" && !it.st) { const d = pixels(m); it.st = d ? roiStats(d, m.w, m.h, it.pts[0], it.pts[1]) : null; }
+    if (it.type === "colour" && !it.st) { const d = pixels(m); it.st = !d ? null : it.shape === "poly" ? polyStats(d, m.w, m.h, it.pts) : roiStats(d, m.w, m.h, it.pts[0], it.pts[1]); }
     if (it.type === "fascicle") Object.assign(it, fascicleFromLines([it.pts[0], it.pts[1]], [it.pts[2], it.pts[3]], [it.pts[4], it.pts[5]], k, { w: m.w, h: m.h }));
   }
 
@@ -356,7 +400,7 @@ export function mountImages(root, { t, download }) {
     const m = I(); if (!m) return;
     const sc = fin(m.mmPerPx) ? `${t("us_scale")}: ${m.scaleMm} mm = ${r1(m.scaleMm / m.mmPerPx)} px (${(m.mmPerPx * 1000).toFixed(1)} µm/px)` : t("us_noScale");
     const rows = m.items.map((it, i) => {
-      const v = it.type === "colour" ? (it.st ? `${swatch(it.st.hex)} ${it.st.w} × ${it.st.h} px (n = ${it.st.n})
+      const v = it.type === "colour" ? (it.st ? `${swatch(it.st.hex)} ${it.shape === "poly" ? `${t("us_poly")}, ${it.pts.length} ${t("us_points")}` : `${it.st.w} × ${it.st.h} px`} (n = ${it.st.n})
           <table style="margin-top:4px"><thead><tr><th></th><th>${t("us_mean")}</th><th>${t("us_median")}</th><th>min</th><th>max</th><th>SD</th></tr></thead><tbody>
           ${it.st.ch.map((q) => `<tr><td>${q.name === "grey" ? t("us_grey") : q.name}</td><td>${r1(q.mean)}</td><td>${r1(q.median)}</td><td>${q.min}</td><td>${q.max}</td><td>${r1(q.sd)}</td></tr>`).join("")}</tbody></table>` : "–")
         : it.type === "length" ? (fin(it.mm) ? `${r1(it.mm)} mm` : `${r1(it.px)} px`) : it.type === "angle" ? `${r1(it.deg)}°`
@@ -367,12 +411,12 @@ export function mountImages(root, { t, download }) {
     $("usItems").innerHTML = `<p class="sub">${sc}</p>${rows ? `<table><tbody>${rows}</tbody></table>` : ""}`
       + (anyCol ? `<button type="button" class="ghost" id="usColCsv" style="width:auto;margin-top:6px">${t("us_colCsv")}</button>` : "");
     if (anyCol) $("usColCsv").onclick = () => {
-      const head = ["file", "condition", "knee_angle_deg", "roi", "x_px", "y_px", "width_px", "height_px", "n_pixels", "mean_hex"];
+      const head = ["file", "condition", "knee_angle_deg", "roi", "shape", "x_px", "y_px", "width_px", "height_px", "n_pixels", "mean_hex", "RGB_mean_sum"];
       ["R", "G", "B", "grey"].forEach((c) => ["mean", "median", "min", "max", "sd"].forEach((k) => head.push(`${c}_${k}`)));
       const L = [head.join(",")];
       imgs.forEach((o) => o.items.filter((x) => x.type === "colour" && x.st).forEach((x, i) => {
         const q = x.st;
-        L.push([JSON.stringify(o.name), o.cond, o.angle, i + 1, q.x, q.y, q.w, q.h, q.n, q.hex, ...q.ch.flatMap((c) => [r1(c.mean), r1(c.median), c.min, c.max, r1(c.sd)])].join(","));
+        L.push([JSON.stringify(o.name), o.cond, o.angle, i + 1, x.shape === "poly" ? "polygon" : "rectangle", q.x, q.y, q.w, q.h, q.n, q.hex, r1(q.ch[0].mean + q.ch[1].mean + q.ch[2].mean), ...q.ch.flatMap((c) => [r1(c.mean), r1(c.median), c.min, c.max, r1(c.sd)])].join(","));
       }));
       download("image_colour_roi.csv", L.join("\n"));
     };
@@ -458,6 +502,17 @@ export function mountImages(root, { t, download }) {
     if (m.scalePts) { line(m.scalePts[0], m.scalePts[1], "#7CFC00"); m.scalePts.forEach((p) => dot(p, "#7CFC00")); label(m.scalePts[1], `${m.scaleMm} mm`, "#7CFC00"); }
     const drawItem = (it, live) => {
       const P = it.pts;
+      if (it.type === "colour" && (it.shape === "poly" || (live && roiShape === "poly"))) {
+        const Q = live ? [...P, pending || hover].filter(Boolean) : P;
+        if (Q.length < 2) { dot(Q[0], "#fff"); return; }
+        const path = () => { g.beginPath(); g.moveTo(Q[0].x, Q[0].y); Q.slice(1).forEach((q) => g.lineTo(q.x, q.y)); if (!live) g.closePath(); };
+        g.setLineDash([]); g.strokeStyle = "#000"; g.lineWidth = lw * 2.2; path(); g.stroke();
+        g.strokeStyle = "#fff"; g.lineWidth = lw; path(); g.stroke();
+        if (live && Q.length >= 3) line(Q[Q.length - 1], Q[0], "#fff", true);   // where it will close
+        if (live) { P.forEach((q) => dot(q, "#fff")); if (P[0]) { g.strokeStyle = "#ff3b30"; g.lineWidth = lw; g.beginPath(); g.arc(P[0].x, P[0].y, 14 / v.k, 0, 7); g.stroke(); } }
+        if (!live && it.st) label(P.reduce((a, q) => (q.y < a.y ? q : a), P[0]), it.st.hex, it.st.hex);
+        return;
+      }
       if (it.type === "colour") {
         const a = P[0], b = P[1] || (live ? pending || hover : null);
         if (!a || !b) { dot(a, "#fff"); return; }
