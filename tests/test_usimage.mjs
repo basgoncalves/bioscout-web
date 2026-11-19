@@ -1,5 +1,5 @@
 // Geometry behind Process > Images (src/usimage.js): node tests/test_usimage.mjs
-import { sampleMean, rgbToHex, greyOf, rgbToHsv, lineIntersect, acuteAngle, vertexAngle, fascicleFromLines, scaleFrom, toTemplateRows, guessMeta } from "../src/usimage.js";
+import { roiStats, sampleMean, rgbToHex, greyOf, rgbToHsv, lineIntersect, acuteAngle, vertexAngle, fascicleFromLines, scaleFrom, toTemplateRows, guessMeta } from "../src/usimage.js";
 
 let bad = 0;
 const ok = (c, m) => { if (!c) { bad++; console.log("FAIL", m); } };
@@ -47,6 +47,16 @@ near(sampleMean(px, 3, 3, 0, 0, 3)[0], (0 + 10 + 30 + 40) / 4, 1e-9, "edge clipp
 ok(rgbToHex([255, 0, 16]) === "#ff0010", "hex");
 near(greyOf([255, 255, 255]), 255, 1e-9, "grey white");
 const hsv = rgbToHsv([0, 0, 255]); near(hsv[0], 240, 1e-9, "hue blue"); near(hsv[1], 100, 1e-9, "sat");
+
+// ROI: 3x3 image, red 0..80 step 10; ROI covering all of it
+const st = roiStats(px, 3, 3, P(0, 0), P(3, 3));
+ok(st.n === 9 && st.w === 3 && st.h === 3, "roi size");
+near(st.ch[0].mean, 40, 1e-9, "roi mean"); ok(st.ch[0].median === 40, "roi median");
+ok(st.ch[0].min === 0 && st.ch[0].max === 80, "roi min/max");
+near(st.ch[0].sd, Math.sqrt(750), 1e-9, "roi sd");
+const st2 = roiStats(px, 3, 3, P(2, 2), P(0, 1));   // corners in any order -> x 0-1, y 1
+ok(st2.n === 2 && st2.ch[0].median === 35, "even-n median");
+ok(roiStats(px, 3, 3, P(5, 5), P(9, 9)) === null, "roi off the image");
 
 console.log(bad ? `${bad} failed` : "usimage: all passed");
 process.exit(bad ? 1 : 0);
