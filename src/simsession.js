@@ -62,9 +62,20 @@ export function itPath(it, key, val) {
 }
 
 // ------------------------------------------------------------------ folder helpers
+/** Project-relative path with "." / ".." resolved ("a/b/../c" -> "a/c"). Throws when ".." climbs above
+ *  the project folder: the browser's folder handle cannot reach it (and rejects ".." as a name). */
+export function normPath(path) {
+  const out = [];
+  for (const p of String(path || "").replace(/\\/g, "/").split("/")) {
+    if (!p || p === ".") continue;
+    if (p === "..") { if (!out.length) throw new Error(`path leaves the project folder: ${path}`); out.pop(); }
+    else out.push(p);
+  }
+  return out.join("/");
+}
 async function dirAt(root, path, create = false) {
   let d = root;
-  for (const p of path.split("/").filter((x) => x && x !== ".")) d = await d.getDirectoryHandle(p, { create });
+  for (const p of normPath(path).split("/").filter(Boolean)) d = await d.getDirectoryHandle(p, { create });
   return d;
 }
 async function listDirs(root, path) {
@@ -78,11 +89,11 @@ async function listFiles(root, path, re) {
 const C3D_DIRS = ["1_c3dfiles", "c3dfiles"];
 async function c3dDir(root) { for (const d of C3D_DIRS) { try { await dirAt(root, d); return d; } catch { /* next */ } } return C3D_DIRS[0]; }
 async function readFile(root, path) {
-  try { const parts = path.split("/"); const d = await dirAt(root, parts.slice(0, -1).join("/")); return await (await d.getFileHandle(parts[parts.length - 1])).getFile(); }
+  try { const parts = normPath(path).split("/"); const d = await dirAt(root, parts.slice(0, -1).join("/")); return await (await d.getFileHandle(parts[parts.length - 1])).getFile(); }
   catch { return null; }
 }
 async function writeFile(root, path, data) {
-  const parts = path.split("/"); const d = await dirAt(root, parts.slice(0, -1).join("/"), true);
+  const parts = normPath(path).split("/"); const d = await dirAt(root, parts.slice(0, -1).join("/"), true);
   const w = await (await d.getFileHandle(parts[parts.length - 1], { create: true })).createWritable(); await w.write(data); await w.close();
 }
 
