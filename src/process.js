@@ -1332,8 +1332,10 @@ export function mountProcess(root, { t, download }) {
         }
         if (!ro || !isTime) return;
         const i = Math.max(0, Math.min(ds.time.length - 1, ds.time.findIndex((v) => v >= tm)));
-        const keys = box.id === "prRaw" ? plotted(ds).raw.map((r) => r.key) : plotted(ds).proc.map((p) => p.key);
-        ro.textContent = `${r3(ds.time[i])} s — ${keys.map((k) => `${k}: ${r3(ds.cols[k][i])}`).join(" · ")}`;
+        // the plotted series themselves: a processed one ("X · processed") is not a column of the file, so
+        // ds.cols[key] was undefined and the readout threw on every pointer move. Built once per plot, not per move.
+        if (!box._series) { const pl = plotted(ds); box._series = box.id === "prRaw" ? pl.raw : pl.proc; }
+        ro.textContent = `${r3(ds.time[i])} s — ${box._series.filter((r) => r.y).map((r) => `${r.key}: ${r3(r.y[i])}`).join(" · ")}`;
         line.setAttribute("x1", px); line.setAttribute("x2", px); line.setAttribute("visibility", "visible");
       };
       svg.onpointerup = () => { if (drag != null) { drag = null; render(); } };
