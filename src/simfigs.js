@@ -17,7 +17,10 @@ export function readSto(text) {
   const L = text.split(/\r?\n/), h = L.findIndex((l) => l.trim().toLowerCase() === "endheader");
   const cols = L[h + 1].trim().split(/[\t ]+/);
   const rows = L.slice(h + 2).filter((l) => l.trim()).map((l) => l.trim().split(/[\t ]+/).map(Number));
-  const col = (n) => { const i = cols.indexOf(n); return i < 0 ? null : rows.map((r) => r[i]); };
+  // each column is built once and kept: callers ask for the same column inside loops over the rows,
+  // which without the cache cost (rows x rows) -- seconds on a 17 000-row grf.mot / emg.mot
+  const cache = new Map();
+  const col = (n) => { if (cache.has(n)) return cache.get(n); const i = cols.indexOf(n), v = i < 0 ? null : rows.map((r) => r[i]); cache.set(n, v); return v; };
   return { cols, rows, col, t: col("time") };
 }
 
@@ -38,6 +41,7 @@ function axes(g, r, series, o = {}) {
   if (!(hi > lo)) { lo -= 1; hi += 1; } const pad = (hi - lo) * 0.05; lo -= pad; hi += pad;
   const X = (v) => x + (v - x0) / (x1 - x0 || 1) * w, Y = (v) => y + h - (v - lo) / (hi - lo) * h;
   g.save(); g.fillStyle = "#fff"; g.fillRect(x, y, w, h);
+  if (o.xband) { const l = Math.max(x, X(o.xband[0])), r2 = Math.min(x + w, X(o.xband[1])); if (r2 > l) { g.fillStyle = "rgba(255,200,0,.22)"; g.fillRect(l, y, r2 - l, h); } }
   for (const b of o.bands || []) { g.fillStyle = b.color; g.fillRect(x, Math.max(y, Y(b.hi)), w, Math.min(y + h, Y(b.lo)) - Math.max(y, Y(b.hi))); }
   if (o.grid) { g.strokeStyle = "#ddd"; g.lineWidth = 1; for (const v of nice(lo, hi)) { g.beginPath(); g.moveTo(x, Y(v)); g.lineTo(x + w, Y(v)); g.stroke(); } }
   if (o.zero !== false && lo < 0 && hi > 0) { g.strokeStyle = o.zeroColor || "#bbb"; g.lineWidth = 1; g.beginPath(); g.moveTo(x, Y(0)); g.lineTo(x + w, Y(0)); g.stroke(); }
@@ -366,5 +370,165 @@ export async function taskFigure({ ikText, idText, errAllText, grfText, grfXml, 
   const items = [["right", R_COL, []], ["left", L_COL, []], ["ID moment (left axis)", "#333", []], ["joint angle (right axis)", "#333", [2, 3]]];
   g.font = "12px sans-serif"; g.textAlign = "left"; g.textBaseline = "middle"; let lx = W / 2 - 300;
   for (const [lab, col, dash] of items) { g.strokeStyle = col; g.lineWidth = 2; g.setLineDash(dash); g.beginPath(); g.moveTo(lx, y + 58); g.lineTo(lx + 26, y + 58); g.stroke(); g.setLineDash([]); g.fillStyle = "#000"; g.fillText(lab, lx + 32, y + 58); lx += 40 + g.measureText(lab).width + 20; }
+  return png(c);
+}
+
+// ------------------------------------------------------------------ 2_experimental + the per-trial summary
+/* The figures bioscout keeps next to the exported files (2_experimental/<trial>/grf_events.png,
+ * emg_processing.png) and one summary.png per trial (3_iterations/<it>/<trial>/) that puts every
+ * output of the chain on one page: GRF, kinematics, moments, EMG vs SO vs CEINMS activations,
+ * muscle forces and joint contact forces. */
+const SO_COL = "#1f77b4", CE_COL = "#ff7f0e", EMG_COL = "#7f7f7f";
+function biquad(fc, fs, type) {                     // 2nd-order Butterworth section (RBJ)
+  const w = 2 * Math.PI * Math.min(fc, fs * 0.49) / fs, c = Math.cos(w), al = Math.sin(w) / (2 * Math.SQRT1_2), a0 = 1 + al;
+  const b = type === "low" ? [(1 - c) / 2, 1 - c, (1 - c) / 2] : [(1 + c) / 2, -(1 + c), (1 + c) / 2];
+  return { b: b.map((v) => v / a0), a: [1, -2 * c / a0, (1 - al) / a0] };
+}
+function filt(x, { b, a }) {
+  const y = new Float64Array(x.length); let x1 = x[0], x2 = x[0], y1 = x[0], y2 = x[0];
+  for (let n = 0; n < x.length; n++) { const v = b[0] * x[n] + b[1] * x1 + b[2] * x2 - a[1] * y1 - a[2] * y2; x2 = x1; x1 = x[n]; y2 = y1; y1 = v; y[n] = v; }
+  return y;
+}
+const filtfilt = (x, f) => filt(filt(x, f).reverse(), f).reverse();
+/** Raw EMG -> linear envelope as bioscout / CEINMS: 20-450 Hz band-pass, rectify, 6 Hz low-pass. */
+export function emgEnvelope(x, t) {
+  const fs = 1 / ((t[t.length - 1] - t[0]) / (t.length - 1) || 1e-3);
+  let y = Float64Array.from(x, (v) => (Number.isFinite(v) ? v : 0));
+  if (fs > 200) { y = filtfilt(y, biquad(20, fs, "high")); y = filtfilt(y, biquad(Math.min(450, fs * 0.45), fs, "low")); }
+  const m = y.reduce((s, v) => s + v, 0) / (y.length || 1);
+  y = y.map((v) => Math.abs(v - m));
+  return filtfilt(y, biquad(6, fs, "low"));
+}
+const pct = (arr, p) => { const v = Array.from(arr).filter(Number.isFinite).sort((a, b) => a - b); return v.length ? v[Math.min(v.length - 1, Math.floor(p / 100 * v.length))] : 0; };
+const ckey = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+/** session.yaml emg_map channel -> the emg.mot column (Voltage_1-VM ~ Voltage.1-VM). */
+export function emgColumn(cols, ch) { return cols.includes(ch) ? ch : cols.find((c) => ckey(c) === ckey(ch)) || null; }
+const parseRange = (tr) => { if (!tr) return null; const m = String(tr).match(/-?[\d.]+/g); return m && m.length >= 2 ? [+m[0], +m[1]] : null; };
+const shade = (g, r, x0, x1, a, b, color = "rgba(255,200,0,.18)") => {
+  if (!a || !(x1 > x0)) return; const X = (v) => r.x + (v - x0) / (x1 - x0) * r.w;
+  const l = Math.max(r.x, X(a[0])), h = Math.min(r.x + r.w, X(a[1])); if (h > l) { g.fillStyle = color; g.fillRect(l, r.y, h - l, r.h); }
+};
+const thin = (t, y, n = 2500) => { if (t.length <= n) return [t, y]; const k = Math.ceil(t.length / n), tt = [], yy = []; for (let i = 0; i < t.length; i += k) { tt.push(t[i]); yy.push(y[i]); } return [tt, yy]; };
+
+/** 2_experimental/<trial>/grf_events.png: vertical force of every plate, foot strike / off, the analysed window. */
+export async function grfEventsFigure(grfText, timeRange) {
+  const d = readSto(grfText), plates = d.cols.filter((c) => /_vy$/.test(c) && !/moment/.test(c));
+  if (!plates.length) return null;
+  const tr = parseRange(timeRange), W = 1200, H = 520, [c, g] = canvas(W, H, "Vertical ground reaction force and events");
+  const r = { x: 110, y: 60, w: 900, h: 380 };
+  // zoom on the contacts (and the analysed window), 0.3 s either side
+  let a = Infinity, b = -Infinity;
+  for (const p of plates) d.col(p).forEach((v, i) => { if (v > 20) { a = Math.min(a, d.t[i]); b = Math.max(b, d.t[i]); } });
+  if (tr) { a = Math.min(a, tr[0]); b = Math.max(b, tr[1]); }
+  const t0 = Number.isFinite(a) ? Math.max(d.t[0], a - 0.3) : d.t[0], t1 = Number.isFinite(b) ? Math.min(d.t[d.t.length - 1], b + 0.3) : d.t[d.t.length - 1];
+  const inW = (p) => { const x = [], y = []; d.t.forEach((tt, i) => { if (tt >= t0 && tt <= t1) { x.push(tt); y.push(d.col(p)[i]); } }); return thin(x, y); };
+  const series = plates.map((p, i) => { const [x, y] = inW(p); return { x, y, color: TAB10[i % 10], width: 1.5 }; });
+  axes(g, r, series, { xlabel: "Time (s)", ylabel: "Vertical force (N)", grid: true, xband: tr });
+  const X = (v) => r.x + (v - t0) / (t1 - t0 || 1) * r.w;
+  g.font = "10px sans-serif"; g.textAlign = "center"; let k = 0;
+  plates.forEach((p, i) => {
+    for (const e of footEvents(d.t, d.col(p), String(i + 1))) {
+      if (e.t < t0 || e.t > t1) continue; const ly = r.y + 12 + (k++ % 4) * 12;
+      g.strokeStyle = TAB10[i % 10]; g.setLineDash([4, 3]); g.beginPath(); g.moveTo(X(e.t), r.y); g.lineTo(X(e.t), r.y + r.h); g.stroke(); g.setLineDash([]);
+      g.fillStyle = TAB10[i % 10]; g.fillText(`${e.on ? "strike" : "off"} ${e.t.toFixed(2)}`, X(e.t), ly);
+    }
+  });
+  g.textAlign = "left"; g.font = "11px sans-serif";
+  plates.forEach((p, i) => { g.strokeStyle = TAB10[i % 10]; g.lineWidth = 2; g.beginPath(); g.moveTo(1030, 80 + i * 18); g.lineTo(1055, 80 + i * 18); g.stroke(); g.fillStyle = "#000"; g.textBaseline = "middle"; g.fillText(p.replace(/_vy$/, "").replace(/^ground_force_/, "plate "), 1060, 80 + i * 18); });
+  if (tr) { g.fillStyle = "rgba(255,200,0,.5)"; g.fillRect(1030, 80 + plates.length * 18, 25, 10); g.fillStyle = "#000"; g.fillText(`time_range ${tr[0]}–${tr[1]} s`, 1060, 85 + plates.length * 18); }
+  return png(c);
+}
+
+/** 2_experimental/<trial>/emg_processing.png: each mapped channel raw (grey) and its envelope (black), as CEINMS reads it. */
+export async function emgProcessingFigure(emgText, emgMap, timeRange) {
+  const d = readSto(emgText);
+  let chans = Object.keys(emgMap || {}).map((ch) => [ch, emgColumn(d.cols, ch), (emgMap[ch] || []).join(", ")]).filter((x) => x[1]);
+  if (!chans.length) chans = d.cols.filter((c) => c !== "time" && !d.cols.some((o) => o !== c && o.startsWith(c + "-"))).map((c) => [c, c, ""]);
+  if (!chans.length) return null;
+  const tr = parseRange(timeRange), cols = 2, rows = Math.ceil(chans.length / cols), pw = 520, ph = 90, W = 1280, H = 70 + rows * (ph + 46) + 20;
+  const [c, g] = canvas(W, H, "EMG: raw (grey) and linear envelope (black, 20–450 Hz band-pass, rectified, 6 Hz low-pass)");
+  const t0 = d.t[0], t1 = d.t[d.t.length - 1];
+  chans.forEach(([ch, col, mus], k) => {
+    const raw = d.col(col), env = emgEnvelope(raw, d.t), top = pct(env, 99.5) || 1, rmax = Math.max(...raw.map((v) => Math.abs(v)).filter(Number.isFinite)) || 1;
+    const r = { x: 80 + (k % cols) * (pw + 80), y: 60 + Math.floor(k / cols) * (ph + 46), w: pw, h: ph };
+    const [tx, ry] = thin(d.t, raw.map((v) => v / rmax)), [, ey] = thin(d.t, Array.from(env, (v) => v / top));
+    axes(g, r, [{ x: tx, y: ry, color: "#c8c8c8", width: 0.8 }, { x: tx, y: ey, color: "#000", width: 1.6 }], { title: `${ch}${mus ? " → " + mus : ""}`, titleSize: 11, ylo: -1, yhi: 1.2, xband: tr });
+  });
+  return png(c);
+}
+
+/** 3_iterations/<it>/<trial>/summary.png -- every output of the chain for one trial on one page.
+ *  f: {ik, id, grf, emg, soAct, soForce, ceAct, ceForce, jraSo, jraCe} texts (any may be missing). */
+export async function summaryFigure(f, { title = "", side = "r", mass = 0, emgMap = {}, timeRange = null } = {}) {
+  if (!f.ik) return null;
+  const R = (x) => (x ? readSto(x) : null);
+  const ik = R(f.ik), id = R(f.id), grf = R(f.grf), emg = R(f.emg), soA = R(f.soAct), soF = R(f.soForce), ceA = R(f.ceAct), ceF = R(f.ceForce), jS = R(f.jraSo), jC = R(f.jraCe);
+  const t0 = ik.t[0], t1 = ik.t[ik.t.length - 1], win = (t, y) => { const x = [], v = []; t.forEach((tt, i) => { if (tt >= t0 - 1e-9 && tt <= t1 + 1e-9) { x.push(tt); v.push(y[i]); } }); return [x, v]; };
+  const S = side, W = 1600, colW = 650, X1 = 110, X2 = 110 + colW + 110, ph = 190, sph = 130, gap = 70;
+  // muscles: the mapped ones first (EMG to compare with), then soleus (no EMG: the model decides)
+  const has = (d, n) => d && d.cols.includes(n);
+  const mapped = []; for (const [ch, mus] of Object.entries(emgMap || {})) for (const m of mus || []) if (/_[rl]$/.test(m) && m.endsWith("_" + S)) mapped.push([m, ch]);
+  const prefer = ["gasmed", "soleus", "vaslat", "recfem", "bflh", "tibant", "semiten", "glmed1", "glmax1", "addlong"];
+  const pool = [...new Set([...prefer.map((p) => p + "_" + S), ...mapped.map((m) => m[0])])].filter((m) => has(soF, m) || has(ceF, m));
+  const muscles = pool.slice(0, 6), chOf = Object.fromEntries(mapped.map(([m, ch]) => [m, ch]));
+  const nRowM = Math.ceil(muscles.length / 3) || 0;
+  const H = 70 + 2 * (ph + gap) + (muscles.length ? 2 * (30 + nRowM * (sph + 50)) : 0) + 40;
+  const [c, g] = canvas(W, H, title);
+  g.font = "12px sans-serif"; g.fillStyle = "#555"; g.textAlign = "center";
+  g.fillText(`side ${S === "r" ? "right" : "left"} · ${t0.toFixed(2)}–${t1.toFixed(2)} s${mass ? ` · ${(+mass).toFixed(1)} kg` : ""} · SO = static optimisation (blue), CEINMS = EMG-informed (orange), EMG = measured envelope (grey)`, W / 2, 46);
+  g.textAlign = "left";
+  let y = 80;
+  // 1. GRF
+  if (grf) {
+    const plates = grf.cols.filter((cc) => /_vy$/.test(cc) && !/moment/.test(cc));
+    const s = plates.map((p, i) => { const [x, yy] = win(grf.t, grf.col(p).map((v) => (mass ? v / (mass * 9.81) : v))); return { x, y: yy, color: TAB10[i % 10] }; }).filter((q) => q.y.some((v) => Math.abs(v) > (mass ? 0.05 : 20)));
+    if (s.length) axes(g, { x: X1, y, w: colW, h: ph }, s, { title: "Vertical ground reaction force (shaded: time_range)", ylabel: mass ? "Force (BW)" : "Force (N)", xlabel: "Time (s)", grid: true, xband: parseRange(timeRange) });
+  }
+  // 2. sagittal angles
+  { const J = [["hip_flexion", "hip"], ["knee_angle", "knee"], ["ankle_angle", "ankle"]].filter(([n]) => ik.col(`${n}_${S}`));
+    const s = J.map(([n], i) => { const [x, yy] = win(ik.t, ik.col(`${n}_${S}`)); return { x, y: yy, color: TAB10[i] }; });
+    if (s.length) axes(g, { x: X2, y, w: colW, h: ph }, s, { title: "Joint angles (sagittal)", ylabel: "Angle (deg)", xlabel: "Time (s)", grid: true, legend: J.map(([, l], i) => ({ label: l, color: TAB10[i] })) }); }
+  y += ph + gap;
+  // 3. moments
+  if (id) {
+    const J = [["hip_flexion", "hip"], ["knee_angle", "knee"], ["ankle_angle", "ankle"]].filter(([n]) => id.col(`${n}_${S}_moment`));
+    const s = J.map(([n], i) => { const [x, yy] = win(id.t, id.col(`${n}_${S}_moment`).map((v) => (mass ? v / mass : v))); return { x, y: yy, color: TAB10[i] }; });
+    if (s.length) axes(g, { x: X1, y, w: colW, h: ph }, s, { title: "Joint moments (inverse dynamics)", ylabel: mass ? "Moment (N·m/kg)" : "Moment (N·m)", xlabel: "Time (s)", grid: true, legend: J.map(([, l], i) => ({ label: l, color: TAB10[i] })) });
+  }
+  // 4. contact forces SO vs CEINMS
+  { const JR = [["hip", new RegExp(`^hip_${S}_on_femur_${S}_in_femur_${S}_f`)], ["knee", new RegExp(`^(tibial_plat_weld|Lerner_knee|walker_knee|knee)_${S}_on_.*_f`)], ["ankle", new RegExp(`^ankle_${S}_on_talus_${S}_in_talus_${S}_f`)]];
+    const res = (d, re) => { if (!d) return null; const cs = d.cols.filter((cc) => re.test(cc) && /_f[xyz]$/.test(cc)).slice(0, 3); if (cs.length < 3) return null; const a = cs.map((cc) => d.col(cc)); return d.t.map((_, i) => Math.hypot(a[0][i], a[1][i], a[2][i]) / (mass ? mass * 9.81 : 1)); };
+    const s = [], leg = [];
+    JR.forEach(([lab, re], i) => {
+      const a = res(jS, re), b = res(jC, re);
+      if (a) { const [x, yy] = win(jS.t, a); s.push({ x, y: yy, color: TAB10[i] }); }
+      if (b) { const [x, yy] = win(jC.t, b); s.push({ x, y: yy, color: TAB10[i], dash: [6, 4] }); }
+      if (a || b) leg.push({ label: `${lab}${a && b ? " (SO solid, CEINMS dashed)" : a ? " (SO)" : " (CEINMS)"}`, color: TAB10[i] });
+    });
+    if (s.length) axes(g, { x: X2, y, w: colW, h: ph }, s, { title: "Joint contact force (resultant)", ylabel: mass ? "Force (BW)" : "Force (N)", xlabel: "Time (s)", grid: true, legend: leg }); }
+  y += ph + gap;
+  // 5. activations and 6. forces, one small panel per muscle
+  const small = (head, draw) => {
+    g.font = "bold 14px sans-serif"; g.fillStyle = "#000"; g.fillText(head, X1 - 60, y); g.font = "11px sans-serif"; y += 30;
+    const sw = (W - X1 - 60 - 2 * 90) / 3;
+    muscles.forEach((m, k) => draw(m, { x: X1 + (k % 3) * (sw + 90), y: y + Math.floor(k / 3) * (sph + 50), w: sw, h: sph }));
+    y += nRowM * (sph + 50);
+  };
+  if (muscles.length) {
+    small("Muscle activation: measured EMG vs static optimisation vs CEINMS", (m, r) => {
+      const s = [], leg = [];
+      const ch = chOf[m], col = emg && ch ? emgColumn(emg.cols, ch) : null;
+      if (col) { const env = emgEnvelope(emg.col(col), emg.t), top = pct(env, 99.5) || 1; const [x, yy] = win(emg.t, Array.from(env, (v) => Math.min(1, v / top))); const [tx, ty] = thin(x, yy, 800); s.push({ x: tx, y: ty, color: EMG_COL, width: 2.5 }); leg.push({ label: "EMG", color: EMG_COL }); }
+      if (has(soA, m)) { const [x, yy] = win(soA.t, soA.col(m)); s.push({ x, y: yy, color: SO_COL }); leg.push({ label: "SO", color: SO_COL }); }
+      if (has(ceA, m)) { const [x, yy] = win(ceA.t, ceA.col(m)); s.push({ x, y: yy, color: CE_COL }); leg.push({ label: "CEINMS", color: CE_COL }); }
+      if (s.length) axes(g, r, s, { title: `${m}${ch ? "" : " (no EMG)"}`, titleSize: 12, ylo: 0, yhi: 1, ylabel: "activation", legend: leg, zero: false });
+    });
+    small("Muscle force: static optimisation vs CEINMS", (m, r) => {
+      const s = [], pk = [];
+      if (has(soF, m)) { const [x, yy] = win(soF.t, soF.col(m)); s.push({ x, y: yy, color: SO_COL }); pk.push(`SO ${Math.max(...yy).toFixed(0)}`); }
+      if (has(ceF, m)) { const [x, yy] = win(ceF.t, ceF.col(m)); s.push({ x, y: yy, color: CE_COL }); pk.push(`CEINMS ${Math.max(...yy).toFixed(0)}`); }
+      if (s.length) axes(g, r, s, { title: `${m} — peak ${pk.join(" / ")} N`, titleSize: 12, ylabel: "force (N)", xlabel: "Time (s)", zero: false });
+    });
+  }
   return png(c);
 }

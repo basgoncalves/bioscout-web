@@ -243,6 +243,7 @@
    "id": "so",
    "label": "Static optimisation",
    "options": {
+    "strength": "Muscle strength factor (x maximum isometric force; 1 = the model, 1.5-2 for running / jumping)",
     "jra": "Also joint reaction loads (1 = yes, 0 = no) -- default 1"
    },
    "slots": [

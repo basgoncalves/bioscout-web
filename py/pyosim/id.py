@@ -137,7 +137,11 @@ def _jacobians_all(model, Q, names, kin):
 
 # ------------------------------------------------------------------ the tool
 def run(model_path, coords_mot, loads_xml, out_sto, loads_mot=None, t_range=None, cutoff=6.0, log=print,
-        setup_path=None):
+        setup_path=None, keep=None):
+    """keep=(t0, t1): the coordinates may cover more than the window wanted (inverse kinematics run with a
+    margin either side). Filtering and the two time derivatives are done on all of it, and only the frames
+    inside keep are written -- the ends of a short window are where both go wrong (on a 0.2 s running
+    stance the pelvis residual force fell from ~570 to ~160 N RMS with a 0.2 s margin)."""
     model = model_path if isinstance(model_path, Model) else Model(model_path)
     t, Q = read_coords(model, coords_mot)
     if t_range:
@@ -214,6 +218,11 @@ def run(model_path, coords_mot, loads_xml, out_sto, loads_mot=None, t_range=None
     except Exception as e:                                  # the figure is optional
         log(f"[id] body positions not written: {e}")
     cols = ["time"] + [n + ("_force" if model.coords[n].translational else "_moment") for n in model.coord_order]
+    if keep is not None:
+        km = (t >= keep[0] - 1e-9) & (t <= keep[1] + 1e-9)
+        if km.sum() >= 3:
+            log(f"[id] {int(km.sum())} of {len(t)} frames written ({keep[0]:.3f}-{keep[1]:.3f} s; the rest was margin)")
+            t, out = t[km], out[km]
     write_mot(out_sto, cols, np.column_stack([t, out]), name="Inverse Dynamics Generalized Forces", degrees=False)
     log(f"[id] wrote {os.path.basename(out_sto)}")
     if setup_path:

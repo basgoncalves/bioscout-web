@@ -927,6 +927,10 @@ try {
   .prJumpStat small { font-size:.5em; font-weight:600; color:var(--muted); }
   /* Simulate (src/simtools.js) */
   dialog.trcDlg { width:min(96vw,1100px); max-width:none; max-height:92vh; overflow:auto; }
+  .simInfo { width:20px !important; height:20px; min-height:0; padding:0 !important; margin:0 4px !important; border-radius:50%; border:1px solid var(--line); background:transparent; color:var(--sub); font:italic 600 12px/18px Georgia,serif; cursor:pointer; vertical-align:middle; flex:none; }
+  .simInfo:hover { color:var(--accent); border-color:var(--accent); }
+  .simInfoPop { position:absolute; z-index:1000; background:var(--card,#1c1d21); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:13px; line-height:1.45; box-shadow:0 10px 30px rgba(0,0,0,.45); }
+  .simInfoPop:before { content:""; position:absolute; top:-8px; left:26px; border:8px solid transparent; border-top:0; border-bottom-color:var(--line); }
   .twBar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0; }
   .twList { max-height:52vh; overflow:auto; display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:2px 14px; }
   .twRow { display:flex; align-items:center; gap:6px; }
@@ -934,6 +938,10 @@ try {
   .twRow input[type=number] { width:70px; }
   .twRow.miss span { opacity:.5; text-decoration:line-through; }
   .tvHead { display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .tvCompact select, .tvCompact button, .tvCompact input[type=text] { width:auto; margin:0; padding:4px 10px; min-height:0; font-size:13px; }
+  .tvHead.tvCompact { align-items:center; justify-content:flex-start; }
+  .tvHead.tvCompact [data-info] { margin-left:auto; }
+  dialog.trcDlg .tvSl { margin-top:4px; }
   .tvBody { display:flex; gap:12px; margin-top:8px; }
   .tvPlots { flex:1; min-width:0; }
   .tvPlots canvas { width:100%; display:block; }
@@ -2321,8 +2329,8 @@ try {
 // deployed yet" apart from "this tab predates the deploy", which is a question
 // that comes up on every single release.
 window.RELEASE = "V2";
-window.BUILD = 183;
-window.BUILD_AT = "2026-11-23 17:16";   // local (Vienna) time; tools/bump_build.mjs keeps it current
+window.BUILD = 184;
+window.BUILD_AT = "2026-11-24 08:40";   // local (Vienna) time; tools/bump_build.mjs keeps it current
 // One source for the build number. It was written twice, and a release that
 // bumped only window.BUILD left the visible stamp reading v27 on a v28 page --
 // which defeats the whole point of having a stamp.

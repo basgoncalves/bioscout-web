@@ -86,6 +86,35 @@ Or run this one on another port: <code>python serve.py 5174</code>.</p></div></b
     webbrowser.open(out.as_uri())
 
 
+def downloads_dir():
+    """The user's Downloads folder: Windows' known folder (it can be moved), XDG on Linux, ~/Downloads otherwise."""
+    if os.name == "nt":
+        try:
+            import ctypes, uuid
+            from ctypes import wintypes
+            guid = uuid.UUID("{374DE290-123F-4565-9164-39C4925E467B}")
+            class GUID(ctypes.Structure):
+                _fields_ = [("d1", wintypes.DWORD), ("d2", wintypes.WORD), ("d3", wintypes.WORD), ("d4", ctypes.c_ubyte * 8)]
+            g = GUID(guid.fields[0], guid.fields[1], guid.fields[2], (ctypes.c_ubyte * 8)(*guid.bytes[8:]))
+            p = ctypes.c_wchar_p()
+            if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(g), 0, None, ctypes.byref(p)) == 0:
+                d = pathlib.Path(p.value); ctypes.windll.ole32.CoTaskMemFree(p)
+                if d.is_dir():
+                    return d
+        except Exception:
+            pass
+    elif sys.platform.startswith("linux"):
+        try:
+            d = pathlib.Path(subprocess.run(["xdg-user-dir", "DOWNLOAD"], capture_output=True, text=True, timeout=3).stdout.strip())
+            if d.is_dir() and d != pathlib.Path.home():
+                return d
+        except Exception:
+            pass
+    d = pathlib.Path.home() / "Downloads"
+    d.mkdir(exist_ok=True)
+    return d
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/__bioscout_whoami":     # lets the next launcher see who holds the port
@@ -94,6 +123,38 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
             return
         super().do_GET()
+
+    def do_POST(self):
+        # /__bioscout_save?name=<file>.zip : the page's export zip written straight into the
+        # user's Downloads folder (no save dialog). Only from this server's own page (same origin),
+        # only a plain *.zip file name, never overwriting.
+        from urllib.parse import urlparse, parse_qs
+        u = urlparse(self.path)
+        if u.path != "/__bioscout_save":
+            self.send_error(404); return
+        origin = self.headers.get("Origin") or ""
+        if origin and urlparse(origin).netloc not in (f"localhost:{PORT}", f"127.0.0.1:{PORT}"):
+            self.send_error(403, "other origin"); return
+        name = os.path.basename((parse_qs(u.query).get("name") or [""])[0])
+        if not name.lower().endswith(".zip") or name.startswith(".") or any(c in name for c in '<>:"/\\|?*'):
+            self.send_error(400, "bad file name"); return
+        n = int(self.headers.get("Content-Length") or 0)
+        if n <= 0 or n > 4 * 1024 ** 3:
+            self.send_error(400, "bad size"); return
+        dest = downloads_dir() / name
+        stem, k = dest.stem, 1
+        while dest.exists():
+            dest = dest.with_name(f"{stem} ({k}).zip"); k += 1
+        with open(dest, "wb") as f:
+            left = n
+            while left > 0:
+                chunk = self.rfile.read(min(left, 1 << 20))
+                if not chunk:
+                    break
+                f.write(chunk); left -= len(chunk)
+        body = json.dumps({"path": str(dest)}).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
 
     def end_headers(self):
         # The whole point: never let anything be cached between edits.

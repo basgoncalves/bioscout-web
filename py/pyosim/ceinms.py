@@ -103,11 +103,18 @@ def emg_envelopes(emg_path, t_out, muscles, log=print, emg_map=None):
     t = data[:, cols.index("time")]
     if emg_map:
         out = np.full((len(t_out), len(muscles)), np.nan); used = {}
+        # session.yaml writes a channel as the Python bioscout names it (Voltage_1-VM); the web's c3d
+        # export keeps the C3D label (Voltage.1-VM): match them ignoring case and . _ - and spaces
+        key = lambda s: re.sub(r"[^a-z0-9]", "", str(s).lower())
+        by_key = {}
+        for c in cols:
+            by_key.setdefault(key(c), c)
         for ch, mus in emg_map.items():
-            if ch not in cols:
+            col = ch if ch in cols else by_key.get(key(ch))
+            if col is None:
                 log(f"[ceinms] EMG channel {ch} not in {os.path.basename(emg_path)}")
                 continue
-            x = _env(data[:, cols.index(ch)].astype(float), t)
+            x = _env(data[:, cols.index(col)].astype(float), t)
             if x is None:
                 log(f"[ceinms] EMG channel {ch} is flat or saturated -- skipped")
                 continue
@@ -164,8 +171,8 @@ def activation(u, t, A=-1.0, t_act=0.015, t_deact=0.05):
 # ------------------------------------------------------------------ the shared set-up
 class Problem:
     def __init__(self, model_path, coords_mot, id_sto, emg_mot=None, t_range=None, cutoff=6.0, log=print, emg_map=None,
-                 weighting="ceinms", passive=False):
-        self.weighting = weighting
+                 weighting="ceinms", passive=False, tendon=True):
+        self.weighting = weighting; self.tendon = tendon; self.passive = passive
         model = model_path if isinstance(model_path, Model) else Model(model_path)
         self.model, self.log = model, log
         paths = Paths(model, model.path)
@@ -174,8 +181,8 @@ class Problem:
         lo, hi = max(t[0], tid[0]), min(t[-1], tid[-1])
         if t_range:
             lo, hi = max(lo, t_range[0]), min(hi, t_range[1])
+        Q = idtool._lowpass(Q, t, cutoff)                          # on all the frames there are, then cropped
         m = (t >= lo - 1e-9) & (t <= hi + 1e-9); t, Q = t[m], Q[m]
-        Q = idtool._lowpass(Q, t, cutoff)
         coords = [c for c in model.coord_order if any(c.startswith(b) for b in LEG) and not model.coords[c].locked
                   and model.coords[c].coupled is None and (c + "_moment") in ic]
         L, R = paths.moment_arms(Q, coords)
@@ -194,6 +201,8 @@ class Problem:
         qd = np.gradient(Q[:, [model.coord_order.index(c) for c in coords]], t, axis=0)
         vm = -np.einsum("ncm,nc->nm", R, qd) * cosa
         self.G = F0 * f_active(lm / lopt) * f_velocity(vm / (vmax * lopt)) * cosa      # force per unit activation
+        # kept for the tendon-stretch passes of solve(): musculotendon length and lengthening speed
+        self._mt = dict(L=L, v=-np.einsum("ncm,nc->nm", R, qd), F0=F0, lopt=lopt, lts=lts, h=lopt * np.sin(a0), vmax=vmax)
         # passive fibre force: off by default. With a rigid tendon the whole musculotendon stretch
         # lands in the fibre, so e.g. soleus sits on its passive curve all trial (~1-1.5 kN each,
         # ~4.5 kN summed over the legs on K2L walking) and the active muscles then fight it --
@@ -236,7 +245,7 @@ class Problem:
             nb = np.sqrt(nM)
         else:
             sc = np.ones(len(self.coords)); nb = 1.0
-        for i in idx:
+        def one(i, G, P, prev):
             blocks, rhs = [], []
             if alpha > 0:
                 blocks.append(np.sqrt(alpha) * sc[:, None] * (self.R[i] * G[i][None])); rhs.append(np.sqrt(alpha) * sc * (self.M[i] - self.R[i] @ P[i]))
@@ -248,8 +257,32 @@ class Problem:
                     blocks.append(np.sqrt(gamma) * np.eye(nM)[have] / ng); rhs.append(np.sqrt(gamma) * ae[i][have] / ng)
             if delta > 0 and frames is None:
                 blocks.append(np.sqrt(delta) * np.eye(nM) / nb); rhs.append(np.sqrt(delta) * prev / nb)
-            r = lsq_linear(np.vstack(blocks), np.concatenate(rhs), bounds=(0.0, 1.0), method="bvls")
-            X[i] = prev = r.x
+            return lsq_linear(np.vstack(blocks), np.concatenate(rhs), bounds=(0.0, 1.0), method="bvls").x
+
+        for i in idx:
+            X[i] = prev = one(i, G, P, prev)
+        if self.tendon and len(self.t) > 4:
+            # tendon stretch, as so.py: a rigid tendon makes the fibres of long-tendon muscles (triceps surae)
+            # shorten near vmax in push-off, where the force-velocity curve leaves them no force. The tendon
+            # length that belongs to the forces found (De Groote et al. 2016 tendon curve) gives a new fibre
+            # length and speed; the frames are solved again (damped fixed point). On a subset of frames
+            # (calibration) the force between them is interpolated in time.
+            mt = self._mt; ker = np.ones(5) / 5; lt_n = np.ones_like(mt["L"]); ii = np.array(list(idx))
+            for _ in range(2 if frames is not None else 3):          # calibration (frame subset): two passes are enough for its fit
+                fT = np.clip((X * G + P) / (mt["F0"] * s), 0.0, 1.6)
+                if frames is not None:
+                    fT = np.stack([np.interp(self.t, self.t[ii], fT[ii, k]) for k in range(nM)], 1)
+                pad = np.pad(fT, ((2, 2), (0, 0)), mode="edge")
+                fT = np.apply_along_axis(lambda v: np.convolve(v, ker, mode="valid"), 0, pad)
+                lt_n = 0.5 * lt_n + 0.5 * (0.995 + np.log((fT + 0.25) / 0.2) / 35.0)
+                lt = mt["lts"] * lt_n
+                lmt = np.maximum(mt["L"] - lt, 1e-4); lm = np.sqrt(lmt ** 2 + mt["h"] ** 2); cosa = lmt / lm
+                vm = (mt["v"] - np.gradient(lt, self.t, axis=0)) * cosa
+                G = mt["F0"] * f_active(lm / mt["lopt"]) * f_velocity(vm / (mt["vmax"] * mt["lopt"])) * cosa * s
+                P = (mt["F0"] * f_passive(lm / mt["lopt"]) * cosa * s) if self.passive else np.zeros_like(G)
+                prev = np.full(nM, 0.05)
+                for i in idx:
+                    X[i] = prev = one(i, G, P, prev)
         F = X * G + P
         Mm = np.einsum("ncm,nm->nc", self.R, F)
         return X, F, Mm
@@ -282,7 +315,7 @@ def calibrate(model_path, coords_mot, id_sto, emg_mot, out_dir, approach="hybrid
         for it in range(4):
             X, F, Mm = pb.solve(alpha, beta, gamma, s, A, frames)
             # moments linear in the group strengths: M = sum_g s_g R (G a + P)
-            Fg = X[frames] * pb.G[frames] + pb.P[frames]
+            Fg = F[frames] / s                                  # per unit strength, with the tendon-stretch fibre state of solve()
             B = np.zeros((len(frames), len(pb.coords), len(groups)))
             for g in range(len(groups)):
                 B[:, :, g] = np.einsum("ncm,nm->nc", pb.R[frames][:, :, gi == g], Fg[:, gi == g])

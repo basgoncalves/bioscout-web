@@ -1,6 +1,7 @@
 """Inverse kinematics: weighted least squares on marker positions, frame by frame,
 like OpenSim's InverseKinematicsTool (same task set and setup files)."""
 import os
+import re
 import xml.etree.ElementTree as ET
 import numpy as np
 from scipy.optimize import least_squares
@@ -22,6 +23,18 @@ def read_tasks(path):
     return mk, co
 
 
+def default_weight(name):
+    """Weight of a marker no task set names. The model's torso is one rigid body without a neck or
+    shoulder girdle, so head and shoulder markers move on it (60-100 mm in running) and, at full
+    weight, drag the trunk and pelvis after them: they are tracked lightly. Everything else 1."""
+    n = name.upper()
+    if re.search(r"(^|[LR_])[FB]?HD\d*$|HEAD|FHD|BHD", n):
+        return 0.02
+    if re.search(r"SHO|ACR(?!$)|ACROM", n) and "SACR" not in n:
+        return 0.1
+    return 1.0
+
+
 def solve(model, times, markers, marker_w, coord_tasks=None, t_range=None, log=print):
     coord_tasks = coord_tasks or {}
     names = [n for n in marker_w if n in markers and n in model.markers]
@@ -31,13 +44,13 @@ def solve(model, times, markers, marker_w, coord_tasks=None, t_range=None, log=p
     # shared marker is tracked with weight 1 instead (the task-set weights only where they match)
     if len(names) < 6 or len(names) < 0.5 * len(common):
         log(f"[ik] task set names only {len(names)} of the {len(common)} markers shared by model and .trc; "
-            f"tracking all {len(common)} (task-set weights where named, 1 elsewhere)")
-        marker_w = {n: marker_w.get(n, 1.0) for n in common}
+            f"tracking all {len(common)} (task-set weights where named; elsewhere 1, head / shoulder markers light)")
+        marker_w = {n: marker_w.get(n, default_weight(n)) for n in common}
         names = common
     elif len(common) > len(names):   # markers the placer added from the c3d: track them too, weight 1
         extra = [n for n in common if n not in marker_w]
         log(f"[ik] also tracking {len(extra)} markers not in the task set (weight 1): {' '.join(extra[:15])}")
-        marker_w = {**marker_w, **{n: 1.0 for n in extra}}
+        marker_w = {**marker_w, **{n: default_weight(n) for n in extra}}
         names = names + extra
     missing = [n for n in marker_w if n not in markers or n not in model.markers]
     if len(names) < 6:
@@ -141,8 +154,12 @@ def run(model_path, trc_path, task_path, out_mot, t_range=None, log=print, marke
         write_mot(allp, ["time"] + list(used), np.column_stack([t, per]), name="Per-marker errors from IK", degrees=False)
     if setup_path:
         write_setup(setup_path, model_path, trc_path, task_path, out_mot, t if len(t) else None)
-    log(f"[ik] {len(t)} frames, {len(used)} markers; RMS error mean {errs[:,0].mean()*1000:.1f} mm, "
-        f"max {errs[:,1].max()*1000:.1f} mm")
+    log(f"[ik] {len(t)} frames, {len(used)} markers; RMS error mean {np.nanmean(errs[:,0])*1000:.1f} mm, "
+        f"max {np.nanmax(errs[:,1])*1000:.1f} mm")
+    full = [k for k, n in enumerate(used) if default_weight(n) >= 1.0]
+    if 0 < len(full) < len(used):
+        log(f"[ik] without the lightly tracked head / shoulder markers: RMS {np.sqrt(np.nanmean(per[:, full] ** 2))*1000:.1f} mm "
+            f"over {len(full)} markers")
     return out_mot, errs
 
 

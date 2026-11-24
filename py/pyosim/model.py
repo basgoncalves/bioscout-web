@@ -244,6 +244,9 @@ class Model:
             self.bodies[b.get("name")] = dict(
                 mass=float(b.findtext("mass") or 0), com=_vec(b.findtext("mass_center")),
                 inertia=_vec(b.findtext("inertia"), 6))
+        if m.find("JointSet/objects") is None:
+            raise ValueError(f"{str(path).replace(chr(92), '/').split('/')[-1]} is an OpenSim 3 model (document version {root.get('Version')}: joints inside the bodies). "
+                             "Open it in the OpenSim 4 GUI and save it again (File > Save Model As), then use that file.")
         self.joints = [Joint(j, self) for j in m.find("JointSet/objects")]
         self.coord_order = [c.name for j in self.joints for c in j.coords]
         cs = m.find("ConstraintSet/objects")

@@ -16,8 +16,9 @@
 import { parseTrc, parseGrfMot, editTaskWeights, viewTrc } from "./trcview.js";
 import { buildSetup, downloadText } from "./simsetup.js";
 import { makeZip } from "./zip.js";
+import { readSto, emgEnvelope, emgColumn } from "./simfigs.js";
 import { readC3d } from "./proc_io.js";
-import { sessionHTML, sessionWire, S as session, openSingleSession, exportC3d, runAll, applySelection, createIteration, iterationDefaults, setStaticTrial, setTrialFlag, trialFlag, setT as sessionT, readActuators, saveActuators, emgMapInfo, saveEmgMap, timeRanges, saveTimeRanges, trialData, eventWindow, setSubject, weightFromStatic, setBodyMass } from "./simsession.js";
+import { sessionHTML, sessionWire, S as session, openSingleSession, exportC3d, runAll, applySelection, createIteration, iterationDefaults, setStaticTrial, setTrialFlag, trialFlag, setT as sessionT, readActuators, saveActuators, emgMapInfo, saveEmgMap, timeRanges, saveTimeRanges, trialData, eventWindow, setSubject, weightFromStatic, setBodyMass, completeFigures, yamlEmgMap, liveUpdate, runStep } from "./simsession.js";
 import { quickHTML, quickWire, quickFooterHTML, Q as quick } from "./simquick.js";
 const SETUP_TOOLS = new Set(["scale", "ik", "id", "ma", "so"]);   // steps whose OpenSim setup .xml can be written before running
 const TPL = "./data/opensim/setup_files/";
@@ -73,7 +74,7 @@ export function simHTML(ctx) {
       const ch = (tl.choices || {})[k];
       const field = ch ? `<select data-opt="${tl.id}:${k}">${ch.map((c) => `<option value="${esc(c)}"${c === v ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>`
         : `<input type="text" data-opt="${tl.id}:${k}" value="${esc(v)}">`;
-      return `<label class="simOpt">${esc(t("sim_opt_" + k) !== "sim_opt_" + k ? t("sim_opt_" + k) : lbl)} ${field}</label>${k === "approach" ? `<span style="flex-basis:100%;height:0"></span>` : ""}`;
+      return `<label class="simOpt">${esc(t("sim_opt_" + k) !== "sim_opt_" + k ? t("sim_opt_" + k) : lbl)} ${field}</label>${k === "approach" ? `${infoBtn(t("sim_info_approach"), esc, true)}<span style="flex-basis:100%;height:0"></span>` : ""}`;
     }).join("");
     const busy = sp.state === "queued" || sp.state === "running";
     const outs = ctx.outputs[tl.id];
@@ -88,8 +89,7 @@ export function simHTML(ctx) {
       : skipSet ? `<label class="simSkip" onclick="event.stopPropagation()"><input type="checkbox" data-skip="${tl.id}"${skipped ? " checked" : ""}> ${esc(t("sq_skip"))}</label>` : "";
     return `<details class="simTool${skipped ? " skipped" : ""}"${ctx.open.has(tl.id) && (step || !skipped) ? " open" : ""} data-tool="${tl.id}">
       ${""}
-      <summary>${step ? skipBox : ""}<b>${i + 1} · ${esc(t("sim_tool_" + tl.id))}</b> ${badge(sp)}${step ? "" : skipBox}</summary>
-      <p class="note" style="margin:4px 0 8px">${t("sim_note_" + tl.id)}</p>
+      <summary>${step ? skipBox : ""}<b>${i + 1} · ${esc(t("sim_tool_" + tl.id))}</b> ${infoBtn(t("sim_note_" + tl.id), esc, true)} ${badge(sp)}${step ? "" : skipBox}</summary>
       ${step && tl.id === "ceinms_cal" && session.single && session.root ? trialTicks(ctx, "cal", t("sim_calTrials"), (x) => trialFlag(x, "calibration")) : ""}
       ${auto ? "" : slots}${auto && tl.id === "so" ? actuHTML(ctx) : ""}${auto && tl.id === "ceinms_cal" ? `<button type="button" class="ghost" data-emgmap style="margin:6px 0">${esc(t("sim_map_btn"))}</button>` : ""}${auto && tl.id === "ik" ? `<button type="button" class="ghost" data-trange style="margin-top:4px">${esc(t("sim_tr_btn"))}</button>` : ""}${opts ? `<div class="simOpts">${opts}${tl.id === "ik" && !auto ? `<button type="button" class="ghost" data-view${trcIK ? "" : " disabled"}>${esc(t("sim_v_btn"))}</button>` : ""}</div>` : ""}
       ${tl.id === "ik" ? `<button type="button" class="ghost" data-tw style="margin-top:8px">${esc(t("sim_tw_btn"))}</button>` : ""}
@@ -129,7 +129,7 @@ export function simHTML(ctx) {
     </div>
     ${ctx.quick ? quickHTML(ctx) : ""}
     ${ctx.err ? `<p class="note banner" style="margin:8px 0 0">${esc(ctx.err)}</p>` : ""}
-    <div class="simTools">${!ctx.quick && !ctx.batch ? section0(ctx) + yamlHTML(ctx) : ""}${sectionsHTML}</div>
+    <div class="simTools">${!ctx.quick && !ctx.batch ? section0(ctx) : ""}${sectionsHTML}</div>
     ${!ctx.quick && !ctx.batch ? runAllHTML(ctx) : ""}
     ${ctx.quick ? quickFooterHTML(ctx) : ""}
     <p class="note" style="margin:10px 0 0">${t("sim_templatesNote")}</p>`;
@@ -154,11 +154,33 @@ function section0(ctx) {
         <label class="simOpt" style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" data-s0events${session.useEvents ? " checked" : ""} style="width:auto;margin:0"> ${esc(t("sim_s0events"))}</label>
         <label class="simOpt">${esc(t("sim_s0static"))}<select data-s0static>${opt(session.trials, top.static_trial || "", "–")}</select></label>
         </div>
+      <div style="display:flex;justify-content:flex-end;margin:6px 0 -2px"><a href="#" data-yamledit class="sub" style="font-size:12px">${esc(t(yamlOpen ? "sim_yamlClose" : "sim_yamlEdit"))}</a></div>
+      ${yamlEditor(ctx)}
       ${trialTicks(ctx, "pick", t("sim_s0trials"), (x) => !session.pick || session.pick.has(x))}
       ${trialTicks(ctx, "emg", t("sim_emgTrials"), (x) => trialFlag(x, "emg_normalisation"))}
       <div class="simRunRow" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
-        <button type="button" data-s0convert${session.busy ? " disabled" : ""}>${esc(t("sim_s0convert"))}</button></div>` : ""}
+        <button type="button" data-s0convert${session.busy ? " disabled" : ""}>${esc(t("sim_s0convert"))}</button></div>
+      <button type="button" class="ghost" data-crop style="width:100%;margin-top:10px"${session.busy || !others.length ? " disabled" : ""}>✂ ${esc(t("sim_crop_btn"))}</button>` : ""}
   </details>`;
+}
+/* (i) next to a title or an option: its text in a balloon, shown only when clicked (html: the text is trusted app markup). */
+function infoBtn(text, esc, html = false) {
+  if (!text) return "";
+  return `<button type="button" class="simInfo" data-info="${esc(html ? text : esc(text))}" aria-label="info" title="info" onclick="event.stopPropagation();event.preventDefault()">i</button>`;
+}
+function wireInfo(box) {
+  box.querySelectorAll("[data-info]").forEach((b) => b.addEventListener("click", (e) => {
+    e.stopPropagation(); e.preventDefault();
+    let pop = document.querySelector(".simInfoPop");
+    if (pop && pop._for === b) { pop.remove(); return; }
+    if (pop) pop.remove();
+    pop = document.createElement("div"); pop._for = b; pop.className = "simInfoPop";
+    pop.innerHTML = b.dataset.info.replace(/\n/g, "<br>");
+    document.body.appendChild(pop);
+    const r = b.getBoundingClientRect(), w = Math.min(460, innerWidth - 16);
+    pop.style.width = w + "px"; pop.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left - 24)) + "px"; pop.style.top = (r.bottom + 10 + scrollY) + "px";
+    setTimeout(() => document.addEventListener("click", function off(ev) { if (!pop.contains(ev.target)) { pop.remove(); document.removeEventListener("click", off); } }), 0);
+  }));
 }
 /* A tick list over the session's trials (the static one left out). */
 function trialTicks(ctx, kind, title, isOn) {
@@ -174,18 +196,19 @@ function actuHTML(ctx) {
     ${actuOpen ? `<textarea data-actutext spellcheck="false" style="width:100%;min-height:260px;margin-top:8px;font-family:ui-monospace,monospace;font-size:12px">${esc(actuText)}</textarea>
       <div style="display:flex;gap:8px;margin-top:6px"><button type="button" data-actusave>${esc(t("sim_actuSave"))}</button><span class="sub">${esc(t("sim_actuNote"))}</span></div>` : ""}</div>`;
 }
-function yamlHTML(ctx) {
-  if (!session.single || !session.root) return "";
+/** session.yaml in a text box, opened from the small link above the trial lists. */
+function yamlEditor(ctx) {
+  if (!session.single || !session.root || !yamlOpen) return "";
   const t = ctx.t, esc = ctx.esc;
-  return `<div class="simModel" style="margin-top:10px"><button type="button" class="ghost" data-yamledit>${esc(t(yamlOpen ? "sim_yamlClose" : "sim_yamlEdit"))}</button>
-    ${yamlOpen ? `<textarea data-yamltext spellcheck="false" style="width:100%;min-height:320px;margin-top:8px;font-family:ui-monospace,monospace;font-size:12px">${esc(session.yaml)}</textarea>
-      <div style="display:flex;gap:8px;margin-top:6px"><button type="button" data-yamlsave>${esc(t("sim_yamlSave"))}</button><span class="sub">${esc(t("sim_yamlNote"))}</span></div>` : ""}</div>`;
+  return `<div class="simModel" style="margin:4px 0 8px"><textarea data-yamltext spellcheck="false" style="width:100%;min-height:320px;font-family:ui-monospace,monospace;font-size:12px">${esc(session.yaml)}</textarea>
+      <div style="display:flex;gap:8px;margin-top:6px"><button type="button" data-yamlsave>${esc(t("sim_yamlSave"))}</button><span class="sub">${esc(t("sim_yamlNote"))}</span></div></div>`;
 }
 function runAllHTML(ctx) {
   const t = ctx.t, esc = ctx.esc, ok = !!session.root && session.single && !!session.iteration;
   return `<div class="simModel" style="margin-top:10px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <button type="button" data-runall${!ok || session.busy ? " disabled" : ""}>${esc(t("sim_runAll"))}</button>
       ${session.busy ? `<button type="button" class="ghost" data-simcancel${session.cancel ? " disabled" : ""}>${esc(t(session.cancel ? "sim_cancelling" : "sim_cancel"))}</button>` : ""}
+      <button type="button" class="ghost" data-simlive${!ok ? " disabled" : ""}>${esc(t("sim_live_btn"))}</button>
       <button type="button" class="ghost" data-simvis${!ok || session.busy ? " disabled" : ""}>${esc(t("sim_visualise"))}</button>
       <button type="button" class="ghost" data-simreset${session.busy ? " disabled" : ""}>${esc(t("sim_reset"))}</button>
       <span class="sub">${esc(t(ok ? "sim_runAllNote" : "sim_runAllNeed"))}</span></div>
@@ -248,7 +271,7 @@ function keepLogs(box) {
 }
 
 export function simWire(box, ctx) {
-  keepLogs(box);
+  keepLogs(box); wireInfo(box);
   const { client, job } = ctx, id = job.id;
   const osimOutputsRefresh = ctx.refreshOutputs || null;
   const sel = box.querySelector("#simModel");
@@ -402,7 +425,16 @@ export function simWire(box, ctx) {
       ctx.act(() => client.status(id));
     };
   });
-  box.querySelectorAll("[data-run]").forEach((b) => { b.onclick = () => { ctx.open.add(b.dataset.run); ctx.act(() => client.toolRun(id, b.dataset.run)); }; });
+  box.querySelectorAll("[data-run]").forEach((b) => { b.onclick = async () => {
+    ctx.open.add(b.dataset.run);
+    // inside a session folder: as one step of Run all -- logged there, saved into the trial's folders, zipped to Downloads
+    if (!ctx.quick && !ctx.batch && session.single && session.root && session.iteration && session.trial && !session.busy) {
+      const log = (x) => { session.runLog.push(x); modeHooks.repaint(); };
+      if (await runStep(ctx, modeHooks, b.dataset.run)) await zipSession(log);
+      return;
+    }
+    ctx.act(() => client.toolRun(id, b.dataset.run));
+  }; });
   // batch mode: the project folder feeds the sections and takes their outputs; quick run: one c3d does
   const modeHooks = {
     send,
@@ -415,8 +447,12 @@ export function simWire(box, ctx) {
       for (const f of list) { let blob = client.toolBlob ? client.toolBlob(id, tool, f.path) : null; if (!blob) blob = await (await fetch(client.toolFileUrl(id, tool, f.path))).blob(); out.push({ path: f.path, data: new Uint8Array(await blob.arrayBuffer()) }); }
       return out;
     },
-    setOption: (tool, key, val) => ctx.act(() => client.toolOptions(id, tool, { ...((job.options || {})[tool] || {}), [key]: val })),
+    // merged into the engine's CURRENT options (the page's job is a snapshot: two quick calls on it lost each
+    // other's key, so a trial's time_range never reached IK), awaited, so the next step sees it
+    setOption: (tool, key, val) => modeHooks.setOptions(tool, { [key]: val }),
+    setOptions: async (tool, obj) => { const st = await client.status(id); return ctx.act(() => client.toolOptions(id, tool, { ...(((st && st.options) || {})[tool] || {}), ...obj })); },
     setGeneric: (f) => { genericName = f ? f.name : ""; genericFile = f; if (client.setGeneric) client.setGeneric(f); },
+    hasScaled: () => !!scaledFile,
     setScaled: (f) => { scaledName = f ? f.name : ""; scaledFile = f; if (client.setScaled) client.setScaled(f); },
     genericName: () => genericName || job.model || "",
     genericFile: () => genericFile,
@@ -492,7 +528,7 @@ function stepWire(box, ctx, hooks) {
         const tpl = await (await fetch(new URL("../data/opensim/setup_files/setup_scale.xml", import.meta.url))).text();
         const r = filterScaleSetup(tpl, ms.available), f = new File([r.xml], "setup_scale.xml", { type: "text/xml" });
         hooks.send("scale:scale_setup", f); ms.scaleSetup = f;
-        log(`setup_scale.xml: ${r.dropped.length} marker pairs without markers dropped${r.off.length ? `, ${r.off.join(", ")} not scaled from markers` : ""}, ${r.tasks} fitting tasks off`);
+        log(`setup_scale.xml: ${r.dropped.length} marker pairs without markers dropped${r.filled && r.filled.length ? `; from this trial's markers instead: ${r.filled.join(", ")}` : ""}${r.off.length ? `; not scaled from markers: ${r.off.join(", ")}` : ""}; ${r.tasks} fitting tasks off`);
       } catch (e) { log(`setup_scale.xml: ${e.message}`); }
     }
     if (session.iteration && ms) {               // an existing iteration takes the better marker set too
@@ -527,7 +563,8 @@ function stepWire(box, ctx, hooks) {
     log(ctx.t("sim_c3dSummary", { c3d: session.c3ds.length, exp: (session.exported || []).length, it: session.iteration }));
     await applySelection(hooks);
   });
-  on("[data-yamledit]", "onclick", () => { yamlOpen = !yamlOpen; hooks.repaint(); });
+  on("[data-yamledit]", "onclick", (e) => { if (e) e.preventDefault(); yamlOpen = !yamlOpen; hooks.repaint(); });
+  on("[data-crop]", "onclick", () => cropTrials(ctx, hooks));
   on("[data-yamlsave]", "onclick", () => busy(async () => {
     const txt = box.querySelector("[data-yamltext]").value;
     const w = await (await session.root.getFileHandle("session.yaml", { create: true })).createWritable(); await w.write(txt); await w.close();
@@ -566,6 +603,7 @@ function stepWire(box, ctx, hooks) {
   }); }; });
   on("[data-runall]", "onclick", async () => { await runAll(ctx, hooks); if (!session.cancel) await zipSession(log); });
   // the session as it is now, straight into Visualise (no download): every file with its path inside the session
+  on("[data-simlive]", "onclick", () => { const tr = session.trial || (session.trials.filter((x) => x !== (session.cfg.top || {}).static_trial)[0]); if (tr) liveUpdate(session.iteration, tr, { open: true }); });
   on("[data-simvis]", "onclick", () => busy(async () => {
     const top = session.name || "session", list = [];
     const walk = async (d, pre) => { for await (const [n, h] of d.entries()) {
@@ -622,45 +660,138 @@ export function filterScaleSetup(xml, have) {
     const m = blk.match(/<markers>\s*([^<]*?)\s*<\/markers>/), names = m ? m[1].split(/\s+/) : [];
     if (names.every((n) => have.has(n))) return blk; dropped.push(names.join("-")); return "";
   });
+  // a measurement left without marker pairs (the template names joint centres / another lab's markers) is made
+  // from the anatomical markers the trial does have, as OpenSim's own setups do: ASIS-knee for the thigh,
+  // knee-malleolus for the shank, heel-toe for the foot, ASIS-ASIS and ASIS-sacrum for the pelvis. Without
+  // it only the pelvis width scaled and the legs kept the generic lengths.
+  const filled = [];
+  const first = (...names) => names.find((n) => have.has(n)) || null;
+  const pairsFor = (name) => {
+    const m = name.match(/^(pelvis|torso|femur|tibia|talus|calcn)(?:_([rl]))?_([xyz])$/); if (!m) return [];
+    const [, seg, sd, ax] = m, S = sd ? sd.toUpperCase() : "", P = [];
+    const asi = (s) => first(`${s}ASI`, `${s}ASIS`), kl = (s) => first(`${s}LFC`, `${s}KNE`, `${s}KNEL`, `${s}LEK`, `${s}LKNE`), km = (s) => first(`${s}MFC`, `${s}KNEM`, `${s}MEK`, `${s}MKNE`);
+    const al = (s) => first(`${s}LMAL`, `${s}ANK`, `${s}MALL`, `${s}LM`), am = (s) => first(`${s}MMAL`, `${s}MALM`, `${s}MM`, `${s}MED`);
+    const add = (a, b) => { if (a && b) P.push([a, b]); };
+    if (seg === "femur") add(asi(S), kl(S));
+    else if (seg === "tibia") { add(kl(S), al(S)); add(km(S), am(S)); }
+    else if (seg === "talus" || seg === "calcn") add(first(`${S}HEE`, `${S}HEEL`, `${S}CAL`), first(`${S}MT2`, `${S}TOE`, `${S}MT1`, `${S}MT5`));
+    else if (seg === "pelvis" && ax === "x") { for (const s of ["L", "R"]) add(asi(s), first(`${s}SACR`, `${s}PSI`, `${s}PSIS`, "SACR", "USACR")); }
+    else if (seg === "pelvis" && ax === "y") add(asi("L"), asi("R"));
+    return P;                                              // torso: no pair of trunk markers gives its length reliably
+  };
   xml = xml.replace(/<Measurement\s+name="([^"]+)"[\s\S]*?<\/Measurement>/g, (blk, name) => {
-    if (/<MarkerPair>/.test(blk)) return blk; off.push(name); return blk.replace(/<apply>\s*true\s*<\/apply>/, "<apply>false</apply>");
+    if (/<MarkerPair>/.test(blk)) return blk;
+    const P = pairsFor(name);
+    if (P.length && /<MarkerPairSet[^>]*>\s*<objects>/.test(blk) || P.length && /<MarkerPairSet\s*\/>|<MarkerPairSet>\s*<objects\s*\/>/.test(blk)) {
+      const objs = P.map(([a, b]) => `<MarkerPair><markers> ${a} ${b}</markers></MarkerPair>`).join("");
+      let out = blk.replace(/<MarkerPairSet\s*\/>/, "<MarkerPairSet><objects></objects></MarkerPairSet>").replace(/<objects\s*\/>/, "<objects></objects>");
+      out = out.replace(/(<MarkerPairSet[^>]*>\s*<objects>)/, `$1${objs}`).replace(/<apply>\s*false\s*<\/apply>/, "<apply>true</apply>");
+      filled.push(`${name} (${P.map((p) => p.join("-")).join(", ")})`); return out;
+    }
+    off.push(name); return blk.replace(/<apply>\s*true\s*<\/apply>/, "<apply>false</apply>");
   });
   let tasks = 0;
   xml = xml.replace(/<IKMarkerTask\s+name="([^"]+)"[\s\S]*?<\/IKMarkerTask>/g, (blk, name) => {
     if (have.has(name)) return blk; tasks++; return blk.replace(/<apply>\s*true\s*<\/apply>/, "<apply>false</apply>");
   });
-  return { xml, dropped, off, tasks };
+  return { xml, dropped, off, tasks, filled };
 }
-/** The session as a whole bioscout PROJECT -> <project>.zip in Downloads:
- *   <project>/project.yaml · models/generic/<model>.osim · models/personalised/<subject>/<session>/*_scaled*.osim
- *   setupFiles/*.xml · simulations/<subject>/<session>/{session.yaml, 1_c3dfiles, 2_experimental, 3_iterations} */
+/** The session as a whole bioscout PROJECT -> <project>.zip in Downloads, in the layout of
+ *  bioscout/example_data/orthoload:
+ *   <project>/project.yaml
+ *   models/generic/<family>/<model>.osim · models/personalised/<subject>/<session>/{<it>_scaled.osim, scale_setup.xml}
+ *   setupFiles/markers_*.xml, actuators_so.xml ...
+ *   simulations/<subject>/<session>/{session.yaml, 1_c3dfiles, 2_experimental, 3_iterations}
+ *  The session's own models_dir / setup_dir folders move up to the project (not kept inside the session),
+ *  and session.yaml is rewritten to point at them. */
 async function zipSession(log) {
   if (!session.root) return;
-  const subject = ((session.cfg && session.cfg.top.subject) || session.subject || "subject").replace(/[^\w.-]+/g, "_");
-  const ses = (session.sessionName || session.session || "session").replace(/[^\w.-]+/g, "_");
-  const proj = `bioscout_${subject}`, simPre = `${proj}/simulations/${subject}/${ses}/`, files = [], seen = new Set();
-  const add = (name, data) => { if (!seen.has(name)) { seen.add(name); files.push({ name, data }); } };
+  try { await completeFigures(log); } catch (e) { log(`figures: ${e.message}`); }
+  const top = (session.cfg && session.cfg.top) || {};
+  const subject = (top.subject || session.subject || "subject").replace(/[^\w.-]+/g, "_");
+  const ses = (session.sessionName || session.session || top.session || "session").replace(/[^\w.-]+/g, "_");
+  const proj = `bioscout_${subject}`, simPre = `${proj}/simulations/${subject}/${ses}/`, pers = `models/personalised/${subject}/${ses}`, files = [], seen = new Set();
+  const add = (name, data, replace = false) => {
+    if (!seen.has(name)) { seen.add(name); files.push({ name, data }); } else if (replace) files.find((f) => f.name === name).data = data;
+  };
+  const dirOf = (v) => String(v || "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+  const modelsDir = dirOf(top.models_dir), setupDir = dirOf(top.setup_dir);
+  const dec = (d) => new TextDecoder().decode(d), enc = (x) => new TextEncoder().encode(x);
+  let yaml = null, scaleXml = null, generic = "", scaled = "", markerset = "";
   const walk = async (d, pre) => {
     for await (const [n, h] of d.entries()) {
-      if (h.kind === "directory") { await walk(h, `${pre}${n}/`); continue; }
-      let data = new Uint8Array(await (await h.getFile()).arrayBuffer());
       const rel = `${pre}${n}`;
-      if (rel === "session.yaml") data = new TextEncoder().encode(new TextDecoder().decode(data).replace(/^project_dir:.*$/m, "project_dir: ../../..").replace(/^session:.*$/m, `session: '${ses}'`));
+      if (h.kind === "directory") { if (pre === "" && /^(logs|results)$/.test(n)) continue; await walk(h, `${rel}/`); continue; }
+      const data = new Uint8Array(await (await h.getFile()).arrayBuffer());
+      if (rel === "session.yaml") { yaml = dec(data); continue; }
+      // the session's models_dir -> <project>/models
+      if (modelsDir && rel.startsWith(modelsDir + "/")) {
+        const r = rel.slice(modelsDir.length + 1); add(`${proj}/models/${r}`, data);
+        if (/\.osim$/i.test(n)) { if (/^personalised\//.test(r) || /_scaled/i.test(n)) scaled = scaled || r; else generic = generic || r; }
+        continue;
+      }
+      // the session's setup_dir -> <project>/setupFiles (the scale setup goes with the scaled model)
+      if (setupDir && rel.startsWith(setupDir + "/")) {
+        if (/^setup_scale\.xml$/i.test(n)) { scaleXml = scaleXml || dec(data); continue; }
+        if (/^markers.*\.xml$/i.test(n)) markerset = markerset || n;
+        add(`${proj}/setupFiles/${rel.slice(setupDir.length + 1)}`, data); continue;
+      }
+      // files at the top of an iteration folder: models to models/, setup files to setupFiles/
+      if (/^3_iterations\/[^/]+\/[^/]+$/.test(rel) && /\.(osim|xml)$/i.test(n)) {
+        if (/\.osim$/i.test(n)) { if (/_scaled/i.test(n)) { scaled = scaled || `personalised/${subject}/${ses}/${n}`; add(`${proj}/${pers}/${n}`, data); } else { const fam = /^GPK/i.test(n) ? "GPK/" : ""; generic = generic || `generic/${fam}${n}`; add(`${proj}/models/generic/${fam}${n}`, data); } }
+        else if (/^setup_scale\.xml$/i.test(n)) scaleXml = dec(data);      // the iteration's (fitted) one wins
+        else { if (/^markers/i.test(n)) markerset = markerset || n; add(`${proj}/setupFiles/${n}`, data, true); }   // the iteration's fitted copy wins
+        continue;
+      }
       add(simPre + rel, data);
-      // the project's own folders, as bioscout keeps them (copies; the session keeps its iteration-relative files too)
-      const top = /^3_iterations\/[^/]+\/[^/]+$/.test(rel);
-      if (top && /\.osim$/i.test(n)) add(/_scaled/i.test(n) ? `${proj}/models/personalised/${subject}/${ses}/${n}` : `${proj}/models/generic/${n}`, data);
-      if (top && /\.xml$/i.test(n)) add(`${proj}/setupFiles/${n}`, data);
     }
   };
   await walk(session.root, "");
+  // the scaled model kept in the page when Scale's output was not written to the folder
+  if (!scaled && scaledFile) { const it = session.iteration || "model", n = `${it}_scaled.osim`; scaled = `personalised/${subject}/${ses}/${n}`; add(`${proj}/${pers}/${n}`, new Uint8Array(await scaledFile.arrayBuffer())); }
+  const scaledName = scaled ? scaled.split("/").pop() : `${session.iteration || "model"}_scaled.osim`;
+  // models/personalised/<subject>/<session>/scale_setup.xml, filled in as the Scale run used it (paths relative to that folder)
+  if (scaleXml) {
+    const st = top.static_trial || "static", up = "../../../..";
+    let x = scaleXml, i = 0;
+    const set = (tag, v, nth = 0) => { let k = -1; x = x.replace(new RegExp(`<${tag}>[^<]*</${tag}>`, "g"), (m) => (++k === nth ? `<${tag}>${v}</${tag}>` : m)); };
+    x = x.replace(/<ScaleTool\s+name="[^"]*"/, `<ScaleTool name="${subject}"`);
+    if (top.body_mass) set("mass", top.body_mass);
+    if (generic) set("model_file", `${up}/models/${generic}`);
+    if (markerset) set("marker_set_file", `${up}/setupFiles/${markerset}`);
+    for (i = 0; i < 2; i++) set("marker_file", `${up}/simulations/${subject}/${ses}/2_experimental/${st}/marker_experimental.trc`, i);
+    set("output_model_file", scaledName, 0); set("output_scale_file", "scale_factors.xml", 0);
+    set("output_motion_file", "Unassigned", 0); set("output_model_file", "Unassigned", 1);
+    add(`${proj}/${pers}/scale_setup.xml`, enc(x));
+  }
+  // session.yaml: project_dir back to the project, models_dir / setup_dir to its folders, the iteration keys after them
+  if (yaml != null) {
+    let y = yaml.replace(/^project_dir:.*$/m, "project_dir: ../../..").replace(/^session:.*$/m, `session: '${ses}'`).replace(/^c3d_source:.*\n?/m, "");
+    for (const [k, v] of [["models_dir", "models"], ["setup_dir", "setupFiles"]]) {
+      if (new RegExp(`^${k}:`, "m").test(y)) y = y.replace(new RegExp(`^${k}:.*$`, "m"), `${k}: ${v}`);
+      else y = y.replace(/^project_dir:.*$/m, (m) => `${m}\n${k}: ${v}`);
+    }
+    y = y.replace(/^    # files: relative to this iteration's folder.*$/gm, "    # files: models under models_dir (models/), setup files under setup_dir (setupFiles/)");
+    if (generic) y = y.replace(/^(    model_generic:).*$/gm, `$1 ./${generic}`);
+    y = y.replace(/^(    model_scaled:).*$/gm, `$1 ./personalised/<subject>/<session>/${scaledName}`);
+    if (markerset) y = y.replace(/^(    markerset:).*$/gm, `$1 ${markerset}`);
+    y = y.replace(/^(    scale_tool:).*$/gm, scaleXml ? `$1 ../${pers}/scale_setup.xml` : "$1");
+    add(simPre + "session.yaml", enc(y));
+  }
   add(`${proj}/project.yaml`, `# project.yaml -- written by BioScout Web (Simulate, step-by-step)\nschema: 1\nname: ${proj}\n`);
-  for (const d of ["logs", "results"]) add(`${proj}/${d}/.keep`, "");
-  const a = document.createElement("a"); a.href = URL.createObjectURL(makeZip(files));
+  const zip = makeZip(files);
   const d = new Date(), pad = (k) => String(k).padStart(2, "0"), stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
-  a.download = `${proj}_${ses}_${stamp}.zip`;
+  const name = `${proj}_${ses}_${stamp}.zip`;
+  // served by serve.py on this computer: it writes the zip straight into Downloads, no save dialog
+  if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+    try {
+      const r = await fetch(`/__bioscout_save?name=${encodeURIComponent(name)}`, { method: "POST", body: zip, headers: { "Content-Type": "application/zip" } });
+      if (r.ok) { const j = await r.json(); log(`${files.length} files → ${j.path}`); return; }
+    } catch { /* not serve.py: the browser's download below */ }
+  }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(zip); a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-  log(`${a.download}: ${files.length} files → Downloads`);
+  log(`${name}: ${files.length} files → Downloads`);
 }
 
 /** Start Simulate from nothing: every dropped file, model, output folder and the step-by-step session.
@@ -672,6 +803,65 @@ export async function resetSim({ wipeStore = false } = {}) {
     iteration: "", trial: "", c3ds: [], exported: [], msg: "", busy: false, runLog: [], progress: null, pick: null, useEvents: false, exportSkip: false,
     skip: new Set(["rra", "ceinms_cal", "ceinms"]) });
   if (wipeStore) { try { const opfs = await navigator.storage.getDirectory(); await opfs.removeEntry("bioscout_sessions", { recursive: true }); } catch { /* nothing kept */ } }
+}
+
+/** The signals the Crop trials viewer can plot under the markers: GRF components / CoP of every plate,
+ *  and, when the trial has EMG, the envelopes of the mapped channels and each channel raw + envelope. */
+function cropSignals(grfText, emgText) {
+  const out = [];
+  if (grfText) {
+    try {
+      const d = readSto(grfText), t = Float64Array.from(d.t);
+      const comp = [["vy", "GRF vertical (N)"], ["vx", "GRF anterior–posterior x (N)"], ["vz", "GRF medio–lateral z (N)"], ["px", "CoP x (m)"], ["pz", "CoP z (m)"]];
+      for (const [c, label] of comp) {
+        const cols = d.cols.filter((x) => x.endsWith("_" + c) && !/moment|torque/i.test(x));
+        const series = cols.map((x) => ({ name: x.replace(/^ground_force_/, "plate ").replace(/_[vp][xyz]$/, ""), y: Float64Array.from(d.col(x)) }));
+        // CoP is meaningless off the plate: blank where that plate carries < 20 N
+        if (c[0] === "p") series.forEach((sr, j) => { const fy = d.col(cols[j].replace(/_p([xyz])$/, "_vy")); if (fy) sr.y = sr.y.map((v, k) => (fy[k] > 20 ? v : NaN)); });
+        if (series.some((sr) => sr.y.some((v) => isFinite(v) && Math.abs(v) > 1e-6))) out.push({ key: "grf_" + c, label, t, series });
+      }
+      const vy = d.cols.filter((x) => /_vy$/.test(x) && !/moment/i.test(x));
+      if (vy.length > 1) out.splice(1, 0, { key: "grf_sum", label: "GRF vertical, all plates summed (N)", t, series: [{ name: "sum", y: (() => { const cs = vy.map((x) => d.col(x)); return Float64Array.from(d.t, (_, k) => cs.reduce((a, c) => a + (c[k] || 0), 0)); })() }] });
+    } catch { /* no GRF plot */ }
+  }
+  if (emgText) {
+    try {
+      const d = readSto(emgText), t = Float64Array.from(d.t), map = yamlEmgMap(session.yaml);
+      let chans = Object.keys(map).map((ch) => [ch, emgColumn(d.cols, ch)]).filter((x) => x[1]);
+      if (!chans.length) chans = d.cols.filter((c) => c !== "time" && !d.cols.some((o) => o !== c && o.startsWith(c + "-"))).map((c) => [c, c]);
+      const env = {}, raw = {};
+      for (const [ch, col] of chans) {
+        raw[ch] = d.col(col); const e = emgEnvelope(raw[ch], d.t);
+        let top = 0; for (const v of e) if (v > top) top = v; env[ch] = Float64Array.from(e, (v) => v / (top || 1));
+      }
+      if (chans.length) out.push({ key: "emg_all", label: "EMG envelopes, all channels (normalised)", t, series: chans.map(([ch]) => ({ name: ch.replace(/^Voltage[._]?/i, ""), y: env[ch] })) });
+      for (const [ch] of chans) {
+        let m = 0; for (const v of raw[ch]) if (isFinite(v) && Math.abs(v) > m) m = Math.abs(v);
+        out.push({ key: "emg_" + ch, label: `EMG ${ch}${map[ch] ? " → " + map[ch].join(", ") : ""} (raw + envelope)`, t,
+          series: [{ name: "raw", y: Float64Array.from(raw[ch]), color: "#888", width: 0.7 }, { name: "envelope", y: Float64Array.from(env[ch], (v) => v * m), width: 2 }] });
+      }
+    } catch { /* no EMG plot */ }
+  }
+  return out;
+}
+/** Crop trials: one trial at a time in the marker viewer (3D markers + GRF / EMG under them, picked from a
+ *  drop-down), Start / End set by slider, click or "start / end = frame"; the trial drop-down moves to another
+ *  trial keeping what was set; Save writes every time_range into session.yaml. */
+async function cropTrials(ctx, hooks) {
+  const t = ctx.t, rows = timeRanges();
+  if (!rows.length) return;
+  const ranges = Object.fromEntries(rows.map((r) => [r.trial, r.range]));
+  let trial = (session.pick ? rows.find((r) => session.pick.has(r.trial)) : null)?.trial || rows[0].trial, signal = null, changed = false;
+  for (;;) {
+    const { trc, grf, emg } = await trialData(trial);
+    if (!trc) { alert(t("sim_tr_noTrc", { trial })); return; }
+    const r = await viewTrc(t, parseTrc(trc), ranges[trial] || [NaN, NaN], null,
+      { signals: cropSignals(grf, emg), signal, trials: rows.map((x) => x.trial), trial, title: `✂ ${t("sim_crop_btn")} · ${trial}`, okLabel: t("sim_crop_save") });
+    if (!r) { if (changed && !confirm(t("sim_crop_discard"))) continue; return; }
+    ranges[trial] = r.whole ? null : [r.t0, r.t1]; signal = r.signal; changed = true;
+    if (r.switchTo) { trial = r.switchTo; continue; }
+    await saveTimeRanges(ranges); await applySelection(hooks); hooks.repaint(); return;
+  }
 }
 
 /** Dialog: every trial's time_range from session.yaml, editable; 🔍 shows its markers in 3D and the GRF with crop sliders. */

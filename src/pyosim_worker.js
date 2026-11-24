@@ -83,7 +83,7 @@ if not loads and a.get("grf"):
     loads = idtool.make_grf_xml(model, "/job/" + a["grf"], "/job/" + a["ik"], "/job/GRF.xml", log=js_log)
 tr = (float(a["t0"]), float(a["t1"])) if a.get("t0") not in (None, "") and a.get("t1") not in (None, "") else None
 idtool.run(model, "/job/" + a["ik"], loads, "/job/inverse_dynamics.sto", loads_mot=("/job/" + a["grf"]) if a.get("grf") else None,
-           t_range=tr, cutoff=float(a.get("cutoff") or 6), log=js_log, setup_path="/job/setup_id.xml")
+           keep=tr, cutoff=float(a.get("cutoff") or 6), log=js_log, setup_path="/job/setup_id.xml")
 `);
       const outputs = {};
       for (const f of ["setup_id.xml", "inverse_dynamics.sto", "GRF.xml", "body_positions.sto"]) {
@@ -97,10 +97,10 @@ from pyosim.model import Model
 a = dict(args)
 tr = (float(a["t0"]), float(a["t1"])) if a.get("t0") not in (None, "") and a.get("t1") not in (None, "") else None
 so.run(Model("/job/" + a["model"]), "/job/" + a["ik"], "/job/" + a["id"], "/job/so", actuators=("/job/" + a["actuators"]) if a.get("actuators") else None,
-       t_range=tr, log=js_log)
+       t_range=tr, log=js_log, strength=float(a.get("strength") or 1))
 `);
       const outputs = {};
-      for (const f of ["SO_StaticOptimization_force.sto", "SO_StaticOptimization_activation.sto"]) {
+      for (const f of ["SO_StaticOptimization_force.sto", "SO_StaticOptimization_activation.sto", "SO_StaticOptimization_moments_contrib.sto"]) {
         try { outputs[f] = py.FS.readFile("/job/so/" + f, { encoding: "utf8" }); } catch { /* optional */ }
       }
       self.postMessage({ id, done: true, outputs });

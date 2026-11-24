@@ -163,7 +163,7 @@ export function makeLocalClient(spec) {
     let actu = files["so:actuators"] || null;
     if (!actu) { try { const r = await fetch(BASE + "data/opensim/setup_files/actuators_so.xml"); if (r.ok) actu = new File([await r.blob()], "actuators_so.xml"); } catch { /* model actuators only */ } }
     const payload = { [model.name]: await model.arrayBuffer(), "ik.mot": await ikf.arrayBuffer(), "id.sto": await idf.arrayBuffer() };
-    const args = { model: model.name, ik: "ik.mot", id: "id.sto" };
+    const args = { model: model.name, ik: "ik.mot", id: "id.sto", strength: (job.options.so || {}).strength };
     if (actu) { payload["actuators.xml"] = await actu.arrayBuffer(); args.actuators = "actuators.xml"; }
     sp.log = [];
     const t0 = Date.now();
