@@ -206,6 +206,10 @@ export function makeLocalClient(spec) {
     const args = { cmd: tool, ik: "ik.mot", id: "id.sto", approach: o.approach, alpha: o.alpha, beta: o.beta, gamma: o.gamma, mode: o.mode, gammas: o.gammas, alphas: o.alphas, betas: o.betas, tol: o.tol };
     const em = files[`${tool}:emg_map`] || files["ceinms_cal:emg_map"]; if (em) { payload["emg_map.json"] = await em.arrayBuffer(); args.emg_map = "emg_map.json"; }
     if (emg) { payload["emg.mot"] = await emg.arrayBuffer(); args.emg = "emg.mot"; }
+    // the session's EMG normalisation trials (maximal contractions, jumps ...): EMG is scaled to its peak over them
+    const norm = Object.keys(files).filter((k) => k.startsWith("ceinms:emg_norm_")).map((k) => files[k]);
+    if (emg && norm.length) { args.emg_norm = norm.map((f, i) => { payload[`norm${i}.mot`] = null; return `norm${i}.mot`; }).join(" ");
+      for (const [i, f] of norm.entries()) payload[`norm${i}.mot`] = await f.arrayBuffer(); }
     return { ikf, payload, args };
   }
   async function runCeinmsCal() {

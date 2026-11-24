@@ -629,7 +629,14 @@ export async function runAll(ctx, hooks) {
   try {
     if (!it) throw new Error(T("ss_noIteration"));
     // 0. c3d export (only the trials not exported yet)
-    if (!S.exportSkip && S.c3ds.length) await exportC3d(log, S.single ? { only: new Set([S.cfg.top.static_trial, ...pickedTrials(), ...S.trials.filter((t) => trialFlag(t, "calibration"))].filter(Boolean)) } : {});
+    if (!S.exportSkip && S.c3ds.length) await exportC3d(log, S.single ? { only: new Set([S.cfg.top.static_trial, ...pickedTrials(), ...S.trials.filter((t) => trialFlag(t, "calibration") || trialFlag(t, "emg_normalisation"))].filter(Boolean)) } : {});
+    // EMG normalisation trials (session.yaml emg_normalisation: true): CEINMS scales each channel to its peak over them
+    { for (const x of S.trials) await hooks.clear("ceinms", `emg_norm_${x}`); let n = 0;
+      for (const x of S.trials.filter((t) => trialFlag(t, "emg_normalisation"))) {
+        const f = await fileIn(sp(`2_experimental/${x}/emg.mot`)); if (!f) continue;
+        await hooks.send(`ceinms:emg_norm_${x}`, new File([f], `${x}_emg.mot`)); n++;
+      }
+      if (n) log(`EMG normalisation: peak over ${n} trial(s) (${S.trials.filter((t) => trialFlag(t, "emg_normalisation")).join(", ")})`); }
     const cal = S.trials.filter((t) => trialFlag(t, "calibration") && t !== S.cfg.top.static_trial);
     const trials = [...new Set([...(S.skip.has("ceinms_cal") ? [] : cal), ...pickedTrials()])];
     if (!trials.length) throw new Error(T("ss_noTrials"));

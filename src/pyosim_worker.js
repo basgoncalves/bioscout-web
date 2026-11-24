@@ -147,13 +147,14 @@ emg = ("/job/" + a["emg"]) if a.get("emg") else None
 import json as _json
 em = _json.load(open("/job/" + a["emg_map"])) if a.get("emg_map") else None
 lst = lambda k, d: [float(x) for x in str(a.get(k) or "").replace(",", " ").split()] or d
+norm = ["/job/" + f for f in str(a.get("emg_norm") or "").split()] or None
 if a["cmd"] == "ceinms_cal":
     ceinms.calibrate("/job/" + a["model"], "/job/" + a["ik"], "/job/" + a["id"], emg, "/job/out", approach=a.get("approach") or "hybrid",
-                     alpha=num("alpha"), beta=num("beta"), gamma=num("gamma"), t_range=tr, log=js_log, emg_map=em)
+                     alpha=num("alpha"), beta=num("beta"), gamma=num("gamma"), t_range=tr, log=js_log, emg_map=em, emg_norm=norm)
 else:
     ceinms.execute("/job/" + a["model"], "/job/" + a["ik"], "/job/" + a["id"], "/job/out", emg_mot=emg, approach=a.get("approach") or "hybrid",
                    mode=(a.get("mode") or "execution").strip().lower(), alpha=num("alpha"), beta=num("beta"), gamma=num("gamma"),
-                   gammas=lst("gammas", [1, 10, 30, 100, 300]), alphas=lst("alphas", None), betas=lst("betas", None), tol=num("tol"), emg_map=em, calibration=("/job/" + a["calibration"]) if a.get("calibration") else None, t_range=tr, log=js_log)
+                   gammas=lst("gammas", [1, 10, 30, 100, 300]), alphas=lst("alphas", None), betas=lst("betas", None), tol=num("tol"), emg_map=em, calibration=("/job/" + a["calibration"]) if a.get("calibration") else None, t_range=tr, log=js_log, emg_norm=norm)
 `);
       const outputs = {};
       for (const f of py.FS.readdir("/job/out")) if (!f.startsWith(".")) outputs[f] = py.FS.readFile("/job/out/" + f, { encoding: "utf8" });

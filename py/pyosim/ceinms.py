@@ -77,10 +77,55 @@ def _group_of(name):
 
 
 # ------------------------------------------------------------------ EMG
-def _env(x, t):
-    """Raw EMG -> envelope normalised to its 99.5th percentile; an envelope already in [0, 1] is kept."""
+def _raw_env(x, t):
+    """Raw EMG -> linear envelope in the signal's units (band-pass 20-450 Hz, rectify, low-pass 6 Hz); None if flat."""
+    fs = 1.0 / np.median(np.diff(t))
+    x = np.where(np.abs(x) >= 0.98 * np.nanmax(np.abs(x)), 0.0, x)
+    if np.allclose(x, 0):
+        return None
+    if fs > 200:
+        b, a = butter(2, [20 / (fs / 2), min(450 / (fs / 2), 0.99)], "band"); x = filtfilt(b, a, x)
+    x = np.abs(x - np.mean(x))
+    b, a = butter(2, 6 / (fs / 2)); return filtfilt(b, a, x)
+
+
+def _ckey(s):
+    return re.sub(r"[^a-z0-9]", "", str(s).lower())
+
+
+def emg_maxima(paths, log=print):
+    """Peak linear envelope of every EMG channel over the normalisation trials (session.yaml emg_normalisation:
+    the maximal contractions, jumps, ... and the trial itself) -> {channel key: peak}. Each envelope is first
+    smoothed over 0.5 s of its 99.5th percentile, so a single artefact does not set the maximum."""
+    out, src = {}, {}
+    for p in paths or []:
+        try:
+            cols, data, _ = read_sto(p)
+        except Exception as e:
+            log(f"[ceinms] normalisation trial {os.path.basename(p)} not read: {e}"); continue
+        t = data[:, cols.index("time")]
+        for k, c in enumerate(cols):
+            if c == "time":
+                continue
+            e = _raw_env(data[:, k].astype(float), t)
+            if e is None:
+                continue
+            pk = float(np.percentile(e, 99.5))
+            if pk > out.get(_ckey(c), 0):
+                out[_ckey(c)] = pk; src[_ckey(c)] = os.path.basename(p)
+    if out:
+        log(f"[ceinms] EMG normalised to the peak over {len(paths)} trial(s)")
+    return out
+
+
+def _env(x, t, top=None):
+    """Raw EMG -> envelope normalised to `top` (the channel's peak over the normalisation trials) or, without it,
+    to its own 99.5th percentile; an envelope already in [0, 1] is kept."""
     if not (np.nanmax(np.abs(x)) > 1.5 or np.nanmin(x) < -0.05):
         return x
+    if top:
+        e = _raw_env(x, t)
+        return None if e is None else e / top
     fs = 1.0 / np.median(np.diff(t))
     x = np.where(np.abs(x) >= 0.98 * np.nanmax(np.abs(x)), 0.0, x)
     if np.allclose(x, 0):
@@ -93,7 +138,7 @@ def _env(x, t):
     return x / top if top > 0 else None
 
 
-def emg_envelopes(emg_path, t_out, muscles, log=print, emg_map=None):
+def emg_envelopes(emg_path, t_out, muscles, log=print, emg_map=None, emg_max=None):
     """-> (excitations (n, M) in [0,1] or NaN for muscles without EMG, {muscle: channel}).
     emg_map: {channel: [muscles]} (bioscout's session.yaml emg_map). With it the channels are
     used exactly as given -- already filtered and normalised, as CEINMS.exe reads them -- and
@@ -114,7 +159,7 @@ def emg_envelopes(emg_path, t_out, muscles, log=print, emg_map=None):
             if col is None:
                 log(f"[ceinms] EMG channel {ch} not in {os.path.basename(emg_path)}")
                 continue
-            x = _env(data[:, cols.index(col)].astype(float), t)
+            x = _env(data[:, cols.index(col)].astype(float), t, (emg_max or {}).get(_ckey(col)))
             if x is None:
                 log(f"[ceinms] EMG channel {ch} is flat or saturated -- skipped")
                 continue
@@ -171,7 +216,7 @@ def activation(u, t, A=-1.0, t_act=0.015, t_deact=0.05):
 # ------------------------------------------------------------------ the shared set-up
 class Problem:
     def __init__(self, model_path, coords_mot, id_sto, emg_mot=None, t_range=None, cutoff=6.0, log=print, emg_map=None,
-                 weighting="ceinms", passive=False, tendon=True):
+                 weighting="ceinms", passive=False, tendon=True, emg_norm=None):
         self.weighting = weighting; self.tendon = tendon; self.passive = passive
         model = model_path if isinstance(model_path, Model) else Model(model_path)
         self.model, self.log = model, log
@@ -211,7 +256,8 @@ class Problem:
         self.P = F0 * f_passive(lm / lopt) * cosa if passive else np.zeros_like(self.G)
         self.u_emg = None; self.emg_map = {}
         if emg_mot:
-            self.u_emg, self.emg_map = emg_envelopes(emg_mot, t, self.names, log, emg_map=emg_map)
+            mx = emg_maxima(list(emg_norm or []) + [emg_mot], log) if emg_norm else None
+            self.u_emg, self.emg_map = emg_envelopes(emg_mot, t, self.names, log, emg_map=emg_map, emg_max=mx)
         log(f"[ceinms] {len(t)} frames, {len(self.names)} muscles, {len(coords)} coordinates: {', '.join(coords)}")
 
     def a_emg(self, A):
@@ -298,8 +344,8 @@ class Problem:
 
 # ------------------------------------------------------------------ calibration
 def calibrate(model_path, coords_mot, id_sto, emg_mot, out_dir, approach="hybrid", alpha=None, beta=None, gamma=None,
-              shapes=(-3, -2, -1, -0.5, -0.01), t_range=None, log=print, emg_map=None):
-    pb = Problem(model_path, coords_mot, id_sto, emg_mot, t_range, log=log, emg_map=emg_map)
+              shapes=(-3, -2, -1, -0.5, -0.01), t_range=None, log=print, emg_map=None, emg_norm=None):
+    pb = Problem(model_path, coords_mot, id_sto, emg_mot, t_range, log=log, emg_map=emg_map, emg_norm=emg_norm)
     a0, b0, g0 = APPROACHES.get(approach, APPROACHES["hybrid"])
     alpha, beta, gamma = (a0 if alpha is None else alpha), (b0 if beta is None else beta), (g0 if gamma is None else gamma)
     if pb.u_emg is None or not pb.emg_map:
@@ -377,8 +423,8 @@ def _write(pb, out_dir, tag, X, F, Mm, A):
 
 def execute(model_path, coords_mot, id_sto, out_dir, emg_mot=None, approach="hybrid", mode="execution",
             alpha=None, beta=None, gamma=None, gammas=(1, 10, 30, 100, 300), tol=None, calibration=None, alphas=None, betas=None,
-            t_range=None, log=print, emg_map=None):
-    pb = Problem(model_path, coords_mot, id_sto, emg_mot, t_range, log=log, emg_map=emg_map)
+            t_range=None, log=print, emg_map=None, emg_norm=None):
+    pb = Problem(model_path, coords_mot, id_sto, emg_mot, t_range, log=log, emg_map=emg_map, emg_norm=emg_norm)
     a0, b0, g0 = APPROACHES.get(approach, APPROACHES["hybrid"])
     alpha, beta, gamma = (a0 if alpha is None else alpha), (b0 if beta is None else beta), (g0 if gamma is None else gamma)
     A = -1.0
