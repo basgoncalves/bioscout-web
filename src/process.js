@@ -17,6 +17,7 @@
  */
 import { readAny, toCsv } from "./proc_io.js";
 import * as D from "./proc_dsp.js";
+import { writeC3d } from "./c3dwrite.js";
 
 export const COLORS = ["#2f6fe4", "#e8871a", "#1d7a45", "#c0392b", "#7d5bbe", "#0f8f9c", "#b8860b", "#d6336c"];
 const fin = Number.isFinite;
@@ -645,11 +646,45 @@ export function markersToTrc(ds, mk, name = "markers.trc") {
 }
 
 /**
+ * Force plates of a C3D's analog dataset in lab coordinates (the file's units, mm):
+ * [{ corners: [[x,y,z] x4], F: [Fx,Fy,Fz] (N, on the subject), P: [x,y,z] CoP (NaN off the plate) }]
+ * per analog sample. Same maths as c3dexport.c3dToOpenSim, without the OpenSim axis swap. Cached on the dataset.
+ */
+export function platesLab(an, threshold = 10) {
+  if (!an || !an.meta || !an.meta.platesRaw) return [];
+  if (an._platesLab) return an._platesLab;
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const nz = (a) => { const L = Math.hypot(...a) || 1; return a.map((v) => v / L); };
+  const cr = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const out = [];
+  for (const pl of an.meta.platesRaw) {
+    const c = [0, 1, 2, 3].map((i) => pl.corners.slice(3 * i, 3 * i + 3));
+    if (c.some((v) => v.length < 3 || !v.every(Number.isFinite))) continue;
+    const ex = nz(sub(c[0], c[1])), ez = nz(cr(ex, nz(sub(c[0], c[3])))), ey = cr(ez, ex);
+    const ctr = [0, 1, 2].map((a) => (c[0][a] + c[1][a] + c[2][a] + c[3][a]) / 4);
+    const [ox, oy, oz] = pl.origin.length === 3 ? pl.origin : [0, 0, 0];
+    const [Fx, Fy, Fz, Mx, My] = pl.channels, n = Fx.length;
+    const F = [new Float64Array(n), new Float64Array(n), new Float64Array(n)], P = [new Float64Array(n), new Float64Array(n), new Float64Array(n)];
+    for (let i = 0; i < n; i++) {
+      const on = Math.abs(Fz[i]) > threshold, zs = -oz;
+      const cx = on ? -(My[i] - zs * Fx[i]) / Fz[i] + ox : NaN, cy = on ? (Mx[i] + zs * Fy[i]) / Fz[i] + oy : NaN;
+      for (let a = 0; a < 3; a++) {
+        F[a][i] = ex[a] * Fx[i] + ey[a] * Fy[i] + ez[a] * Fz[i];
+        P[a][i] = on ? ctr[a] + ex[a] * cx + ey[a] * cy : NaN;
+      }
+    }
+    out.push({ corners: c, F, P });
+  }
+  an._platesLab = out;
+  return out;
+}
+
+/**
  * Draw one frame of markers on a 2-D canvas: orthographic view, rotated by
  * yaw about the vertical axis and pitched toward the viewer.
  * view: { yaw, pitch, zoom, up: "z"|"y", labels, frame }
  */
-export function drawMarkers(ctx, W, H, ds, mk, view, box) {
+export function drawMarkers(ctx, W, H, ds, mk, view, box, plates = null) {
   const up = view.up === "y" ? 1 : 2, h1 = up === 2 ? 1 : 2;     // horizontal axes: x and (y or z)
   const P = (p) => {
     const a = p[0] - box.c[0], b = p[h1] - box.c[h1], v = p[up] - box.c[up];
@@ -671,6 +706,25 @@ export function drawMarkers(ctx, W, H, ds, mk, view, box) {
       const a = P(A), b = P(B); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
     }
   }
+  // force plates (grey quads) and the ground reaction force at the CoP (red arrow)
+  if (plates && plates.list.length) {
+    const ai = Math.min(plates.list[0].F[0].length - 1, Math.round(view.frame * plates.ratio));
+    for (const pl of plates.list) {
+      const q = pl.corners.map(P);
+      ctx.fillStyle = "rgba(29,122,138,.28)"; ctx.strokeStyle = "rgba(29,160,170,.9)"; ctx.lineWidth = 1.5;
+      ctx.beginPath(); q.forEach((v, k) => (k ? ctx.lineTo(v[0], v[1]) : ctx.moveTo(v[0], v[1]))); ctx.closePath(); ctx.fill(); ctx.stroke();
+      const cop = [pl.P[0][ai], pl.P[1][ai], pl.P[2][ai]];
+      if (!cop.every(Number.isFinite)) continue;
+      const s = plates.scale, tip = [cop[0] + pl.F[0][ai] * s, cop[1] + pl.F[1][ai] * s, cop[2] + pl.F[2][ai] * s];
+      const a = P(cop), b = P(tip);
+      ctx.strokeStyle = "#e5383b"; ctx.fillStyle = "#e5383b"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+      ctx.beginPath(); ctx.moveTo(b[0], b[1]);
+      ctx.lineTo(b[0] - 10 * Math.cos(ang - 0.4), b[1] - 10 * Math.sin(ang - 0.4)); ctx.lineTo(b[0] - 10 * Math.cos(ang + 0.4), b[1] - 10 * Math.sin(ang + 0.4)); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(a[0], a[1], 3.5, 0, 2 * Math.PI); ctx.fill();
+    }
+  }
   const f = view.frame, pts = [];
   for (const m of mk) {
     const p = [ds.cols[m.x][f], ds.cols[m.y][f], ds.cols[m.z][f]];
@@ -687,8 +741,9 @@ export function drawMarkers(ctx, W, H, ds, mk, view, box) {
   }
   return pts.length;
 }
-export function markerBox(ds, mk, up) {
+export function markerBox(ds, mk, up, plates = []) {
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const pl of plates) for (const p of pl.corners) for (let k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k]; }
   const n = ds.time.length, step = Math.max(1, Math.floor(n / 200));
   for (const m of mk) for (let i = 0; i < n; i += step) {
     const p = [ds.cols[m.x][i], ds.cols[m.y][i], ds.cols[m.z][i]];
@@ -1014,6 +1069,7 @@ export function mountProcess(root, { t, download }) {
         <div><label for="prT1">${t("pr_to")}</label><input id="prT1" type="number" step="any" value="${S.win ? S.win[1] : ""}" placeholder="${(+ds.time[ds.time.length - 1]).toFixed(2)}"></div>
         <div><button type="button" class="ghost" id="prWinAll" style="margin:0">${t("pr_whole")}</button></div>
       </div>
+      ${vis.show3d && mk.length ? markers3dHTML(ds, mk) : ""}
       <div class="prVis">
         <div class="prChanCol">
           <input id="prColFilter" type="search" placeholder="${t("pr_filterCols")}" value="${escX(colFilter)}">
@@ -1028,20 +1084,56 @@ export function mountProcess(root, { t, download }) {
         <div class="prPlots">
           ${plotBox("prRaw", t("pr_raw"), rawSeries, units(pl.raw), [...marksFor(pl.raw.map((r) => r.key)), ...mmMarks(pl.raw)])}
           ${bottom}
-          <div class="row" style="margin-top:8px;gap:8px"><button type="button" class="ghost" id="prCsv" style="margin:0">${t("pr_saveCsv")}</button><button type="button" class="ghost" id="prPng" style="margin:0">${t("pr_savePng")}</button></div>
+          <div class="row" style="margin-top:8px;gap:8px"><button type="button" class="ghost" id="prCsv" style="margin:0">${t("pr_saveCsv")}</button><button type="button" class="ghost" id="prPng" style="margin:0">${t("pr_savePng")}</button>${ds.kind === "c3d" ? `<button type="button" class="ghost" id="prC3d" style="margin:0">${t("pr_saveC3d")}</button>` : ""}</div>
           ${cmpHTML}
         </div>
       </div>
-    </div>
-    ${vis.show3d && mk.length ? markers3dHTML(ds, mk) : ""}`;
+    </div>`;
   }
 
+  /* the analog half of the same C3D (force plates), loaded alongside the markers */
+  function analogOf(ds) {
+    if (ds.meta && ds.meta.platesRaw) return ds;
+    const base = ds.name.replace(/ · markers$/, "");
+    return S.ds.find((d) => d !== ds && d.meta && d.meta.platesRaw && d.name.replace(/ · analog$/, "") === base) || null;
+  }
+  function markersOf(ds) {
+    if (ds.meta && ds.meta.markers) return ds;
+    const base = ds.name.replace(/ · analog$/, "");
+    return S.ds.find((d) => d !== ds && d.meta && d.meta.markers && d.name.replace(/ · markers$/, "") === base) || null;
+  }
+  /* Save C3D: markers (with any added marker) + analog channels + plates + events, over the From/To window.
+     The processing chain is applied to the current file's channels, as Save CSV does. */
+  function c3dOf(ds) {
+    const mds = markersOf(ds), ads = analogOf(ds);
+    const proc = (d, k) => (d === ds && S.pipe.length ? P.processed(d, k) : d.cols[k]);
+    const base = mds || ads, [i0, i1] = span(base), t0 = base.time[i0];
+    const rate = mds ? mds.fs : ads.fs;
+    const markers = mds ? markerTriplets(mds).map((m) => ({ name: m.name, x: proc(mds, m.x).slice(i0, i1), y: proc(mds, m.y).slice(i0, i1), z: proc(mds, m.z).slice(i0, i1) })) : [];
+    let analog = null, plates = [];
+    if (ads) {
+      const ratio = mds ? Math.max(1, Math.round(ads.fs / mds.fs)) : 1, a0 = i0 * ratio, a1 = Math.min(ads.time.length, i1 * ratio);
+      const derived = /^FP\d+ (Fx|Fy|Fz|Mx|My|Mz|CoPx|CoPy)$/;
+      const raw = ads.meta.platesRaw || [], plateArrs = new Set(raw.flatMap((p) => p.channels));
+      const channels = Object.keys(ads.cols).filter((k) => !derived.test(k) && !(ads.src && ads.src[k]) && !plateArrs.has(ads.cols[k]))
+        .map((k) => ({ name: k, unit: ads.units[k] || "", y: proc(ads, k).slice(a0, a1) }));
+      raw.forEach((p, k) => {
+        if (p.corners.length < 12) return;
+        const idx = ["Fx", "Fy", "Fz", "Mx", "My", "Mz"].map((nm, j) => channels.push({ name: `FP${k + 1}_${nm}`, unit: j < 3 ? "N" : "Nmm", y: p.channels[j].slice(a0, a1) }) - 1);
+        plates.push({ corners: p.corners, origin: p.origin, channels: idx });
+      });
+      analog = { ratio, channels };
+    }
+    const events = ((mds && mds.meta.events) || []).map((e) => ({ ...e, t: e.t - t0 })).filter((e) => e.t >= 0 && e.t <= base.time[i1 - 1] - t0);
+    return writeC3d({ rate, markers, units: (mds && mds.units[markerTriplets(mds)[0]?.x]) || "mm", analog, plates, events });
+  }
   function markers3dHTML(ds, mk) {
     const n = ds.time.length;
     if (vis.view.up == null) vis.view.up = ds.kind === "trc" ? "y" : "z";
     vis.view.frame = Math.min(vis.view.frame, n - 1);
-    return `<div class="card"><b>${t("pr_v3d")} (${mk.length})</b>
-      <canvas id="prCanvas" style="width:100%;aspect-ratio:4/3;display:block;border:1px solid var(--line);border-radius:10px;touch-action:none;cursor:grab;margin-top:8px"></canvas>
+    const np = platesLab(analogOf(ds)).length;
+    return `<div class="pr3d" style="margin-top:10px"><div class="prPlotTitle">${t("pr_v3d")} (${mk.length})${np ? ` · ${t("pr_v3dPlates", { n: np })}` : ""}</div>
+      <canvas id="prCanvas" style="width:100%;height:min(62vh,560px);display:block;background:#0f1720;border:1px solid var(--line);border-radius:10px;touch-action:none;cursor:grab;margin-top:6px"></canvas>
       <p class="note" style="margin:4px 0 6px">${t("pr_vDrag")}</p>
       <div class="row" style="gap:8px;align-items:center">
         <button type="button" id="prPlay" style="margin:0;width:auto;padding:6px 14px">${vis.playing ? t("pr_pause") : t("pr_play")}</button>
@@ -1293,6 +1385,14 @@ export function mountProcess(root, { t, download }) {
       catch (e) { say({ ok: false, msg: e.message }, t("pr_saveCsv")); render(); return; }
       download(`${ds.name.replace(/[^\w.-]+/g, "_")}_${S.pipe.length ? "processed" : "raw"}.csv`, toCsv({ time: ds.time.slice(i0, i1), cols }, keys));
     };
+    if (q("#prC3d")) q("#prC3d").onclick = () => {
+      try {
+        const nm = ds.name.replace(/ · (markers|analog)$/, "").replace(/\.c3d$/i, "").replace(/[^\w.-]+/g, "_");
+        download(`${nm}_${S.pipe.length ? "processed" : "export"}.c3d`, new Blob([c3dOf(ds)], { type: "application/octet-stream" }));
+        say({ ok: true, msg: `${nm}.c3d` }, t("pr_saveC3d"));
+      } catch (e) { say({ ok: false, msg: e.message }, t("pr_saveC3d")); }
+      render();
+    };
     if (q("#prPng")) q("#prPng").onclick = () => {
       const svgs = [...root.querySelectorAll(".prPlots .prPlot svg")];
       const titles = [...root.querySelectorAll(".prPlots .prPlotTitle")].map((e) => e.firstChild.textContent);
@@ -1345,8 +1445,9 @@ export function mountProcess(root, { t, download }) {
 
   function wire3d(ds) {
     const cv = root.querySelector("#prCanvas"); if (!cv) { vis.playing = false; return; }
-    const mk = markerTriplets(ds), key = ds.name + vis.view.up;
-    if (vis.boxFor !== key) { vis.box = markerBox(ds, mk, vis.view.up); vis.boxFor = key; }
+    const mk = markerTriplets(ds), key = ds.name + vis.view.up, an = analogOf(ds), plList = platesLab(an);
+    const plates = plList.length ? { list: plList, ratio: an.fs / (ds.fs || an.fs), scale: 0.5 } : null;   // 0.5 mm per N
+    if (vis.boxFor !== key) { vis.box = markerBox(ds, mk, vis.view.up, plList); vis.boxFor = key; }
     const draw = () => {
       const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
       cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
@@ -1359,7 +1460,7 @@ export function mountProcess(root, { t, download }) {
         const info = root.querySelector("#prMkInfo"), f = vis.view.frame;
         if (info) info.textContent = Number.isFinite(v.x[f]) ? `${t("pr_mkAt")}: ${[v.x[f], v.y[f], v.z[f]].map((q) => q.toFixed(1)).join(", ")} · ${Array.from(v.x).filter(Number.isFinite).length}/${v.x.length} ${t("pr_samples")}` : t("pr_mkNone");
       }
-      if (vis.box) drawMarkers(ctx, r.width, r.height, dsD, mkD, vis.view, vis.box);
+      if (vis.box) drawMarkers(ctx, r.width, r.height, dsD, mkD, vis.view, vis.box, plates);
       const fr = root.querySelector("#prFrame"), ft = root.querySelector("#prFrameT");
       if (fr) fr.value = vis.view.frame; if (ft) ft.textContent = `${(+ds.time[vis.view.frame]).toFixed(2)} s`;
     };
