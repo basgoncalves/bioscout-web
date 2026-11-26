@@ -1463,6 +1463,15 @@ export function mountProcess(root, { t, download }) {
       if (vis.box) drawMarkers(ctx, r.width, r.height, dsD, mkD, vis.view, vis.box, plates);
       const fr = root.querySelector("#prFrame"), ft = root.querySelector("#prFrameT");
       if (fr) fr.value = vis.view.frame; if (ft) ft.textContent = `${(+ds.time[vis.view.frame]).toFixed(2)} s`;
+      // the 3D frame as the vertical bar on the time plots below
+      const tf = +ds.time[vis.view.frame];
+      for (const svg of root.querySelectorAll(".prPlots .prPlot svg")) {
+        const line = svg.querySelector(".prCursor"); if (!line || !svg.querySelector(".prCur")) continue;
+        const W = +svg.dataset.w, L = +svg.dataset.l, R = +svg.dataset.r, x0 = +svg.dataset.x0, x1 = +svg.dataset.x1;
+        if (!(tf >= x0 && tf <= x1)) { line.setAttribute("visibility", "hidden"); continue; }
+        const px = L + ((tf - x0) / (x1 - x0)) * (W - L - R);
+        line.setAttribute("x1", px); line.setAttribute("x2", px); line.setAttribute("visibility", "visible");
+      }
     };
     draw();
     let drag = null;
